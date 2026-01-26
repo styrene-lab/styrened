@@ -115,7 +115,7 @@ class StyreneDaemon:
         errors when re-announcing in the main loop.
         """
         try:
-            from styrene.services.reticulum import get_operator_identity_object
+            from styrene_core.services.reticulum import get_operator_identity_object
             from styrene_core.services.rns_service import get_rns_service
 
             identity = get_operator_identity_object()
@@ -142,7 +142,7 @@ class StyreneDaemon:
 
         try:
             from styrene_core.services.lxmf_service import get_lxmf_service
-            from styrene.services.rpc_server import RPCServer
+            from styrene_core.rpc import RPCServer
 
             lxmf_service = get_lxmf_service()
             if not lxmf_service.is_initialized:
@@ -191,7 +191,7 @@ class StyreneDaemon:
         try:
             from styrene_core.services.auto_reply import AutoReplyHandler
             from styrene_core.services.lxmf_service import get_lxmf_service
-            from styrene.services.reticulum import get_operator_identity_object
+            from styrene_core.services.reticulum import get_operator_identity_object
 
             lxmf_service = get_lxmf_service()
             if not lxmf_service.is_initialized or not lxmf_service.router:
