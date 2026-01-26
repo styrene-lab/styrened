@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "styrene-core>=0.1.0",  # Core library (no textual!)
+    "styrene-core>=0.2.0",  # Core library (no textual!)
 ]
 
 [project.optional-dependencies]
