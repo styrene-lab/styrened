@@ -379,6 +379,14 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
                 target_device = device
                 break
         if target_device:
+            # Wait a bit more for LXMF destination announce (arrives shortly after operator announce)
+            await asyncio.sleep(1.0)
+            # Refresh device info to get LXMF destination if it arrived
+            devices = discover_devices()
+            for device in devices:
+                if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                    target_device = device
+                    break
             break
         await asyncio.sleep(0.5)
 
@@ -487,6 +495,14 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
                 target_device = device
                 break
         if target_device:
+            # Wait a bit more for LXMF destination announce (arrives shortly after operator announce)
+            await asyncio.sleep(1.0)
+            # Refresh device info to get LXMF destination if it arrived
+            devices = discover_devices()
+            for device in devices:
+                if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                    target_device = device
+                    break
             break
         await asyncio.sleep(0.5)
 
