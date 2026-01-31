@@ -51,3 +51,6 @@ result-*
 Thumbs.db
 .cleave/
 .cleave-build/
+
+# Claude
+.claude/

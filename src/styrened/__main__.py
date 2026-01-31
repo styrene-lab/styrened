@@ -1,6 +1,6 @@
-"""Entry point for styrened daemon."""
+"""Entry point for styrened CLI."""
 
-from styrened.daemon import main
+from styrened.cli import main
 
 if __name__ == "__main__":
     main()
