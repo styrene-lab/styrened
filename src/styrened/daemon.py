@@ -208,8 +208,9 @@ class StyreneDaemon:
                 start_time=self._start_time,
             )
 
-            # Register the handler with LXMF router
-            lxmf_service.router.register_delivery_callback(self._auto_reply_handler.handle_message)
+            # Register the handler with LXMF service (not directly with router)
+            # Use raw_mode=True since AutoReplyHandler expects LXMF.LXMessage
+            lxmf_service.register_callback(self._auto_reply_handler.handle_message, raw_mode=True)
 
             logger.info(
                 f"Auto-reply handler started (cooldown: {self.config.chat.auto_reply_cooldown}s)"

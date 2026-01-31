@@ -76,7 +76,10 @@ class LXMFService:
         self._identity: RNS.Identity | None = None
         self._delivery_destination: "RNS.Destination | None" = None
         self._initialized = False
-        self._message_callback: Callable[[str, dict[str, object]], None] | None = None
+        # Support multiple callbacks - list of (callback, raw_mode) tuples
+        # raw_mode=True means callback receives raw LXMF.LXMessage
+        # raw_mode=False means callback receives (source_hash, payload_dict)
+        self._message_callbacks: list[tuple[Callable, bool]] = []
 
     @property
     def is_initialized(self) -> bool:
@@ -421,46 +424,66 @@ class LXMFService:
             logger.error(f"Failed to send message: {e}")
             return False
 
-    def register_callback(self, callback: Callable[[str, dict[str, object]], None]) -> None:
+    def register_callback(
+        self,
+        callback: Callable[[str, dict[str, object]], None],
+        raw_mode: bool = False,
+    ) -> None:
         """Register callback for incoming messages.
 
-        The callback will be invoked when a message is received with the
-        source hash and deserialized payload.
+        Multiple callbacks can be registered - all will be invoked for each message.
 
         Args:
-            callback: Function called with (source_hash: str, payload: dict).
+            callback: Function to call when message received.
+                     If raw_mode=False: called with (source_hash: str, payload: dict)
+                     If raw_mode=True: called with (LXMF.LXMessage)
+            raw_mode: If True, callback receives raw LXMF.LXMessage instead of
+                     parsed (source_hash, payload) tuple.
         """
-        self._message_callback = callback
-        logger.debug("Registered message callback")
+        self._message_callbacks.append((callback, raw_mode))
+        logger.debug(
+            f"Registered message callback (raw_mode={raw_mode}), total: {len(self._message_callbacks)}"
+        )
 
     def _handle_lxmf_message(self, message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message.
 
         This is called by the LXMF router when a message is received.
+        Dispatches to all registered callbacks.
 
         Args:
             message: LXMF.LXMessage instance.
         """
-        try:
-            # Extract source hash
-            source_hash = message.source_hash.hex()
+        if not self._message_callbacks:
+            logger.warning("No message callbacks registered - message will be dropped")
+            return
 
-            # Decode content
+        # Extract source hash for logging
+        source_hash = message.source_hash.hex()
+
+        # Try to parse JSON content for non-raw callbacks
+        payload = None
+        try:
             content = message.content.decode("utf-8")
             payload = json.loads(content)
-
             logger.info(
                 f"LXMF received from {source_hash[:16]}...: type={payload.get('type')}, protocol={payload.get('protocol')}"
             )
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.debug(f"LXMF message from {source_hash[:16]}... is not JSON: {e}")
 
-            # Invoke callback if registered
-            if self._message_callback is not None:
-                self._message_callback(source_hash, payload)
-            else:
-                logger.warning("No message callback registered - message will be dropped")
-
-        except Exception as e:
-            logger.error(f"Error handling LXMF message: {e}")
+        # Dispatch to all callbacks
+        for callback, raw_mode in self._message_callbacks:
+            try:
+                if raw_mode:
+                    # Raw mode - pass the LXMF message directly
+                    callback(message)
+                elif payload is not None:
+                    # Parsed mode - pass source_hash and payload dict
+                    callback(source_hash, payload)
+                # If not raw_mode and payload is None, skip this callback
+            except Exception as e:
+                logger.error(f"Error in message callback: {e}")
 
     def shutdown(self) -> None:
         """Shutdown the LXMF instance and clean up resources.
