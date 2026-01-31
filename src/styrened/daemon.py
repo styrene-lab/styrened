@@ -35,9 +35,9 @@ if TYPE_CHECKING:
     from styrened.models.mesh_device import MeshDevice
 
 from styrened.models.config import CoreConfig
-from styrened.services.lifecycle import CoreLifecycle
 from styrened.services.auto_reply import AutoReplyHandler
 from styrened.services.config import get_default_core_config, load_core_config
+from styrened.services.lifecycle import CoreLifecycle
 from styrened.services.reticulum import discover_devices, start_discovery
 
 logger = logging.getLogger(__name__)
@@ -141,8 +141,8 @@ class StyreneDaemon:
             return
 
         try:
-            from styrened.services.lxmf_service import get_lxmf_service
             from styrened.rpc import RPCServer
+            from styrened.services.lxmf_service import get_lxmf_service
 
             lxmf_service = get_lxmf_service()
             if not lxmf_service.is_initialized:
@@ -161,9 +161,7 @@ class StyreneDaemon:
                 if self.config.rpc.allow_command_execution:
                     logger.info("RPC server starting with command execution enabled")
                 else:
-                    logger.warning(
-                        "RPC server starting but command execution is disabled"
-                    )
+                    logger.warning("RPC server starting but command execution is disabled")
 
             self._rpc_server.start()
             mode_str = "relay mode" if self.config.rpc.relay_mode else "execute mode"
@@ -211,9 +209,7 @@ class StyreneDaemon:
             )
 
             # Register the handler with LXMF router
-            lxmf_service.router.register_delivery_callback(
-                self._auto_reply_handler.handle_message
-            )
+            lxmf_service.router.register_delivery_callback(self._auto_reply_handler.handle_message)
 
             logger.info(
                 f"Auto-reply handler started (cooldown: {self.config.chat.auto_reply_cooldown}s)"
@@ -244,9 +240,7 @@ class StyreneDaemon:
             )
             self._api_server = uvicorn.Server(uvicorn_config)
 
-            logger.info(
-                f"Starting API on {self.config.api.host}:{self.config.api.port}"
-            )
+            logger.info(f"Starting API on {self.config.api.host}:{self.config.api.port}")
 
             # Run server in background task
             self._api_task = asyncio.create_task(self._api_server.serve())
@@ -259,9 +253,12 @@ class StyreneDaemon:
     async def _run_loop(self) -> None:
         """Main daemon loop with periodic announces."""
         announce_interval = self.config.reticulum.announce_interval
+        logger.info(f"Starting run loop with announce_interval={announce_interval}s")
 
         while self._running:
+            logger.debug(f"Run loop sleeping for {announce_interval}s...")
             await asyncio.sleep(announce_interval)
+            logger.info(f"Run loop woke up, _running={self._running}")
 
             # Re-announce presence using cached destination
             try:
@@ -297,9 +294,13 @@ class StyreneDaemon:
                             lxmf_dest = lxmf_service.delivery_destination.hash.hex()
                             logger.info(f"Including LXMF dest in re-announce: {lxmf_dest[:16]}...")
                         else:
-                            logger.warning("LXMF not initialized or no delivery destination for re-announce")
+                            logger.warning(
+                                "LXMF not initialized or no delivery destination for re-announce"
+                            )
                     except Exception as e:
-                        logger.warning(f"Could not get LXMF destination for re-announce: {e}", exc_info=True)
+                        logger.warning(
+                            f"Could not get LXMF destination for re-announce: {e}", exc_info=True
+                        )
 
                     app_data = f"styrene:{hostname}:{version}:{caps_str}:{lxmf_dest}".encode()
                     destination.announce(app_data=app_data)
