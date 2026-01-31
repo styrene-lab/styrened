@@ -286,7 +286,9 @@ class LXMFService:
             # Send via router
             self._router.handle_outbound(message)
 
-            logger.debug(f"Sent message to {destination_hash}: {payload.get('type')}")
+            logger.info(
+                f"Sent LXMF message to {dest_destination.hash.hex()[:16]}... (type={payload.get('type')}, protocol={payload.get('protocol')})"
+            )
             return True
 
         except Exception as e:
@@ -410,7 +412,9 @@ class LXMFService:
             # Send via router
             self._router.handle_outbound(message)
 
-            logger.debug(f"Sent message to {destination_hash}: {payload.get('type')}")
+            logger.info(
+                f"Sent LXMF message (with retry) to {dest_destination.hash.hex()[:16]}... (type={payload.get('type')}, protocol={payload.get('protocol')})"
+            )
             return True
 
         except Exception as e:
@@ -445,11 +449,15 @@ class LXMFService:
             content = message.content.decode("utf-8")
             payload = json.loads(content)
 
-            logger.debug(f"Received message from {source_hash}: {payload.get('type')}")
+            logger.info(
+                f"LXMF received from {source_hash[:16]}...: type={payload.get('type')}, protocol={payload.get('protocol')}"
+            )
 
             # Invoke callback if registered
             if self._message_callback is not None:
                 self._message_callback(source_hash, payload)
+            else:
+                logger.warning("No message callback registered - message will be dropped")
 
         except Exception as e:
             logger.error(f"Error handling LXMF message: {e}")
