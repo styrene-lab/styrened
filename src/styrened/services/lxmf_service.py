@@ -146,6 +146,10 @@ class LXMFService:
                 storagepath=str(lxmf_storage),
             )
 
+            # Register our identity for receiving messages - this creates the actual
+            # delivery destination that will receive incoming LXMF messages
+            self._delivery_destination = self._router.register_delivery_identity(identity)
+
             # Register message received callback
             self._router.register_delivery_callback(self._handle_lxmf_message)
 
@@ -153,10 +157,6 @@ class LXMFService:
             self._initialized = True
 
             # Announce our LXMF delivery destination so others can send to us
-            # Create the delivery destination to get its hash for announcing
-            self._delivery_destination = RNS.Destination(
-                identity, RNS.Destination.IN, RNS.Destination.SINGLE, "lxmf", "delivery"
-            )
             self._router.announce(self._delivery_destination.hash)
             logger.info(
                 f"LXMF initialized and announced (delivery: {self._delivery_destination.hexhash[:16]}...)"
