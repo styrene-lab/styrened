@@ -204,9 +204,10 @@ class LXMFService:
             return False
 
         try:
-            # First, try to recall directly with the provided hash
+            # First, try to recall directly with the provided hash (as destination hash)
             dest_bytes = bytes.fromhex(destination_hash)
             dest_identity = RNS.Identity.recall(dest_bytes)
+            logger.debug(f"Direct recall({destination_hash[:16]}): {dest_identity is not None}")
 
             # If not found, check if we have the identity hash in NodeStore
             if dest_identity is None:
@@ -215,16 +216,29 @@ class LXMFService:
 
                     store = get_node_store()
 
-                    # The destination_hash might be a destination hash, try to get identity hash
+                    # Try looking up by operator destination hash first
                     identity_hash = store.get_identity_for_destination(destination_hash)
-                    if identity_hash and identity_hash != destination_hash:
+                    logger.debug(
+                        f"NodeStore.get_identity_for_destination({destination_hash[:16]}): {identity_hash[:16] if identity_hash else None}"
+                    )
+
+                    # If not found, try looking up by LXMF destination hash
+                    if not identity_hash:
+                        identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
                         logger.debug(
+                            f"NodeStore.get_identity_for_lxmf_destination({destination_hash[:16]}): {identity_hash[:16] if identity_hash else None}"
+                        )
+
+                    if identity_hash and identity_hash != destination_hash:
+                        logger.info(
                             f"Found identity hash {identity_hash[:16]}... for destination {destination_hash[:16]}..."
                         )
                         identity_bytes = bytes.fromhex(identity_hash)
-                        dest_identity = RNS.Identity.recall(identity_bytes)
+                        # Use from_identity_hash=True since we're looking up by identity hash
+                        dest_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
+                        logger.info(f"Recall by identity hash: {dest_identity is not None}")
                 except Exception as e:
-                    logger.debug(f"NodeStore lookup failed: {e}")
+                    logger.warning(f"NodeStore lookup failed: {e}")
 
             if dest_identity is None:
                 logger.warning(
@@ -305,7 +319,7 @@ class LXMFService:
             return False
 
         try:
-            # First, try to recall directly with the provided hash
+            # First, try to recall directly with the provided hash (as destination hash)
             dest_bytes = bytes.fromhex(destination_hash)
             dest_identity = RNS.Identity.recall(dest_bytes)
 
@@ -316,15 +330,23 @@ class LXMFService:
 
                     store = get_node_store()
 
+                    # Try looking up by operator destination hash first
                     identity_hash = store.get_identity_for_destination(destination_hash)
+
+                    # If not found, try looking up by LXMF destination hash
+                    if not identity_hash:
+                        identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
+
                     if identity_hash and identity_hash != destination_hash:
-                        logger.debug(
+                        logger.info(
                             f"Found identity hash {identity_hash[:16]}... for destination {destination_hash[:16]}..."
                         )
                         identity_bytes = bytes.fromhex(identity_hash)
-                        dest_identity = RNS.Identity.recall(identity_bytes)
+                        # Use from_identity_hash=True since we're looking up by identity hash
+                        dest_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
+                        logger.info(f"Recall by identity hash: {dest_identity is not None}")
                 except Exception as e:
-                    logger.debug(f"NodeStore lookup failed: {e}")
+                    logger.warning(f"NodeStore lookup failed: {e}")
 
             if dest_identity is None:
                 logger.warning(
@@ -343,22 +365,21 @@ class LXMFService:
             )
 
             # Wait for path to become available
+            logger.info(
+                f"Dest destination hash: {dest_destination.hash.hex()[:16]}... (from identity {dest_identity.hash.hex()[:16]}...)"
+            )
             start_time = time.monotonic()
             path_available = self._ensure_path(dest_destination.hash)
 
             while not path_available and (time.monotonic() - start_time) < max_wait:
                 time.sleep(check_interval)
                 path_available = RNS.Transport.has_path(dest_destination.hash)
-                if not path_available:
-                    logger.debug(
-                        f"Still waiting for path to {destination_hash[:16]}... "
-                        f"({time.monotonic() - start_time:.1f}s elapsed)"
-                    )
+                elapsed = time.monotonic() - start_time
+                logger.info(f"Path check: has_path={path_available}, elapsed={elapsed:.1f}s")
 
             if not path_available:
                 logger.warning(
-                    f"Timeout waiting for path to {destination_hash[:16]}... "
-                    f"after {max_wait}s"
+                    f"Timeout waiting for path to {destination_hash[:16]}... after {max_wait}s"
                 )
                 return False
 
@@ -396,9 +417,7 @@ class LXMFService:
             logger.error(f"Failed to send message: {e}")
             return False
 
-    def register_callback(
-        self, callback: Callable[[str, dict[str, object]], None]
-    ) -> None:
+    def register_callback(self, callback: Callable[[str, dict[str, object]], None]) -> None:
         """Register callback for incoming messages.
 
         The callback will be invoked when a message is received with the
@@ -516,9 +535,7 @@ class MockLXMFService:
         self.sent_messages.append((destination, payload))
         return True
 
-    def register_callback(
-        self, callback: Callable[[str, dict[str, Any]], None]
-    ) -> None:
+    def register_callback(self, callback: Callable[[str, dict[str, Any]], None]) -> None:
         """Register message callback.
 
         Args:

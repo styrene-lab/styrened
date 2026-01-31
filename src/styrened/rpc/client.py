@@ -29,6 +29,12 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from styrened.protocols.base import LXMFMessage, Protocol
+from styrened.rpc.errors import (
+    RPCInvalidResponseError,
+    RPCTimeoutError,
+    RPCTransportError,
+)
 from styrened.rpc.messages import (
     ExecCommand,
     ExecResult,
@@ -40,13 +46,7 @@ from styrened.rpc.messages import (
     UpdateConfigResult,
     deserialize_message,
 )
-from styrened.protocols.base import LXMFMessage, Protocol
 from styrened.services.lxmf_service import LXMFService
-from styrened.rpc.errors import (
-    RPCInvalidResponseError,
-    RPCTimeoutError,
-    RPCTransportError,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +147,7 @@ class RPCClient(Protocol):
         Raises:
             RPCTransportError: If send fails
         """
-        if isinstance(
-            content, (StatusRequest, ExecCommand, RebootCommand, UpdateConfigCommand)
-        ):
+        if isinstance(content, (StatusRequest, ExecCommand, RebootCommand, UpdateConfigCommand)):
             # Use existing call() method for proper RPC semantics
             await self.call(destination, content)
         else:
@@ -278,9 +276,9 @@ class RPCClient(Protocol):
         request_id = self._generate_request_id()
 
         # Create future for response
-        future: asyncio.Future[
-            StatusResponse | ExecResult | RebootResult | UpdateConfigResult
-        ] = asyncio.Future()
+        future: asyncio.Future[StatusResponse | ExecResult | RebootResult | UpdateConfigResult] = (
+            asyncio.Future()
+        )
 
         # Track pending request
         self._add_pending_request(request_id, future, destination, message.type)
@@ -290,9 +288,11 @@ class RPCClient(Protocol):
         payload["request_id"] = request_id
         payload["protocol"] = "rpc"  # Protocol discrimination
 
-        # Send message
+        # Send message with retry to handle path discovery
         logger.debug(f"Sending {message.type} to {destination} (request_id: {request_id})")
-        if not self.lxmf_service.send_message(destination, payload):
+        if not self.lxmf_service.send_with_retry(
+            destination, payload, max_wait=15.0, check_interval=1.0
+        ):
             # Cleanup on send failure
             self._remove_pending_request(request_id)
             raise RPCTransportError(f"Failed to send message to {destination}", destination)

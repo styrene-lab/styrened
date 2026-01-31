@@ -297,6 +297,28 @@ class NodeStore:
 
             return row["identity_hash"] if row else None
 
+    def get_identity_for_lxmf_destination(self, lxmf_destination_hash: str) -> str | None:
+        """Get identity hash for an LXMF destination hash.
+
+        LXMF destinations are derived from the same identity as operator
+        destinations, so we can look up by LXMF dest to find the identity.
+
+        Thread-safe: read operations allow concurrent access.
+
+        Args:
+            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash.
+
+        Returns:
+            Identity hash if found, None otherwise.
+        """
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash = ?",
+                (lxmf_destination_hash,),
+            ).fetchone()
+
+            return row["identity_hash"] if row else None
+
     def get_all_nodes(self) -> list[MeshDevice]:
         """Get all stored nodes.
 
@@ -306,9 +328,7 @@ class NodeStore:
             List of MeshDevice objects.
         """
         with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM nodes ORDER BY last_announce DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM nodes ORDER BY last_announce DESC").fetchall()
 
             return [self._row_to_device(row) for row in rows]
 

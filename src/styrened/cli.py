@@ -204,8 +204,13 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
     discovery_wait = getattr(args, "wait", 10)
 
     # Start discovery and wait for target device to announce
+    # Pass node_store for persistence so we can look up identity later
+    from styrened.services.node_store import get_node_store
+
+    node_store = get_node_store()
+
     print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
-    start_discovery()
+    start_discovery(node_store=node_store)
 
     # Wait for announce from target device
     target_device = None
@@ -221,7 +226,9 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
             break
         await asyncio.sleep(0.5)
 
+    # Stop discovery BEFORE sending - discovery handler interferes with path responses
     stop_discovery()
+    await asyncio.sleep(0.5)  # Delay to ensure handler is fully deregistered
 
     if not target_device:
         print(f"Device {destination[:16]}... not found after {discovery_wait}s", file=sys.stderr)
@@ -235,7 +242,24 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    print(f"Found {target_device.name}, using LXMF dest {lxmf_dest[:16]}...")
+    print(f"Found {target_device.name}, LXMF dest {lxmf_dest[:16]}...")
+
+    # The identity from the announce can be used to construct the LXMF destination
+    # Store the identity hash so send_message can recall it
+    identity_hash = target_device.identity_hash
+    if identity_hash:
+        print(f"Identity hash: {identity_hash[:16]}...")
+
+        # Try to recall the identity from RNS (should be known from the announce)
+        import RNS
+
+        identity_bytes = bytes.fromhex(identity_hash)
+        # Use from_identity_hash=True since we have identity hash, not destination hash
+        recalled_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
+        if recalled_identity:
+            print(f"Identity recalled successfully")
+        else:
+            print(f"Warning: Identity not recalled - may need to wait for LXMF announce")
 
     # Create RPC client
     rpc_client = RPCClient(lxmf_service)

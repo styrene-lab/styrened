@@ -347,6 +347,11 @@ class StyreneAnnounceHandler:
     This handler listens to ALL announces on the network (no aspect filter)
     and tracks discovered devices as MeshDevice objects. Supports Styrene nodes,
     RNodes, and generic Reticulum announces.
+
+    IMPORTANT: We explicitly opt-out of receiving path responses to avoid
+    interfering with RNS path discovery. Path responses are a special type
+    of announce used internally by RNS for routing, and consuming them in
+    our handler would break message delivery.
     """
 
     def __init__(
@@ -363,6 +368,7 @@ class StyreneAnnounceHandler:
         self.callback = callback
         self.node_store = node_store
         self.aspect_filter = None  # Listen to ALL announces
+        self.receive_path_responses = False  # Don't interfere with RNS path discovery
         self.discovered_devices: dict[str, MeshDevice] = {}
 
     def received_announce(
@@ -386,8 +392,14 @@ class StyreneAnnounceHandler:
             announced_identity: RNS.Identity of the announcer.
             app_data: Optional application data from the announce.
             announce_packet_hash: Hash of the announce packet (unused).
-            is_path_response: Whether this is a path response (unused).
+            is_path_response: Whether this is a path response - skip these to not
+                              interfere with RNS path discovery.
         """
+        # Skip path responses - these are internal RNS routing messages
+        # that we must not consume or we'll break message delivery
+        if is_path_response:
+            return
+
         dest_hash_hex = destination_hash.hex()
 
         # Extract identity hash from the announced identity
@@ -397,6 +409,35 @@ class StyreneAnnounceHandler:
         # Check if we've seen this device before
         existing = self.discovered_devices.get(dest_hash_hex)
         announce_count = existing.announce_count + 1 if existing else 1
+
+        # Remember the identity so RNS.Identity.recall() will work later
+        # This is critical for sending LXMF messages to this destination
+        if announced_identity is not None:
+            try:
+                pub_key = announced_identity.get_public_key()
+                logger.info(
+                    f"Announce from {dest_hash_hex[:16]}: pub_key={pub_key is not None}, packet_hash={announce_packet_hash is not None}"
+                )
+                if pub_key:
+                    # Use destination_hash as packet_hash if not provided
+                    pkt_hash = announce_packet_hash if announce_packet_hash else destination_hash
+                    RNS.Identity.remember(
+                        packet_hash=pkt_hash,
+                        destination_hash=destination_hash,
+                        public_key=pub_key,
+                        app_data=app_data,
+                    )
+                    logger.info(f"Remembered identity for {dest_hash_hex[:16]}...")
+
+                    # Verify it worked - use from_identity_hash=True for identity hash lookup
+                    test_recall = RNS.Identity.recall(
+                        announced_identity.hash, from_identity_hash=True
+                    )
+                    logger.info(
+                        f"Verify recall({announced_identity.hash.hex()[:16]}): {test_recall is not None}"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not remember identity: {e}")
 
         # Create/update MeshDevice with both hashes
         device = create_mesh_device(
