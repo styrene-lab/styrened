@@ -105,6 +105,43 @@ pytest tests/k8s/ -m integration   # K8s integration tests
 
 K8s tests use `tests/k8s/harness.py` (K8sTestHarness) for Helm deployment automation.
 
+## Iterative Testing (Two-Machine)
+
+For hands-on peer testing between two machines on the same LAN:
+
+**Machine A (server/hub)** - e.g., MacBook:
+```yaml
+# ~/.config/styrene/core-config.yaml
+reticulum:
+  mode: standalone
+  interfaces:
+    server:
+      enabled: true
+      listen_ip: 0.0.0.0
+      port: 4242
+```
+Then: `styrened daemon`
+
+**Machine B (client)** - e.g., Desktop:
+```yaml
+# ~/.config/styrene/core-config.yaml
+reticulum:
+  mode: standalone
+  interfaces:
+    peers:
+      - host: <machine-a-ip>
+        port: 4242
+```
+Then:
+```bash
+styrened devices -w 15          # Discover Machine A
+styrened status <dest-hash>     # Query its status
+styrened send <dest-hash> "hi"  # Send a message
+styrened exec <dest-hash> uptime # Run command remotely
+```
+
+Watch daemon logs on both sides to observe announces, message delivery, and RPC handling.
+
 ## CI/CD
 
 GitHub Actions workflows:
