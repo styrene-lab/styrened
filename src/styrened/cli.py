@@ -24,6 +24,7 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 from typing import NoReturn
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,12 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
     from styrened.services.config import get_default_core_config, load_core_config
     from styrened.services.lifecycle import CoreLifecycle
     from styrened.services.lxmf_service import get_lxmf_service
-    from styrened.services.reticulum import get_operator_identity_object
+    from styrened.services.reticulum import (
+        discover_devices,
+        get_operator_identity_object,
+        start_discovery,
+        stop_discovery,
+    )
 
     # Load config
     try:
@@ -193,16 +199,51 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
+    destination = args.destination
+    timeout = args.timeout if hasattr(args, "timeout") else 30.0
+    discovery_wait = getattr(args, "wait", 10)
+
+    # Start discovery and wait for target device to announce
+    print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
+    start_discovery()
+
+    # Wait for announce from target device
+    target_device = None
+    start_time = time.time()
+    while time.time() - start_time < discovery_wait:
+        devices = discover_devices()
+        for device in devices:
+            # Match by destination hash prefix
+            if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                target_device = device
+                break
+        if target_device:
+            break
+        await asyncio.sleep(0.5)
+
+    stop_discovery()
+
+    if not target_device:
+        print(f"Device {destination[:16]}... not found after {discovery_wait}s", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    # Use LXMF destination from announce if available
+    lxmf_dest = target_device.lxmf_destination_hash
+    if not lxmf_dest:
+        print(f"Device {target_device.name} has no LXMF destination in announce", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    print(f"Found {target_device.name}, using LXMF dest {lxmf_dest[:16]}...")
+
     # Create RPC client
     rpc_client = RPCClient(lxmf_service)
 
-    destination = args.destination
-    timeout = args.timeout if hasattr(args, "timeout") else 30.0
-
-    print(f"Querying status of {destination[:16]}... (timeout: {timeout}s)")
+    print(f"Querying status (timeout: {timeout}s)...")
 
     try:
-        response = await rpc_client.call_status(destination, timeout=timeout)
+        response = await rpc_client.call_status(lxmf_dest, timeout=timeout)
 
         if args.json:
             import json
@@ -558,7 +599,14 @@ def create_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("status", help="Query remote node status")
     status_parser.add_argument("destination", help="Destination hash (hex) of remote node")
     status_parser.add_argument(
-        "-t", "--timeout", type=float, default=30.0, help="Timeout in seconds (default: 30)"
+        "-w",
+        "--wait",
+        type=int,
+        default=10,
+        help="Seconds to wait for device announce (default: 10)",
+    )
+    status_parser.add_argument(
+        "-t", "--timeout", type=float, default=30.0, help="RPC timeout in seconds (default: 30)"
     )
     status_parser.add_argument("--json", action="store_true", help="Output as JSON")
     status_parser.set_defaults(func=cmd_status)

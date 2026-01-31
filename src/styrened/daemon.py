@@ -306,6 +306,17 @@ class StyreneDaemon:
                     destination.announce(app_data=app_data)
                     logger.info(f"Re-announced as Styrene node: {hostname}")
 
+                    # Also re-announce LXMF delivery destination so clients can send to us
+                    try:
+                        from styrened.services.lxmf_service import get_lxmf_service
+
+                        lxmf_service = get_lxmf_service()
+                        if lxmf_service.is_initialized and lxmf_service.router:
+                            lxmf_service.router.announce(lxmf_service.delivery_destination.hash)
+                            logger.info(f"Re-announced LXMF delivery destination")
+                    except Exception as e:
+                        logger.warning(f"LXMF re-announce failed: {e}")
+
             except Exception as e:
                 logger.warning(f"Announce failed: {e}")
 
