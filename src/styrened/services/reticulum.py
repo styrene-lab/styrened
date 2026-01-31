@@ -22,13 +22,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from styrened.models.config import CoreConfig, DeploymentMode
 from styrened.models.mesh_device import MeshDevice, create_mesh_device
 from styrened.models.reticulum import (
     ReticulumIdentity,
     ReticulumInterface,
     ReticulumNotConfiguredError,
 )
-from styrened.models.config import CoreConfig, DeploymentMode
 
 # Conditional RNS import
 if TYPE_CHECKING:
@@ -514,7 +514,7 @@ def get_rnodes() -> list[MeshDevice]:
     return [device for device in _announce_handler.discovered_devices.values() if device.is_rnode]
 
 
-def generate_rns_config(config: CoreConfig) -> str:
+def generate_rns_config(config: CoreConfig, client_only: bool = False) -> str:
     """Generate Reticulum configuration from CoreConfig.
 
     Creates an INI-formatted config string for RNS based on deployment mode
@@ -522,6 +522,7 @@ def generate_rns_config(config: CoreConfig) -> str:
 
     Args:
         config: CoreConfig object with deployment mode and interface settings.
+        client_only: If True, don't include server interfaces (for CLI tools).
 
     Returns:
         INI-formatted config string for RNS.
@@ -543,7 +544,8 @@ def generate_rns_config(config: CoreConfig) -> str:
     lines.append("")
 
     # TCPServerInterface (hub mode) - highest priority
-    if config.reticulum.interfaces.server.enabled:
+    # Skip server interface in client_only mode (for CLI tools)
+    if config.reticulum.interfaces.server.enabled and not client_only:
         lines.append("[[TCP Server Interface]]")
         lines.append("type = TCPServerInterface")
         lines.append("enabled = true")

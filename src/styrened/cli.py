@@ -91,8 +91,8 @@ async def _cmd_devices_async(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         config = get_default_core_config()
 
-    # Initialize services
-    lifecycle = CoreLifecycle(config)
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
     if not lifecycle.initialize():
         print("Failed to initialize services", file=sys.stderr)
         return 1
@@ -179,8 +179,8 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         config = get_default_core_config()
 
-    # Initialize services
-    lifecycle = CoreLifecycle(config)
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
     if not lifecycle.initialize():
         print("Failed to initialize services", file=sys.stderr)
         return 1
@@ -271,8 +271,8 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         config = get_default_core_config()
 
-    # Initialize services
-    lifecycle = CoreLifecycle(config)
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
     if not lifecycle.initialize():
         print("Failed to initialize services", file=sys.stderr)
         return 1
@@ -343,8 +343,8 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         config = get_default_core_config()
 
-    # Initialize services
-    lifecycle = CoreLifecycle(config)
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
     if not lifecycle.initialize():
         print("Failed to initialize services", file=sys.stderr)
         return 1
@@ -437,8 +437,8 @@ async def _cmd_announce_async(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         config = get_default_core_config()
 
-    # Initialize services
-    lifecycle = CoreLifecycle(config)
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
     if not lifecycle.initialize():
         print("Failed to initialize services", file=sys.stderr)
         return 1

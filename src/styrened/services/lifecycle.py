@@ -25,6 +25,7 @@ Usage:
 """
 
 import logging
+from pathlib import Path
 
 from styrened.models.config import CoreConfig
 from styrened.models.rns_error import RNSErrorState
@@ -50,15 +51,18 @@ class CoreLifecycle:
     or Styrene node announcements.
     """
 
-    def __init__(self, config: CoreConfig) -> None:
+    def __init__(self, config: CoreConfig, client_only: bool = False) -> None:
         """Initialize lifecycle manager.
 
         Args:
             config: Core configuration.
+            client_only: If True, don't start server interfaces (for CLI tools).
         """
         self.config = config
+        self._client_only = client_only
         self._initialized = False
         self._rns_error_state: RNSErrorState = RNSErrorState.none()
+        self._rns_config_dir: Path | None = None
 
     @property
     def rns_error_state(self) -> RNSErrorState:
@@ -126,27 +130,31 @@ class CoreLifecycle:
 
         try:
             # Initialize RNS with core config
-            from styrened.services.reticulum import generate_rns_config
             import tempfile
             from pathlib import Path
 
+            from styrened.services.reticulum import generate_rns_config
+
             # Generate RNS config from CoreConfig
-            config_content = generate_rns_config(self.config)
+            config_content = generate_rns_config(self.config, client_only=self._client_only)
 
-            # Create temporary config directory
-            with tempfile.TemporaryDirectory() as tmpdir:
-                config_dir = Path(tmpdir)
-                config_file = config_dir / "config"
-                config_file.write_text(config_content)
+            # Create temporary config directory that persists for daemon lifetime
+            # Note: We use mkdtemp instead of TemporaryDirectory context manager
+            # because RNS needs the config to remain accessible while running
+            config_dir = Path(tempfile.mkdtemp(prefix="styrened_rns_"))
+            self._rns_config_dir = config_dir  # Store reference for cleanup
+            config_file = config_dir / "config"
+            config_file.write_text(config_content)
 
-                logger.info(f"Initializing RNS in {self.config.reticulum.mode.value} mode")
+            logger.info(f"Initializing RNS in {self.config.reticulum.mode.value} mode")
+            logger.debug(f"RNS config written to: {config_file}")
 
-                # Initialize RNS with temporary config
-                rns_service = get_rns_service()
-                if not rns_service.initialize(config_override=config_dir):
-                    logger.warning("RNS service initialization failed")
-                    self._rns_error_state = rns_service.error_state
-                    return False
+            # Initialize RNS with temporary config
+            rns_service = get_rns_service()
+            if not rns_service.initialize(config_override=config_dir):
+                logger.warning("RNS service initialization failed")
+                self._rns_error_state = rns_service.error_state
+                return False
 
             # Success - clear any error state
             self._rns_error_state = RNSErrorState.none()
@@ -210,6 +218,7 @@ class CoreLifecycle:
 
             # Stop device discovery
             from styrened.services.reticulum import stop_discovery
+
             stop_discovery()
 
             # Shutdown LXMF service
@@ -224,6 +233,17 @@ class CoreLifecycle:
             # Shutdown RNS service
             rns_service = get_rns_service()
             rns_service.shutdown()
+
+            # Clean up temporary RNS config directory
+            if self._rns_config_dir and self._rns_config_dir.exists():
+                import shutil
+
+                try:
+                    shutil.rmtree(self._rns_config_dir)
+                    logger.debug(f"Cleaned up RNS config dir: {self._rns_config_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up RNS config dir: {e}")
+                self._rns_config_dir = None
 
             self._initialized = False
             logger.info("Core services shutdown complete")

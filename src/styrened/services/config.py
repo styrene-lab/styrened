@@ -94,6 +94,17 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     Raises:
         ConfigLoadError: If config file exists but cannot be parsed.
     """
+    from styrened.models.config import (
+        APIConfig,
+        ChatConfig,
+        DiscoveryConfig,
+        InterfaceConfig,
+        PeerConfig,
+        ReticulumConfig,
+        RPCConfig,
+        ServerInterfaceConfig,
+    )
+
     if config_path is None:
         config_path = get_config_dir() / "core-config.yaml"
 
@@ -110,9 +121,91 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         return get_default_core_config()
 
     # Parse CoreConfig from dictionary
-    # For now, just return defaults - full parsing can be added later
-    # This is a minimal implementation to unblock headless apps
-    return get_default_core_config()
+    config = CoreConfig()
+
+    # Parse reticulum section
+    if "reticulum" in data and isinstance(data["reticulum"], dict):
+        ret = data["reticulum"]
+        if "mode" in ret:
+            try:
+                config.reticulum.mode = DeploymentMode(ret["mode"])
+            except ValueError:
+                pass  # Keep default
+        if "announce_interval" in ret:
+            config.reticulum.announce_interval = int(ret["announce_interval"])
+        if "enable_transport" in ret:
+            config.reticulum.enable_transport = bool(ret["enable_transport"])
+
+        # Parse interfaces
+        if "interfaces" in ret and isinstance(ret["interfaces"], dict):
+            ifaces = ret["interfaces"]
+            if "auto" in ifaces:
+                config.reticulum.interfaces.auto = bool(ifaces["auto"])
+
+            # Parse server interface
+            if "server" in ifaces and isinstance(ifaces["server"], dict):
+                srv = ifaces["server"]
+                config.reticulum.interfaces.server = ServerInterfaceConfig(
+                    enabled=bool(srv.get("enabled", False)),
+                    listen_ip=str(srv.get("listen_ip", "0.0.0.0")),
+                    port=int(srv.get("port", 4242)),
+                )
+
+            # Parse peers list
+            if "peers" in ifaces and isinstance(ifaces["peers"], list):
+                peers = []
+                for p in ifaces["peers"]:
+                    if isinstance(p, dict) and "host" in p:
+                        peers.append(
+                            PeerConfig(
+                                host=str(p["host"]),
+                                port=int(p.get("port", 4242)),
+                                name=p.get("name"),
+                            )
+                        )
+                config.reticulum.interfaces.peers = peers
+
+    # Parse rpc section
+    if "rpc" in data and isinstance(data["rpc"], dict):
+        rpc = data["rpc"]
+        if "enabled" in rpc:
+            config.rpc.enabled = bool(rpc["enabled"])
+        if "relay_mode" in rpc:
+            config.rpc.relay_mode = bool(rpc["relay_mode"])
+        if "allow_command_execution" in rpc:
+            config.rpc.allow_command_execution = bool(rpc["allow_command_execution"])
+
+    # Parse discovery section
+    if "discovery" in data and isinstance(data["discovery"], dict):
+        disc = data["discovery"]
+        if "enabled" in disc:
+            config.discovery.enabled = bool(disc["enabled"])
+        if "auto_announce" in disc:
+            config.discovery.auto_announce = bool(disc["auto_announce"])
+
+    # Parse chat section
+    if "chat" in data and isinstance(data["chat"], dict):
+        chat = data["chat"]
+        if "enabled" in chat:
+            config.chat.enabled = bool(chat["enabled"])
+        if "auto_reply_enabled" in chat:
+            config.chat.auto_reply_enabled = bool(chat["auto_reply_enabled"])
+        if "auto_reply_message" in chat:
+            config.chat.auto_reply_message = str(chat["auto_reply_message"])
+        if "auto_reply_cooldown" in chat:
+            config.chat.auto_reply_cooldown = int(chat["auto_reply_cooldown"])
+
+    # Parse api section
+    if "api" in data and isinstance(data["api"], dict):
+        api = data["api"]
+        if "enabled" in api:
+            config.api.enabled = bool(api["enabled"])
+        if "host" in api:
+            config.api.host = str(api["host"])
+        if "port" in api:
+            config.api.port = int(api["port"])
+
+    return config
 
 
 def save_core_config(config: CoreConfig, config_path: Path | None = None) -> None:
