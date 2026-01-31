@@ -1,0 +1,35 @@
+{
+  "name": "star",
+  "description": "Star topology with 1 hub and N clients",
+  "nodes": [
+    {
+      "id": "hub-0",
+      "role": "hub",
+      "config": "hub.yaml",
+      "connections": ["client-0", "client-1", "client-2"]
+    },
+    {
+      "id": "client-0",
+      "role": "client",
+      "config": "peer.yaml",
+      "connections": ["hub-0"]
+    },
+    {
+      "id": "client-1",
+      "role": "client",
+      "config": "peer.yaml",
+      "connections": ["hub-0"]
+    },
+    {
+      "id": "client-2",
+      "role": "client",
+      "config": "peer.yaml",
+      "connections": ["hub-0"]
+    }
+  ],
+  "test_scenarios": [
+    "Hub crash and recovery",
+    "Client reconnection",
+    "Message routing through hub"
+  ]
+}

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "styrened-test.fullname" . }}
+  labels:
+    {{- include "styrened-test.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "styrened-test.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "styrened-test.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "styrened-test.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: styrened
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: rns
+          containerPort: 4242
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: STYRENE_CONFIG_DIR
+          value: "/config"
+        - name: RNS_LOGLEVEL
+          value: "4"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: rns-config
+          mountPath: /root/.reticulum
+        - name: data
+          mountPath: /data
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "pgrep -f styrened"
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "test -f /config/config.yaml"
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "styrened-test.fullname" . }}-config
+      - name: rns-config
+        configMap:
+          name: {{ include "styrened-test.fullname" . }}-rns
+      - name: data
+        emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

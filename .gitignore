@@ -49,3 +49,5 @@ result-*
 # OS
 .DS_Store
 Thumbs.db
+.cleave/
+.cleave-build/

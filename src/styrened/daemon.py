@@ -32,13 +32,13 @@ from typing import TYPE_CHECKING, Any
 import RNS  # type: ignore
 
 if TYPE_CHECKING:
-    from styrene_core.models.mesh_device import MeshDevice
+    from styrened.models.mesh_device import MeshDevice
 
-from styrene_core.models.config import CoreConfig
-from styrene_core.services.lifecycle import CoreLifecycle
-from styrene_core.services.auto_reply import AutoReplyHandler
-from styrene_core.services.config import get_default_core_config, load_core_config
-from styrene_core.services.reticulum import discover_devices, start_discovery
+from styrened.models.config import CoreConfig
+from styrened.services.lifecycle import CoreLifecycle
+from styrened.services.auto_reply import AutoReplyHandler
+from styrened.services.config import get_default_core_config, load_core_config
+from styrened.services.reticulum import discover_devices, start_discovery
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +115,8 @@ class StyreneDaemon:
         errors when re-announcing in the main loop.
         """
         try:
-            from styrene_core.services.reticulum import get_operator_identity_object
-            from styrene_core.services.rns_service import get_rns_service
+            from styrened.services.reticulum import get_operator_identity_object
+            from styrened.services.rns_service import get_rns_service
 
             identity = get_operator_identity_object()
             if identity:
@@ -141,8 +141,8 @@ class StyreneDaemon:
             return
 
         try:
-            from styrene_core.services.lxmf_service import get_lxmf_service
-            from styrene_core.rpc import RPCServer
+            from styrened.services.lxmf_service import get_lxmf_service
+            from styrened.rpc import RPCServer
 
             lxmf_service = get_lxmf_service()
             if not lxmf_service.is_initialized:
@@ -189,9 +189,9 @@ class StyreneDaemon:
             return
 
         try:
-            from styrene_core.services.auto_reply import AutoReplyHandler
-            from styrene_core.services.lxmf_service import get_lxmf_service
-            from styrene_core.services.reticulum import get_operator_identity_object
+            from styrened.services.auto_reply import AutoReplyHandler
+            from styrened.services.lxmf_service import get_lxmf_service
+            from styrened.services.reticulum import get_operator_identity_object
 
             lxmf_service = get_lxmf_service()
             if not lxmf_service.is_initialized or not lxmf_service.router:
@@ -290,7 +290,7 @@ class StyreneDaemon:
                     # Include LXMF delivery destination in announce
                     lxmf_dest = ""
                     try:
-                        from styrene_core.services.lxmf_service import get_lxmf_service
+                        from styrened.services.lxmf_service import get_lxmf_service
 
                         lxmf_service = get_lxmf_service()
                         if lxmf_service.is_initialized and lxmf_service.delivery_destination:

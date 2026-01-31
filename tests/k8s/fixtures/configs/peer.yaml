@@ -1,0 +1,16 @@
+# Peer mode configuration for styrened tests
+# Used for client node testing (connects to hub)
+
+reticulum:
+  mode: peer
+  transport_enabled: false
+  announce_interval: 300
+
+rpc:
+  enabled: true
+
+discovery:
+  announce_interval: 300
+
+chat:
+  auto_reply_enabled: false

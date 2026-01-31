@@ -1,0 +1,16 @@
+apiVersion: v2
+name: styrened-test
+description: Helm chart for styrened containerized testing
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - styrened
+  - reticulum
+  - mesh-network
+  - testing
+maintainers:
+  - name: styrene-lab
+home: https://github.com/styrene-lab/styrened
+sources:
+  - https://github.com/styrene-lab/styrened

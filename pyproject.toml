@@ -5,17 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "styrened"
 version = "0.2.0"
-description = "Headless Styrene daemon for edge deployments"
+description = "Unified Styrene library and headless daemon for RNS/LXMF mesh networking"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Vanderlyn Labs"}
 ]
-keywords = ["reticulum", "mesh", "daemon", "rpc", "edge"]
+keywords = ["reticulum", "mesh", "daemon", "rpc", "edge", "lxmf"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: No Input/Output (Daemon)",
+    "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
@@ -24,10 +25,17 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Systems Administration",
+    "Topic :: Communications",
 ]
 
+# Core dependencies (merged from styrene-core)
 dependencies = [
-    "styrene-core>=0.2.0",  # Core library (no textual!)
+    "rns>=0.7.5",
+    "lxmf>=0.4.3",
+    "pyyaml>=6.0",
+    "platformdirs>=4.0",
+    "sqlalchemy>=2.0",
+    "msgpack>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -35,8 +43,10 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "pytest-asyncio>=0.21",
+    "pytest-xdist>=3.5",
     "mypy>=1.7",
     "ruff>=0.1.6",
+    "types-pyyaml>=6.0",
 ]
 
 [project.scripts]
@@ -58,8 +68,22 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP"]
-ignore = ["E501"]  # Line length handled by formatter
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__ files
 
 [tool.mypy]
 python_version = "3.11"
@@ -68,8 +92,24 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["RNS.*", "LXMF.*", "msgpack"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --strict-markers"
+markers = [
+    "slow: marks tests as slow (load/scaling tests)",
+    "requires_metrics: requires metrics-server (for resource usage tests)",
+    "smoke: marks tests as smoke tests (fast validation, <2min)",
+    "integration: marks tests as integration tests (moderate complexity, <10min)",
+    "comprehensive: marks tests as comprehensive tests (deep validation, <30min)",
+    "rns_singleton: tests requiring RNS singleton isolation",
+]
+# pytest-xdist configuration
+# Use --dist loadscope to keep session-scoped fixtures shared within workers
+# Use -n auto to auto-detect CPU count, or -n <number> for explicit worker count
+asyncio_mode = "auto"

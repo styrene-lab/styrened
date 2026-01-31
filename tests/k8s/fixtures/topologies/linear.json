@@ -1,0 +1,35 @@
+{
+  "name": "linear",
+  "description": "Linear chain topology - nodes in sequence",
+  "nodes": [
+    {
+      "id": "node-0",
+      "role": "edge",
+      "config": "gateway.yaml",
+      "connections": ["node-1"]
+    },
+    {
+      "id": "node-1",
+      "role": "relay",
+      "config": "gateway.yaml",
+      "connections": ["node-0", "node-2"]
+    },
+    {
+      "id": "node-2",
+      "role": "relay",
+      "config": "gateway.yaml",
+      "connections": ["node-1", "node-3"]
+    },
+    {
+      "id": "node-3",
+      "role": "edge",
+      "config": "peer.yaml",
+      "connections": ["node-2"]
+    }
+  ],
+  "test_scenarios": [
+    "Multi-hop message delivery",
+    "End-to-end latency",
+    "Relay failure handling"
+  ]
+}

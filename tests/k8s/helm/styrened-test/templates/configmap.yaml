@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "styrened-test.fullname" . }}-config
+  labels:
+    {{- include "styrened-test.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    reticulum:
+      mode: {{ .Values.styrene.reticulum.mode }}
+      transport_enabled: {{ .Values.styrene.reticulum.transport_enabled }}
+      announce_interval: {{ .Values.styrene.reticulum.announce_interval }}
+
+    rpc:
+      enabled: {{ .Values.styrene.rpc.enabled }}
+
+    discovery:
+      announce_interval: {{ .Values.styrene.discovery.announce_interval }}
+
+    chat:
+      auto_reply_enabled: {{ .Values.styrene.chat.auto_reply_enabled }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "styrened-test.fullname" . }}-rns
+  labels:
+    {{- include "styrened-test.labels" . | nindent 4 }}
+data:
+  config: |
+    [reticulum]
+    enable_transport = {{ .Values.rns.enable_transport }}
+    share_instance = {{ .Values.rns.share_instance }}
+
+    [interfaces]
+    {{- range $i, $iface := .Values.rns.interfaces }}
+    [[{{ $iface.type }}]]
+    enabled = {{ $iface.enabled }}
+    {{- if eq $iface.type "TCPServerInterface" }}
+    listen_ip = {{ $iface.listen_ip }}
+    listen_port = {{ $iface.listen_port }}
+    {{- end }}
+    {{- if eq $iface.type "TCPClientInterface" }}
+    target_host = {{ $iface.target_host }}
+    target_port = {{ $iface.target_port }}
+    {{- end }}
+    {{- end }}

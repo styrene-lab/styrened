@@ -1,0 +1,112 @@
+# Default values for styrened-test Helm chart
+
+# Number of styrened pods to deploy
+replicaCount: 3
+
+# Container image configuration
+image:
+  repository: styrened-test
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# Resource limits per pod (cost-efficient)
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Styrene configuration (merged into ConfigMap)
+styrene:
+  reticulum:
+    mode: standalone  # standalone, hub, peer
+    transport_enabled: false
+    announce_interval: 300
+
+  rpc:
+    enabled: true
+
+  discovery:
+    announce_interval: 300
+
+  chat:
+    auto_reply_enabled: false
+
+# RNS configuration (written to /root/.reticulum/config)
+rns:
+  enable_transport: false
+  share_instance: true
+  interfaces:
+    # TCP Server Interface (for pod-to-pod communication)
+    - type: TCPServerInterface
+      enabled: true
+      listen_ip: "0.0.0.0"
+      listen_port: 4242
+
+    # Auto Interface (disabled in k8s)
+    - type: AutoInterface
+      enabled: false
+
+# Service configuration
+service:
+  # Headless service for pod DNS
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: rns
+      port: 4242
+      targetPort: 4242
+      protocol: TCP
+
+# Network policy for pod-to-pod communication
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - podSelector: {}
+  egress:
+    - to:
+      - podSelector: {}
+    - to:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 53  # DNS
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Container security context
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: false  # RNS needs to bind to ports
+  runAsUser: 0
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules (spread pods across nodes)
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchLabels:
+            app: styrened-test
+        topologyKey: kubernetes.io/hostname

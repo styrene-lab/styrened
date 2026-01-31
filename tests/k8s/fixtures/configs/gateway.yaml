@@ -1,0 +1,17 @@
+# Gateway mode configuration for styrened tests
+# Used for edge gateway testing
+
+reticulum:
+  mode: gateway
+  transport_enabled: true
+  announce_interval: 120
+
+rpc:
+  enabled: true
+
+discovery:
+  announce_interval: 120
+
+chat:
+  auto_reply_enabled: true
+  auto_reply_message: "Gateway node"

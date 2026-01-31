@@ -1,0 +1,316 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'  # v0.2.0, v0.2.1, v1.0.0-rc1, etc.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v0.2.1)'
+        required: true
+        type: string
+
+env:
+  KIND_VERSION: v0.20.0
+  KUBECTL_VERSION: v1.28.0
+  HELM_VERSION: v3.13.0
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate-tag:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.prerelease }}
+
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          if [[ "$VERSION" =~ (rc|alpha|beta) ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Release version: $VERSION"
+          echo "Prerelease: ${{ steps.version.outputs.prerelease }}"
+
+  build-multi-arch:
+    name: Build Multi-Arch Images
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.validate-tag.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate-tag.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.validate-tag.outputs.version }},enable=${{ needs.validate-tag.outputs.is_prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.validate-tag.outputs.is_prerelease == 'false' }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: tests/k8s/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+
+  test-release:
+    name: Full Test Suite
+    needs: [validate-tag, build-multi-arch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-xdist pytest-cov kubernetes
+
+      - name: Set up kind cluster
+        uses: helm/kind-action@v1.8.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: styrene-release
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and load release image
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }} styrened-test:latest
+          kind load docker-image styrened-test:latest --name styrene-release
+
+      - name: Run full test suite
+        run: |
+          pytest tests/k8s/ -v --tb=short --run-slow \
+            --cov=src --cov-report=xml --cov-report=term --cov-report=html \
+            -n 8 --dist loadscope
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: release
+          name: release-${{ needs.validate-tag.outputs.version }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-coverage-report
+          path: htmlcov/
+          retention-days: 90
+
+      - name: Collect test logs
+        if: always()
+        run: |
+          mkdir -p /tmp/release-logs
+          kubectl get namespaces | grep styrene-test | awk '{print $1}' | while read ns; do
+            kubectl get pods -n $ns -o name | while read pod; do
+              pod_name=$(basename $pod)
+              kubectl logs $pod_name -n $ns --tail=1000 > /tmp/release-logs/${ns}_${pod_name}.log 2>&1 || true
+            done
+          done
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-test-logs
+          path: /tmp/release-logs/
+          retention-days: 90
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kubectl get namespaces | grep styrene-test | awk '{print $1}' | xargs -r kubectl delete namespace --grace-period=0 --force || true
+
+  generate-changelog:
+    name: Generate Changelog
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [[ -z "$PREVIOUS_TAG" ]]; then
+            echo "First release - collecting all commits"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            echo "Previous tag: $PREVIOUS_TAG"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" ${PREVIOUS_TAG}..HEAD)
+          fi
+
+          # Generate changelog content
+          CHANGELOG="## What's Changed
+
+          $COMMITS
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...v${{ needs.validate-tag.outputs.version }}"
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  create-release:
+    name: Create GitHub Release
+    needs: [validate-tag, build-multi-arch, test-release, generate-changelog]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/release-artifacts
+
+      - name: Create release archive
+        run: |
+          mkdir -p /tmp/release-package
+
+          # Package source code
+          tar czf /tmp/release-package/styrened-${{ needs.validate-tag.outputs.version }}-source.tar.gz \
+            --exclude='.git' \
+            --exclude='*.pyc' \
+            --exclude='__pycache__' \
+            --exclude='.venv' \
+            .
+
+          # Package test logs
+          if [[ -d /tmp/release-artifacts/release-test-logs ]]; then
+            tar czf /tmp/release-package/test-logs.tar.gz -C /tmp/release-artifacts/release-test-logs .
+          fi
+
+          # Package coverage report
+          if [[ -d /tmp/release-artifacts/release-coverage-report ]]; then
+            tar czf /tmp/release-package/coverage-report.tar.gz -C /tmp/release-artifacts/release-coverage-report .
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.validate-tag.outputs.version }}
+          name: Release v${{ needs.validate-tag.outputs.version }}
+          body: |
+            # Styrened v${{ needs.validate-tag.outputs.version }}
+
+            ${{ needs.generate-changelog.outputs.changelog }}
+
+            ## Docker Images
+
+            Multi-architecture images available at:
+            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}`
+            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest` (stable releases only)
+
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}
+            ```
+
+            ## Test Results
+
+            ✅ Full test suite passed (smoke + integration + comprehensive)
+            📊 Coverage report available in release artifacts
+
+            ## Platforms
+
+            - linux/amd64
+            - linux/arm64
+          draft: false
+          prerelease: ${{ needs.validate-tag.outputs.is_prerelease == 'true' }}
+          files: |
+            /tmp/release-package/*.tar.gz
+
+      - name: Notify team
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseType = ${{ needs.validate-tag.outputs.is_prerelease }} ? 'Pre-release' : 'Release';
+            const emoji = ${{ needs.validate-tag.outputs.is_prerelease }} ? '🚧' : '🎉';
+
+            const comment = `${emoji} **${releaseType} v${{ needs.validate-tag.outputs.version }} Published**
+
+            🐳 **Docker Images:**
+            - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}\`
+
+            📋 **Release Notes:** [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-tag.outputs.version }})
+
+            ✅ All tests passed successfully
+            📊 Coverage reports available in release artifacts
+            `;
+
+            // Create a discussion or comment on the release (requires permissions)
+            console.log(comment);

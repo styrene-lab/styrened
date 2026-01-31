@@ -1,0 +1,16 @@
+# Hub mode configuration for styrened tests
+# Used for central hub/gateway testing
+
+reticulum:
+  mode: hub
+  transport_enabled: true
+  announce_interval: 60
+
+rpc:
+  enabled: true
+
+discovery:
+  announce_interval: 60
+
+chat:
+  auto_reply_enabled: false

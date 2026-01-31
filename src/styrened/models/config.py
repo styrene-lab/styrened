@@ -1,0 +1,311 @@
+"""Core configuration models for Styrene.
+
+This module contains configuration models that are shared between
+headless (core) and TUI applications. TUI-specific config is in
+styrene-tui/src/styrene/models/config.py.
+"""
+
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+
+
+# -----------------------------------------------------------------------------
+# Enums
+# -----------------------------------------------------------------------------
+
+
+class LogLevel(Enum):
+    """Logging verbosity levels.
+
+    Maps to standard Python logging levels for consistency.
+    """
+
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class DeploymentMode(Enum):
+    """Styrene deployment modes.
+
+    Determines how Styrene participates in the Reticulum mesh.
+    """
+
+    STANDALONE = "standalone"  # Local only, no external connections
+    HUB = "hub"  # Act as transport node, accept connections
+    PEER = "peer"  # Connect to specific hubs
+
+
+class GatewayMode(Enum):
+    """Mesh gateway operating modes.
+
+    Determines how a device participates in mesh internet sharing.
+    """
+
+    OFF = "off"  # No gateway functionality
+    CLIENT = "client"  # Use mesh gateway for internet
+    SERVER = "server"  # Provide internet to mesh clients
+
+
+# -----------------------------------------------------------------------------
+# Configuration validation errors
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfigValidationError:
+    """Represents a configuration validation error.
+
+    Attributes:
+        field: Dot-notation path to the problematic field (e.g., "mesh.channel").
+        message: Human-readable error description.
+        value: The invalid value (if safe to display).
+    """
+
+    field: str
+    message: str
+    value: str | None = None
+
+    def __str__(self) -> str:
+        if self.value:
+            return f"{self.field}: {self.message} (got: {self.value})"
+        return f"{self.field}: {self.message}"
+
+
+class ConfigLoadError(Exception):
+    """Raised when configuration cannot be loaded.
+
+    Attributes:
+        path: Path to the config file that failed to load.
+    """
+
+    def __init__(self, message: str, path: Path | None = None) -> None:
+        self.path = path
+        super().__init__(message)
+
+
+class ConfigValidationErrors(Exception):
+    """Raised when configuration validation fails.
+
+    Contains a list of all validation errors encountered.
+
+    Attributes:
+        errors: List of ConfigValidationError instances.
+    """
+
+    def __init__(self, errors: list[ConfigValidationError]) -> None:
+        self.errors = errors
+        messages = [str(e) for e in errors]
+        super().__init__(f"Configuration validation failed: {'; '.join(messages)}")
+
+
+# -----------------------------------------------------------------------------
+# Configuration section dataclasses
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class PeerConfig:
+    """Configuration for a peer hub connection.
+
+    Attributes:
+        host: Hostname or IP address of peer hub.
+        port: TCP port for connection.
+        name: Optional human-readable name for this peer.
+    """
+
+    host: str
+    port: int = 4242
+    name: str | None = None
+
+
+@dataclass
+class ServerInterfaceConfig:
+    """Configuration for TCP server interface.
+
+    Attributes:
+        enabled: Whether to enable TCP server interface.
+        listen_ip: IP address to bind to (0.0.0.0 = all interfaces).
+        port: TCP port to listen on.
+    """
+
+    enabled: bool = False
+    listen_ip: str = "0.0.0.0"
+    port: int = 4242
+
+
+@dataclass
+class InterfaceConfig:
+    """RNS interface configuration.
+
+    Attributes:
+        auto: Enable AutoInterface for local UDP discovery.
+              Disabled by default due to platform compatibility issues.
+              See generate_rns_config() for details on Linux/macOS errors.
+        server: TCP server interface configuration.
+        peers: List of peer hubs to connect to.
+    """
+
+    auto: bool = False
+    server: ServerInterfaceConfig = field(default_factory=ServerInterfaceConfig)
+    peers: list[PeerConfig] = field(default_factory=list)
+
+
+@dataclass
+class ReticulumConfig:
+    """Reticulum integration settings.
+
+    Controls how Styrene interacts with Reticulum. Note that Reticulum
+    itself stores its config in its own location following the priority:
+    /etc/reticulum -> ~/.config/reticulum -> ~/.reticulum
+
+    Attributes:
+        config_path_override: Force a specific Reticulum config directory.
+        auto_initialize: Offer to initialize Reticulum if not configured.
+        mode: Deployment mode (standalone, hub, peer).
+        enable_transport: Override transport setting (None = auto from mode).
+        interfaces: Interface configuration.
+        operator_identity_path: Path to operator identity file.
+        announce_interval: Seconds between announces (default 300).
+        hub_enabled: Whether to connect to Hub (Phase 2).
+        hub_address: Hub LXMF address for fleet coordination (Phase 2).
+        hub_announce_interval: Hub's announce interval in seconds (default 60).
+    """
+
+    config_path_override: Path | None = None
+    auto_initialize: bool = True
+    mode: DeploymentMode = DeploymentMode.STANDALONE
+    enable_transport: bool | None = None  # None = auto-determine from mode
+    interfaces: InterfaceConfig = field(default_factory=InterfaceConfig)
+    operator_identity_path: Path | None = None
+    announce_interval: int = 300
+    # Phase 2 settings - hub connectivity
+    hub_enabled: bool = False
+    hub_address: str | None = None  # 32-char hex LXMF address
+    hub_announce_interval: int = 60  # Hub's announce interval in seconds
+
+    def resolve_transport_enabled(self) -> bool:
+        """Determine if transport should be enabled based on mode.
+
+        Returns:
+            True if transport should be enabled, False otherwise.
+        """
+        if self.enable_transport is not None:
+            return self.enable_transport
+
+        # Auto-determine based on mode
+        # HUB: transport enabled for routing
+        # STANDALONE: transport enabled to use our own interfaces
+        # CLIENT: transport disabled, connects to shared instance
+        return self.mode in (DeploymentMode.HUB, DeploymentMode.STANDALONE)
+
+    def resolve_operator_identity_path(self) -> Path:
+        """Get the operator identity path.
+
+        Returns:
+            Path to operator identity file.
+        """
+        if self.operator_identity_path:
+            return self.operator_identity_path
+
+        from platformdirs import user_config_dir
+
+        config_dir = Path(user_config_dir("styrene"))
+        return config_dir / "operator.key"
+
+
+@dataclass
+class APIConfig:
+    """HTTP API configuration for headless mode.
+
+    Attributes:
+        enabled: Whether to enable HTTP API.
+        host: IP address to bind to.
+        port: TCP port for API server.
+    """
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+
+@dataclass
+class RPCConfig:
+    """RPC server configuration.
+
+    Attributes:
+        enabled: Whether to enable the RPC server.
+        relay_mode: If true, relay RPC messages without executing commands.
+        allow_command_execution: If true, execute received RPC commands (edge devices only).
+    """
+
+    enabled: bool = True
+    relay_mode: bool = False
+    allow_command_execution: bool = True
+
+
+@dataclass
+class DiscoveryConfig:
+    """Device discovery configuration.
+
+    Attributes:
+        enabled: Whether to enable device discovery.
+        auto_announce: Automatically announce presence on startup.
+    """
+
+    enabled: bool = True
+    auto_announce: bool = True
+
+
+@dataclass
+class ChatConfig:
+    """Chat and messaging configuration.
+
+    Attributes:
+        enabled: Whether to enable chat/LXMF messaging.
+        auto_reply_enabled: Send automatic replies when running headless.
+        auto_reply_message: Message to send as auto-reply.
+            Supports placeholders: {hostname}, {identity}, {uptime}, {version}
+        auto_reply_cooldown: Minimum seconds between auto-replies to same sender.
+            Prevents spam loops with other auto-reply bots.
+        persist_messages: Store messages in database (requires SQLite).
+    """
+
+    enabled: bool = True
+    auto_reply_enabled: bool = True
+    auto_reply_message: str = (
+        "This is {hostname}, a Styrene mesh node running in headless mode. "
+        "No operator is currently available to respond. "
+        "For more information about Styrene, visit: https://github.com/styrene-lab"
+    )
+    auto_reply_cooldown: int = 300  # 5 minutes between replies to same sender
+    persist_messages: bool = True
+
+
+# -----------------------------------------------------------------------------
+# Core configuration root
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class CoreConfig:
+    """Core Styrene configuration for headless applications.
+
+    This is the root configuration object for headless/daemon mode,
+    containing only core mesh and messaging settings.
+
+    Attributes:
+        reticulum: Reticulum integration settings.
+        rpc: RPC server configuration.
+        discovery: Device discovery configuration.
+        chat: Chat and messaging configuration.
+        api: HTTP API configuration.
+    """
+
+    reticulum: ReticulumConfig = field(default_factory=ReticulumConfig)
+    rpc: RPCConfig = field(default_factory=RPCConfig)
+    discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
+    api: APIConfig = field(default_factory=APIConfig)

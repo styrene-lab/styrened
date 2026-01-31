@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "styrened-test.fullname" . }}
+  labels:
+    {{- include "styrened-test.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  clusterIP: {{ .Values.service.clusterIP }}
+  {{- with .Values.service.ports }}
+  ports:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "styrened-test.selectorLabels" . | nindent 4 }}
