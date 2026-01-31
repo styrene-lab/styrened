@@ -328,7 +328,13 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
     from styrened.services.config import get_default_core_config, load_core_config
     from styrened.services.lifecycle import CoreLifecycle
     from styrened.services.lxmf_service import get_lxmf_service
-    from styrened.services.reticulum import get_operator_identity_object
+    from styrened.services.node_store import get_node_store
+    from styrened.services.reticulum import (
+        discover_devices,
+        get_operator_identity_object,
+        start_discovery,
+        stop_discovery,
+    )
 
     # Load config
     try:
@@ -354,17 +360,49 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
     message = args.message
     retry = args.retry if hasattr(args, "retry") else False
     max_wait = args.max_wait if hasattr(args, "max_wait") else 30.0
+    discovery_wait = getattr(args, "wait", 10)
 
-    print(f"Sending message to {destination[:16]}...")
+    # Start discovery and wait for target device to announce
+    # This is required to get the identity into memory for sending
+    node_store = get_node_store()
+    print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
+    start_discovery(node_store=node_store)
 
-    payload = {"type": "chat", "content": message}
+    # Wait for announce from target device
+    target_device = None
+    start_time = time.time()
+    while time.time() - start_time < discovery_wait:
+        devices = discover_devices()
+        for device in devices:
+            # Match by destination hash prefix
+            if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                target_device = device
+                break
+        if target_device:
+            break
+        await asyncio.sleep(0.5)
+
+    # Stop discovery before sending
+    stop_discovery()
+    await asyncio.sleep(0.5)
+
+    if not target_device:
+        print(f"Device {destination[:16]}... not found after {discovery_wait}s", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    # Use the LXMF destination for sending
+    lxmf_dest = target_device.lxmf_destination_hash or destination
+    print(f"Found {target_device.name or 'device'}, sending to LXMF dest {lxmf_dest[:16]}...")
+
+    payload = {"type": "chat", "protocol": "chat", "content": message}
 
     if retry:
         success = lxmf_service.send_with_retry(
-            destination, payload, max_wait=max_wait, check_interval=2.0
+            lxmf_dest, payload, max_wait=max_wait, check_interval=2.0
         )
     else:
-        success = lxmf_service.send_message(destination, payload)
+        success = lxmf_service.send_message(lxmf_dest, payload)
 
     if success:
         print("Message sent successfully")
@@ -400,7 +438,13 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
     from styrened.services.config import get_default_core_config, load_core_config
     from styrened.services.lifecycle import CoreLifecycle
     from styrened.services.lxmf_service import get_lxmf_service
-    from styrened.services.reticulum import get_operator_identity_object
+    from styrened.services.node_store import get_node_store
+    from styrened.services.reticulum import (
+        discover_devices,
+        get_operator_identity_object,
+        start_discovery,
+        stop_discovery,
+    )
 
     # Load config
     try:
@@ -422,18 +466,50 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    # Create RPC client
-    rpc_client = RPCClient(lxmf_service)
-
     destination = args.destination
     command = args.command
     cmd_args = args.args if hasattr(args, "args") and args.args else []
     timeout = args.timeout if hasattr(args, "timeout") else 60.0
+    discovery_wait = getattr(args, "wait", 10)
 
-    print(f"Executing '{command} {' '.join(cmd_args)}' on {destination[:16]}...")
+    # Start discovery and wait for target device to announce
+    node_store = get_node_store()
+    print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
+    start_discovery(node_store=node_store)
+
+    # Wait for announce from target device
+    target_device = None
+    start_time = time.time()
+    while time.time() - start_time < discovery_wait:
+        devices = discover_devices()
+        for device in devices:
+            if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                target_device = device
+                break
+        if target_device:
+            break
+        await asyncio.sleep(0.5)
+
+    # Stop discovery before sending
+    stop_discovery()
+    await asyncio.sleep(0.5)
+
+    if not target_device:
+        print(f"Device {destination[:16]}... not found after {discovery_wait}s", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    # Use the LXMF destination for RPC
+    lxmf_dest = target_device.lxmf_destination_hash or destination
+    print(f"Found {target_device.name or 'device'}, LXMF dest {lxmf_dest[:16]}...")
+
+    # Create RPC client
+    rpc_client = RPCClient(lxmf_service)
+
+    print(f"Executing '{command} {' '.join(cmd_args)}'...")
 
     try:
-        result = await rpc_client.call_exec(destination, command, cmd_args, timeout=timeout)
+        result = await rpc_client.call_exec(lxmf_dest, command, cmd_args, timeout=timeout)
 
         if args.json:
             import json
@@ -643,6 +719,9 @@ def create_parser() -> argparse.ArgumentParser:
         "-r", "--retry", action="store_true", help="Retry until path available"
     )
     send_parser.add_argument(
+        "-w", "--wait", type=int, default=10, help="Discovery wait time in seconds (default: 10)"
+    )
+    send_parser.add_argument(
         "--max-wait", type=float, default=30.0, help="Max wait for path (default: 30s)"
     )
     send_parser.set_defaults(func=cmd_send)
@@ -654,6 +733,9 @@ def create_parser() -> argparse.ArgumentParser:
     exec_parser.add_argument("args", nargs="*", help="Command arguments")
     exec_parser.add_argument(
         "-t", "--timeout", type=float, default=60.0, help="Timeout in seconds (default: 60)"
+    )
+    exec_parser.add_argument(
+        "-w", "--wait", type=int, default=10, help="Discovery wait time in seconds (default: 10)"
     )
     exec_parser.add_argument("--json", action="store_true", help="Output as JSON")
     exec_parser.set_defaults(func=cmd_exec)
