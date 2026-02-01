@@ -14,7 +14,7 @@ Daemon usage:
     # or run via: styrened command
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 # Daemon exports
 from styrened.daemon import StyreneDaemon, main
