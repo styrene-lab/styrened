@@ -49,6 +49,46 @@ jobs:
           echo "Release version: $VERSION"
           echo "Prerelease: ${{ steps.version.outputs.prerelease }}"
 
+  build-wheel:
+    name: Build Python Wheel
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Verify version matches tag
+        run: |
+          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${{ needs.validate-tag.outputs.version }}"
+          
+          if [[ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]]; then
+            echo "ERROR: pyproject.toml version ($PYPROJECT_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $PYPROJECT_VERSION"
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel
+          path: dist/
+          retention-days: 90
+
   build-multi-arch:
     name: Build Multi-Arch Images
     needs: validate-tag
@@ -208,14 +248,20 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [validate-tag, build-multi-arch, test-release, generate-changelog]
+    needs: [validate-tag, build-wheel, build-multi-arch, test-release, generate-changelog]
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-wheel
+          path: /tmp/wheel
+
+      - name: Download other artifacts
         uses: actions/download-artifact@v4
         with:
           path: /tmp/release-artifacts
@@ -223,6 +269,10 @@ jobs:
       - name: Create release archive
         run: |
           mkdir -p /tmp/release-package
+
+          # Copy wheel and sdist
+          cp /tmp/wheel/*.whl /tmp/release-package/
+          cp /tmp/wheel/*.tar.gz /tmp/release-package/
 
           # Package source code
           tar czf /tmp/release-package/styrened-${{ needs.validate-tag.outputs.version }}-source.tar.gz \
@@ -241,6 +291,8 @@ jobs:
           if [[ -d /tmp/release-artifacts/release-coverage-report ]]; then
             tar czf /tmp/release-package/coverage-report.tar.gz -C /tmp/release-artifacts/release-coverage-report .
           fi
+          
+          ls -la /tmp/release-package/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -251,6 +303,17 @@ jobs:
             # Styrened v${{ needs.validate-tag.outputs.version }}
 
             ${{ needs.generate-changelog.outputs.changelog }}
+
+            ## Installation
+
+            ### From GitHub Release (recommended for private use)
+            ```bash
+            # Install wheel directly
+            pip install https://github.com/styrene-lab/styrened/releases/download/v${{ needs.validate-tag.outputs.version }}/styrened-${{ needs.validate-tag.outputs.version }}-py3-none-any.whl
+
+            # Or install from git tag
+            pip install git+https://github.com/styrene-lab/styrened.git@v${{ needs.validate-tag.outputs.version }}
+            ```
 
             ## Container Images
 
@@ -274,6 +337,7 @@ jobs:
           draft: false
           prerelease: ${{ needs.validate-tag.outputs.is_prerelease == 'true' }}
           files: |
+            /tmp/release-package/*.whl
             /tmp/release-package/*.tar.gz
 
       - name: Notify team
@@ -287,11 +351,14 @@ jobs:
             **Container Images:**
             - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}\`
 
+            **Python Package:**
+            - Wheel: \`styrened-${{ needs.validate-tag.outputs.version }}-py3-none-any.whl\`
+            - Install: \`pip install git+https://github.com/styrene-lab/styrened.git@v${{ needs.validate-tag.outputs.version }}\`
+
             **Release Notes:** [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-tag.outputs.version }})
 
             All tests passed successfully.
             Coverage reports available in release artifacts.
             `;
 
-            // Create a discussion or comment on the release (requires permissions)
             console.log(comment);
