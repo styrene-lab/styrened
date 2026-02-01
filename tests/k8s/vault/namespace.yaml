@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: styrene-infra
+  labels:
+    app.kubernetes.io/name: styrene-infra
+    app.kubernetes.io/part-of: styrene

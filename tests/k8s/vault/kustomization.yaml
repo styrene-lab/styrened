@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: styrene-infra
+
+resources:
+  - namespace.yaml
+  - vault-auth.yaml
+  - ghcr-secret.yaml

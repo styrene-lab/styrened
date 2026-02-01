@@ -560,8 +560,9 @@ class K8sTestHarness:
     def _ensure_ghcr_secret(self, namespace: str) -> None:
         """Ensure ghcr-secret exists in the target namespace.
 
-        For cloud clusters, copies the secret from a known source namespace
-        or creates it if GHCR_TOKEN environment variable is set.
+        For cloud clusters, copies the VSO-managed secret from styrene-infra
+        namespace. The secret is provisioned via VaultStaticSecret from Vault
+        at path secret/bootstrap/ghcr/styrene-lab.
 
         Args:
             namespace: Target namespace for the secret
@@ -578,34 +579,39 @@ class K8sTestHarness:
         if result.returncode == 0:
             return  # Secret already exists
 
-        # Try to copy from known source namespaces
-        source_namespaces = ["default", "styrene-test6", "reticulum"]
-        for source_ns in source_namespaces:
-            result = subprocess.run(
-                ["kubectl", "get", "secret", "ghcr-secret", "-n", source_ns, "-o", "yaml"],
+        # Copy from VSO-managed source in styrene-infra namespace
+        # This secret is synced from Vault via VaultStaticSecret
+        source_ns = "styrene-infra"
+        result = subprocess.run(
+            ["kubectl", "get", "secret", "ghcr-secret", "-n", source_ns, "-o", "yaml"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            # Modify namespace and apply
+            import re
+
+            yaml_content = re.sub(r"namespace: \S+", f"namespace: {namespace}", result.stdout)
+            # Remove resourceVersion, uid, and VSO annotations for clean copy
+            yaml_content = re.sub(r"  resourceVersion: .*\n", "", yaml_content)
+            yaml_content = re.sub(r"  uid: .*\n", "", yaml_content)
+            yaml_content = re.sub(r"  creationTimestamp: .*\n", "", yaml_content)
+            # Remove VSO-specific labels and annotations
+            yaml_content = re.sub(r"    app\.kubernetes\.io/.*\n", "", yaml_content)
+            yaml_content = re.sub(r"    secrets\.hashicorp\.com/.*\n", "", yaml_content)
+
+            apply_result = subprocess.run(
+                ["kubectl", "apply", "-f", "-"],
+                input=yaml_content,
                 capture_output=True,
                 text=True,
             )
-            if result.returncode == 0:
-                # Modify namespace and apply
-                import re
+            if apply_result.returncode == 0:
+                return  # Successfully copied from VSO-managed source
 
-                yaml_content = re.sub(r"namespace: \S+", f"namespace: {namespace}", result.stdout)
-                # Remove resourceVersion and uid for clean copy
-                yaml_content = re.sub(r"  resourceVersion: .*\n", "", yaml_content)
-                yaml_content = re.sub(r"  uid: .*\n", "", yaml_content)
-
-                apply_result = subprocess.run(
-                    ["kubectl", "apply", "-f", "-"],
-                    input=yaml_content,
-                    capture_output=True,
-                    text=True,
-                )
-                if apply_result.returncode == 0:
-                    return  # Successfully copied
-
-        # If no source secret found, warn but continue (may fail on image pull)
-        print(f"Warning: ghcr-secret not found in any source namespace for {namespace}")
+        # If VSO source not found, warn with setup instructions
+        print(f"Warning: ghcr-secret not found in {source_ns} namespace for {namespace}")
+        print("  Ensure VSO is configured: kubectl apply -f tests/k8s/vault/")
 
     def deploy_hub(
         self,

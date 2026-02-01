@@ -73,7 +73,7 @@ async def test_short_stability_check(
     # Verify peers discovered
     for pod in pods:
         peers = k8s_cluster.get_discovered_peers(pod)
-        assert peers >= 2, f"Pod {pod} should discover at least 2 peers (got {peers})"
+        assert len(peers) >= 2, f"Pod {pod} should discover at least 2 peers (got {len(peers)})"
 
     # Run for 5 minutes
     await asyncio.sleep(300)
@@ -128,7 +128,7 @@ async def test_2_hour_stability(
     # Verify initial mesh state
     for pod in pods:
         peers = k8s_cluster.get_discovered_peers(pod)
-        assert peers >= 4, f"Pod {pod} should discover at least 4 peers (got {peers})"
+        assert len(peers) >= 4, f"Pod {pod} should discover at least 4 peers (got {len(peers)})"
 
     # Run for 2 hours
     duration = 2 * 3600  # 2 hours
@@ -268,7 +268,9 @@ async def test_8_hour_stability_no_leaks(
     # Verify initial mesh state
     for pod in pods:
         peers = k8s_cluster.get_discovered_peers(pod)
-        assert peers >= 4, f"Pod {pod} should discover at least 4 peers initially (got {peers})"
+        assert len(peers) >= 4, (
+            f"Pod {pod} should discover at least 4 peers initially (got {len(peers)})"
+        )
 
     # Run for 8 hours
     duration = 8 * 3600  # 8 hours = 28800 seconds
@@ -282,7 +284,9 @@ async def test_8_hour_stability_no_leaks(
 
         # Verify mesh still converged
         peers = k8s_cluster.get_discovered_peers(pod)
-        assert peers >= 4, f"Pod {pod} should still have peers after 8 hours (got {peers})"
+        assert len(peers) >= 4, (
+            f"Pod {pod} should still have peers after 8 hours (got {len(peers)})"
+        )
 
     # Metrics collector will stop via fixture and generate summary
     # Summary will include:
