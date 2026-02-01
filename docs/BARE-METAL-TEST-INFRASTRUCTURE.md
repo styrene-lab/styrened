@@ -636,13 +636,157 @@ pytest tests/bare-metal/test_deployment.py -k styrene-node -v
 gh workflow run bare-metal-tests.yml -f suite=all
 ```
 
+## Supported Hardware
+
+### Currently Validated
+
+| Device | Model | SoC/CPU | Architecture | OS | Status | Notes |
+|--------|-------|---------|--------------|-----|--------|-------|
+| styrene-node | ASUS Q502LA | Intel Core i5-4210U | x86_64 | NixOS 24.11 | ✅ Validated | Primary test node, good baseline x86 performance |
+| t100ta | ASUS T100TA | Intel Atom Z3740 | x86_64 | NixOS 24.11 | ✅ Validated | Low-power x86, tests resource-constrained scenarios |
+
+### Validated Test Results (v0.3.5)
+
+| Test Category | styrene-node | t100ta |
+|---------------|:------------:|:------:|
+| Wheel deployment | ✅ | ✅ |
+| Daemon startup | ✅ | ✅ |
+| Identity persistence | ✅ | ✅ |
+| Mesh discovery | ✅ | ✅ |
+| RPC status query | ✅ | ✅ |
+| RPC exec command | ✅ | ✅ |
+| Chat/auto-reply | ✅ | ✅ |
+| Config path precedence | ✅ | ✅ |
+
+### Known Limitations
+
+- **Q502LA**: None observed. Good reference platform.
+- **T100TA**: Slower RPC response times (~2-3s vs ~1s on Q502LA) due to Atom CPU. Acceptable for mesh networking use case.
+
+### Target Hardware (Planned)
+
+The following devices are targeted for future validation to ensure broad ARM and low-power SoC support:
+
+| Device | Model | SoC | Architecture | RAM | Target OS | Priority | Use Case |
+|--------|-------|-----|--------------|-----|-----------|----------|----------|
+| rpi5 | Raspberry Pi 5 | BCM2712 (Cortex-A76) | aarch64 | 4-8GB | NixOS | High | Primary ARM64 reference |
+| rpi4b | Raspberry Pi 4B | BCM2711 (Cortex-A72) | aarch64 | 2-8GB | NixOS | High | Widely deployed ARM64 |
+| rpi-zero2w | Raspberry Pi Zero 2 W | RP3A0 (Cortex-A53) | aarch64 | 512MB | NixOS | Medium | Ultra-low-power edge |
+| rpi3b | Raspberry Pi 3B+ | BCM2837B0 (Cortex-A53) | aarch64 | 1GB | NixOS | Low | Legacy ARM64 |
+| odroid-n2 | ODROID-N2+ | Amlogic S922X (Cortex-A73/A53) | aarch64 | 4GB | NixOS | Medium | High-performance ARM |
+| rock5b | Radxa ROCK 5B | RK3588 (Cortex-A76/A55) | aarch64 | 8-16GB | NixOS | Low | Flagship ARM SoC |
+| beaglebone | BeagleBone Black | AM3358 (Cortex-A8) | armv7l | 512MB | Debian | Low | 32-bit ARM legacy |
+
+### Hardware Validation Criteria
+
+For a device to be marked as "validated", it must pass:
+
+1. **Deployment**: Wheel install succeeds, daemon starts
+2. **Identity**: Creates/loads identity correctly
+3. **Discovery**: Discovers at least one other validated node
+4. **RPC**: Bidirectional status query and exec with another node
+5. **Stability**: Daemon runs for 1+ hour without crashes
+
+### Adding New Hardware
+
+To add a new device to the test infrastructure:
+
+1. **Provision device** with NixOS (preferred) or supported Linux distro
+2. **Configure SSH** access from development machine
+3. **Add to registry** in `tests/bare-metal/devices.yaml`:
+   ```yaml
+   new-device:
+     host: 192.168.0.XX
+     user: styrene
+     os: nixos
+     arch: aarch64
+     hardware: "Raspberry Pi 5"
+     venv_path: ~/.local/styrene-venv
+     config_path: ~/.config/styrene
+     rns_config_path: /etc/reticulum
+     identity_hash: null  # Will be populated on first run
+     lxmf_dest: null
+     capabilities:
+       - tcp_server
+       - auto_interface
+       - systemd_user
+   ```
+4. **Run smoke tests**: `pytest tests/bare-metal/test_smoke.py -k new-device -v`
+5. **Run full validation**: `make test-bare-metal`
+6. **Update documentation** with results
+
+### NixOS Device Configuration
+
+Standard NixOS configuration for test devices:
+
+```nix
+# /etc/nixos/styrene-test.nix
+{ config, pkgs, ... }:
+
+{
+  # Network
+  networking.firewall.allowedTCPPorts = [ 4242 ];
+  
+  # Python environment for styrened
+  environment.systemPackages = with pkgs; [
+    python311
+    python311Packages.pip
+    python311Packages.virtualenv
+  ];
+  
+  # User for test automation
+  users.users.styrene = {
+    isNormalUser = true;
+    extraGroups = [ "wheel" ];
+    openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAA... test-runner@dev-machine"
+    ];
+  };
+  
+  # Enable lingering for user systemd services
+  systemd.tmpfiles.rules = [
+    "d /var/lib/systemd/linger 0755 root root -"
+    "f /var/lib/systemd/linger/styrene 0644 root root -"
+  ];
+}
+```
+
+### Raspberry Pi Specific Notes
+
+**NixOS on Raspberry Pi**:
+- Use `nixos-generators` for SD card images
+- RPi 4/5: Full NixOS support via `raspberry-pi-nix`
+- RPi Zero 2 W: Limited RAM requires swap or minimal config
+
+**Boot configuration** (`boot.nix`):
+```nix
+{ config, pkgs, ... }:
+
+{
+  # RPi 4/5
+  boot.loader.grub.enable = false;
+  boot.loader.generic-extlinux-compatible.enable = true;
+  
+  # Enable hardware RNG
+  hardware.raspberry-pi."4".apply-overlays-dtmerge.enable = true;
+}
+```
+
+**Memory-constrained devices** (Zero 2 W, 3B):
+```nix
+{
+  # Add swap
+  swapDevices = [{
+    device = "/swapfile";
+    size = 1024;  # 1GB
+  }];
+  
+  # Limit Python memory
+  systemd.services.styrened.serviceConfig.MemoryMax = "256M";
+}
+```
+
 ## Future Extensions
-
-### Additional Device Types
-
-- **Raspberry Pi**: Add `rpi4` device with GPIO capabilities
-- **Debian/Ubuntu**: Add non-NixOS device for distro coverage
-- **Serial interfaces**: Add LoRa/packet radio testing
 
 ### Hardware Interface Tests
 
