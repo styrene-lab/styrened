@@ -4,6 +4,12 @@ These tests exercise realistic multi-node mesh topologies with LXMF propagation,
 multi-hop routing, and resilience scenarios. They validate production-like behavior
 over extended periods.
 
+Network Topology:
+    All tests use hub+peers topology for reliable mesh convergence in K8s:
+    - Hub: Single pod with transport_enabled=true, accepts peer connections on port 4242
+    - Peers: Connect to hub via TCPClientInterface
+    This avoids multicast/AutoInterface issues in containerized environments.
+
 Test Tiers:
     - @pytest.mark.slow: All tests require --run-slow flag (>10 minutes)
     - @pytest.mark.integration: Moderate hub-based tests (10-15 min)
@@ -120,21 +126,39 @@ def chain_stack(k8s_cluster, propagation_namespace):
 
 @pytest.fixture
 def mesh_stack(k8s_cluster, propagation_namespace):
-    """Deploy a standard mesh topology and cleanup after test."""
+    """Deploy a hub+peers mesh topology and cleanup after test.
+
+    Uses hub+peers topology for reliable mesh convergence in K8s environments
+    where multicast/AutoInterface is not available.
+    """
     releases = []
 
     def _deploy(release_name: str, count: int = 3, announce_interval: int = 30):
-        pods = k8s_cluster.deploy_stack(
-            release_name,
-            replica_count=count,
-            mode="standalone",
-            transport_enabled=True,
+        # Deploy hub first
+        hub_name = f"{release_name}-hub"
+        hub_pod = k8s_cluster.deploy_hub(hub_name, announce_interval=announce_interval)
+        releases.append(hub_name)
+
+        assert k8s_cluster.wait_for_ready([hub_pod], timeout=90), "Hub failed to become ready"
+
+        # Get hub IP for peer connections
+        hub_ip = k8s_cluster.get_pod_ip(hub_pod)
+
+        # Deploy peers (count - 1 since hub is one node)
+        peer_count = max(1, count - 1)
+        peer_name = f"{release_name}-peers"
+        peer_pods = k8s_cluster.deploy_peers(
+            peer_name,
+            hub_address=hub_ip,
+            count=peer_count,
             announce_interval=announce_interval,
         )
-        releases.append(release_name)
+        releases.append(peer_name)
 
-        assert k8s_cluster.wait_for_ready(pods, timeout=90), "Mesh pods failed to become ready"
-        return pods
+        assert k8s_cluster.wait_for_ready(peer_pods, timeout=90), "Peers failed to become ready"
+
+        # Return all pods (hub + peers)
+        return [hub_pod] + peer_pods
 
     yield _deploy
 

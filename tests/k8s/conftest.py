@@ -255,7 +255,7 @@ def test_namespace(k8s_cluster: K8sTestHarness, request) -> str:
             "namespace",
             namespace,
             "styrened-test=true",
-            f"created-by=pytest",
+            "created-by=pytest",
             f"worker={worker_id}",
             "scope=function",
         ],

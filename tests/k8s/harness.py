@@ -588,26 +588,52 @@ class K8sTestHarness:
             text=True,
         )
         if result.returncode == 0:
-            # Modify namespace and apply
-            import re
+            # Use jq to properly clean the secret for copying to another namespace
+            # This handles nested structures like ownerReferences that regex can't
+            import json
 
-            yaml_content = re.sub(r"namespace: \S+", f"namespace: {namespace}", result.stdout)
-            # Remove resourceVersion, uid, and VSO annotations for clean copy
-            yaml_content = re.sub(r"  resourceVersion: .*\n", "", yaml_content)
-            yaml_content = re.sub(r"  uid: .*\n", "", yaml_content)
-            yaml_content = re.sub(r"  creationTimestamp: .*\n", "", yaml_content)
-            # Remove VSO-specific labels and annotations
-            yaml_content = re.sub(r"    app\.kubernetes\.io/.*\n", "", yaml_content)
-            yaml_content = re.sub(r"    secrets\.hashicorp\.com/.*\n", "", yaml_content)
-
-            apply_result = subprocess.run(
-                ["kubectl", "apply", "-f", "-"],
-                input=yaml_content,
+            # Parse YAML to JSON, clean, and apply
+            jq_result = subprocess.run(
+                [
+                    "kubectl",
+                    "get",
+                    "secret",
+                    "ghcr-secret",
+                    "-n",
+                    source_ns,
+                    "-o",
+                    "json",
+                ],
                 capture_output=True,
                 text=True,
             )
-            if apply_result.returncode == 0:
-                return  # Successfully copied from VSO-managed source
+            if jq_result.returncode == 0:
+                try:
+                    secret = json.loads(jq_result.stdout)
+                    # Remove metadata that shouldn't be copied
+                    metadata = secret.get("metadata", {})
+                    for key in [
+                        "resourceVersion",
+                        "uid",
+                        "creationTimestamp",
+                        "ownerReferences",
+                        "managedFields",
+                        "labels",
+                    ]:
+                        metadata.pop(key, None)
+                    metadata["namespace"] = namespace
+                    secret["metadata"] = metadata
+
+                    apply_result = subprocess.run(
+                        ["kubectl", "apply", "-f", "-"],
+                        input=json.dumps(secret),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if apply_result.returncode == 0:
+                        return  # Successfully copied from VSO-managed source
+                except json.JSONDecodeError:
+                    pass  # Fall through to warning
 
         # If VSO source not found, warn with setup instructions
         print(f"Warning: ghcr-secret not found in {source_ns} namespace for {namespace}")

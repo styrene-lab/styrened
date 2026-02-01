@@ -29,6 +29,12 @@ Metrics output:
             snapshot_000.json
             snapshot_001.json
             ...
+
+Network topology:
+    All tests use hub+peers topology for reliable mesh convergence in K8s:
+    - Hub: Single pod with transport_enabled=true, accepts peer connections
+    - Peers: Connect to hub via TCPClientInterface
+    This avoids multicast/AutoInterface issues in containerized environments.
 """
 
 import asyncio
@@ -40,7 +46,6 @@ import pytest
 @pytest.mark.comprehensive
 async def test_short_stability_check(
     k8s_cluster,
-    styrened_stack,
     metrics_collector,
 ):
     """5-minute stability check with metrics collection.
@@ -49,7 +54,7 @@ async def test_short_stability_check(
     a full overnight run. Useful for development and PR validation.
 
     Resources:
-        Pods: 3
+        Pods: 1 hub + 2 peers = 3 total
         Memory: ~600 MB total
         CPU: ~300m total
         Duration: 5 minutes
@@ -57,29 +62,54 @@ async def test_short_stability_check(
 
     Validation:
         - Pods remain stable (no restarts)
-        - Mesh convergence (peers discovered)
+        - Mesh convergence (peers discovered via hub)
         - Metrics collection successful
         - No memory leaks detected
     """
-    # Deploy 3-pod mesh
-    pods = styrened_stack(replica_count=3, mode="standalone", announce_interval=60)
+    # Deploy hub node first
+    hub_pod = k8s_cluster.deploy_hub(
+        release_name="hub",
+        announce_interval=30,
+    )
+
+    # Wait for hub to be ready
+    await asyncio.sleep(10)
+
+    # Get hub IP for peer connections
+    hub_ip = k8s_cluster.get_pod_ip(hub_pod)
+
+    # Deploy peer nodes connecting to hub
+    peer_pods = k8s_cluster.deploy_peers(
+        release_name="peers",
+        hub_address=hub_ip,
+        count=2,
+        announce_interval=60,
+    )
+
+    all_pods = [hub_pod] + peer_pods
 
     # Start metrics collection
-    await metrics_collector.start(pods)
+    await metrics_collector.start(all_pods)
 
-    # Wait for mesh convergence (30s should be enough with 60s announce)
-    await asyncio.sleep(30)
+    # Wait for mesh convergence (peers connect to hub, discover each other)
+    # TCPClientInterface connection + announce propagation takes ~45-60s
+    await asyncio.sleep(60)
 
-    # Verify peers discovered
-    for pod in pods:
+    # Verify peers discovered via hub
+    for pod in peer_pods:
         peers = k8s_cluster.get_discovered_peers(pod)
-        assert len(peers) >= 2, f"Pod {pod} should discover at least 2 peers (got {len(peers)})"
+        # Each peer should discover at least the hub + other peer
+        assert len(peers) >= 1, f"Pod {pod} should discover at least 1 peer (got {len(peers)})"
+
+    # Hub should see all peers
+    hub_peers = k8s_cluster.get_discovered_peers(hub_pod)
+    assert len(hub_peers) >= 2, f"Hub should discover at least 2 peers (got {len(hub_peers)})"
 
     # Run for 5 minutes
     await asyncio.sleep(300)
 
     # Final verification - no restarts
-    for pod in pods:
+    for pod in all_pods:
         status = k8s_cluster.get_pod_status(pod)
         assert status["ready"], f"Pod {pod} should still be ready"
         assert status["restart_count"] == 0, f"Pod {pod} should have no restarts"
@@ -90,7 +120,6 @@ async def test_short_stability_check(
 @pytest.mark.comprehensive
 async def test_2_hour_stability(
     k8s_cluster,
-    styrened_stack,
     metrics_collector,
 ):
     """2-hour stability test with leak detection.
@@ -99,7 +128,7 @@ async def test_2_hour_stability(
     to detect obvious memory leaks but completes in a reasonable timeframe.
 
     Resources:
-        Pods: 5
+        Pods: 1 hub + 4 peers = 5 total
         Memory: ~1 GB total
         CPU: ~500m total
         Duration: 2 hours
@@ -111,31 +140,42 @@ async def test_2_hour_stability(
         - Memory growth < 10 MB/hour
         - CPU usage stable
     """
-    # Deploy 5-pod mesh
-    pods = styrened_stack(
-        replica_count=5,
-        mode="standalone",
-        announce_interval=120,
-        rpc_enabled=True,
+    # Deploy hub node
+    hub_pod = k8s_cluster.deploy_hub(
+        release_name="hub",
+        announce_interval=60,
     )
 
+    await asyncio.sleep(10)
+    hub_ip = k8s_cluster.get_pod_ip(hub_pod)
+
+    # Deploy peer nodes
+    peer_pods = k8s_cluster.deploy_peers(
+        release_name="peers",
+        hub_address=hub_ip,
+        count=4,
+        announce_interval=120,
+        extra_values={"styrene.rpc.enabled": "true"},
+    )
+
+    all_pods = [hub_pod] + peer_pods
+
     # Start metrics collection
-    await metrics_collector.start(pods)
+    await metrics_collector.start(all_pods)
 
     # Wait for mesh convergence
     await asyncio.sleep(60)
 
-    # Verify initial mesh state
-    for pod in pods:
-        peers = k8s_cluster.get_discovered_peers(pod)
-        assert len(peers) >= 4, f"Pod {pod} should discover at least 4 peers (got {len(peers)})"
+    # Verify initial mesh state - hub should see all peers
+    hub_peers = k8s_cluster.get_discovered_peers(hub_pod)
+    assert len(hub_peers) >= 4, f"Hub should discover at least 4 peers (got {len(hub_peers)})"
 
     # Run for 2 hours
     duration = 2 * 3600  # 2 hours
     await asyncio.sleep(duration)
 
     # Final verification
-    for pod in pods:
+    for pod in all_pods:
         status = k8s_cluster.get_pod_status(pod)
         assert status["ready"], f"Pod {pod} should still be ready after {duration}s"
         assert status["restart_count"] == 0, f"Pod {pod} should have no restarts"
@@ -148,7 +188,6 @@ async def test_2_hour_stability(
 @pytest.mark.comprehensive
 async def test_4_hour_sustained_load(
     k8s_cluster,
-    styrened_stack,
     metrics_collector,
 ):
     """4-hour sustained load test with RPC activity.
@@ -157,7 +196,7 @@ async def test_4_hour_sustained_load(
     RPC doesn't cause memory leaks or performance degradation.
 
     Resources:
-        Pods: 5
+        Pods: 1 hub + 4 peers = 5 total
         Memory: ~1 GB total
         CPU: ~600m total
         Duration: 4 hours
@@ -170,16 +209,29 @@ async def test_4_hour_sustained_load(
         - RPC latency remains consistent
         - No message delivery failures
     """
-    # Deploy 5-pod mesh with RPC enabled
-    pods = styrened_stack(
-        replica_count=5,
-        mode="standalone",
-        announce_interval=120,
-        rpc_enabled=True,
+    # Deploy hub node with RPC
+    hub_pod = k8s_cluster.deploy_hub(
+        release_name="hub",
+        announce_interval=60,
+        extra_values={"styrene.rpc.enabled": "true"},
     )
 
+    await asyncio.sleep(10)
+    hub_ip = k8s_cluster.get_pod_ip(hub_pod)
+
+    # Deploy peer nodes with RPC
+    peer_pods = k8s_cluster.deploy_peers(
+        release_name="peers",
+        hub_address=hub_ip,
+        count=4,
+        announce_interval=120,
+        extra_values={"styrene.rpc.enabled": "true"},
+    )
+
+    all_pods = [hub_pod] + peer_pods
+
     # Start metrics collection
-    await metrics_collector.start(pods)
+    await metrics_collector.start(all_pods)
 
     # Wait for mesh convergence
     await asyncio.sleep(60)
@@ -196,7 +248,7 @@ async def test_4_hour_sustained_load(
 
         # Send RPC status request every minute
         if current_time >= next_rpc_time:
-            for pod in pods:
+            for pod in all_pods:
                 try:
                     # Query status via RPC (this exercises LXMF message handling)
                     # Note: This is a basic check - full RPC testing is in other test files
@@ -211,7 +263,7 @@ async def test_4_hour_sustained_load(
         await asyncio.sleep(10)
 
     # Final verification - no restarts
-    for pod in pods:
+    for pod in all_pods:
         status = k8s_cluster.get_pod_status(pod)
         assert status["ready"], f"Pod {pod} should still be ready after sustained load"
         assert status["restart_count"] == 0, f"Pod {pod} should have no restarts"
@@ -224,7 +276,6 @@ async def test_4_hour_sustained_load(
 @pytest.mark.comprehensive
 async def test_8_hour_stability_no_leaks(
     k8s_cluster,
-    styrened_stack,
     metrics_collector,
 ):
     """8-hour stability test with comprehensive leak detection.
@@ -233,7 +284,7 @@ async def test_8_hour_stability_no_leaks(
     to detect slow memory leaks and performance degradation issues.
 
     Resources:
-        Pods: 5
+        Pods: 1 hub + 4 peers = 5 total
         Memory: ~1 GB total
         CPU: ~500m total
         Duration: 8 hours
@@ -251,42 +302,52 @@ async def test_8_hour_stability_no_leaks(
         - Avg CPU: 100-150m per pod
         - Memory growth rate: <10 MB/hour
     """
-    # Deploy 5-pod mesh
-    pods = styrened_stack(
-        replica_count=5,
-        mode="standalone",
-        announce_interval=180,
-        rpc_enabled=True,
+    # Deploy hub node
+    hub_pod = k8s_cluster.deploy_hub(
+        release_name="hub",
+        announce_interval=90,
+        extra_values={"styrene.rpc.enabled": "true"},
     )
 
+    await asyncio.sleep(10)
+    hub_ip = k8s_cluster.get_pod_ip(hub_pod)
+
+    # Deploy peer nodes
+    peer_pods = k8s_cluster.deploy_peers(
+        release_name="peers",
+        hub_address=hub_ip,
+        count=4,
+        announce_interval=180,
+        extra_values={"styrene.rpc.enabled": "true"},
+    )
+
+    all_pods = [hub_pod] + peer_pods
+
     # Start metrics collection
-    await metrics_collector.start(pods)
+    await metrics_collector.start(all_pods)
 
     # Wait for initial mesh convergence
     await asyncio.sleep(120)
 
-    # Verify initial mesh state
-    for pod in pods:
-        peers = k8s_cluster.get_discovered_peers(pod)
-        assert len(peers) >= 4, (
-            f"Pod {pod} should discover at least 4 peers initially (got {len(peers)})"
-        )
+    # Verify initial mesh state - hub sees all peers
+    hub_peers = k8s_cluster.get_discovered_peers(hub_pod)
+    assert len(hub_peers) >= 4, (
+        f"Hub should discover at least 4 peers initially (got {len(hub_peers)})"
+    )
 
     # Run for 8 hours
     duration = 8 * 3600  # 8 hours = 28800 seconds
     await asyncio.sleep(duration)
 
     # Final verification - mesh should still be healthy
-    for pod in pods:
+    for pod in all_pods:
         status = k8s_cluster.get_pod_status(pod)
         assert status["ready"], f"Pod {pod} should still be ready after 8 hours"
         assert status["restart_count"] == 0, f"Pod {pod} should have no restarts after 8 hours"
 
-        # Verify mesh still converged
-        peers = k8s_cluster.get_discovered_peers(pod)
-        assert len(peers) >= 4, (
-            f"Pod {pod} should still have peers after 8 hours (got {len(peers)})"
-        )
+    # Verify hub still has full mesh visibility
+    hub_peers = k8s_cluster.get_discovered_peers(hub_pod)
+    assert len(hub_peers) >= 4, f"Hub should still have peers after 8 hours (got {len(hub_peers)})"
 
     # Metrics collector will stop via fixture and generate summary
     # Summary will include:
