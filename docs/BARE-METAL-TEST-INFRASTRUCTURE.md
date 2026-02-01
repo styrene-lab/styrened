@@ -601,59 +601,6 @@ test-bare-metal-mesh:
 test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
 ```
 
-## CI Integration
-
-`.github/workflows/bare-metal-tests.yml`:
-
-```yaml
-name: Bare-Metal Tests
-
-on:
-  workflow_dispatch:
-    inputs:
-      suite:
-        description: 'Test suite to run'
-        required: true
-        default: 'smoke'
-        type: choice
-        options:
-          - smoke
-          - deployment
-          - mesh
-          - all
-  
-  # Run after releases
-  release:
-    types: [published]
-
-jobs:
-  bare-metal-tests:
-    runs-on: self-hosted  # Requires runner on LAN with device access
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          pip install fabric pyyaml pytest
-          pip install -e .
-      
-      - name: Build wheel
-        if: inputs.suite == 'deployment' || inputs.suite == 'all'
-        run: python -m build --wheel
-      
-      - name: Run bare-metal tests
-        run: |
-          python -m tests.bare_metal.run_tests ${{ inputs.suite || 'smoke' }}
-        env:
-          SSH_AUTH_SOCK: ${{ env.SSH_AUTH_SOCK }}
-```
-
 ## Usage Examples
 
 ### Pre-Release Validation
