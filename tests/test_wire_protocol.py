@@ -1,6 +1,5 @@
 """Smoke tests for styrene wire protocol."""
 
-import pytest
 
 from styrened.models.styrene_wire import (
     StyreneEnvelope,

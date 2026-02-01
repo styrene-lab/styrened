@@ -10,7 +10,8 @@ env:
   KUBECTL_VERSION: v1.28.0
   HELM_VERSION: v3.13.0
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME_PROD: styrene-lab/styrened
+  IMAGE_NAME_TEST: styrene-lab/styrened-test
 
 jobs:
   smoke-tests:
@@ -27,21 +28,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build test image with cache
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: tests/k8s/docker/Dockerfile
-          tags: styrened-test:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          load: true
+      - name: Build test image with Makefile
+        run: make build-test
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install test dependencies
         run: |
@@ -67,7 +61,7 @@ jobs:
 
       - name: Load test image into kind
         run: |
-          kind load docker-image styrened-test:latest --name styrene-pr-test
+          kind load docker-image styrene-lab/styrened-test:test --name styrene-pr-test
 
       - name: Verify image loaded
         run: |
@@ -118,14 +112,13 @@ jobs:
         with:
           script: |
             const status = '${{ job.status }}';
-            const emoji = status === 'success' ? '✅' : '❌';
-            const body = `${emoji} **Smoke Tests ${status.toUpperCase()}**
+            const body = `**Smoke Tests ${status.toUpperCase()}**
 
             - **Duration**: ~5-10 minutes
             - **Tests**: Fast validation tier
             - **Result**: ${status}
 
-            ${status === 'failure' ? '⚠️ Smoke tests failed. Please review logs and fix critical issues.' : '✅ All smoke tests passed. PR is ready for review.'}
+            ${status === 'failure' ? 'Smoke tests failed. Please review logs and fix critical issues.' : 'All smoke tests passed. PR is ready for review.'}
             `;
 
             github.rest.issues.createComment({

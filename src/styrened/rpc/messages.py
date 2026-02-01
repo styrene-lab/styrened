@@ -1,57 +1,27 @@
-"""RPC message models for communication over LXMF.
+"""RPC message response models.
 
-This module defines the message data structures used for RPC communication
+This module defines the response data structures used for RPC communication
 over LXMF between TUI clients, daemons, and peers.
 
-Message types:
-- StatusRequest: Request device status
+Response types:
 - StatusResponse: Device status response
-- ExecCommand: Execute command on device
 - ExecResult: Command execution result
-- RebootCommand: Reboot device
 - RebootResult: Reboot result
-- UpdateConfigCommand: Update configuration
 - UpdateConfigResult: Config update result
+
+Note:
+    Request types and wire format encoding are handled by StyreneEnvelope
+    and the convenience functions in models/styrene_wire.py:
+    - create_status_request()
+    - create_exec()
+    - create_reboot()
+    - create_config_update()
+
+    See: models/styrene_wire.py for the wire format implementation.
 """
 
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
-
-
-class RPCMessage(Protocol):
-    """Protocol for RPC messages.
-
-    All RPC messages must implement this protocol to be serializable
-    and identifiable by type.
-    """
-
-    @property
-    def type(self) -> str:
-        """Message type identifier."""
-        ...
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize message to JSON-compatible dict."""
-        ...
-
-
-@dataclass
-class StatusRequest:
-    """Request device status information.
-
-    This is an empty message - the request type itself is the signal.
-    """
-
-    type: str = "status_request"
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return {"type": self.type}
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StatusRequest":
-        """Deserialize from dict."""
-        return cls()
+from typing import Any
 
 
 @dataclass
@@ -116,32 +86,6 @@ class StatusResponse:
 
 
 @dataclass
-class ExecCommand:
-    """Execute command on device.
-
-    Attributes:
-        command: Command to execute.
-        args: Command arguments.
-    """
-
-    command: str
-    args: list[str]
-    type: str = "exec"
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExecCommand":
-        """Deserialize from dict."""
-        return cls(
-            command=data["command"],
-            args=data["args"],
-        )
-
-
-@dataclass
 class ExecResult:
     """Command execution result.
 
@@ -176,27 +120,6 @@ class ExecResult:
 
 
 @dataclass
-class RebootCommand:
-    """Reboot device command.
-
-    Attributes:
-        delay: Seconds to delay reboot (0 = immediate).
-    """
-
-    delay: int = 0
-    type: str = "reboot"
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RebootCommand":
-        """Deserialize from dict."""
-        return cls(delay=data.get("delay", 0))
-
-
-@dataclass
 class RebootResult:
     """Reboot command result.
 
@@ -226,27 +149,6 @@ class RebootResult:
 
 
 @dataclass
-class UpdateConfigCommand:
-    """Update device configuration command.
-
-    Attributes:
-        config_updates: Dictionary of config keys to update with new values.
-    """
-
-    config_updates: dict[str, Any]
-    type: str = "update_config"
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return {"type": self.type, "config": self.config_updates}
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UpdateConfigCommand":
-        """Deserialize from dict."""
-        return cls(config_updates=data.get("config", {}))
-
-
-@dataclass
 class UpdateConfigResult:
     """Update config command result.
 
@@ -273,61 +175,3 @@ class UpdateConfigResult:
             message=data["message"],
             updated_keys=data.get("updated_keys", []),
         )
-
-
-# Message type registry for deserialization
-MESSAGE_TYPES: dict[
-    str,
-    type[
-        StatusRequest
-        | StatusResponse
-        | ExecCommand
-        | ExecResult
-        | RebootCommand
-        | RebootResult
-        | UpdateConfigCommand
-        | UpdateConfigResult
-    ],
-] = {
-    "status_request": StatusRequest,
-    "status_response": StatusResponse,
-    "exec": ExecCommand,
-    "exec_result": ExecResult,
-    "reboot": RebootCommand,
-    "reboot_result": RebootResult,
-    "update_config": UpdateConfigCommand,
-    "update_config_result": UpdateConfigResult,
-}
-
-
-def deserialize_message(
-    data: dict[str, Any],
-) -> (
-    StatusRequest
-    | StatusResponse
-    | ExecCommand
-    | ExecResult
-    | RebootCommand
-    | RebootResult
-    | UpdateConfigCommand
-    | UpdateConfigResult
-):
-    """Deserialize RPC message from dict.
-
-    Args:
-        data: Message data with 'type' field.
-
-    Returns:
-        Deserialized message instance.
-
-    Raises:
-        ValueError: If message type is unknown.
-    """
-    msg_type = data.get("type")
-    if not msg_type:
-        raise ValueError("Message missing 'type' field")
-
-    if msg_type not in MESSAGE_TYPES:
-        raise ValueError(f"Unknown message type: {msg_type}")
-
-    return MESSAGE_TYPES[msg_type].from_dict(data)

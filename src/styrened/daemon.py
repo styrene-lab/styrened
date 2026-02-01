@@ -27,11 +27,14 @@ import logging
 import signal
 import sys
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import RNS  # type: ignore
 
 if TYPE_CHECKING:
+    import LXMF
+
     from styrened.models.mesh_device import MeshDevice
 
 from styrened.models.config import CoreConfig
@@ -63,6 +66,9 @@ class StyreneDaemon:
         self._api_server: Any = None
         self._api_task: asyncio.Task[None] | None = None
         self._rpc_server: Any = None
+        self._rpc_client: Any = None  # Exposed for IPC handlers
+        self._control_server: Any = None  # IPC control socket server
+        self._lxmf_service: Any = None  # Cached for IPC handlers
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
 
@@ -90,6 +96,10 @@ class StyreneDaemon:
         # Start HTTP API if enabled
         if self.config.api.enabled:
             await self._start_api()
+
+        # Start IPC control server if enabled
+        if self.config.ipc.enabled:
+            await self._start_control_server()
 
         self._running = True
         logger.info("Styrene daemon running")
@@ -141,6 +151,8 @@ class StyreneDaemon:
             return
 
         try:
+            from styrened.models.messages import init_db
+            from styrened.protocols.styrene import StyreneProtocol
             from styrened.rpc import RPCServer
             from styrened.services.lxmf_service import get_lxmf_service
 
@@ -149,7 +161,34 @@ class StyreneDaemon:
                 logger.warning("LXMF not initialized, RPC server not started")
                 return
 
-            self._rpc_server = RPCServer(lxmf_service)
+            if not lxmf_service.router or not lxmf_service._identity:
+                logger.warning("LXMF router or identity not available, RPC server not started")
+                return
+
+            # Initialize database for message persistence
+            db_engine = init_db()
+
+            # Create StyreneProtocol instance for RPC transport
+            styrene_protocol = StyreneProtocol(
+                router=lxmf_service.router,
+                identity=lxmf_service._identity,
+                db_engine=db_engine,
+            )
+
+            # Register StyreneProtocol as a callback handler for LXMF messages
+            # so it can dispatch incoming Styrene messages to RPC handlers
+            lxmf_service.register_callback(
+                self._handle_styrene_message_dispatch(styrene_protocol),
+                raw_mode=True,
+            )
+
+            self._rpc_server = RPCServer(styrene_protocol)
+
+            # Create RPC client for outgoing requests (used by IPC handlers)
+            from styrened.rpc import RPCClient
+
+            self._rpc_client = RPCClient(styrene_protocol)
+            logger.debug("RPC client created for IPC handlers")
 
             # Configure based on deployment mode
             if self.config.rpc.relay_mode:
@@ -171,6 +210,53 @@ class StyreneDaemon:
             logger.warning(f"RPC server not available: {e}")
         except Exception as e:
             logger.error(f"Failed to start RPC server: {e}")
+
+    def _handle_styrene_message_dispatch(
+        self, styrene_protocol: Any
+    ) -> Callable[["LXMF.LXMessage"], None]:
+        """Create a callback to dispatch LXMF messages to StyreneProtocol.
+
+        This bridges the LXMFService callback mechanism with StyreneProtocol's
+        message handling.
+
+        Args:
+            styrene_protocol: StyreneProtocol instance to dispatch messages to.
+
+        Returns:
+            Callback function for LXMFService.register_callback().
+        """
+        import asyncio
+
+        from styrened.protocols.base import LXMFMessage
+
+        def callback(lxmf_message: "LXMF.LXMessage") -> None:
+            # Wrap raw LXMF message in our LXMFMessage dataclass
+            wrapped = LXMFMessage(
+                source_hash=lxmf_message.source_hash.hex(),
+                destination_hash=lxmf_message.destination_hash.hex()
+                if lxmf_message.destination_hash
+                else "",
+                timestamp=lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else 0.0,
+                content=lxmf_message.content.decode("utf-8")
+                if isinstance(lxmf_message.content, bytes)
+                else (lxmf_message.content or ""),
+                fields=lxmf_message.fields or {},
+            )
+
+            # Check if this is a Styrene protocol message
+            if styrene_protocol.can_handle(wrapped):
+                # Dispatch to StyreneProtocol (async)
+                # The callback is invoked from RNS/LXMF library in a sync context,
+                # so we need to schedule the coroutine on the running event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(styrene_protocol.handle_message(wrapped))
+                except RuntimeError:
+                    # No running event loop - run synchronously in new loop
+                    # This handles callbacks from non-async contexts
+                    asyncio.run(styrene_protocol.handle_message(wrapped))
+
+        return callback
 
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
@@ -251,6 +337,80 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to start API: {e}")
 
+    async def _start_control_server(self) -> None:
+        """Start IPC control socket server for CLI/TUI communication."""
+        try:
+            from styrened.ipc import ControlServer
+
+            socket_path = self.config.ipc.socket_path
+            socket_mode = self.config.ipc.socket_mode
+
+            self._control_server = ControlServer(
+                daemon=self,
+                socket_path=socket_path,
+                socket_mode=socket_mode,
+            )
+            await self._control_server.start()
+            logger.info("IPC control server started")
+
+        except Exception as e:
+            logger.error(f"Failed to start IPC control server: {e}")
+
+    def _announce(self) -> None:
+        """Trigger an announce of the local operator destination.
+
+        Called by IPC handlers and the main loop.
+        """
+        if not self._operator_destination:
+            logger.warning("Cannot announce: no operator destination")
+            return
+
+        try:
+            import socket
+
+            hostname = socket.gethostname()
+            version = "0.1.0"
+            capabilities = []
+            if self.config.reticulum.mode.value == "hub":
+                capabilities.append("hub")
+            if self.config.api.enabled:
+                capabilities.append("api")
+
+            caps_str = ",".join(capabilities) if capabilities else "node"
+
+            # Include LXMF delivery destination in announce
+            lxmf_dest = ""
+            try:
+                from styrened.services.lxmf_service import get_lxmf_service
+
+                lxmf_service = get_lxmf_service()
+                if lxmf_service.is_initialized and lxmf_service.delivery_destination:
+                    lxmf_dest = lxmf_service.delivery_destination.hash.hex()
+            except Exception as e:
+                logger.warning(f"Could not get LXMF destination for announce: {e}")
+
+            app_data = f"styrene:{hostname}:{version}:{caps_str}:{lxmf_dest}".encode()
+            self._operator_destination.announce(app_data=app_data)
+            logger.info(f"Announced as Styrene node: {hostname}")
+
+            # Also announce LXMF delivery destination
+            try:
+                from styrened.services.lxmf_service import get_lxmf_service
+
+                lxmf_service = get_lxmf_service()
+                if (
+                    lxmf_service.is_initialized
+                    and lxmf_service.router
+                    and lxmf_service.delivery_destination
+                ):
+                    lxmf_service.router.announce(lxmf_service.delivery_destination.hash)
+                    logger.debug("Announced LXMF delivery destination")
+            except Exception as e:
+                logger.warning(f"LXMF announce failed: {e}")
+
+        except Exception as e:
+            logger.warning(f"Announce failed: {e}")
+
     async def _run_loop(self) -> None:
         """Main daemon loop with periodic announces."""
         announce_interval = self.config.reticulum.announce_interval
@@ -312,9 +472,13 @@ class StyreneDaemon:
                         from styrened.services.lxmf_service import get_lxmf_service
 
                         lxmf_service = get_lxmf_service()
-                        if lxmf_service.is_initialized and lxmf_service.router:
+                        if (
+                            lxmf_service.is_initialized
+                            and lxmf_service.router
+                            and lxmf_service.delivery_destination
+                        ):
                             lxmf_service.router.announce(lxmf_service.delivery_destination.hash)
-                            logger.info(f"Re-announced LXMF delivery destination")
+                            logger.info("Re-announced LXMF delivery destination")
                     except Exception as e:
                         logger.warning(f"LXMF re-announce failed: {e}")
 
@@ -337,6 +501,11 @@ class StyreneDaemon:
         """Stop the daemon services."""
         logger.info("Stopping Styrene daemon...")
         self._running = False
+
+        # Stop IPC control server
+        if self._control_server:
+            await self._control_server.stop()
+            self._control_server = None
 
         # Stop RPC server
         if self._rpc_server:

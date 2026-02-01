@@ -35,14 +35,17 @@ data:
 
     [interfaces]
     {{- range $i, $iface := .Values.rns.interfaces }}
-    [[{{ $iface.type }}]]
-    enabled = {{ $iface.enabled }}
-    {{- if eq $iface.type "TCPServerInterface" }}
-    listen_ip = {{ $iface.listen_ip }}
-    listen_port = {{ $iface.listen_port }}
-    {{- end }}
-    {{- if eq $iface.type "TCPClientInterface" }}
-    target_host = {{ $iface.target_host }}
-    target_port = {{ $iface.target_port }}
-    {{- end }}
+      [[Interface {{ $i }}]]
+      type = {{ $iface.type }}
+      enabled = {{ $iface.enabled }}
+      {{- if eq $iface.type "TCPServerInterface" }}
+      listen_ip = {{ $iface.listen_ip }}
+      listen_port = {{ $iface.listen_port }}
+      {{- end }}
+      {{- if eq $iface.type "TCPClientInterface" }}
+      target_host = {{ $iface.target_host }}
+      target_port = {{ $iface.target_port }}
+      {{- end }}
+      {{- if eq $iface.type "AutoInterface" }}
+      {{- end }}
     {{- end }}

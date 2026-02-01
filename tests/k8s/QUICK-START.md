@@ -18,7 +18,7 @@ pytest tests/k8s/ -v -n auto
 
 ## Test Tiers
 
-### 🔥 Smoke (9 tests, ~3-5min with 4 workers)
+### Smoke (9 tests, ~3-5min with 4 workers)
 **Purpose:** Fast validation of critical paths
 **When:** Every commit, during development
 
@@ -36,7 +36,7 @@ pytest tests/k8s/ -v -n auto -m smoke
 - CPU throttling behavior
 - Memory pressure handling
 
-### 🔧 Integration (17 tests, ~10-15min with 4 workers)
+### Integration (17 tests, ~10-15min with 4 workers)
 **Purpose:** Common scenarios and failure modes
 **When:** Pre-merge, nightly builds
 
@@ -53,7 +53,7 @@ pytest tests/k8s/ -v -n auto -m integration
 - Message queue saturation
 - Various load and scaling scenarios
 
-### 🎯 Comprehensive (7 tests, ~20-30min with 4 workers)
+### Comprehensive (7 tests, ~20-30min with 4 workers)
 **Purpose:** Deep validation, stress tests, edge cases
 **When:** Pre-release, weekly validation
 
@@ -159,24 +159,58 @@ k3d cluster create styrene-test
 kubectl cluster-info
 ```
 
-### 2. Docker Image
+### 2. Container Image
 
-Build and load the test image:
+**Option A: Build locally (recommended for development)**
+
+```bash
+# Build test image using Makefile
+make build-test
+
+# Load into kind
+kind load docker-image styrene-lab/styrened-test:test --name styrene-test
+
+# OR load into k3d
+k3d image import styrene-lab/styrened-test:test -c styrene-test
+```
+
+**Option B: Use pre-built images from GHCR**
+
+```bash
+# Pull latest nightly test image
+docker pull ghcr.io/styrene-lab/styrened-test:latest
+
+# Load into kind
+kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-test
+
+# OR load into k3d
+k3d image import ghcr.io/styrene-lab/styrened-test:latest -c styrene-test
+```
+
+**Option C: Build directly (if Makefile unavailable)**
 
 ```bash
 # Build for AMD64 (if on ARM Mac)
 docker build --platform linux/amd64 -t styrened-test:latest -f tests/k8s/docker/Dockerfile .
 
-# Load into kind
+# Load into cluster
 kind load docker-image styrened-test:latest --name styrene-test
-
-# OR load into k3d
-k3d image import styrened-test:latest -c styrene-test
-
-# OR push to remote registry (for cloud k8s)
-docker tag styrened-test:latest your-registry/styrened-test:latest
-docker push your-registry/styrened-test:latest
 ```
+
+**Option D: Use GHCR images on remote cluster (recommended for brutus/cloud)**
+
+```bash
+# One command: create secret, deploy from GHCR, run tests
+make test-k8s-remote
+```
+
+This is ideal for:
+- Remote k3s clusters (like brutus)
+- Cloud Kubernetes (GKE, EKS, AKS)
+- Testing CI-built images without rebuilding
+- ARM64 clusters (native multi-arch images)
+
+See [REMOTE-TESTING.md](REMOTE-TESTING.md) for complete guide.
 
 ### 3. Python Dependencies
 
@@ -219,19 +253,19 @@ pytest tests/k8s/ -v -n auto -m smoke --dist loadscope -vv
 
 ## What Gets Tested
 
-### ✅ End-to-End Scenarios
+### End-to-End Scenarios
 - **LXMF Message Passing:** Peer-to-peer, hub-routed, multi-hop
 - **RPC Command Execution:** Status, exec, cross-pod calls
 - **Device Discovery:** Announce, discover, mesh formation
 
-### ✅ Edge Cases
+### Edge Cases
 - Network partitions (NetworkPolicy isolation)
 - Identity corruption and regeneration
 - Hub crashes and reconnection
 - Message queue saturation
 - RNS initialization failures
 
-### ✅ Load & Scaling
+### Load and Scaling
 - Message throughput (100 msgs/min)
 - Discovery scaling (20 nodes)
 - RPC concurrency (5 simultaneous)

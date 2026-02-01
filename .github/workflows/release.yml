@@ -3,11 +3,11 @@ name: Release Build
 on:
   push:
     tags:
-      - 'v*'  # v0.2.0, v0.2.1, v1.0.0-rc1, etc.
+      - "v*" # v0.2.0, v0.2.1, v1.0.0-rc1, etc.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g., v0.2.1)'
+        description: "Tag to release (e.g., v0.2.1)"
         required: true
         type: string
 
@@ -16,7 +16,8 @@ env:
   KUBECTL_VERSION: v1.28.0
   HELM_VERSION: v3.13.0
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME_PROD: styrene-lab/styrened
+  IMAGE_NAME_TEST: styrene-lab/styrened-test
 
 jobs:
   validate-tag:
@@ -66,35 +67,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.validate-tag.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate-tag.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.validate-tag.outputs.version }},enable=${{ needs.validate-tag.outputs.is_prerelease == 'false' }}
-            type=raw,value=latest,enable=${{ needs.validate-tag.outputs.is_prerelease == 'false' }}
-
-      - name: Build and push multi-arch image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: tests/k8s/docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          push: true
+      - name: Build and push production image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          if [[ "${{ needs.validate-tag.outputs.is_prerelease }}" == "false" ]]; then
+            make push-prod-latest
+          else
+            make push-prod
+          fi
 
   test-release:
     name: Full Test Suite
@@ -109,8 +91,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install test dependencies
         run: |
@@ -138,8 +120,8 @@ jobs:
 
       - name: Pull and load release image
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }} styrened-test:latest
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }} styrened-test:latest
           kind load docker-image styrened-test:latest --name styrene-release
 
       - name: Run full test suite
@@ -270,20 +252,20 @@ jobs:
 
             ${{ needs.generate-changelog.outputs.changelog }}
 
-            ## Docker Images
+            ## Container Images
 
-            Multi-architecture images available at:
-            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}`
-            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest` (stable releases only)
+            Multi-architecture OCI images available at:
+            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}`
+            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:latest` (stable releases only)
 
             ```bash
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}
             ```
 
             ## Test Results
 
-            ✅ Full test suite passed (smoke + integration + comprehensive)
-            📊 Coverage report available in release artifacts
+            Full test suite passed (smoke + integration + comprehensive)
+            Coverage report available in release artifacts
 
             ## Platforms
 
@@ -299,17 +281,16 @@ jobs:
         with:
           script: |
             const releaseType = ${{ needs.validate-tag.outputs.is_prerelease }} ? 'Pre-release' : 'Release';
-            const emoji = ${{ needs.validate-tag.outputs.is_prerelease }} ? '🚧' : '🎉';
 
-            const comment = `${emoji} **${releaseType} v${{ needs.validate-tag.outputs.version }} Published**
+            const comment = `**${releaseType} v${{ needs.validate-tag.outputs.version }} Published**
 
-            🐳 **Docker Images:**
-            - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-tag.outputs.version }}\`
+            **Container Images:**
+            - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}\`
 
-            📋 **Release Notes:** [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-tag.outputs.version }})
+            **Release Notes:** [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-tag.outputs.version }})
 
-            ✅ All tests passed successfully
-            📊 Coverage reports available in release artifacts
+            All tests passed successfully.
+            Coverage reports available in release artifacts.
             `;
 
             // Create a discussion or comment on the release (requires permissions)

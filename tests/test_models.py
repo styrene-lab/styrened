@@ -1,14 +1,13 @@
 """Smoke tests for styrene-core models."""
 
-import pytest
 
 from styrened.models import (
     CoreConfig,
     DeviceType,
     MeshDevice,
-    RNSErrorState,
     ReticulumIdentity,
     ReticulumState,
+    RNSErrorState,
 )
 
 

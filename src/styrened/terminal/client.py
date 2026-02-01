@@ -1,0 +1,622 @@
+"""Terminal client for TUI/CLI applications.
+
+Connects to remote styrened terminals using LXMF for session control
+and RNS Links for data plane I/O.
+
+Architecture:
+    1. Client sends TERMINAL_REQUEST via LXMF (Styrene protocol)
+    2. Server validates identity and returns TERMINAL_ACCEPT with Link destination
+    3. Client establishes RNS Link to server's terminal destination
+    4. Bidirectional I/O flows over Link until session ends
+
+Usage:
+    from styrened.terminal import TerminalClient
+
+    client = TerminalClient(styrene_protocol)
+    session = await client.connect(
+        destination="abc123...",
+        term_type="xterm-256color",
+        rows=24,
+        cols=80,
+    )
+    await session.run_interactive()
+"""
+
+import asyncio
+import logging
+import os
+import signal
+import sys
+import termios
+import tty
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from styrened.models.styrene_wire import (
+    StyreneEnvelope,
+    StyreneMessageType,
+    create_terminal_close,
+    create_terminal_request,
+    decode_payload,
+)
+from styrened.terminal.messages import (
+    CommandExited,
+    Error,
+    StreamData,
+    VersionInfo,
+    WindowSize,
+    deserialize_message,
+    serialize_message,
+)
+
+if TYPE_CHECKING:
+    import RNS
+
+    from styrened.protocols.styrene import StyreneProtocol
+
+logger = logging.getLogger(__name__)
+
+# Connection timeout (waiting for TERMINAL_ACCEPT)
+CONNECT_TIMEOUT = 30.0
+
+# Link establishment timeout
+LINK_TIMEOUT = 15.0
+
+
+@dataclass
+class TerminalClientSession:
+    """Active terminal client session.
+
+    Manages the client side of a terminal connection, handling:
+    - RNS Link for data plane I/O
+    - Local terminal raw mode management
+    - Window resize propagation
+    - Signal forwarding
+
+    Attributes:
+        session_id: Session identifier from server
+        link_destination: RNS destination hash for data Link
+        link: Established RNS Link (set after connect)
+        remote_version: Server's protocol version info
+        exit_code: Process exit code (set when session ends)
+    """
+
+    session_id: bytes
+    link_destination: str
+    styrene_protocol: "StyreneProtocol"
+    destination: str  # Remote destination hash
+
+    link: "RNS.Link | None" = None
+    remote_version: VersionInfo | None = None
+    exit_code: int | None = None
+
+    # Callbacks
+    on_output: Callable[[bytes], None] | None = None
+    on_exit: Callable[[int], None] | None = None
+    on_error: Callable[[str], None] | None = None
+
+    # Internal state
+    _connected: asyncio.Event = field(default_factory=asyncio.Event)
+    _exited: asyncio.Event = field(default_factory=asyncio.Event)
+    _original_termios: list | None = None
+    _read_task: asyncio.Task | None = None
+    _resize_handler_installed: bool = False
+
+    async def connect(self, timeout: float = LINK_TIMEOUT) -> bool:
+        """Establish RNS Link to server.
+
+        Args:
+            timeout: Link establishment timeout in seconds
+
+        Returns:
+            True if connected successfully
+        """
+        import RNS
+
+        # Resolve destination
+        try:
+            dest_identity = RNS.Identity.recall(bytes.fromhex(self.link_destination))
+            if not dest_identity:
+                # Try to resolve via path
+                logger.info(f"Requesting path to {self.link_destination[:16]}...")
+                RNS.Transport.request_path(bytes.fromhex(self.link_destination))
+
+                # Wait for path resolution
+                for _ in range(int(timeout * 10)):
+                    dest_identity = RNS.Identity.recall(bytes.fromhex(self.link_destination))
+                    if dest_identity:
+                        break
+                    await asyncio.sleep(0.1)
+
+            if not dest_identity:
+                logger.error(f"Could not resolve identity for {self.link_destination[:16]}...")
+                return False
+
+            # Create destination
+            destination = RNS.Destination(
+                dest_identity,
+                RNS.Destination.OUT,
+                RNS.Destination.SINGLE,
+                "styrene",
+                "terminal",
+            )
+
+            # Establish Link
+            logger.info(f"Establishing Link to {self.link_destination[:16]}...")
+            self.link = RNS.Link(destination)
+
+            # Set callbacks
+            self.link.set_link_established_callback(self._on_link_established)
+            self.link.set_link_closed_callback(self._on_link_closed)
+            self.link.set_packet_callback(self._on_link_packet)
+
+            # Wait for Link to establish
+            try:
+                await asyncio.wait_for(self._connected.wait(), timeout=timeout)
+            except TimeoutError:
+                logger.error("Link establishment timeout")
+                if self.link:
+                    self.link.teardown()
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Link establishment failed: {e}")
+            return False
+
+    def _on_link_established(self, link: "RNS.Link") -> None:
+        """Handle Link establishment.
+
+        Sends session_id to associate Link with terminal session.
+        """
+        logger.info("Terminal Link established")
+
+        # Send session_id to associate Link
+        link.send(self.session_id)
+
+        # Send version info
+        version_msg = VersionInfo(version="1.0", software="styrene-client")
+        link.send(serialize_message(version_msg))
+
+    def _on_link_closed(self, link: "RNS.Link", reason: int) -> None:
+        """Handle Link closure."""
+        logger.info(f"Terminal Link closed (reason: {reason})")
+
+        if self.exit_code is None:
+            self.exit_code = -1
+
+        self._exited.set()
+
+        if self.on_exit and self.exit_code is not None:
+            self.on_exit(self.exit_code)
+
+    def _on_link_packet(self, data: bytes, packet: "RNS.Packet") -> None:
+        """Handle data received from server."""
+        try:
+            msg = deserialize_message(data)
+
+            if isinstance(msg, StreamData):
+                if msg.is_stdout or msg.is_stderr:
+                    if self.on_output:
+                        self.on_output(msg.data)
+                    else:
+                        # Default: write to stdout/stderr
+                        if msg.is_stdout:
+                            sys.stdout.buffer.write(msg.data)
+                            sys.stdout.buffer.flush()
+                        else:
+                            sys.stderr.buffer.write(msg.data)
+                            sys.stderr.buffer.flush()
+
+            elif isinstance(msg, CommandExited):
+                self.exit_code = msg.return_code
+                self._exited.set()
+                if self.on_exit:
+                    self.on_exit(msg.return_code)
+
+            elif isinstance(msg, VersionInfo):
+                self.remote_version = msg
+                logger.debug(f"Server version: {msg.version} ({msg.software})")
+                # Mark as connected after version exchange
+                self._connected.set()
+
+            elif isinstance(msg, Error):
+                logger.error(f"Server error: {msg.message} (code={msg.code})")
+                if self.on_error:
+                    self.on_error(msg.message)
+                if msg.fatal:
+                    self._exited.set()
+
+        except Exception as e:
+            logger.error(f"Failed to handle terminal packet: {e}")
+
+    def send_input(self, data: bytes) -> bool:
+        """Send input data to remote terminal.
+
+        Args:
+            data: Input bytes (stdin)
+
+        Returns:
+            True if sent successfully
+        """
+        if not self.link or self.link.status != 0x00:  # RNS.Link.ACTIVE
+            return False
+
+        msg = StreamData(stream=StreamData.STDIN, data=data)
+        self.link.send(serialize_message(msg))
+        return True
+
+    def send_resize(self, rows: int, cols: int, xpixel: int = 0, ypixel: int = 0) -> bool:
+        """Send window resize to remote terminal.
+
+        Args:
+            rows: New terminal rows
+            cols: New terminal columns
+            xpixel: Width in pixels (optional)
+            ypixel: Height in pixels (optional)
+
+        Returns:
+            True if sent successfully
+        """
+        if not self.link or self.link.status != 0x00:
+            return False
+
+        msg = WindowSize(rows=rows, cols=cols, xpixel=xpixel, ypixel=ypixel)
+        self.link.send(serialize_message(msg))
+        return True
+
+    async def close(self) -> None:
+        """Close the terminal session gracefully."""
+        # Send close request via LXMF control plane
+        close_env = create_terminal_close(
+            session_id=self.session_id,
+            request_id=self.session_id,
+        )
+        await self.styrene_protocol.send(self.destination, close_env)
+
+        # Teardown Link
+        if self.link:
+            self.link.teardown()
+
+        self._exited.set()
+
+    async def run_interactive(self) -> int:
+        """Run interactive terminal session.
+
+        Takes over the local terminal, forwarding I/O to the remote session.
+        Returns when the session ends.
+
+        Returns:
+            Process exit code
+        """
+        if not self.link:
+            raise RuntimeError("Not connected")
+
+        # Save and set raw terminal mode
+        stdin_fd = sys.stdin.fileno()
+        try:
+            self._original_termios = termios.tcgetattr(stdin_fd)
+            tty.setraw(stdin_fd)
+        except termios.error:
+            # Not a TTY (e.g., piped input)
+            self._original_termios = None
+
+        # Install SIGWINCH handler for window resize
+        loop = asyncio.get_event_loop()
+
+        def handle_sigwinch(signum, frame):
+            try:
+                rows, cols = os.get_terminal_size()
+                # Schedule resize in event loop
+                loop.call_soon_threadsafe(lambda: self.send_resize(rows, cols))
+            except OSError:
+                pass
+
+        old_sigwinch = signal.signal(signal.SIGWINCH, handle_sigwinch)
+        self._resize_handler_installed = True
+
+        # Send initial window size
+        try:
+            rows, cols = os.get_terminal_size()
+            self.send_resize(rows, cols)
+        except OSError:
+            pass
+
+        # Start stdin read task
+        self._read_task = asyncio.create_task(self._stdin_read_loop())
+
+        try:
+            # Wait for session to end
+            await self._exited.wait()
+        finally:
+            # Restore terminal
+            if self._original_termios:
+                termios.tcsetattr(stdin_fd, termios.TCSADRAIN, self._original_termios)
+
+            # Restore signal handler
+            if self._resize_handler_installed:
+                signal.signal(signal.SIGWINCH, old_sigwinch)
+
+            # Cancel read task
+            if self._read_task:
+                self._read_task.cancel()
+                try:
+                    await self._read_task
+                except asyncio.CancelledError:
+                    pass
+
+        return self.exit_code or 0
+
+    async def _stdin_read_loop(self) -> None:
+        """Read from stdin and send to remote terminal."""
+        loop = asyncio.get_event_loop()
+        stdin_fd = sys.stdin.fileno()
+
+        try:
+            while self.link and self.link.status == 0x00:
+                # Non-blocking read from stdin
+                try:
+                    data = await loop.run_in_executor(
+                        None,
+                        lambda: os.read(stdin_fd, 1024),
+                    )
+                    if data:
+                        self.send_input(data)
+                    else:
+                        # EOF on stdin
+                        break
+                except BlockingIOError:
+                    await asyncio.sleep(0.01)
+                except OSError:
+                    break
+
+        except asyncio.CancelledError:
+            pass
+
+
+class TerminalClient:
+    """Terminal client for connecting to remote styrened terminals.
+
+    Handles session establishment via LXMF control plane and manages
+    the RNS Link data plane connection.
+
+    Usage:
+        client = TerminalClient(styrene_protocol)
+        session = await client.connect(
+            destination="abc123...",
+            term_type="xterm-256color",
+        )
+        exit_code = await session.run_interactive()
+    """
+
+    def __init__(self, styrene_protocol: "StyreneProtocol"):
+        """Initialize terminal client.
+
+        Args:
+            styrene_protocol: Styrene protocol for LXMF messaging
+        """
+        self.styrene_protocol = styrene_protocol
+
+        # Pending session requests (request_id -> Future)
+        self._pending_requests: dict[bytes, asyncio.Future] = {}
+
+        # Register handlers for terminal responses
+        self._register_handlers()
+
+    def _register_handlers(self) -> None:
+        """Register LXMF handlers for terminal responses."""
+        self.styrene_protocol.register_handler(
+            StyreneMessageType.TERMINAL_ACCEPT,
+            self._handle_terminal_accept,
+        )
+        self.styrene_protocol.register_handler(
+            StyreneMessageType.TERMINAL_REJECT,
+            self._handle_terminal_reject,
+        )
+        self.styrene_protocol.register_handler(
+            StyreneMessageType.TERMINAL_CLOSED,
+            self._handle_terminal_closed,
+        )
+
+    async def _handle_terminal_accept(
+        self,
+        source_identity: str,
+        envelope: StyreneEnvelope,
+    ) -> None:
+        """Handle TERMINAL_ACCEPT response."""
+        request_id = envelope.request_id
+        if not request_id:
+            return
+
+        future = self._pending_requests.get(request_id)
+        if future and not future.done():
+            payload = decode_payload(envelope.payload)
+            future.set_result(
+                {
+                    "accepted": True,
+                    "link_destination": payload["link_destination"],
+                    "session_id": bytes.fromhex(payload["session_id"])
+                    if isinstance(payload.get("session_id"), str)
+                    else payload.get("session_id", request_id),
+                }
+            )
+
+    async def _handle_terminal_reject(
+        self,
+        source_identity: str,
+        envelope: StyreneEnvelope,
+    ) -> None:
+        """Handle TERMINAL_REJECT response."""
+        request_id = envelope.request_id
+        if not request_id:
+            return
+
+        future = self._pending_requests.get(request_id)
+        if future and not future.done():
+            payload = decode_payload(envelope.payload)
+            future.set_result(
+                {
+                    "accepted": False,
+                    "reason": payload.get("reason", "Unknown"),
+                    "code": payload.get("code", 1),
+                }
+            )
+
+    async def _handle_terminal_closed(
+        self,
+        source_identity: str,
+        envelope: StyreneEnvelope,
+    ) -> None:
+        """Handle TERMINAL_CLOSED notification."""
+        # This is informational - the session will handle it via Link closure
+        payload = decode_payload(envelope.payload) if envelope.payload else {}
+        logger.info(
+            f"Terminal session closed: exit_code={payload.get('exit_code')}, "
+            f"reason={payload.get('reason')}"
+        )
+
+    async def connect(
+        self,
+        destination: str,
+        term_type: str = "xterm-256color",
+        rows: int | None = None,
+        cols: int | None = None,
+        shell: str | None = None,
+        command: str | None = None,
+        args: list[str] | None = None,
+        timeout: float = CONNECT_TIMEOUT,
+    ) -> TerminalClientSession:
+        """Connect to a remote terminal.
+
+        Sends TERMINAL_REQUEST via LXMF and establishes RNS Link for I/O.
+
+        Args:
+            destination: Remote styrened destination hash
+            term_type: Terminal type (TERM env var)
+            rows: Terminal rows (auto-detected if None)
+            cols: Terminal columns (auto-detected if None)
+            shell: Shell to execute (server default if None)
+            command: Command to run instead of shell
+            args: Command arguments
+            timeout: Connection timeout in seconds
+
+        Returns:
+            Connected TerminalClientSession
+
+        Raises:
+            ConnectionRefusedError: If server rejects the request
+            TimeoutError: If connection times out
+            RuntimeError: If connection fails
+        """
+        # Auto-detect terminal size
+        if rows is None or cols is None:
+            try:
+                detected_cols, detected_rows = os.get_terminal_size()
+                rows = rows or detected_rows
+                cols = cols or detected_cols
+            except OSError:
+                rows = rows or 24
+                cols = cols or 80
+
+        # Create request
+        request = create_terminal_request(
+            term_type=term_type,
+            rows=rows,
+            cols=cols,
+            shell=shell,
+            command=command,
+            args=args,
+        )
+        request_id = request.request_id
+        if request_id is None:
+            raise ValueError("Terminal request must have a request_id")
+
+        # Create future for response
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending_requests[request_id] = future
+
+        try:
+            # Send request
+            logger.info(f"Sending terminal request to {destination[:16]}...")
+            await self.styrene_protocol.send(destination, request)
+
+            # Wait for response
+            try:
+                result = await asyncio.wait_for(future, timeout=timeout)
+            except TimeoutError as e:
+                raise TimeoutError(f"Terminal request timed out after {timeout}s") from e
+
+            if not result["accepted"]:
+                raise ConnectionRefusedError(
+                    f"Terminal request rejected: {result['reason']} (code={result['code']})"
+                )
+
+            # Create session
+            session = TerminalClientSession(
+                session_id=result["session_id"],
+                link_destination=result["link_destination"],
+                styrene_protocol=self.styrene_protocol,
+                destination=destination,
+            )
+
+            # Establish Link
+            if not await session.connect(timeout=timeout):
+                raise RuntimeError("Failed to establish terminal Link")
+
+            logger.info(f"Terminal session established: {session.session_id.hex()[:16]}...")
+
+            return session
+
+        finally:
+            # Clean up pending request
+            self._pending_requests.pop(request_id, None)
+
+    async def run_command(
+        self,
+        destination: str,
+        command: str,
+        args: list[str] | None = None,
+        timeout: float = CONNECT_TIMEOUT,
+        capture_output: bool = False,
+    ) -> tuple[int, bytes | None]:
+        """Run a command on remote terminal and wait for completion.
+
+        Non-interactive version for scripted use.
+
+        Args:
+            destination: Remote styrened destination hash
+            command: Command to execute
+            args: Command arguments
+            timeout: Connection timeout in seconds
+            capture_output: If True, collect and return stdout/stderr
+
+        Returns:
+            Tuple of (exit_code, output_bytes or None)
+        """
+        output_buffer = bytearray() if capture_output else None
+
+        def capture(data: bytes) -> None:
+            if output_buffer is not None:
+                output_buffer.extend(data)
+            else:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+
+        session = await self.connect(
+            destination=destination,
+            command=command,
+            args=args,
+            timeout=timeout,
+        )
+
+        session.on_output = capture
+
+        # Wait for command to complete
+        await session._exited.wait()
+
+        return (
+            session.exit_code or 0,
+            bytes(output_buffer) if output_buffer else None,
+        )

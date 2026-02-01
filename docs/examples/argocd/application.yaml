@@ -1,0 +1,87 @@
+# ArgoCD Application Example for Styrened Production Deployment
+#
+# This is a REFERENCE EXAMPLE for future production deployment.
+# DO NOT apply this yet - styrened is not stable enough for production.
+#
+# When ready for production deployment on brutus:
+# 1. Copy this file to vanderlyn/apps/argocd/applications/styrened.yaml
+# 2. Create vanderlyn/apps/styrened/values.yaml with production overrides
+# 3. Create ImagePullSecret in styrened namespace
+# 4. Commit and push to vanderlyn repo
+# 5. ArgoCD will auto-sync within 3 minutes
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: styrened
+  namespace: argocd
+  annotations:
+    # Sync wave: Deploy after infrastructure but before workload apps
+    # -2: MetalLB (LoadBalancer)
+    # -1: Traefik (Ingress)
+    #  0: cert-manager, external-dns
+    #  1: ArgoCD (self-managing)
+    # 10: Applications (styrened goes here)
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    # Ensure proper cleanup on deletion (remove K8s resources first)
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # Project scope (default = cluster-wide access)
+  project: default
+
+  # Multi-source: Helm chart from styrened repo + values from vanderlyn repo
+  sources:
+    # Source 1: Helm chart from styrened repository
+    - repoURL: https://github.com/styrene-lab/styrened.git
+      targetRevision: main  # Can be: main, develop, v0.2.1, etc.
+      path: tests/k8s/helm/styrened-test
+      helm:
+        # Load values from second source (vanderlyn repo)
+        valueFiles:
+          - $values/apps/styrened/values.yaml
+
+    # Source 2: Values override from vanderlyn repository
+    - repoURL: https://github.com/cwilson613/vanderlyn.git
+      targetRevision: main
+      ref: values  # Referenced as $values in source 1
+
+    # Source 3 (optional): Additional manifests (Ingress, NetworkPolicy, etc.)
+    # Uncomment if you need extra manifests not in the Helm chart
+    # - repoURL: https://github.com/cwilson613/vanderlyn.git
+    #   targetRevision: main
+    #   path: apps/styrened/manifests
+    #   directory:
+    #     include: "*.yaml"
+
+  # Deployment target
+  destination:
+    server: https://kubernetes.default.svc  # In-cluster
+    namespace: styrened  # Production namespace
+
+  # Sync policy
+  syncPolicy:
+    automated:
+      # Automatically sync when git changes detected
+      prune: true      # Delete resources removed from git
+      selfHeal: true   # Revert manual kubectl changes
+
+    syncOptions:
+      # Create namespace if it doesn't exist
+      - CreateNamespace=true
+
+      # Use server-side apply (safer for CRDs and large resources)
+      - ServerSideApply=true
+
+      # Optional: Fail sync if any resource fails (default is to continue)
+      # - FailOnSharedResource=false
+
+      # Optional: Replace resource instead of applying (for immutable fields)
+      # - Replace=true
+
+  # Health assessment (optional - ArgoCD auto-detects for standard resources)
+  # ignoreDifferences:
+  #   - group: apps
+  #     kind: StatefulSet
+  #     jsonPointers:
+  #       - /spec/volumeClaimTemplates  # Ignore PVC template changes

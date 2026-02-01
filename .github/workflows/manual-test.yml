@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       test_tier:
-        description: 'Test tier to run'
+        description: "Test tier to run"
         required: true
-        default: 'smoke'
+        default: "smoke"
         type: choice
         options:
           - smoke
@@ -14,22 +14,22 @@ on:
           - comprehensive
           - all
       workers:
-        description: 'Number of parallel workers (1-8)'
+        description: "Number of parallel workers (1-8)"
         required: false
-        default: '4'
+        default: "4"
         type: choice
         options:
-          - '1'
-          - '2'
-          - '4'
-          - '6'
-          - '8'
+          - "1"
+          - "2"
+          - "4"
+          - "6"
+          - "8"
       test_pattern:
-        description: 'Specific test pattern (optional, e.g., test_edge_cases.py::test_network_partition)'
+        description: "Specific test pattern (optional, e.g., test_edge_cases.py::test_network_partition)"
         required: false
         type: string
       run_slow_tests:
-        description: 'Run slow tests (load/scaling)'
+        description: "Run slow tests (load/scaling)"
         required: false
         default: false
         type: boolean
@@ -67,8 +67,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install test dependencies
         run: |
@@ -231,7 +231,7 @@ jobs:
             const actor = context.actor;
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
-            console.log(`❌ Manual test execution failed`);
+            console.log(`Manual test execution failed`);
             console.log(`Requested by: ${actor}`);
             console.log(`Test tier: ${{ inputs.test_tier }}`);
             console.log(`Workers: ${{ inputs.workers }}`);

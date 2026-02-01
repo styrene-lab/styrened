@@ -1,23 +1,32 @@
-"""RPC server for handling incoming requests.
+"""RPC server for handling incoming requests over Styrene protocol.
 
 This module implements the server-side RPC handler that processes incoming
-RPC requests and sends responses. It complements the RPCClient which sends
-requests.
+RPC requests and sends responses using the Styrene wire protocol.
+It complements the RPCClient which sends requests.
+
+Wire Format:
+    Uses StyreneProtocol with FIELD_CUSTOM_TYPE="styrene.io" and
+    FIELD_CUSTOM_DATA containing the v2 wire format with 16-byte request_id
+    for correlation.
 
 The RPC server handles:
-- status_request: Returns system status (uptime, IP, disk, services)
-- exec: Executes commands and returns output
-- reboot: Schedules system reboot
-- update_config: Updates local configuration
+- STATUS_REQUEST (0x10): Returns system status (uptime, IP, disk, services)
+- EXEC (0x40): Executes commands and returns output
+- REBOOT (0x41): Schedules system reboot
+- CONFIG_UPDATE (0x42): Updates local configuration
 
 Usage:
     from styrened.rpc import RPCServer
-    from styrened.services.lxmf_service import get_lxmf_service
+    from styrened.protocols.styrene import StyreneProtocol
 
-    # Initialize server
-    server = RPCServer(get_lxmf_service())
+    # Initialize with StyreneProtocol
+    styrene_protocol = StyreneProtocol(router, identity, db_engine)
+    server = RPCServer(styrene_protocol)
 
-    # Server automatically handles incoming RPC messages via LXMF callback
+    # Start server
+    server.start()
+
+    # Server automatically handles incoming Styrene RPC messages
 """
 
 import asyncio
@@ -27,20 +36,26 @@ import platform
 import socket
 import subprocess
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-from styrened.rpc.messages import (
-    ExecCommand,
-    ExecResult,
-    RebootCommand,
-    RebootResult,
-    StatusRequest,
-    StatusResponse,
-    UpdateConfigCommand,
-    UpdateConfigResult,
-    deserialize_message,
+from styrened.models.styrene_wire import (
+    NO_CORRELATION,
+    StyreneEnvelope,
+    StyreneMessageType,
+    create_config_result,
+    create_error,
+    create_exec_result,
+    create_reboot_result,
+    create_status_response,
+    decode_payload,
 )
-from styrened.services.lxmf_service import LXMFService
+from styrened.protocols.base import LXMFMessage
+
+# Import response types for backward compatibility
+
+if TYPE_CHECKING:
+    from styrened.protocols.styrene import StyreneProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -75,48 +90,137 @@ DEFAULT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
 )
 
 
-class RPCServer:
-    """RPC server for handling incoming requests.
+# Error codes for RPC errors
+class RPCErrorCode:
+    """Standard error codes for RPC errors."""
 
-    Listens for incoming RPC messages via LXMF and dispatches them to
-    appropriate handlers. Responses are sent back to the requesting node.
+    UNKNOWN = 0
+    INVALID_REQUEST = 1
+    COMMAND_NOT_ALLOWED = 2
+    COMMAND_NOT_FOUND = 3
+    COMMAND_TIMEOUT = 4
+    COMMAND_FAILED = 5
+    REBOOT_FAILED = 6
+    CONFIG_FAILED = 7
+
+
+class RPCServer:
+    """RPC server for handling incoming Styrene protocol requests.
+
+    Listens for incoming RPC messages via StyreneProtocol and dispatches them to
+    appropriate handlers. Responses are sent back using the Styrene wire format.
 
     Attributes:
-        lxmf_service: LXMF transport service for sending responses.
+        styrene_protocol: StyreneProtocol instance for sending responses.
         allowed_commands: Set of commands allowed for exec (security).
         _running: Whether the server is running.
     """
 
     def __init__(
         self,
-        lxmf_service: LXMFService,
+        styrene_protocol: "StyreneProtocol",
         allowed_commands: set[str] | None = None,
     ) -> None:
         """Initialize RPC server.
 
         Args:
-            lxmf_service: LXMF transport service.
+            styrene_protocol: StyreneProtocol instance for transport.
             allowed_commands: Set of allowed commands for exec.
                             Defaults to DEFAULT_ALLOWED_COMMANDS.
         """
-        self.lxmf_service = lxmf_service
+        self._protocol = styrene_protocol
         self.allowed_commands = allowed_commands or set(DEFAULT_ALLOWED_COMMANDS)
         self._running = False
-        self._original_callback: Any = None
+        self._handlers: dict[StyreneMessageType, Callable[[str, StyreneEnvelope], None]] = {}
 
-        logger.debug("RPCServer initialized")
+        # Register default handlers
+        self._register_default_handlers()
+
+        # Register with StyreneProtocol for message routing
+        self._register_with_protocol()
+
+        logger.debug("RPCServer initialized with StyreneProtocol")
+
+    def _register_with_protocol(self) -> None:
+        """Register RPC message handlers with StyreneProtocol."""
+        # Register for RPC command types
+        rpc_types = [
+            StyreneMessageType.STATUS_REQUEST,
+            StyreneMessageType.EXEC,
+            StyreneMessageType.REBOOT,
+            StyreneMessageType.CONFIG_UPDATE,
+            StyreneMessageType.PING,
+        ]
+        for msg_type in rpc_types:
+            self._protocol.register_handler(msg_type, self._protocol_handler)
+
+    def _register_default_handlers(self) -> None:
+        """Register default handlers for RPC command types."""
+        self._handlers[StyreneMessageType.STATUS_REQUEST] = self._handle_status_request
+        self._handlers[StyreneMessageType.EXEC] = self._handle_exec
+        self._handlers[StyreneMessageType.REBOOT] = self._handle_reboot
+        self._handlers[StyreneMessageType.CONFIG_UPDATE] = self._handle_config_update
+        self._handlers[StyreneMessageType.PING] = self._handle_ping
+
+    async def _protocol_handler(self, message: LXMFMessage, envelope: StyreneEnvelope) -> None:
+        """Handler called by StyreneProtocol for RPC messages.
+
+        This async method bridges the StyreneProtocol dispatch to the
+        internal RPC handlers.
+
+        Args:
+            message: Original LXMF message
+            envelope: Decoded Styrene envelope
+        """
+        if not self._running:
+            return
+
+        # Check if we have a handler for this message type
+        handler = self._handlers.get(envelope.message_type)
+        if handler is None:
+            logger.debug(f"No RPC handler for message type: {envelope.message_type.name}")
+            return
+
+        logger.info(f"Received RPC {envelope.message_type.name} from {message.source_hash[:16]}...")
+
+        # Dispatch to handler (handlers use asyncio.create_task internally)
+        try:
+            handler(message.source_hash, envelope)
+        except Exception as e:
+            logger.error(f"Error handling RPC request: {e}")
+            # Send error response if we have a request_id
+            if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                await self._send_error(
+                    message.source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.UNKNOWN,
+                    "Internal server error",  # Sanitized message
+                )
+
+    def register_handler(
+        self,
+        message_type: StyreneMessageType,
+        handler: Callable[[str, StyreneEnvelope], None],
+    ) -> None:
+        """Register a custom handler for a message type.
+
+        Args:
+            message_type: StyreneMessageType to handle.
+            handler: Handler function taking (source_hash, envelope).
+        """
+        self._handlers[message_type] = handler
+        logger.debug(f"Registered handler for {message_type.name}")
 
     def start(self) -> None:
         """Start the RPC server.
 
-        Registers the message handler with LXMF service.
+        Note: The StyreneProtocol dispatches messages to handlers.
+        This method enables handling of those messages.
         """
         if self._running:
             logger.warning("RPC server already running")
             return
 
-        # Register our handler with LXMF
-        self.lxmf_service.register_callback(self._handle_incoming_message)
         self._running = True
         logger.info("RPC server started")
 
@@ -125,122 +229,135 @@ class RPCServer:
         self._running = False
         logger.info("RPC server stopped")
 
-    def _handle_incoming_message(self, source_hash: str, payload: dict[str, Any]) -> None:
-        """Handle incoming LXMF message.
-
-        Checks if this is an RPC request and dispatches to appropriate handler.
+    def _handle_ping(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle PING - respond with PONG.
 
         Args:
-            source_hash: Source destination hash.
-            payload: Message payload.
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
         """
-        if not self._running:
-            return
+        logger.debug(f"PING from {source_hash[:16]}...")
 
-        # Check if this is an RPC message
-        if payload.get("protocol") != "rpc":
-            logger.debug(f"Ignoring non-RPC message from {source_hash}")
-            return
+        # Send PONG response
+        asyncio.create_task(self._send_pong(source_hash, envelope.request_id))
 
-        # Extract request_id for response correlation
-        request_id = payload.get("request_id")
-        if not request_id:
-            logger.warning(f"RPC message from {source_hash} missing request_id")
-            return
+    async def _send_pong(self, destination: str, request_id: bytes | None) -> None:
+        """Send PONG response.
 
-        msg_type = payload.get("type")
-        logger.info(f"Received RPC {msg_type} from {source_hash[:16]}...")
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from PING.
+        """
+        from styrened.models.styrene_wire import create_pong
 
-        # Dispatch to handler
+        pong_envelope = create_pong(request_id=request_id)
         try:
-            message = deserialize_message(payload)
-            response = self._dispatch_request(message)
-
-            # Send response
-            self._send_response(source_hash, request_id, response)
-
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=pong_envelope.message_type,
+                payload=pong_envelope.payload,
+                request_id=pong_envelope.request_id,
+            )
         except Exception as e:
-            logger.error(f"Error handling RPC request: {e}")
-            # Send error response
-            self._send_error_response(source_hash, request_id, str(e))
+            logger.error(f"Failed to send PONG: {e}")
 
-    def _dispatch_request(
-        self,
-        message: StatusRequest | ExecCommand | RebootCommand | UpdateConfigCommand,
-    ) -> StatusResponse | ExecResult | RebootResult | UpdateConfigResult:
-        """Dispatch request to appropriate handler.
+    def _handle_status_request(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle STATUS_REQUEST - gather and return system status.
 
         Args:
-            message: Deserialized RPC request message.
-
-        Returns:
-            Response message.
-
-        Raises:
-            ValueError: If message type is not a request type.
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
         """
-        if isinstance(message, StatusRequest):
-            return self._handle_status_request()
-        elif isinstance(message, ExecCommand):
-            return self._handle_exec_command(message)
-        elif isinstance(message, RebootCommand):
-            return self._handle_reboot_command(message)
-        elif isinstance(message, UpdateConfigCommand):
-            return self._handle_update_config_command(message)
-        else:
-            raise ValueError(f"Unknown request type: {type(message)}")
+        logger.debug("Handling STATUS_REQUEST")
 
-    def _handle_status_request(self) -> StatusResponse:
-        """Handle status request - gather system information.
+        # Gather status data
+        status_data = self._gather_status()
 
-        Returns:
-            StatusResponse with system status.
-        """
-        logger.debug("Handling status_request")
-
-        # Get uptime
-        uptime = self._get_uptime()
-
-        # Get IP address
-        ip = self._get_ip_address()
-
-        # Get running services (simplified)
-        services = self._get_services()
-
-        # Get disk usage
-        disk_used, disk_total = self._get_disk_usage()
-
-        return StatusResponse(
-            uptime=uptime,
-            ip=ip,
-            services=services,
-            disk_used=disk_used,
-            disk_total=disk_total,
+        # Send response
+        asyncio.create_task(
+            self._send_status_response(source_hash, envelope.request_id, status_data)
         )
 
-    def _handle_exec_command(self, cmd: ExecCommand) -> ExecResult:
-        """Handle exec command - run command and return output.
+    async def _send_status_response(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        status_data: dict[str, Any],
+    ) -> None:
+        """Send STATUS_RESPONSE.
 
         Args:
-            cmd: ExecCommand with command and args.
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            status_data: Status data dictionary.
+        """
+        response_envelope = create_status_response(status_data, request_id=request_id)
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent STATUS_RESPONSE to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send STATUS_RESPONSE: {e}")
+
+    def _handle_exec(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle EXEC - execute command and return result.
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        # Decode payload
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+        except Exception as e:
+            logger.error(f"Failed to decode EXEC payload: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    f"Invalid payload: {e}",
+                )
+            )
+            return
+
+        command = payload_data.get("command", "")
+        args = payload_data.get("args", [])
+
+        logger.info(f"Executing command: {command} {' '.join(args)}")
+
+        # Execute command
+        result = self._execute_command(command, args)
+
+        # Send response
+        asyncio.create_task(self._send_exec_result(source_hash, envelope.request_id, result))
+
+    def _execute_command(self, command: str, args: list[str]) -> dict[str, Any]:
+        """Execute a command and return result.
+
+        Args:
+            command: Command to execute.
+            args: Command arguments.
 
         Returns:
-            ExecResult with output and exit code.
+            Dictionary with exit_code, stdout, stderr.
         """
-        logger.info(f"Executing command: {cmd.command} {' '.join(cmd.args)}")
-
         # Security check - command whitelist
-        if cmd.command not in self.allowed_commands:
-            logger.warning(f"Command not allowed: {cmd.command}")
-            return ExecResult(
-                exit_code=126,
-                stdout="",
-                stderr=f"Command not allowed: {cmd.command}",
-            )
+        if command not in self.allowed_commands:
+            logger.warning(f"Command not allowed: {command}")
+            return {
+                "exit_code": 126,
+                "stdout": "",
+                "stderr": f"Command not allowed: {command}",
+            }
 
         try:
             # Build full command
-            full_cmd = [cmd.command, *cmd.args]
+            full_cmd = [command, *args]
 
             # Execute with timeout
             result = subprocess.run(
@@ -250,136 +367,283 @@ class RPCServer:
                 timeout=30,
             )
 
-            return ExecResult(
-                exit_code=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
-            )
+            return {
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
 
         except subprocess.TimeoutExpired:
-            return ExecResult(
-                exit_code=124,
-                stdout="",
-                stderr="Command timed out after 30 seconds",
-            )
+            return {
+                "exit_code": 124,
+                "stdout": "",
+                "stderr": "Command timed out after 30 seconds",
+            }
         except FileNotFoundError:
-            return ExecResult(
-                exit_code=127,
-                stdout="",
-                stderr=f"Command not found: {cmd.command}",
-            )
+            return {
+                "exit_code": 127,
+                "stdout": "",
+                "stderr": f"Command not found: {command}",
+            }
         except Exception as e:
-            return ExecResult(
-                exit_code=1,
-                stdout="",
-                stderr=str(e),
-            )
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": str(e),
+            }
 
-    def _handle_reboot_command(self, cmd: RebootCommand) -> RebootResult:
-        """Handle reboot command - schedule system reboot.
+    async def _send_exec_result(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        result: dict[str, Any],
+    ) -> None:
+        """Send EXEC_RESULT response.
 
         Args:
-            cmd: RebootCommand with optional delay.
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            result: Execution result dictionary.
+        """
+        response_envelope = create_exec_result(
+            exit_code=result["exit_code"],
+            stdout=result["stdout"],
+            stderr=result["stderr"],
+            request_id=request_id,
+        )
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent EXEC_RESULT to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send EXEC_RESULT: {e}")
+
+    def _handle_reboot(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle REBOOT - schedule system reboot.
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        # Decode payload
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+        except Exception as e:
+            logger.error(f"Failed to decode REBOOT payload: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    f"Invalid payload: {e}",
+                )
+            )
+            return
+
+        delay = payload_data.get("delay", 0)
+        logger.info(f"Reboot requested with delay: {delay}s")
+
+        # Schedule reboot
+        result = self._schedule_reboot(delay)
+
+        # Send response
+        asyncio.create_task(self._send_reboot_result(source_hash, envelope.request_id, result))
+
+    def _schedule_reboot(self, delay: int) -> dict[str, Any]:
+        """Schedule system reboot.
+
+        Args:
+            delay: Seconds to delay reboot (0 = immediate).
 
         Returns:
-            RebootResult with scheduled time.
+            Dictionary with success, message, scheduled_time.
         """
-        logger.info(f"Reboot requested with delay: {cmd.delay}s")
-
         try:
-            scheduled_time = time.time() + cmd.delay
-
-            if cmd.delay == 0:
+            if delay == 0:
                 # Immediate reboot - schedule for 5 seconds to allow response
                 asyncio.get_event_loop().call_later(5, self._do_reboot)
-                return RebootResult(
-                    success=True,
-                    message="Rebooting in 5 seconds",
-                    scheduled_time=time.time() + 5,
-                )
+                return {
+                    "success": True,
+                    "message": "Rebooting in 5 seconds",
+                    "scheduled_time": time.time() + 5,
+                }
             else:
                 # Delayed reboot
-                asyncio.get_event_loop().call_later(cmd.delay, self._do_reboot)
-                return RebootResult(
-                    success=True,
-                    message=f"Reboot scheduled in {cmd.delay} seconds",
-                    scheduled_time=scheduled_time,
-                )
+                asyncio.get_event_loop().call_later(delay, self._do_reboot)
+                return {
+                    "success": True,
+                    "message": f"Reboot scheduled in {delay} seconds",
+                    "scheduled_time": time.time() + delay,
+                }
 
         except Exception as e:
             logger.error(f"Failed to schedule reboot: {e}")
-            return RebootResult(
-                success=False,
-                message=f"Failed to schedule reboot: {e}",
-            )
+            return {
+                "success": False,
+                "message": f"Failed to schedule reboot: {e}",
+                "scheduled_time": None,
+            }
 
-    def _handle_update_config_command(self, cmd: UpdateConfigCommand) -> UpdateConfigResult:
-        """Handle update_config command - update local configuration.
+    async def _send_reboot_result(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        result: dict[str, Any],
+    ) -> None:
+        """Send REBOOT_RESULT response.
 
         Args:
-            cmd: UpdateConfigCommand with config updates.
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            result: Reboot result dictionary.
+        """
+        response_envelope = create_reboot_result(
+            success=result["success"],
+            message=result["message"],
+            scheduled_time=result.get("scheduled_time"),
+            request_id=request_id,
+        )
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent REBOOT_RESULT to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send REBOOT_RESULT: {e}")
+
+    def _handle_config_update(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle CONFIG_UPDATE - update local configuration.
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        # Decode payload
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+        except Exception as e:
+            logger.error(f"Failed to decode CONFIG_UPDATE payload: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    f"Invalid payload: {e}",
+                )
+            )
+            return
+
+        updates = payload_data.get("updates", {})
+        logger.info(f"Config update requested: {list(updates.keys())}")
+
+        # Process config updates
+        result = self._process_config_update(updates)
+
+        # Send response
+        asyncio.create_task(self._send_config_result(source_hash, envelope.request_id, result))
+
+    def _process_config_update(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """Process configuration updates.
+
+        Args:
+            updates: Dictionary of config keys to update.
 
         Returns:
-            UpdateConfigResult with updated keys.
+            Dictionary with success, message, updated_keys.
         """
-        logger.info(f"Config update requested: {list(cmd.config_updates.keys())}")
-
         # For now, just acknowledge - actual config updates would need
         # integration with config service
-        updated_keys = list(cmd.config_updates.keys())
+        updated_keys = list(updates.keys())
 
-        return UpdateConfigResult(
-            success=True,
-            message=f"Updated {len(updated_keys)} config keys",
-            updated_keys=updated_keys,
-        )
-
-    def _send_response(
-        self,
-        destination: str,
-        request_id: str,
-        response: StatusResponse | ExecResult | RebootResult | UpdateConfigResult,
-    ) -> None:
-        """Send RPC response to requester.
-
-        Args:
-            destination: Destination hash to send response to.
-            request_id: Request ID for correlation.
-            response: Response message.
-        """
-        payload = response.to_dict()
-        payload["request_id"] = request_id
-        payload["protocol"] = "rpc"
-
-        logger.debug(f"Sending {response.type} response to {destination[:16]}...")
-
-        if not self.lxmf_service.send_message(destination, payload):
-            logger.error(f"Failed to send response to {destination}")
-
-    def _send_error_response(
-        self,
-        destination: str,
-        request_id: str,
-        error: str,
-    ) -> None:
-        """Send error response to requester.
-
-        Args:
-            destination: Destination hash.
-            request_id: Request ID for correlation.
-            error: Error message.
-        """
-        payload = {
-            "type": "error",
-            "request_id": request_id,
-            "protocol": "rpc",
-            "error": error,
+        return {
+            "success": True,
+            "message": f"Updated {len(updated_keys)} config keys",
+            "updated_keys": updated_keys,
         }
 
-        logger.debug(f"Sending error response to {destination[:16]}...")
-        self.lxmf_service.send_message(destination, payload)
+    async def _send_config_result(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        result: dict[str, Any],
+    ) -> None:
+        """Send CONFIG_RESULT response.
+
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            result: Config result dictionary.
+        """
+        response_envelope = create_config_result(
+            success=result["success"],
+            message=result["message"],
+            updated_keys=result["updated_keys"],
+            request_id=request_id,
+        )
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent CONFIG_RESULT to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send CONFIG_RESULT: {e}")
+
+    async def _send_error(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        error_code: int,
+        message: str,
+    ) -> None:
+        """Send ERROR response.
+
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            error_code: Error code.
+            message: Error message.
+        """
+        error_envelope = create_error(
+            error_code=error_code,
+            message=message,
+            request_id=request_id,
+        )
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=error_envelope.message_type,
+                payload=error_envelope.payload,
+                request_id=error_envelope.request_id,
+            )
+            logger.debug(f"Sent ERROR to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send ERROR: {e}")
 
     # System information helpers
+
+    def _gather_status(self) -> dict[str, Any]:
+        """Gather system status information.
+
+        Returns:
+            Dictionary with uptime, ip, services, disk_used, disk_total.
+        """
+        return {
+            "uptime": self._get_uptime(),
+            "ip": self._get_ip_address(),
+            "services": self._get_services(),
+            "disk_used": self._get_disk_usage()[0],
+            "disk_total": self._get_disk_usage()[1],
+        }
 
     def _get_uptime(self) -> int:
         """Get system uptime in seconds.
@@ -420,7 +684,7 @@ class RPCServer:
             # Connect to external address to find default interface IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
+            ip: str = s.getsockname()[0]
             s.close()
             return ip
         except Exception:
@@ -488,23 +752,23 @@ class RPCServer:
 _rpc_server: RPCServer | None = None
 
 
-def get_rpc_server(lxmf_service: LXMFService | None = None) -> RPCServer:
+def get_rpc_server(styrene_protocol: "StyreneProtocol | None" = None) -> RPCServer:
     """Get the singleton RPCServer instance.
 
     Args:
-        lxmf_service: LXMF service (required on first call).
+        styrene_protocol: StyreneProtocol instance (required on first call).
 
     Returns:
         The singleton RPCServer instance.
 
     Raises:
-        ValueError: If called without lxmf_service before initialization.
+        ValueError: If called without styrene_protocol before initialization.
     """
     global _rpc_server
 
     if _rpc_server is None:
-        if lxmf_service is None:
-            raise ValueError("lxmf_service required for first initialization")
-        _rpc_server = RPCServer(lxmf_service)
+        if styrene_protocol is None:
+            raise ValueError("styrene_protocol required for first initialization")
+        _rpc_server = RPCServer(styrene_protocol)
 
     return _rpc_server

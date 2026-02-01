@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-
 # -----------------------------------------------------------------------------
 # Enums
 # -----------------------------------------------------------------------------
@@ -55,8 +54,8 @@ class GatewayMode(Enum):
 
 
 @dataclass(frozen=True)
-class ConfigValidationError:
-    """Represents a configuration validation error.
+class ConfigFieldError:
+    """Represents a single configuration field validation error.
 
     Attributes:
         field: Dot-notation path to the problematic field (e.g., "mesh.channel").
@@ -86,16 +85,16 @@ class ConfigLoadError(Exception):
         super().__init__(message)
 
 
-class ConfigValidationErrors(Exception):
+class ConfigValidationError(Exception):
     """Raised when configuration validation fails.
 
     Contains a list of all validation errors encountered.
 
     Attributes:
-        errors: List of ConfigValidationError instances.
+        errors: List of ConfigFieldError instances.
     """
 
-    def __init__(self, errors: list[ConfigValidationError]) -> None:
+    def __init__(self, errors: list[ConfigFieldError]) -> None:
         self.errors = errors
         messages = [str(e) for e in errors]
         super().__init__(f"Configuration validation failed: {'; '.join(messages)}")
@@ -284,6 +283,28 @@ class ChatConfig:
     persist_messages: bool = True
 
 
+@dataclass
+class IPCConfig:
+    """IPC control socket configuration.
+
+    Configures the Unix socket used for CLI/TUI communication with the daemon.
+
+    Attributes:
+        enabled: Whether to enable the IPC control socket.
+        socket_path: Path to Unix socket (None = auto-detect).
+            Auto-detection order:
+            1. $STYRENED_SOCKET environment variable
+            2. /run/styrened/control.sock (system daemon)
+            3. $XDG_RUNTIME_DIR/styrened/control.sock (user session)
+            4. ~/.local/run/styrened/control.sock (fallback)
+        socket_mode: File permissions for socket (default: 0o660).
+    """
+
+    enabled: bool = True
+    socket_path: Path | None = None
+    socket_mode: int = 0o660
+
+
 # -----------------------------------------------------------------------------
 # Core configuration root
 # -----------------------------------------------------------------------------
@@ -302,6 +323,7 @@ class CoreConfig:
         discovery: Device discovery configuration.
         chat: Chat and messaging configuration.
         api: HTTP API configuration.
+        ipc: IPC control socket configuration.
     """
 
     reticulum: ReticulumConfig = field(default_factory=ReticulumConfig)
@@ -309,3 +331,4 @@ class CoreConfig:
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
     api: APIConfig = field(default_factory=APIConfig)
+    ipc: IPCConfig = field(default_factory=IPCConfig)

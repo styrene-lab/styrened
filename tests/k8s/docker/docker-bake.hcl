@@ -61,8 +61,8 @@ function "release_tags" {
 
 # Base target configuration
 target "default" {
-  dockerfile = "Dockerfile"
-  context    = "../../.."
+  dockerfile = "tests/k8s/docker/Dockerfile"
+  context    = "../../.."  # styrened root
   platforms  = PLATFORMS
 
   labels = {

@@ -1,0 +1,244 @@
+# Production Values Override for Styrened
+#
+# This file would live at: vanderlyn/apps/styrened/values.yaml
+# Referenced by the ArgoCD Application multi-source configuration
+#
+# Purpose: Override test chart defaults with production-specific settings
+
+# Number of styrened replicas for production mesh
+# Recommendation: 3+ for high availability
+replicaCount: 3
+
+# Container image configuration
+image:
+  # Production image (not test image)
+  repository: ghcr.io/styrene-lab/styrened
+
+  # Version strategy:
+  # - latest: Always use newest release (not recommended for production)
+  # - v0.2.1: Pin to specific version (recommended)
+  # - edge: Latest main branch build (for testing pre-release features)
+  tag: latest  # Change to specific version when stable
+
+  # Always pull for production to ensure latest security patches
+  pullPolicy: Always
+
+# ImagePullSecret for GHCR access
+# Must be created manually in styrened namespace:
+#   kubectl create secret docker-registry ghcr-secret \
+#     --docker-server=ghcr.io \
+#     --docker-username=$GITHUB_ACTOR \
+#     --docker-password=$GITHUB_TOKEN \
+#     -n styrened
+imagePullSecrets:
+  - name: ghcr-secret
+
+# Resource limits for production workload
+# Adjust based on actual usage metrics
+resources:
+  limits:
+    cpu: 500m      # Max CPU (half a core)
+    memory: 512Mi  # Max memory
+  requests:
+    cpu: 100m      # Guaranteed CPU
+    memory: 128Mi  # Guaranteed memory
+
+# Styrene application configuration
+styrene:
+  reticulum:
+    # Mesh operation mode
+    # - standalone: Independent node (no hub)
+    # - hub: Central router for star topology
+    # - peer: Connect to hub node
+    mode: standalone
+
+    # Enable transport mode for multi-hop routing
+    # true: Act as mesh router
+    # false: Endpoint only
+    transport_enabled: true
+
+    # Announce interval (seconds)
+    # Production: 600-1800 (10-30 minutes)
+    # Testing: 60-300 (1-5 minutes)
+    announce_interval: 600
+
+  # RPC server configuration
+  rpc:
+    enabled: true
+    # bind_address: "0.0.0.0"  # Default: listen on all interfaces
+    # bind_port: 5820           # Default: 5820
+
+  # Device discovery configuration
+  discovery:
+    announce_interval: 600  # Match reticulum announce interval
+
+  # Auto-reply to chat messages
+  chat:
+    auto_reply_enabled: false
+    # auto_reply_message: "This is an automated Styrene node"
+
+  # HTTP API (optional - for monitoring/control)
+  # Requires ingress configuration below
+  # api:
+  #   enabled: false
+  #   host: "0.0.0.0"
+  #   port: 8000
+
+# RNS (Reticulum) network configuration
+rns:
+  enable_transport: true  # Must match styrene.reticulum.transport_enabled
+  share_instance: true    # Allow shared RNS instance
+
+  interfaces:
+    # TCP Server Interface for pod-to-pod mesh communication
+    - type: TCPServerInterface
+      enabled: true
+      listen_ip: "0.0.0.0"
+      listen_port: 4242
+
+    # Auto Interface (LAN discovery) - disabled in K8s
+    - type: AutoInterface
+      enabled: false
+
+    # Optional: UDP Interface for external mesh connectivity
+    # - type: UDPInterface
+    #   enabled: false
+    #   listen_ip: "0.0.0.0"
+    #   listen_port: 4243
+
+# Service configuration
+service:
+  # Headless service for StatefulSet (required for stable pod DNS)
+  type: ClusterIP
+  clusterIP: None
+
+  ports:
+    - name: rns
+      port: 4242
+      targetPort: 4242
+      protocol: TCP
+
+    # Optional: HTTP API port
+    # - name: http-api
+    #   port: 8000
+    #   targetPort: 8000
+    #   protocol: TCP
+
+# Network policy for mesh isolation (optional)
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow all pods in namespace to communicate
+    - from:
+        - podSelector: {}
+
+    # Optional: Allow ingress from specific namespaces
+    # - from:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           name: mesh-clients
+
+  egress:
+    # Allow pod-to-pod within namespace
+    - to:
+        - podSelector: {}
+
+    # Allow DNS queries
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+
+    # Optional: Allow external mesh connectivity
+    # - to:
+    #     - ipBlock:
+    #         cidr: 0.0.0.0/0
+
+# Ingress for HTTP API (optional)
+# Requires: styrene.api.enabled: true
+# Requires: Traefik ingress controller
+# Requires: cert-manager for TLS
+ingress:
+  enabled: false
+  className: traefik
+
+  annotations:
+    # TLS certificate via cert-manager
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+    # Optional: Basic auth middleware
+    # traefik.ingress.kubernetes.io/router.middlewares: styrened-auth@kubernetescrd
+
+    # Optional: Rate limiting
+    # traefik.ingress.kubernetes.io/router.middlewares: styrened-ratelimit@kubernetescrd
+
+  hosts:
+    - host: styrened.vanderlyn.house
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: styrened-tls
+      hosts:
+        - styrened.vanderlyn.house
+
+# Persistent storage (optional - for message/identity persistence)
+# Uncomment if you need data to persist across pod restarts
+# persistence:
+#   enabled: true
+#   storageClass: longhorn  # Brutus uses Longhorn for block storage
+#   accessMode: ReadWriteOnce
+#   size: 1Gi
+#   mountPath: /data
+
+# Pod annotations (optional)
+podAnnotations: {}
+  # prometheus.io/scrape: "true"
+  # prometheus.io/port: "8000"
+  # prometheus.io/path: "/metrics"
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+# Container security context
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false  # RNS needs write access
+  runAsNonRoot: false  # RNS needs to bind to ports
+  runAsUser: 0
+
+# Node selector (optional - schedule on specific nodes)
+nodeSelector: {}
+  # kubernetes.io/hostname: brutus
+  # node.kubernetes.io/instance-type: raspberry-pi
+
+# Tolerations (optional - allow scheduling on tainted nodes)
+tolerations: []
+  # - key: node-role.kubernetes.io/master
+  #   operator: Exists
+  #   effect: NoSchedule
+
+# Affinity rules for pod placement
+affinity:
+  # Spread pods across nodes for high availability
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: styrened
+          topologyKey: kubernetes.io/hostname

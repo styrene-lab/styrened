@@ -135,19 +135,27 @@ class CoreLifecycle:
 
             from styrened.services.reticulum import generate_rns_config
 
-            # Generate RNS config from CoreConfig
-            config_content = generate_rns_config(self.config, client_only=self._client_only)
+            # Check for pre-existing RNS config (e.g., mounted in K8s)
+            # This allows containerized deployments to provide custom network interfaces
+            system_rns_config = Path.home() / ".reticulum" / "config"
+            if system_rns_config.exists():
+                logger.info(f"Using existing RNS config: {system_rns_config}")
+                config_dir = system_rns_config.parent
+                self._rns_config_dir = None  # Don't cleanup system config
+            else:
+                # Generate RNS config from CoreConfig
+                config_content = generate_rns_config(self.config, client_only=self._client_only)
 
-            # Create temporary config directory that persists for daemon lifetime
-            # Note: We use mkdtemp instead of TemporaryDirectory context manager
-            # because RNS needs the config to remain accessible while running
-            config_dir = Path(tempfile.mkdtemp(prefix="styrened_rns_"))
-            self._rns_config_dir = config_dir  # Store reference for cleanup
-            config_file = config_dir / "config"
-            config_file.write_text(config_content)
+                # Create temporary config directory that persists for daemon lifetime
+                # Note: We use mkdtemp instead of TemporaryDirectory context manager
+                # because RNS needs the config to remain accessible while running
+                config_dir = Path(tempfile.mkdtemp(prefix="styrened_rns_"))
+                self._rns_config_dir = config_dir  # Store reference for cleanup
+                config_file = config_dir / "config"
+                config_file.write_text(config_content)
 
             logger.info(f"Initializing RNS in {self.config.reticulum.mode.value} mode")
-            logger.debug(f"RNS config written to: {config_file}")
+            logger.debug(f"RNS config dir: {config_dir}")
 
             # Initialize RNS with temporary config
             rns_service = get_rns_service()

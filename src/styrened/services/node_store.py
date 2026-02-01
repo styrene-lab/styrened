@@ -28,6 +28,7 @@ the complexity of connection pooling for this use case.
 """
 
 import logging
+import re
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -39,6 +40,25 @@ import platformdirs
 from styrened.models.mesh_device import DeviceType, MeshDevice
 
 logger = logging.getLogger(__name__)
+
+# Validation pattern for 32-character hex hashes (RNS identity/destination hashes)
+_HEX_HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{32}$")
+
+
+def _is_valid_hash(h: str | None) -> bool:
+    """Validate a 32-character hex hash.
+
+    RNS identity and destination hashes are 16 bytes (128 bits),
+    represented as 32 hexadecimal characters.
+
+    Args:
+        h: Hash string to validate.
+
+    Returns:
+        True if valid 32-char hex string, False otherwise.
+    """
+    return h is not None and bool(_HEX_HASH_PATTERN.match(h))
+
 
 # Global lock for thread-safe database operations
 # RNS announce handlers run in separate threads
@@ -113,6 +133,12 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
+    """)
+
+    # Index on lxmf_destination_hash for message sending lookups
+    # This enables efficient identity_hash lookup when sending to LXMF destinations
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_lxmf_destination_hash ON nodes(lxmf_destination_hash)
     """)
 
     conn.commit()
@@ -193,7 +219,19 @@ class NodeStore:
 
         Args:
             device: MeshDevice to persist.
+
+        Note:
+            Invalid hashes are rejected with a warning log. This protects
+            against malformed data from untrusted mesh peers.
         """
+        # Validate hashes from potentially untrusted mesh peers
+        if not _is_valid_hash(device.destination_hash):
+            logger.warning(f"Invalid destination_hash rejected: {device.destination_hash!r}")
+            return
+        if not _is_valid_hash(device.identity_hash):
+            logger.warning(f"Invalid identity_hash rejected: {device.identity_hash!r}")
+            return
+
         with _db_lock:
             with self._connection() as conn:
                 # Serialize capabilities
@@ -275,16 +313,16 @@ class NodeStore:
             return None
 
     def get_identity_for_destination(self, destination_hash: str) -> str | None:
-        """Get identity hash for a destination hash.
+        """Get identity hash for an operator destination hash.
 
-        This is the key lookup for sending messages: given a destination
-        hash (what we display/store), get the identity hash needed for
-        RNS.Identity.recall().
+        This lookup is used when we have the operator destination hash
+        (from `styrene_node:operator` announces). For LXMF destinations,
+        use get_identity_for_lxmf_destination() instead.
 
         Thread-safe: read operations allow concurrent access.
 
         Args:
-            destination_hash: Hex-encoded destination hash.
+            destination_hash: Hex-encoded operator destination hash.
 
         Returns:
             Identity hash if found, None otherwise.
@@ -295,13 +333,28 @@ class NodeStore:
                 (destination_hash,),
             ).fetchone()
 
-            return row["identity_hash"] if row else None
+            if row:
+                identity_hash: str = row["identity_hash"]
+                logger.debug(
+                    f"[HASH] NodeStore lookup: operator_dest={destination_hash[:16]}... "
+                    f"-> identity_hash={identity_hash[:16]}..."
+                )
+                return identity_hash
+            else:
+                logger.debug(
+                    f"[HASH] NodeStore lookup: operator_dest={destination_hash[:16]}... "
+                    f"-> NOT FOUND"
+                )
+                return None
 
     def get_identity_for_lxmf_destination(self, lxmf_destination_hash: str) -> str | None:
         """Get identity hash for an LXMF destination hash.
 
-        LXMF destinations are derived from the same identity as operator
-        destinations, so we can look up by LXMF dest to find the identity.
+        This is the KEY lookup for sending LXMF messages:
+        - We have the target's LXMF destination_hash (what we want to send to)
+        - We need the identity_hash to call RNS.Identity.recall()
+        - The LXMF destination is different from the operator destination,
+          but both share the same identity_hash
 
         Thread-safe: read operations allow concurrent access.
 
@@ -317,7 +370,19 @@ class NodeStore:
                 (lxmf_destination_hash,),
             ).fetchone()
 
-            return row["identity_hash"] if row else None
+            if row:
+                identity_hash: str = row["identity_hash"]
+                logger.debug(
+                    f"[HASH] NodeStore lookup: lxmf_dest={lxmf_destination_hash[:16]}... "
+                    f"-> identity_hash={identity_hash[:16]}..."
+                )
+                return identity_hash
+            else:
+                logger.debug(
+                    f"[HASH] NodeStore lookup: lxmf_dest={lxmf_destination_hash[:16]}... "
+                    f"-> NOT FOUND (node may not have announced with LXMF dest in app_data)"
+                )
+                return None
 
     def get_all_nodes(self) -> list[MeshDevice]:
         """Get all stored nodes.

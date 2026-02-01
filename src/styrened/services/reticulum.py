@@ -14,11 +14,63 @@ Config path priority (matches Reticulum behavior):
 2. /etc/reticulum (system-wide)
 3. ~/.config/reticulum (XDG compliant)
 4. ~/.reticulum (legacy default)
+
+## Hash Architecture for RNS/LXMF
+
+Understanding the three hash types is CRITICAL for message delivery:
+
+1. **identity_hash** (16 bytes, 32 hex chars)
+   - Hash of the RNS Identity's public key (Ed25519/X25519)
+   - Computed as: `RNS.Identity.full_hash(public_key)[:16]`
+   - Used for: `RNS.Identity.recall(hash, from_identity_hash=True)`
+   - Stored by RNS after `RNS.Identity.remember()` calls
+   - This is the KEY to look up an identity for sending messages
+
+2. **destination_hash** (16 bytes, 32 hex chars)
+   - Hash of identity + app_name + aspects
+   - Computed as: `RNS.Identity.full_hash(identity_hash + app_name + aspects)[:16]`
+   - Used for: Routing, display to users, path discovery
+   - Examples:
+     - Operator destination: hash(identity + "styrene_node" + "operator")
+     - LXMF delivery: hash(identity + "lxmf" + "delivery")
+   - SAME identity can have MULTIPLE different destination_hashes
+
+3. **packet_hash** (32 bytes)
+   - Hash of the announce packet itself
+   - Used internally by RNS for deduplication
+   - We pass this to `RNS.Identity.remember()` but don't use it otherwise
+
+### Message Sending Flow
+
+To send an LXMF message to a destination_hash:
+
+1. Look up identity_hash from destination_hash (via NodeStore)
+2. Call `RNS.Identity.recall(identity_hash, from_identity_hash=True)`
+3. Create `RNS.Destination(identity, OUT, SINGLE, "lxmf", "delivery")`
+4. Send message to that destination
+
+### The Mismatch Problem
+
+When we receive an announce for `styrene_node:operator`:
+- We get destination_hash = hash(identity + "styrene_node" + "operator")
+- We store identity_hash in NodeStore keyed by this destination_hash
+
+When we want to send to LXMF:
+- We have target's LXMF destination_hash = hash(identity + "lxmf" + "delivery")
+- This is a DIFFERENT hash than the operator destination_hash
+- NodeStore lookup by LXMF destination_hash fails!
+
+### Solution
+
+1. Parse LXMF destination from announce app_data (Styrene nodes include it)
+2. Store LXMF destination -> identity_hash mapping in NodeStore
+3. When sending, look up identity_hash by LXMF destination_hash
 """
 
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +97,38 @@ logger = logging.getLogger(__name__)
 
 # Operator identity storage
 OPERATOR_IDENTITY_PATH = Path.home() / ".styrene" / "operator.key"
+
+# Known LXMF application identity paths (in priority order)
+# TODO(2026-04): Review identity detection paths - the LXMF ecosystem may have
+# evolved with new applications or changed storage conventions. Check for:
+# - New mesh chat applications (beyond NomadNet, Sideband, MeshChat)
+# - Changed default paths in existing applications
+# - XDG base directory adoption
+# - Any standardization efforts in the Reticulum community
+KNOWN_LXMF_IDENTITY_PATHS: list[tuple[str, Path]] = [
+    # NomadNet - checks XDG, system, and legacy paths
+    ("NomadNet", Path.home() / ".nomadnetwork" / "storage" / "identity"),
+    ("NomadNet (XDG)", Path.home() / ".config" / "nomadnetwork" / "storage" / "identity"),
+    ("NomadNet (system)", Path("/etc/nomadnetwork/storage/identity")),
+    # Sideband - Android/desktop LXMF client
+    ("Sideband", Path.home() / ".config" / "sideband" / "identity"),
+    ("Sideband (legacy)", Path.home() / ".sideband" / "identity"),
+    # MeshChat
+    ("MeshChat", Path.home() / ".config" / "meshchat" / "identity"),
+    ("MeshChat (legacy)", Path.home() / ".meshchat" / "identity"),
+    # Generic LXMF storage
+    ("LXMF", Path.home() / ".config" / "lxmf" / "identity"),
+    ("LXMF (legacy)", Path.home() / ".lxmf" / "identity"),
+]
+
+# Preferred identity paths for symlinking (one per application, XDG preferred)
+# These are the paths we'll create symlinks at when sharing styrened's identity
+LXMF_SYMLINK_TARGETS: dict[str, Path] = {
+    "nomadnet": Path.home() / ".nomadnetwork" / "storage" / "identity",
+    "sideband": Path.home() / ".config" / "sideband" / "identity",
+    "meshchat": Path.home() / ".config" / "meshchat" / "identity",
+    "lxmf": Path.home() / ".config" / "lxmf" / "identity",
+}
 
 
 def get_reticulum_config_paths() -> list[Path]:
@@ -259,11 +343,374 @@ def get_reticulum_config_state(config_dir: Path | None = None) -> Any:
 # Operator Identity Management
 
 
-def ensure_operator_identity() -> str:
+def detect_existing_lxmf_identity() -> tuple[str, Path] | None:
+    """Detect existing LXMF identity from other applications.
+
+    Searches known LXMF application paths for an existing identity file.
+    This allows styrened to reuse an identity from NomadNet, Sideband,
+    MeshChat, or other LXMF applications.
+
+    Returns:
+        Tuple of (application_name, path) if found, None otherwise.
+    """
+    for app_name, path in KNOWN_LXMF_IDENTITY_PATHS:
+        if path.exists() and path.is_file():
+            try:
+                # Verify it's a valid identity file (should be readable)
+                content = path.read_bytes()
+                if len(content) >= 32:  # Minimum size for RNS identity
+                    logger.debug(f"Found existing identity from {app_name} at {path}")
+                    return (app_name, path)
+            except (OSError, PermissionError) as e:
+                logger.debug(f"Cannot read identity at {path}: {e}")
+                continue
+    return None
+
+
+@dataclass
+class SymlinkResult:
+    """Result of a symlink operation."""
+
+    app: str
+    path: Path
+    success: bool
+    message: str
+    was_existing: bool = False  # True if path already existed (file/symlink)
+    was_symlink: bool = False  # True if was already a symlink
+    backed_up_to: Path | None = None  # Backup path if original was backed up
+
+
+def get_identity_sharing_status() -> dict[str, dict[str, Any]]:
+    """Get the current identity sharing status for all known LXMF applications.
+
+    Returns:
+        Dictionary mapping app names to their status:
+        - path: The identity path for this app
+        - exists: Whether the path exists
+        - is_symlink: Whether it's a symlink
+        - points_to_styrened: Whether it points to styrened's identity
+        - symlink_target: The symlink target if it's a symlink
+    """
+    status: dict[str, dict[str, Any]] = {}
+
+    for app, path in LXMF_SYMLINK_TARGETS.items():
+        app_status: dict[str, Any] = {
+            "path": path,
+            "exists": path.exists() or path.is_symlink(),  # is_symlink for broken links
+            "is_symlink": path.is_symlink(),
+            "points_to_styrened": False,
+            "symlink_target": None,
+        }
+
+        if path.is_symlink():
+            try:
+                target = path.resolve()
+                app_status["symlink_target"] = target
+                app_status["points_to_styrened"] = target == OPERATOR_IDENTITY_PATH.resolve()
+            except OSError:
+                pass  # Broken symlink
+
+        status[app] = app_status
+
+    return status
+
+
+def share_identity_with_apps(
+    apps: list[str] | None = None,
+    backup: bool = True,
+    force: bool = False,
+) -> list[SymlinkResult]:
+    """Create symlinks from other LXMF applications to styrened's identity.
+
+    This makes styrened's identity the source of truth, with other applications
+    (NomadNet, Sideband, MeshChat) symlinking to it. This is the inverse of
+    detect_existing_lxmf_identity() - instead of styrened adopting an existing
+    identity, other apps adopt styrened's identity.
+
+    Args:
+        apps: List of app names to create symlinks for. If None, all known apps.
+              Valid names: "nomadnet", "sideband", "meshchat", "lxmf"
+        backup: If True, backup existing identity files before replacing.
+        force: If True, replace existing files/symlinks. If False, skip existing.
+
+    Returns:
+        List of SymlinkResult objects describing what was done for each app.
+
+    Raises:
+        FileNotFoundError: If styrened's identity doesn't exist yet.
+    """
+    if not OPERATOR_IDENTITY_PATH.exists():
+        raise FileNotFoundError(
+            f"Styrened identity not found at {OPERATOR_IDENTITY_PATH}. "
+            "Run 'styrened identity --create' first."
+        )
+
+    target_apps = apps if apps else list(LXMF_SYMLINK_TARGETS.keys())
+    results: list[SymlinkResult] = []
+
+    for app in target_apps:
+        if app not in LXMF_SYMLINK_TARGETS:
+            results.append(
+                SymlinkResult(
+                    app=app,
+                    path=Path(),
+                    success=False,
+                    message=f"Unknown application: {app}",
+                )
+            )
+            continue
+
+        path = LXMF_SYMLINK_TARGETS[app]
+
+        # Check if already correctly symlinked
+        if path.is_symlink():
+            try:
+                if path.resolve() == OPERATOR_IDENTITY_PATH.resolve():
+                    results.append(
+                        SymlinkResult(
+                            app=app,
+                            path=path,
+                            success=True,
+                            message="Already symlinked to styrened",
+                            was_existing=True,
+                            was_symlink=True,
+                        )
+                    )
+                    continue
+            except OSError:
+                pass  # Broken symlink, will be replaced
+
+        # Handle existing file or symlink
+        path_exists = path.exists() or path.is_symlink()
+        backed_up_to: Path | None = None
+
+        if path_exists:
+            if not force:
+                results.append(
+                    SymlinkResult(
+                        app=app,
+                        path=path,
+                        success=False,
+                        message=f"Path exists, use force=True to replace: {path}",
+                        was_existing=True,
+                        was_symlink=path.is_symlink(),
+                    )
+                )
+                continue
+
+            # Backup or remove existing
+            if backup and path.exists() and not path.is_symlink():
+                backed_up_to = path.with_suffix(".key.bak")
+                counter = 1
+                while backed_up_to.exists():
+                    backed_up_to = path.with_suffix(f".key.bak.{counter}")
+                    counter += 1
+                try:
+                    path.rename(backed_up_to)
+                    logger.info(f"Backed up {path} to {backed_up_to}")
+                except OSError as e:
+                    results.append(
+                        SymlinkResult(
+                            app=app,
+                            path=path,
+                            success=False,
+                            message=f"Failed to backup: {e}",
+                            was_existing=True,
+                        )
+                    )
+                    continue
+            else:
+                # Remove existing symlink or file (if no backup requested)
+                try:
+                    path.unlink()
+                except OSError as e:
+                    results.append(
+                        SymlinkResult(
+                            app=app,
+                            path=path,
+                            success=False,
+                            message=f"Failed to remove existing: {e}",
+                            was_existing=True,
+                            was_symlink=path.is_symlink(),
+                        )
+                    )
+                    continue
+
+        # Create parent directories
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            results.append(
+                SymlinkResult(
+                    app=app,
+                    path=path,
+                    success=False,
+                    message=f"Failed to create directory: {e}",
+                )
+            )
+            continue
+
+        # Create symlink
+        try:
+            path.symlink_to(OPERATOR_IDENTITY_PATH)
+            logger.info(f"Created symlink: {path} -> {OPERATOR_IDENTITY_PATH}")
+            results.append(
+                SymlinkResult(
+                    app=app,
+                    path=path,
+                    success=True,
+                    message=f"Symlinked to {OPERATOR_IDENTITY_PATH}",
+                    was_existing=path_exists,
+                    backed_up_to=backed_up_to,
+                )
+            )
+        except OSError as e:
+            results.append(
+                SymlinkResult(
+                    app=app,
+                    path=path,
+                    success=False,
+                    message=f"Failed to create symlink: {e}",
+                )
+            )
+
+    return results
+
+
+def unshare_identity_from_apps(
+    apps: list[str] | None = None,
+    restore_backup: bool = True,
+) -> list[SymlinkResult]:
+    """Remove symlinks from other LXMF applications to styrened's identity.
+
+    This reverses share_identity_with_apps(), removing symlinks and optionally
+    restoring backed-up identity files.
+
+    Args:
+        apps: List of app names to remove symlinks for. If None, all known apps.
+        restore_backup: If True, restore .key.bak files if they exist.
+
+    Returns:
+        List of SymlinkResult objects describing what was done for each app.
+    """
+    target_apps = apps if apps else list(LXMF_SYMLINK_TARGETS.keys())
+    results: list[SymlinkResult] = []
+
+    for app in target_apps:
+        if app not in LXMF_SYMLINK_TARGETS:
+            results.append(
+                SymlinkResult(
+                    app=app,
+                    path=Path(),
+                    success=False,
+                    message=f"Unknown application: {app}",
+                )
+            )
+            continue
+
+        path = LXMF_SYMLINK_TARGETS[app]
+
+        # Check if it's a symlink pointing to styrened
+        if not path.is_symlink():
+            if path.exists():
+                results.append(
+                    SymlinkResult(
+                        app=app,
+                        path=path,
+                        success=False,
+                        message="Not a symlink, leaving unchanged",
+                        was_existing=True,
+                    )
+                )
+            else:
+                results.append(
+                    SymlinkResult(
+                        app=app,
+                        path=path,
+                        success=True,
+                        message="No symlink exists",
+                    )
+                )
+            continue
+
+        # Verify it points to styrened before removing
+        try:
+            if path.resolve() != OPERATOR_IDENTITY_PATH.resolve():
+                results.append(
+                    SymlinkResult(
+                        app=app,
+                        path=path,
+                        success=False,
+                        message="Symlink doesn't point to styrened, leaving unchanged",
+                        was_existing=True,
+                        was_symlink=True,
+                    )
+                )
+                continue
+        except OSError:
+            pass  # Broken symlink, remove it anyway
+
+        # Remove the symlink
+        try:
+            path.unlink()
+            logger.info(f"Removed symlink: {path}")
+        except OSError as e:
+            results.append(
+                SymlinkResult(
+                    app=app,
+                    path=path,
+                    success=False,
+                    message=f"Failed to remove symlink: {e}",
+                    was_existing=True,
+                    was_symlink=True,
+                )
+            )
+            continue
+
+        # Try to restore backup
+        restored_from: Path | None = None
+        if restore_backup:
+            # Look for backup files
+            backup_path = path.with_suffix(".key.bak")
+            if backup_path.exists():
+                try:
+                    backup_path.rename(path)
+                    restored_from = backup_path
+                    logger.info(f"Restored backup: {backup_path} -> {path}")
+                except OSError as e:
+                    logger.warning(f"Failed to restore backup {backup_path}: {e}")
+
+        message = "Symlink removed"
+        if restored_from:
+            message += f", restored from {restored_from}"
+
+        results.append(
+            SymlinkResult(
+                app=app,
+                path=path,
+                success=True,
+                message=message,
+                was_existing=True,
+                was_symlink=True,
+                backed_up_to=restored_from,  # Reusing field for "restored from"
+            )
+        )
+
+    return results
+
+
+def ensure_operator_identity(use_existing: bool = True) -> str:
     """Ensure operator has a Reticulum identity.
 
-    Generates a new RNS.Identity if one doesn't exist, or loads the existing one.
+    If no styrened identity exists, checks for existing LXMF identities from
+    other applications (NomadNet, Sideband, MeshChat) and copies them if found.
+    This allows users to maintain a single identity across all LXMF applications.
+
     The identity is stored in ~/.styrene/operator.key.
+
+    Args:
+        use_existing: If True (default), detect and copy existing LXMF identities
+                      from other applications. Set to False to always create new.
 
     Returns:
         Hex-encoded identity hash (destination address) - 32 hex characters (16 bytes).
@@ -276,7 +723,7 @@ def ensure_operator_identity() -> str:
         raise ImportError("RNS library not available. Install with: pip install rns")
 
     if OPERATOR_IDENTITY_PATH.exists():
-        # Load existing identity
+        # Load existing styrened identity
         identity = RNS.Identity.from_file(str(OPERATOR_IDENTITY_PATH))
         if identity is None:
             # RNS.Identity.from_file returns None on failure (doesn't raise)
@@ -287,6 +734,30 @@ def ensure_operator_identity() -> str:
             )
         return str(identity.hash.hex())
 
+    # No styrened identity exists - check for existing LXMF identities
+    if use_existing:
+        existing = detect_existing_lxmf_identity()
+        if existing:
+            app_name, source_path = existing
+            logger.info(
+                f"Found existing identity from {app_name} at {source_path}, "
+                f"copying to {OPERATOR_IDENTITY_PATH}"
+            )
+
+            # Load and verify the existing identity
+            identity = RNS.Identity.from_file(str(source_path))
+            if identity is not None:
+                # Ensure parent directory exists
+                OPERATOR_IDENTITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+                # Save a copy for styrened
+                identity.to_file(str(OPERATOR_IDENTITY_PATH))
+
+                logger.info(f"Identity imported from {app_name}: {identity.hash.hex()[:16]}...")
+                return str(identity.hash.hex())
+            else:
+                logger.warning(f"Could not load identity from {source_path}, creating new identity")
+
     # Generate new RNS.Identity with X25519/Ed25519 keys
     identity = RNS.Identity(create_keys=True)
 
@@ -296,6 +767,7 @@ def ensure_operator_identity() -> str:
     # Save identity to file
     identity.to_file(str(OPERATOR_IDENTITY_PATH))
 
+    logger.info(f"Created new operator identity: {identity.hash.hex()[:16]}...")
     return str(identity.hash.hex())
 
 
@@ -352,6 +824,11 @@ class StyreneAnnounceHandler:
     interfering with RNS path discovery. Path responses are a special type
     of announce used internally by RNS for routing, and consuming them in
     our handler would break message delivery.
+
+    Hash Types (see module docstring for full explanation):
+    - identity_hash: Hash of public key, used for RNS.Identity.recall()
+    - destination_hash: Hash of identity+app+aspects, used for routing
+    - LXMF destination_hash: Different from operator destination_hash but same identity
     """
 
     def __init__(
@@ -381,17 +858,23 @@ class StyreneAnnounceHandler:
     ) -> None:
         """Handle received announce from RNS.Transport.
 
-        IMPORTANT HASH DISTINCTION:
+        This method processes announces and stores the identity mapping needed
+        for sending LXMF messages later. The critical insight is that we need
+        to store BOTH the operator destination -> identity mapping AND the
+        LXMF destination -> identity mapping.
+
+        Hash Types:
         - destination_hash: Hash of the destination (identity + app + aspects).
-                           Used for routing. This is what we display to users.
+                           For operator announces: hash(identity + "styrene_node" + "operator")
+                           For LXMF announces: hash(identity + "lxmf" + "delivery")
         - announced_identity.hash: Hash of just the public key (identity hash).
-                                   Used for RNS.Identity.recall() when sending.
+                                   This is what RNS.Identity.recall() needs.
 
         Args:
-            destination_hash: Hash of the announcing destination.
+            destination_hash: Hash of the announcing destination (operator or LXMF).
             announced_identity: RNS.Identity of the announcer.
             app_data: Optional application data from the announce.
-            announce_packet_hash: Hash of the announce packet (unused).
+            announce_packet_hash: Hash of the announce packet (for RNS internal use).
             is_path_response: Whether this is a path response - skip these to not
                               interfere with RNS path discovery.
         """
@@ -406,17 +889,24 @@ class StyreneAnnounceHandler:
         # This is CRITICAL - we need this to send messages later
         identity_hash_hex = announced_identity.hash.hex() if announced_identity else dest_hash_hex
 
+        logger.debug(
+            f"[HASH] Announce received: "
+            f"destination_hash={dest_hash_hex[:16]}... (routing), "
+            f"identity_hash={identity_hash_hex[:16]}... (for recall)"
+        )
+
         # Check if we've seen this device before
         existing = self.discovered_devices.get(dest_hash_hex)
         announce_count = existing.announce_count + 1 if existing else 1
 
         # Remember the identity so RNS.Identity.recall() will work later
-        # This is critical for sending LXMF messages to this destination
+        # RNS stores identities keyed by identity_hash, not destination_hash
         if announced_identity is not None:
             try:
                 pub_key = announced_identity.get_public_key()
                 logger.info(
-                    f"Announce from {dest_hash_hex[:16]}: pub_key={pub_key is not None}, packet_hash={announce_packet_hash is not None}"
+                    f"[HASH] Storing identity: identity_hash={identity_hash_hex[:16]}... "
+                    f"(source: announce from destination {dest_hash_hex[:16]}...)"
                 )
                 if pub_key:
                     # Use destination_hash as packet_hash if not provided
@@ -427,19 +917,29 @@ class StyreneAnnounceHandler:
                         public_key=pub_key,
                         app_data=app_data,
                     )
-                    logger.info(f"Remembered identity for {dest_hash_hex[:16]}...")
+                    logger.debug(
+                        f"[HASH] Called RNS.Identity.remember(): "
+                        f"destination_hash={dest_hash_hex[:16]}..., "
+                        f"identity will be recalled via identity_hash={identity_hash_hex[:16]}..."
+                    )
 
-                    # Verify it worked - use from_identity_hash=True for identity hash lookup
+                    # Verify it worked - MUST use from_identity_hash=True
                     test_recall = RNS.Identity.recall(
                         announced_identity.hash, from_identity_hash=True
                     )
-                    logger.info(
-                        f"Verify recall({announced_identity.hash.hex()[:16]}): {test_recall is not None}"
-                    )
+                    if test_recall:
+                        logger.info(
+                            f"[HASH] Recall verified: identity_hash={identity_hash_hex[:16]}... -> OK"
+                        )
+                    else:
+                        logger.warning(
+                            f"[HASH] Recall FAILED: identity_hash={identity_hash_hex[:16]}... -> None"
+                        )
             except Exception as e:
                 logger.warning(f"Could not remember identity: {e}")
 
         # Create/update MeshDevice with both hashes
+        # The create_mesh_device function extracts LXMF destination from app_data
         device = create_mesh_device(
             destination_hash=dest_hash_hex,
             identity_hash=identity_hash_hex,
@@ -447,12 +947,27 @@ class StyreneAnnounceHandler:
             announce_count=announce_count,
         )
 
+        # Log LXMF destination if present (parsed from app_data by create_mesh_device)
+        if device.lxmf_destination_hash:
+            logger.info(
+                f"[HASH] Styrene node has LXMF destination: "
+                f"lxmf_dest={device.lxmf_destination_hash[:16]}..., "
+                f"identity_hash={identity_hash_hex[:16]}... (same identity, different destination)"
+            )
+
         self.discovered_devices[dest_hash_hex] = device
 
         # Persist to store if available
+        # NodeStore will index by both operator destination and LXMF destination
         if self.node_store is not None:
             try:
                 self.node_store.save_node(device)
+                logger.debug(
+                    f"[HASH] Persisted to NodeStore: "
+                    f"operator_dest={dest_hash_hex[:16]}..., "
+                    f"lxmf_dest={device.lxmf_destination_hash[:16] + '...' if device.lxmf_destination_hash else 'None'}, "
+                    f"identity={identity_hash_hex[:16]}..."
+                )
             except Exception as e:
                 logger.warning(f"Failed to persist node to store: {e}")
 

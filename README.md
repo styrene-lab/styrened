@@ -4,7 +4,7 @@ Headless Styrene daemon for edge deployments on Reticulum mesh networks.
 
 ## Overview
 
-`styrened` is a lightweight daemon built on **styrene-core** for running Styrene services without the TUI. Optimized for resource-constrained edge devices and designed for easy deployment via Nix flakes on NixOS.
+`styrened` is the Styrene daemon and library for Reticulum mesh networks. It provides both headless daemon functionality for edge devices and the core library used by styrene-tui. Optimized for resource-constrained edge devices and designed for easy deployment via Nix flakes on NixOS.
 
 **Key Features**:
 - **Zero UI dependencies** - No textual, minimal footprint
@@ -17,16 +17,21 @@ Headless Styrene daemon for edge deployments on Reticulum mesh networks.
 ## Architecture
 
 ```
-┌─────────────────────┐
-│  styrened           │  ← This package
-│  (daemon only)      │
-├─────────────────────┤
-│  styrene-core       │  ← Headless library
-│  (RNS, LXMF, etc.)  │
-├─────────────────────┤
-│  Reticulum Stack    │
-└─────────────────────┘
+┌──────────────────┐
+│  styrene-tui     │  ← Terminal UI (optional)
+├──────────────────┤
+│  styrened        │  ← This package: daemon + library
+│  (RNS, LXMF,     │
+│   protocols,     │
+│   services)      │
+├──────────────────┤
+│  Reticulum Stack │
+└──────────────────┘
 ```
+
+`styrened` serves two purposes:
+1. **As a library** - Provides RNS/LXMF services, protocols, and models used by styrene-tui
+2. **As a daemon** - Runs headless on edge devices for fleet management
 
 ## Installation
 
@@ -67,6 +72,62 @@ nix run github:styrene-lab/styrened
   };
 }
 ```
+
+### Containers / Kubernetes
+
+Multi-architecture OCI container images are published to GitHub Container Registry:
+
+```bash
+# Production image (app stage only)
+docker pull ghcr.io/styrene-lab/styrened:latest
+docker pull ghcr.io/styrene-lab/styrened:0.2.1
+
+# Edge builds (main branch)
+docker pull ghcr.io/styrene-lab/styrened:edge
+
+# Test images (includes test dependencies)
+docker pull ghcr.io/styrene-lab/styrened-test:latest
+```
+
+**Supported platforms**: `linux/amd64`, `linux/arm64`
+
+**Run container:**
+```bash
+docker run -d \
+  --name styrened \
+  -v ~/.styrene:/config \
+  -v styrene-data:/data \
+  ghcr.io/styrene-lab/styrened:latest
+```
+
+**Available tags:**
+- `latest` - Latest stable release (production image)
+- `edge` - Latest main branch build (production image)
+- `v0.2.1` - Specific release version
+- `<commit-sha>` - Build from specific commit
+
+See [tests/k8s/helm/styrened-test](tests/k8s/helm/styrened-test) for Kubernetes deployment examples.
+
+### Building from Source
+
+For local builds and development:
+
+```bash
+# Build production image
+make build-prod
+
+# Build test image (includes test dependencies)
+make build-test
+
+# Show version information
+make version
+```
+
+See [CONTAINERS.md](CONTAINERS.md) for complete build pipeline documentation, including:
+- Multi-architecture builds (amd64, arm64)
+- Pushing to GitHub Container Registry
+- CI/CD integration
+- Troubleshooting
 
 ## Usage
 
@@ -111,13 +172,13 @@ api:
 ### Programmatic Usage
 
 ```python
+import asyncio
 from styrened import StyreneDaemon
-from styrene_core.services.config import get_default_core_config
+from styrened.services.config import get_default_config
 
-config = get_default_core_config()
+config = get_default_config()
 daemon = StyreneDaemon(config)
 
-import asyncio
 asyncio.run(daemon.start())
 ```
 
@@ -179,15 +240,16 @@ api:
   port: 8000
 ```
 
-## Differences from `styrene` (TUI)
+## Differences from `styrene-tui`
 
-| Feature | styrene (TUI) | styrened (daemon) |
-|---------|---------------|-------------------|
+| Feature | styrene-tui | styrened |
+|---------|-------------|----------|
 | **UI** | Textual TUI | Headless only |
-| **Dependencies** | +textual, +psutil | styrene-core only |
-| **Size** | ~10MB | ~5MB |
-| **Use Case** | Interactive | Service/edge |
+| **Dependencies** | +textual, +psutil | Minimal (RNS, LXMF, msgpack) |
+| **Use Case** | Interactive operator | Service/edge device |
 | **Nix Support** | Python package | Nix flake + module |
+
+Both packages share the same underlying library code (protocols, services, models) which lives in styrened.
 
 ## Development
 
@@ -212,12 +274,14 @@ ruff check src/
 ## Requirements
 
 - Python 3.11+
-- styrene-core >= 0.1.0
+- RNS (Reticulum Network Stack)
+- LXMF
+- msgpack
 
 ## Related Projects
 
-- **styrene-core** - Headless RNS/LXMF library
-- **styrene** - Terminal UI (depends on styrene-core)
+- **[styrene-tui](https://github.com/styrene-lab/styrene-tui)** - Terminal UI for interactive operation
+- **[styrene](https://github.com/styrene-lab/styrene)** - Organization docs and research
 
 ## License
 
@@ -225,9 +289,28 @@ MIT License
 
 ## Documentation
 
-Full documentation coming soon.
+### API Reference
 
-For now, see:
-- [styrene-core docs](https://github.com/styrene-lab/styrene-core)
+Auto-generated API documentation is available at:
+
+**[styrene-lab.github.io/styrened](https://styrene-lab.github.io/styrened/)**
+
+The API reference is built from source using [pdoc](https://pdoc.dev) and updated automatically on each release.
+
+#### Generate Locally
+
+```bash
+# Install docs dependencies
+pip install -e ".[docs]"
+
+# Generate static docs to docs/api/
+make docs
+
+# Serve with live reload for development
+make docs-serve
+```
+
+### Related Documentation
+
 - [Reticulum docs](https://reticulum.network)
 - [LXMF docs](https://github.com/markqvist/LXMF)

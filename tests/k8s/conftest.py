@@ -1,13 +1,16 @@
 """Pytest configuration and fixtures for styrened k8s tests."""
 
 import os
+import time
 import uuid
+from collections.abc import Callable
+from datetime import UTC
 from pathlib import Path
-from typing import Callable, List, Optional
 
 import pytest
 
 from .harness import K8sTestHarness
+from .metrics_collector import MetricsCollector
 
 
 @pytest.fixture(scope="session")
@@ -56,6 +59,83 @@ def k8s_cluster(worker_id) -> K8sTestHarness:
     return harness
 
 
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_orphaned_namespaces(k8s_cluster: K8sTestHarness):
+    """Clean up orphaned test namespaces from previous runs before starting tests.
+
+    This prevents cluster pollution from interrupted test runs or cleanup failures.
+    Removes all namespaces with label styrened-test=true that are older than 10 minutes.
+    """
+    import json
+    import subprocess
+    from datetime import datetime, timedelta
+
+    # List all namespaces with our test label
+    result = subprocess.run(
+        ["kubectl", "get", "namespaces", "-l", "styrened-test=true", "-o", "json"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0 and result.stdout.strip():
+        try:
+            data = json.loads(result.stdout)
+            orphaned = []
+            now = datetime.now(UTC)
+
+            for ns in data.get("items", []):
+                name = ns["metadata"]["name"]
+                created_str = ns["metadata"]["creationTimestamp"]
+
+                # Parse creation time (ISO 8601 format)
+                created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                age = now - created
+
+                # Consider namespace orphaned if older than 10 minutes
+                if age > timedelta(minutes=10):
+                    orphaned.append((name, age))
+
+            if orphaned:
+                print(f"\n⚠️  Found {len(orphaned)} orphaned test namespace(s) from previous runs:")
+                for name, age in orphaned:
+                    age_min = int(age.total_seconds() / 60)
+                    print(f"   • {name} (age: {age_min}m)")
+
+                print("\n🧹 Cleaning up orphaned namespaces...")
+                for name, _ in orphaned:
+                    # Clean up Helm releases first
+                    helm_result = subprocess.run(
+                        ["helm", "list", "-n", name, "-q"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if helm_result.returncode == 0:
+                        for release in helm_result.stdout.strip().split("\n"):
+                            if release:
+                                print(f"   Uninstalling Helm release: {release}")
+                                subprocess.run(
+                                    ["helm", "uninstall", release, "-n", name],
+                                    capture_output=True,
+                                )
+
+                    # Delete namespace
+                    print(f"   Deleting namespace: {name}")
+                    del_result = subprocess.run(
+                        ["kubectl", "delete", "namespace", name, "--wait=false"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if del_result.returncode != 0:
+                        print(f"   ⚠️  Warning: Failed to delete {name}: {del_result.stderr}")
+
+                print("✓ Cleanup complete\n")
+
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"⚠️  Warning: Could not parse namespace list: {e}")
+
+    yield
+
+
 @pytest.fixture(scope="session")
 def long_running_daemon(k8s_cluster: K8sTestHarness, worker_id: str):
     """Session-scoped fixture for long-running daemon that persists across tests.
@@ -83,9 +163,16 @@ def long_running_daemon(k8s_cluster: K8sTestHarness, worker_id: str):
         worker_num = worker_id.replace("gw", "")
         namespace = f"styrene-daemon-w{worker_num}-{session_id}"
 
-    # Create namespace
+    # Create namespace with labels for tracking
     subprocess.run(
-        ["kubectl", "create", "namespace", namespace],
+        [
+            "kubectl",
+            "create",
+            "namespace",
+            namespace,
+            "--labels",
+            f"styrened-test=true,created-by=pytest,worker={worker_id},scope=session",
+        ],
         check=True,
         capture_output=True,
     )
@@ -121,10 +208,13 @@ def long_running_daemon(k8s_cluster: K8sTestHarness, worker_id: str):
     print(f"\n[k8s-tests:{worker_id}] Cleaning up session daemon: {namespace}")
 
     k8s_cluster.cleanup(release_name)
-    subprocess.run(
+    result = subprocess.run(
         ["kubectl", "delete", "namespace", namespace, "--wait=false"],
         capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        print(f"⚠️  Cleanup warning: Failed to delete namespace {namespace}: {result.stderr}")
 
     # Restore original namespace
     k8s_cluster.namespace = original_namespace
@@ -151,9 +241,16 @@ def test_namespace(k8s_cluster: K8sTestHarness, request) -> str:
         worker_num = worker_id.replace("gw", "")
         namespace = f"styrene-test-w{worker_num}-{test_id}"
 
-    # Create namespace
+    # Create namespace with labels for tracking
     subprocess.run(
-        ["kubectl", "create", "namespace", namespace],
+        [
+            "kubectl",
+            "create",
+            "namespace",
+            namespace,
+            "--labels",
+            f"styrened-test=true,created-by=pytest,worker={worker_id},scope=function",
+        ],
         check=True,
         capture_output=True,
     )
@@ -169,19 +266,20 @@ def test_namespace(k8s_cluster: K8sTestHarness, request) -> str:
     # Cleanup - delete namespace (cascades to all resources)
     print(f"\n[k8s-tests:{worker_id}] Cleaning up namespace: {namespace}")
 
-    subprocess.run(
+    result = subprocess.run(
         ["kubectl", "delete", "namespace", namespace, "--wait=false"],
         capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        print(f"⚠️  Cleanup warning: Failed to delete namespace {namespace}: {result.stderr}")
 
     # Restore original namespace
     k8s_cluster.namespace = original_namespace
 
 
 @pytest.fixture
-def styrened_stack(
-    k8s_cluster: K8sTestHarness, test_namespace: str
-) -> Callable[..., List[str]]:
+def styrened_stack(k8s_cluster: K8sTestHarness, test_namespace: str) -> Callable[..., list[str]]:
     """Function-level fixture providing styrened stack deployment.
 
     Returns a callable that deploys a stack and returns pod names.
@@ -200,9 +298,9 @@ def styrened_stack(
         transport_enabled: bool = False,
         announce_interval: int = 300,
         rpc_enabled: bool = True,
-        release_name: Optional[str] = None,
+        release_name: str | None = None,
         **kwargs,
-    ) -> List[str]:
+    ) -> list[str]:
         """Deploy styrened stack.
 
         Args:
@@ -233,9 +331,7 @@ def styrened_stack(
         # Wait for pods to be ready
         if not k8s_cluster.wait_for_ready(pods, timeout=120):
             # Collect logs for debugging
-            k8s_cluster.collect_logs(
-                pods, output_dir=Path("/tmp") / "styrene-test-logs"
-            )
+            k8s_cluster.collect_logs(pods, output_dir=Path("/tmp") / "styrene-test-logs")
             pytest.fail(f"Pods not ready after 120s: {pods}")
 
         deployed_releases.append(release_name)
@@ -247,6 +343,63 @@ def styrened_stack(
     for release in deployed_releases:
         print(f"\n[k8s-tests] Cleaning up release: {release}")
         k8s_cluster.cleanup(release)
+
+
+@pytest.fixture
+async def metrics_collector(k8s_cluster: K8sTestHarness, request) -> MetricsCollector:
+    """Function-level fixture for automatic metrics collection.
+
+    Collects periodic snapshots (default: 5 min) of pod metrics during test run.
+    Automatically stops collection and writes summary on test completion.
+
+    Environment variables:
+        METRICS_INTERVAL: Seconds between snapshots (default: 300 = 5 min)
+        METRICS_ENABLED: Set to "false" to disable collection (default: enabled)
+
+    Usage:
+        async def test_overnight(metrics_collector, styrened_stack):
+            pods = styrened_stack(replica_count=5)
+            await metrics_collector.start(pods)
+            # Metrics collected automatically in background
+            await asyncio.sleep(28800)  # 8 hours
+            # Fixture automatically stops and writes summary
+
+    Returns:
+        MetricsCollector instance (not yet started)
+    """
+    # Check if metrics collection is disabled
+    if os.getenv("METRICS_ENABLED", "true").lower() == "false":
+        # Return None-like collector that does nothing
+        class NoOpCollector:
+            async def start(self, pods):
+                pass
+
+            def stop(self):
+                pass
+
+        yield NoOpCollector()
+        return
+
+    # Generate unique run ID
+    test_name = request.node.name
+    run_id = f"{test_name}_{int(time.time())}"
+
+    # Get snapshot interval from environment
+    snapshot_interval = int(os.getenv("METRICS_INTERVAL", "300"))
+
+    # Create collector
+    collector = MetricsCollector(
+        harness=k8s_cluster,
+        run_id=run_id,
+        test_name=test_name,
+        snapshot_interval=snapshot_interval,
+    )
+
+    yield collector
+
+    # Automatic cleanup on test completion
+    if collector and hasattr(collector, "stop"):
+        collector.stop()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -272,7 +425,7 @@ def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line(
         "markers",
-        "slow: marks tests as slow (load/scaling tests)",
+        "slow: marks tests as slow (load/scaling tests, >10min)",
     )
     config.addinivalue_line(
         "markers",
@@ -289,6 +442,22 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "comprehensive: marks tests as comprehensive tests (deep validation, <30min)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "propagation: LXMF propagation and multi-hop routing tests",
+    )
+    config.addinivalue_line(
+        "markers",
+        "resilience: failover and recovery tests",
+    )
+    config.addinivalue_line(
+        "markers",
+        "convergence: mesh discovery and convergence tests",
+    )
+    config.addinivalue_line(
+        "markers",
+        "slow_extended: marks tests as very slow (overnight tests, 4-8+ hours)",
     )
 
 

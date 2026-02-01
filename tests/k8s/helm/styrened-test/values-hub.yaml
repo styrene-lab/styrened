@@ -1,0 +1,97 @@
+# Hub node values for styrened-test
+#
+# Deploy a single hub node that acts as a transport/routing node.
+# Peers connect to this hub via TCPClientInterface.
+#
+# Usage:
+#   helm install hub ./helm/styrened-test -f values-hub.yaml -n styrene-test
+
+replicaCount: 1
+
+image:
+  repository: styrened-test
+  tag: "local-amd64"
+  pullPolicy: Never
+
+resources:
+  limits:
+    cpu: 300m
+    memory: 384Mi
+  requests:
+    cpu: 150m
+    memory: 192Mi
+
+styrene:
+  reticulum:
+    mode: hub
+    transport_enabled: true
+    announce_interval: 30
+
+  rpc:
+    enabled: true
+
+  discovery:
+    announce_interval: 30
+
+  chat:
+    auto_reply_enabled: false
+
+rns:
+  enable_transport: true
+  share_instance: false
+  interfaces:
+    - type: TCPServerInterface
+      enabled: true
+      listen_ip: "0.0.0.0"
+      listen_port: 4242
+
+    - type: AutoInterface
+      enabled: false
+
+service:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: rns
+      port: 4242
+      targetPort: 4242
+      protocol: TCP
+
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+        - namespaceSelector: {}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53
+
+podAnnotations:
+  styrene.io/role: hub
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: false
+  runAsUser: 0
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

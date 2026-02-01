@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 
 def test_rns_service_import() -> None:
     """RNS service should import without errors."""
@@ -59,7 +57,7 @@ def test_auto_reply_instantiation() -> None:
     from styrened.models.config import ChatConfig
     from styrened.services.auto_reply import AutoReplyHandler
 
-    config = ChatConfig()
+    _config = ChatConfig()
     # AutoReplyHandler requires identity and router (RNS/LXMF objects)
     # For smoke test, just verify it can be imported and class exists
     # Full instantiation requires RNS/LXMF which needs network initialization
@@ -95,10 +93,12 @@ def test_node_store_basic_operations() -> None:
         db_path = Path(tmpdir) / "test_nodes.db"
         store = NodeStore(db_path)
 
-        # Create test device
+        # Create test device with valid 32-char hex hashes
+        dest_hash = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        identity_hash = "f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6"
         device = MeshDevice(
-            destination_hash="abc123",
-            identity_hash="def456",
+            destination_hash=dest_hash,
+            identity_hash=identity_hash,
             name="test-node",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=1234567890,
@@ -108,7 +108,7 @@ def test_node_store_basic_operations() -> None:
         store.save_node(device)
 
         # Retrieve
-        retrieved = store.get_node_by_destination("abc123")
+        retrieved = store.get_node_by_destination(dest_hash)
         assert retrieved is not None
         assert retrieved.name == "test-node"
         assert retrieved.device_type == DeviceType.STYRENE_NODE
@@ -145,9 +145,9 @@ def test_reticulum_service_import() -> None:
 def test_hub_connection_import() -> None:
     """Hub connection should import without errors."""
     from styrened.services.hub_connection import (
+        STYRENE_HUB_ADDRESS,
         HubConnection,
         get_hub_connection,
-        STYRENE_HUB_ADDRESS,
     )
 
     assert HubConnection is not None
@@ -178,8 +178,8 @@ def test_core_lifecycle_import() -> None:
 
 def test_core_lifecycle_instantiation() -> None:
     """CoreLifecycle should instantiate with CoreConfig."""
-    from styrened.services.lifecycle import CoreLifecycle
     from styrened.services.config import get_default_core_config
+    from styrened.services.lifecycle import CoreLifecycle
 
     config = get_default_core_config()
     lifecycle = CoreLifecycle(config)

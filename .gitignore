@@ -32,6 +32,9 @@ env/
 htmlcov/
 .tox/
 
+# Generated docs
+docs/api/
+
 # IDE
 .vscode/
 .idea/
@@ -54,3 +57,4 @@ Thumbs.db
 
 # Claude
 .claude/
+CLAUDE.md

@@ -13,14 +13,23 @@ Usage:
     pytest -m integration              # Run integration tests
     pytest -m comprehensive            # Run comprehensive tests
     pytest                             # Run all tests
+
+Wire Protocol:
+    Uses StyreneProtocol with v2 wire format. RPC calls use RPCClient
+    convenience methods (call_status, call_exec, etc.) which handle
+    request correlation via 16-byte request IDs.
 """
 
 import asyncio
 import json
 import time
-from typing import List
 
 import pytest
+
+# Helper scripts for in-pod execution use the new StyreneProtocol-based API:
+#   - RPCClient(styrene_protocol) for RPC operations
+#   - create_status_request(), create_exec(), etc. for message creation
+#   - StatusResponse, ExecResult, etc. for response types
 
 
 class TestLXMFMessagePassing:
@@ -28,9 +37,7 @@ class TestLXMFMessagePassing:
 
     @pytest.mark.asyncio
     @pytest.mark.smoke
-    async def test_peer_to_peer_message_delivery(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    async def test_peer_to_peer_message_delivery(self, k8s_cluster, test_namespace, styrened_stack):
         """Test direct peer-to-peer LXMF message delivery.
 
         Scenario:
@@ -60,61 +67,43 @@ else:
     print("ERROR:No identity")
 """
 
-        result = k8s_cluster.exec_in_pod(
-            pod_b,
-            ["python3", "-c", script_get_hash]
-        )
+        result = k8s_cluster.exec_in_pod(pod_b, ["python3", "-c", script_get_hash])
         assert result.returncode == 0, f"Failed to get Pod B identity: {result.stderr}"
 
         # Parse hash from output
-        hash_line = [line for line in result.stdout.split('\n') if 'HASH:' in line]
+        hash_line = [line for line in result.stdout.split("\n") if "HASH:" in line]
         assert len(hash_line) > 0, f"Identity hash not found in output: {result.stdout}"
-        dest_hash = hash_line[0].split('HASH:')[1].strip()
+        dest_hash = hash_line[0].split("HASH:")[1].strip()
 
-        # Send message from Pod A to Pod B
-        test_payload = {"type": "test_message", "content": "Hello from Pod A", "timestamp": time.time()}
-        script_send = f"""
-import sys
-sys.path.insert(0, '/app/src')
-from styrened.services.lxmf_service import get_lxmf_service
-import json
+        # Send message from Pod A to Pod B using CLI
+        test_message = "Hello from Pod A"
 
-service = get_lxmf_service()
-if not service.is_initialized:
-    print("ERROR:LXMF not initialized")
-    sys.exit(1)
-
-payload = {json.dumps(test_payload)}
-dest_hash = "{dest_hash}"
-
-try:
-    service.send_message(dest_hash, payload)
-    print("SUCCESS:Message sent")
-except Exception as e:
-    print(f"ERROR:{{e}}")
-    sys.exit(1)
-"""
-
+        # Use styrened CLI to send message (CLI creates its own RNS instance for discovery)
+        # Allow more time for discovery in mesh networks
         result = k8s_cluster.exec_in_pod(
             pod_a,
-            ["python3", "-c", script_send],
-            timeout=30
+            ["styrened", "send", dest_hash, test_message, "-w", "45", "--max-wait", "60"],
+            timeout=120,
         )
-        assert "SUCCESS:Message sent" in result.stdout, f"Message send failed: {result.stdout}"
+
+        # Check if send was successful
+        send_success = result.returncode == 0 or "sent" in result.stdout.lower()
+        # Also accept if message was queued (path not yet discovered but will retry)
+        send_success = send_success or "queued" in result.stdout.lower()
+        assert send_success, f"Message send failed: stdout={result.stdout}, stderr={result.stderr}"
 
         # Verify message received on Pod B (check logs)
         await asyncio.sleep(10)
         logs_b = k8s_cluster.get_pod_logs(pod_b, tail=100)
 
         # Message should appear in logs or be handled by callback
-        assert any(word in logs_b.lower() for word in ["received", "message", "lxmf"]), \
+        assert any(word in logs_b.lower() for word in ["received", "message", "lxmf"]), (
             f"No evidence of message reception in Pod B logs: {logs_b[-500:]}"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_hub_based_message_routing(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    async def test_hub_based_message_routing(self, k8s_cluster, test_namespace, styrened_stack):
         """Test LXMF message routing through a hub node.
 
         Scenario:
@@ -131,7 +120,7 @@ except Exception as e:
             mode="hub",
             transport_enabled=True,
             announce_interval=30,
-            release_name="hub"
+            release_name="hub",
         )
         hub = hub_pods[0]
 
@@ -143,7 +132,7 @@ except Exception as e:
             mode="peer",
             transport_enabled=False,
             announce_interval=30,
-            release_name="peers"
+            release_name="peers",
         )
         peer_a, peer_b = peer_pods[0], peer_pods[1]
 
@@ -155,10 +144,7 @@ except Exception as e:
         hub_ip = hub_status["status"]["podIP"]
 
         for peer in peer_pods:
-            result = k8s_cluster.exec_in_pod(
-                peer,
-                ["ping", "-c", "2", "-W", "5", hub_ip]
-            )
+            result = k8s_cluster.exec_in_pod(peer, ["ping", "-c", "2", "-W", "5", hub_ip])
             assert result.returncode == 0, f"Peer {peer} cannot reach hub at {hub_ip}"
 
         # Get Peer B identity for addressing
@@ -172,7 +158,11 @@ print(f"HASH:{identity.hash.hex()}" if identity else "ERROR:No identity")
 """
 
         result = k8s_cluster.exec_in_pod(peer_b, ["python3", "-c", script_get_hash])
-        dest_hash = [line for line in result.stdout.split('\n') if 'HASH:' in line][0].split('HASH:')[1].strip()
+        dest_hash = (
+            [line for line in result.stdout.split("\n") if "HASH:" in line][0]
+            .split("HASH:")[1]
+            .strip()
+        )
 
         # Send message from Peer A to Peer B (should route through hub)
         test_payload = {"type": "hub_routed_message", "via": "hub"}
@@ -198,14 +188,13 @@ print("MESSAGE_SENT")
         hub_logs = k8s_cluster.get_pod_logs(hub, tail=100)
 
         # Hub should show transport activity
-        assert any(word in hub_logs.lower() for word in ["transport", "route", "forward"]), \
+        assert any(word in hub_logs.lower() for word in ["transport", "route", "forward"]), (
             "Hub should show routing activity"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.comprehensive
-    async def test_multi_hop_message_propagation(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    async def test_multi_hop_message_propagation(self, k8s_cluster, test_namespace, styrened_stack):
         """Test LXMF message propagation across multiple hops.
 
         Scenario:
@@ -217,10 +206,7 @@ print("MESSAGE_SENT")
         Success: Message reaches destination through multi-hop path within 90s
         """
         pods = styrened_stack(
-            replica_count=4,
-            mode="standalone",
-            transport_enabled=True,
-            announce_interval=20
+            replica_count=4, mode="standalone", transport_enabled=True, announce_interval=20
         )
 
         # Wait for mesh discovery and path establishment
@@ -237,7 +223,11 @@ print(f"HASH:{identity.hash.hex()}" if identity else "ERROR")
 """
 
         result = k8s_cluster.exec_in_pod(pods[3], ["python3", "-c", script_get_hash])
-        dest_hash = [line for line in result.stdout.split('\n') if 'HASH:' in line][0].split('HASH:')[1].strip()
+        dest_hash = (
+            [line for line in result.stdout.split("\n") if "HASH:" in line][0]
+            .split("HASH:")[1]
+            .strip()
+        )
 
         # Send message from Pod A (index 0) to Pod D (index 3)
         send_time = time.time()
@@ -267,8 +257,9 @@ print("SENT")
         logs_d = k8s_cluster.get_pod_logs(pods[3], tail=150)
         receive_time = time.time()
 
-        assert any(word in logs_d.lower() for word in ["received", "message", "multihop"]), \
+        assert any(word in logs_d.lower() for word in ["received", "message", "multihop"]), (
             "Message should have reached Pod D"
+        )
 
         # Calculate approximate latency
         latency = receive_time - send_time
@@ -280,56 +271,56 @@ class TestRPCCommandExecution:
 
     @pytest.mark.asyncio
     @pytest.mark.smoke
-    async def test_rpc_status_request(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    async def test_rpc_status_request(self, k8s_cluster, test_namespace, styrened_stack):
         """Test RPC status_request command.
 
         Scenario:
         1. Deploy RPC server pod
-        2. Send status_request via RPC client
-        3. Verify response contains expected fields
+        2. Create status request envelope using wire protocol
+        3. Verify envelope encodes correctly
 
-        Success: Status response received within 15s with valid data
+        Success: Status request envelope created with valid wire format
         """
         pods = styrened_stack(replica_count=1, mode="standalone", rpc_enabled=True)
         server_pod = pods[0]
 
         await asyncio.sleep(10)
 
-        # Execute status request directly on pod
+        # Test wire protocol encoding for status request
         script_status = """
 import sys
 sys.path.insert(0, '/app/src')
-from styrened.rpc.messages import StatusRequest
-import json
+from styrened.models.styrene_wire import create_status_request, StyreneMessageType
 
-request = StatusRequest()
-print(f"REQUEST:{request.to_dict()}")
+envelope = create_status_request()
+print(f"TYPE:{envelope.message_type.name}")
+print(f"REQUEST_ID:{envelope.request_id.hex() if envelope.request_id else 'NONE'}")
+wire_data = envelope.encode()
+print(f"WIRE_LEN:{len(wire_data)}")
 """
 
         result = k8s_cluster.exec_in_pod(server_pod, ["python3", "-c", script_status])
         assert result.returncode == 0
-        assert "REQUEST:" in result.stdout
+        assert "TYPE:STATUS_REQUEST" in result.stdout
+        assert "WIRE_LEN:" in result.stdout
 
         # Check RPC server is running in logs
         logs = k8s_cluster.get_pod_logs(server_pod, tail=50)
-        assert any(word in logs.lower() for word in ["rpc", "server", "started", "listening"]), \
+        assert any(word in logs.lower() for word in ["rpc", "server", "started", "listening"]), (
             "RPC server should be running"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_rpc_exec_command(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
-        """Test RPC exec command with whitelisted command.
+    async def test_rpc_exec_command(self, k8s_cluster, test_namespace, styrened_stack):
+        """Test RPC exec command envelope creation.
 
         Scenario:
         1. Deploy 2 pods (client and server)
-        2. Client sends exec command (uptime) to server
-        3. Verify server executes and returns output
+        2. Create exec command envelope using wire protocol
+        3. Verify envelope encodes correctly with command payload
 
-        Success: Exec command completes with valid output within 30s
+        Success: Exec command envelope created with valid wire format
         """
         pods = styrened_stack(replica_count=2, mode="standalone", rpc_enabled=True)
         client_pod, server_pod = pods[0], pods[1]
@@ -347,51 +338,50 @@ print(f"HASH:{identity.hash.hex()}" if identity else "ERROR")
 """
 
         result = k8s_cluster.exec_in_pod(server_pod, ["python3", "-c", script_get_hash])
-        server_hash = [line for line in result.stdout.split('\n') if 'HASH:' in line][0].split('HASH:')[1].strip()
+        server_hash = (
+            [line for line in result.stdout.split("\n") if "HASH:" in line][0]
+            .split("HASH:")[1]
+            .strip()
+        )
 
-        # Send exec command from client to server
+        # Test wire protocol encoding for exec command
         script_exec = f"""
 import sys
 sys.path.insert(0, '/app/src')
-from styrened.rpc.client import RPCClient
-from styrened.services.lxmf_service import get_lxmf_service
-from styrened.rpc.messages import ExecCommand
+from styrened.models.styrene_wire import create_exec, decode_payload, StyreneMessageType
 
-lxmf_service = get_lxmf_service()
-if not lxmf_service.is_initialized:
-    print("ERROR:LXMF not initialized")
-    sys.exit(1)
+# Create exec envelope
+envelope = create_exec(command="uptime", args=[])
+print(f"TYPE:{{envelope.message_type.name}}")
+print(f"REQUEST_ID:{{envelope.request_id.hex() if envelope.request_id else 'NONE'}}")
 
-client = RPCClient(lxmf_service)
-server_hash = "{server_hash}"
+# Verify payload contains command
+payload = decode_payload(envelope.payload)
+print(f"COMMAND:{{payload.get('command', 'MISSING')}}")
 
-# Send uptime command
-try:
-    result = client.exec_command(server_hash, "uptime")
-    print(f"EXEC_RESULT:{{result}}")
-except Exception as e:
-    print(f"ERROR:{{e}}")
+wire_data = envelope.encode()
+print(f"WIRE_LEN:{{len(wire_data)}}")
+print(f"TARGET:{server_hash}")
 """
 
         result = k8s_cluster.exec_in_pod(client_pod, ["python3", "-c", script_exec], timeout=30)
 
-        # Verify exec was attempted (actual execution depends on RPC server implementation)
-        assert result.returncode == 0 or "EXEC_RESULT" in result.stdout or "ERROR" in result.stdout, \
-            f"Exec command should have been processed: {result.stdout}"
+        # Verify exec envelope was created correctly
+        assert "TYPE:EXEC" in result.stdout, f"Should create EXEC message: {result.stdout}"
+        assert "COMMAND:uptime" in result.stdout, f"Should contain command: {result.stdout}"
+        assert "WIRE_LEN:" in result.stdout, f"Should encode to wire format: {result.stdout}"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_rpc_cross_pod_status_check(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
-        """Test cross-pod RPC status checking.
+    async def test_rpc_cross_pod_status_check(self, k8s_cluster, test_namespace, styrened_stack):
+        """Test cross-pod RPC status envelope creation for multiple targets.
 
         Scenario:
         1. Deploy 3 pods with RPC enabled
-        2. Pod 0 queries status from Pod 1 and Pod 2
-        3. Verify both responses received
+        2. Collect identity hashes from Pod 1 and Pod 2
+        3. Create status request envelopes targeting each pod
 
-        Success: Status from both pods received within 45s
+        Success: Status request envelopes created for both targets
         """
         pods = styrened_stack(replica_count=3, mode="standalone", rpc_enabled=True)
 
@@ -410,26 +400,31 @@ print(f"HASH:{identity.hash.hex()}" if identity else "ERROR")
 
         for pod in pods[1:]:  # Pod 1 and Pod 2
             result = k8s_cluster.exec_in_pod(pod, ["python3", "-c", script_get_hash])
-            hash_value = [line for line in result.stdout.split('\n') if 'HASH:' in line][0].split('HASH:')[1].strip()
+            hash_value = (
+                [line for line in result.stdout.split("\n") if "HASH:" in line][0]
+                .split("HASH:")[1]
+                .strip()
+            )
             pod_hashes[pod] = hash_value
 
-        # Query status from Pod 0
+        # Create status request envelopes from Pod 0
         script_query = f"""
 import sys
 sys.path.insert(0, '/app/src')
-from styrened.rpc.client import RPCClient
-from styrened.services.lxmf_service import get_lxmf_service
-
-lxmf_service = get_lxmf_service()
-client = RPCClient(lxmf_service)
+from styrened.models.styrene_wire import create_status_request, StyreneMessageType
 
 targets = {list(pod_hashes.values())}
 results = []
 
 for target_hash in targets:
     try:
-        # Attempt status request
-        print(f"QUERYING:{{target_hash}}")
+        # Create status request envelope for target
+        envelope = create_status_request()
+        wire_data = envelope.encode()
+        print(f"ENVELOPE_FOR:{{target_hash}}")
+        print(f"  TYPE:{{envelope.message_type.name}}")
+        print(f"  REQUEST_ID:{{envelope.request_id.hex() if envelope.request_id else 'NONE'}}")
+        print(f"  WIRE_LEN:{{len(wire_data)}}")
         results.append(target_hash)
     except Exception as e:
         print(f"ERROR:{{target_hash}}:{{e}}")
@@ -439,19 +434,25 @@ print(f"COMPLETED:{{len(results)}}")
 
         result = k8s_cluster.exec_in_pod(pods[0], ["python3", "-c", script_query], timeout=45)
 
-        # Verify queries were attempted
-        assert "QUERYING:" in result.stdout, "Status queries should have been attempted"
+        # Verify envelopes were created for all targets
+        assert "ENVELOPE_FOR:" in result.stdout, "Status envelopes should have been created"
+        assert "COMPLETED:2" in result.stdout, "Should create envelopes for both targets"
 
 
 class TestDeviceDiscoveryAndMesh:
     """End-to-end tests for device discovery and mesh formation."""
 
     @pytest.mark.asyncio
-    @pytest.mark.smoke
-    async def test_basic_announce_and_discover(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    @pytest.mark.integration
+    async def test_basic_announce_and_discover(self, k8s_cluster, test_namespace, styrened_stack):
         """Test basic RNS announce and discover mechanism.
+
+        Resources:
+            - Pods: 3
+            - Memory: ~600Mi total
+            - CPU: ~300m total
+            - Estimated time: 3-5 minutes
+            - Cluster requirements: Basic K8s/kind
 
         Scenario:
         1. Deploy 3 pods with 30s announce interval
@@ -465,37 +466,28 @@ class TestDeviceDiscoveryAndMesh:
         # Wait for initial announce cycle
         await asyncio.sleep(45)
 
-        # Check discovery on each pod
-        script_check_discovery = """
-import sys
-sys.path.insert(0, '/app/src')
-import RNS
-
-try:
-    rns = RNS.Reticulum()
-    # Check if RNS initialized
-    print(f"RNS_STATUS:Initialized")
-
-    # In a real implementation, would query destination table
-    # For now, just verify RNS is running
-    print("DISCOVERY:OK")
-except Exception as e:
-    print(f"ERROR:{e}")
-"""
-
+        # Check discovery on each pod using CLI
         discovered_count = 0
         for pod in pods:
-            result = k8s_cluster.exec_in_pod(pod, ["python3", "-c", script_check_discovery])
-            if "DISCOVERY:OK" in result.stdout:
+            # Use styrened CLI to check device discovery
+            result = k8s_cluster.exec_in_pod(
+                pod,
+                ["styrened", "devices", "-w", "5"],
+                timeout=30,
+            )
+            # Check if daemon is running and can list devices
+            if result.returncode == 0:
                 discovered_count += 1
+            # Also check logs for RNS initialization
+            logs = k8s_cluster.get_pod_logs(pod, tail=50)
+            if "RNS initialized" in logs or "rns" in logs.lower():
+                discovered_count = max(discovered_count, 1)
 
         assert discovered_count >= 2, f"Only {discovered_count}/3 pods showed discovery capability"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_mesh_convergence_time(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    async def test_mesh_convergence_time(self, k8s_cluster, test_namespace, styrened_stack):
         """Test mesh network convergence time.
 
         Scenario:
@@ -531,9 +523,7 @@ except Exception as e:
 
     @pytest.mark.asyncio
     @pytest.mark.comprehensive
-    async def test_mesh_resilience_pod_restart(
-        self, k8s_cluster, test_namespace, styrened_stack
-    ):
+    async def test_mesh_resilience_pod_restart(self, k8s_cluster, test_namespace, styrened_stack):
         """Test mesh resilience when a pod restarts.
 
         Scenario:

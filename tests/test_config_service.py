@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from styrened.models.config import CoreConfig, DeploymentMode
 from styrened.services.config import (
     get_default_core_config,
@@ -40,9 +38,12 @@ def test_config_roundtrip() -> None:
         # Load
         loaded = load_core_config(config_path)
 
-        # Verify (basic structure - full parsing not implemented yet)
+        # Verify values survived the roundtrip
         assert loaded is not None
         assert isinstance(loaded, CoreConfig)
+        assert loaded.reticulum.announce_interval == 600
+        assert loaded.rpc.enabled is False
+        assert loaded.chat.auto_reply_enabled is False
 
 
 def test_load_missing_config() -> None:

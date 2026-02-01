@@ -82,6 +82,9 @@ class StyreneProtocol(Protocol):
         ```
     """
 
+    # Type alias for message handlers
+    MessageHandler = Any  # Callable[[LXMFMessage, StyreneEnvelope], Awaitable[None]]
+
     def __init__(
         self,
         router: Any,  # LXMF.LXMRouter
@@ -98,11 +101,49 @@ class StyreneProtocol(Protocol):
         self._router = router
         self._identity = identity
         self._db_engine = db_engine
+        self._external_handlers: dict[StyreneMessageType, list[Any]] = {}
 
     @property
     def protocol_id(self) -> str:
         """Protocol identifier for registration."""
         return "styrene"
+
+    def register_handler(
+        self,
+        message_type: StyreneMessageType,
+        handler: Any,  # Callable[[LXMFMessage, StyreneEnvelope], Awaitable[None]]
+    ) -> None:
+        """Register an external handler for a message type.
+
+        External handlers are called after internal handlers. Multiple handlers
+        can be registered for the same message type.
+
+        Args:
+            message_type: StyreneMessageType to handle
+            handler: Async function taking (message, envelope) as arguments
+        """
+        if message_type not in self._external_handlers:
+            self._external_handlers[message_type] = []
+        self._external_handlers[message_type].append(handler)
+        logger.debug(f"Registered external handler for {message_type.name}")
+
+    def unregister_handler(
+        self,
+        message_type: StyreneMessageType,
+        handler: Any,
+    ) -> None:
+        """Unregister an external handler.
+
+        Args:
+            message_type: StyreneMessageType the handler was registered for
+            handler: The handler function to remove
+        """
+        if message_type in self._external_handlers:
+            try:
+                self._external_handlers[message_type].remove(handler)
+                logger.debug(f"Unregistered external handler for {message_type.name}")
+            except ValueError:
+                pass  # Handler not found
 
     def can_handle(self, message: LXMFMessage) -> bool:
         """Determine if this is a Styrene message.
@@ -163,11 +204,14 @@ class StyreneProtocol(Protocol):
     async def _dispatch_message(self, message: LXMFMessage, envelope: StyreneEnvelope) -> None:
         """Dispatch decoded message to type-specific handler.
 
+        Internal handlers are called first, then any registered external handlers.
+
         Args:
             message: Original LXMF message (for metadata)
             envelope: Decoded Styrene envelope
         """
-        handlers = {
+        # Internal handlers for basic message types
+        internal_handlers = {
             StyreneMessageType.PING: self._handle_ping,
             StyreneMessageType.PONG: self._handle_pong,
             StyreneMessageType.STATUS_REQUEST: self._handle_status_request,
@@ -176,10 +220,24 @@ class StyreneProtocol(Protocol):
             StyreneMessageType.ANNOUNCE: self._handle_announce,
         }
 
-        handler = handlers.get(envelope.message_type)
-        if handler:
-            await handler(message, envelope)
-        else:
+        handled = False
+
+        # Call internal handler if present
+        internal_handler = internal_handlers.get(envelope.message_type)
+        if internal_handler:
+            await internal_handler(message, envelope)
+            handled = True
+
+        # Call external handlers (e.g., RPCServer, RPCClient)
+        external_handlers = self._external_handlers.get(envelope.message_type, [])
+        for ext_handler in external_handlers:
+            try:
+                await ext_handler(message, envelope)
+                handled = True
+            except Exception as e:
+                logger.error(f"External handler error for {envelope.message_type.name}: {e}")
+
+        if not handled:
             logger.warning(f"No handler for message type: {envelope.message_type.name}")
 
     async def _handle_ping(self, message: LXMFMessage, envelope: StyreneEnvelope) -> None:
@@ -254,6 +312,92 @@ class StyreneProtocol(Protocol):
 
         logger.debug(f"Persisted Styrene message: {envelope.message_type.name}")
 
+    def _resolve_identity(self, destination_hash: str) -> Any:
+        """Resolve a destination hash to an RNS Identity.
+
+        This method implements a multi-strategy lookup to find the identity:
+        1. Try direct RNS.Identity.recall() with destination_hash
+        2. Try NodeStore lookup by operator destination hash
+        3. Try NodeStore lookup by LXMF destination hash
+        4. Try direct identity hash recall (from_identity_hash=True)
+
+        Args:
+            destination_hash: Hex-encoded hash (could be destination or identity).
+
+        Returns:
+            RNS.Identity if found, None otherwise.
+        """
+        dest_bytes = bytes.fromhex(destination_hash)
+
+        # Strategy 1: Direct recall (RNS may have it from announce processing)
+        dest_identity = RNS.Identity.recall(dest_bytes)
+        if dest_identity:
+            logger.debug(
+                f"[HASH] Strategy 1 success: direct recall({destination_hash[:16]}...) -> "
+                f"identity_hash={dest_identity.hash.hex()[:16]}..."
+            )
+            return dest_identity
+
+        logger.debug(f"[HASH] Strategy 1 failed: direct recall({destination_hash[:16]}...) -> None")
+
+        # Strategy 2 & 3: NodeStore lookup
+        identity_hash = None
+        try:
+            from styrened.services.node_store import get_node_store
+
+            store = get_node_store()
+
+            # Strategy 2: Try operator destination hash
+            identity_hash = store.get_identity_for_destination(destination_hash)
+            if identity_hash:
+                logger.debug(
+                    f"[HASH] Strategy 2 success: operator_dest lookup -> "
+                    f"identity_hash={identity_hash[:16]}..."
+                )
+
+            # Strategy 3: Try LXMF destination hash
+            if not identity_hash:
+                identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
+                if identity_hash:
+                    logger.debug(
+                        f"[HASH] Strategy 3 success: lxmf_dest lookup -> "
+                        f"identity_hash={identity_hash[:16]}..."
+                    )
+
+        except Exception as e:
+            logger.warning(f"[HASH] NodeStore lookup failed: {e}")
+
+        # If we found an identity hash in NodeStore, recall it
+        if identity_hash:
+            identity_bytes = bytes.fromhex(identity_hash)
+            # MUST use from_identity_hash=True since this is an identity hash
+            dest_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
+            if dest_identity:
+                logger.info(
+                    f"[HASH] Identity resolved: destination={destination_hash[:16]}... -> "
+                    f"identity_hash={identity_hash[:16]}... -> Identity OK"
+                )
+                return dest_identity
+            else:
+                logger.warning(
+                    f"[HASH] NodeStore had identity_hash={identity_hash[:16]}... "
+                    f"but RNS.Identity.recall() failed. Identity may not be in RNS cache."
+                )
+
+        # Strategy 4: Maybe destination_hash IS the identity hash
+        dest_identity = RNS.Identity.recall(dest_bytes, from_identity_hash=True)
+        if dest_identity:
+            logger.debug(
+                f"[HASH] Strategy 4 success: destination WAS identity hash "
+                f"({destination_hash[:16]}...)"
+            )
+            return dest_identity
+
+        logger.debug(
+            f"[HASH] All strategies failed for {destination_hash[:16]}... - identity not found"
+        )
+        return None
+
     async def send_message(self, destination: str, content: Any) -> None:
         """Send a Styrene message (convenience wrapper for chat).
 
@@ -282,6 +426,7 @@ class StyreneProtocol(Protocol):
         destination: str,
         message_type: StyreneMessageType,
         payload: bytes,
+        request_id: bytes | None = None,
     ) -> None:
         """Send a typed Styrene message.
 
@@ -289,9 +434,12 @@ class StyreneProtocol(Protocol):
         via LXMF using FIELD_CUSTOM_TYPE and FIELD_CUSTOM_DATA.
 
         Args:
-            destination: Destination hash (hex string, 32 chars = 16 bytes)
+            destination: Destination hash (hex string, 32 chars = 16 bytes).
+                        Can be an LXMF destination hash or operator destination hash.
             message_type: Type of message to send
             payload: Pre-encoded payload bytes (use encode_payload())
+            request_id: Optional 16-byte correlation ID for request/response.
+                        If None, auto-generated for v2 messages.
 
         Raises:
             ImportError: If LXMF/RNS library not available
@@ -307,22 +455,21 @@ class StyreneProtocol(Protocol):
             version=STYRENE_VERSION,
             message_type=message_type,
             payload=payload,
+            request_id=request_id,
         )
         wire_data = envelope.encode()
 
         # Human-readable content for non-Styrene clients
         human_content = f"[styrene.io:{message_type.name}]"
 
-        # Convert hex string to raw bytes (32 hex chars -> 16 bytes)
-        dest_hash = bytes.fromhex(destination) if isinstance(destination, str) else destination
-
-        # Recall the identity for this destination hash
-        # This requires that we've seen an announce from this destination
-        dest_identity = RNS.Identity.recall(dest_hash)
+        # Resolve the identity using multi-strategy lookup
+        # The destination could be an LXMF destination hash or operator destination hash
+        dest_identity = self._resolve_identity(destination)
         if dest_identity is None:
             raise ValueError(
-                f"Cannot send to {destination}: identity not known. "
-                "Destination must announce before receiving messages."
+                f"[HASH] Cannot send to {destination[:16]}...: identity not known. "
+                "Destination must announce before receiving messages. "
+                "Check that the target node has announced its LXMF destination."
             )
 
         # Create outbound LXMF delivery destination
@@ -353,6 +500,16 @@ class StyreneProtocol(Protocol):
                 FIELD_CUSTOM_DATA: wire_data,  # Actual protocol data
             },
         )
+
+        # Register delivery callbacks for debugging
+        def on_delivery(message: "LXMF.LXMessage") -> None:
+            logger.info(f"[LXMF] Message delivered to {destination[:16]}...")
+
+        def on_failed(message: "LXMF.LXMessage") -> None:
+            logger.warning(f"[LXMF] Message delivery FAILED to {destination[:16]}...")
+
+        lxmf_msg.register_delivery_callback(on_delivery)
+        lxmf_msg.register_failed_callback(on_failed)
 
         # Send via router
         self._router.handle_outbound(lxmf_msg)
@@ -455,3 +612,32 @@ class StyreneProtocol(Protocol):
             message_type=StyreneMessageType.ANNOUNCE,
             payload=encode_payload(identity_data),
         )
+
+    async def send(self, destination: str, envelope: StyreneEnvelope) -> None:
+        """Send a pre-built StyreneEnvelope to a destination.
+
+        This is a convenience method for terminal sessions that build
+        their own envelopes.
+
+        Args:
+            destination: Destination hash (hex string)
+            envelope: Pre-built StyreneEnvelope to send
+        """
+        await self.send_typed_message(
+            destination=destination,
+            message_type=envelope.message_type,
+            payload=envelope.payload,
+            request_id=envelope.request_id,
+        )
+
+    async def send_to_identity(self, identity_hash: str, envelope: StyreneEnvelope) -> None:
+        """Send a pre-built StyreneEnvelope to an identity hash.
+
+        This is an alias for send() since the destination resolution
+        handles both identity hashes and destination hashes.
+
+        Args:
+            identity_hash: Identity hash (hex string)
+            envelope: Pre-built StyreneEnvelope to send
+        """
+        await self.send(identity_hash, envelope)

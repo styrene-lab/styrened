@@ -3,9 +3,9 @@
 from styrened.models.config import (
     APIConfig,
     ChatConfig,
+    ConfigFieldError,
     ConfigLoadError,
     ConfigValidationError,
-    ConfigValidationErrors,
     CoreConfig,
     DeploymentMode,
     DiscoveryConfig,
@@ -58,9 +58,9 @@ __all__ = [
     # config
     "APIConfig",
     "ChatConfig",
+    "ConfigFieldError",
     "ConfigLoadError",
     "ConfigValidationError",
-    "ConfigValidationErrors",
     "CoreConfig",
     "DeploymentMode",
     "DiscoveryConfig",

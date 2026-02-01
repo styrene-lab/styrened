@@ -74,7 +74,7 @@ class LXMFService:
         """Initialize the LXMFService (not the LXMF router yet)."""
         self._router: LXMF.LXMRouter | None = None
         self._identity: RNS.Identity | None = None
-        self._delivery_destination: "RNS.Destination | None" = None
+        self._delivery_destination: RNS.Destination | None = None
         self._initialized = False
         # Support multiple callbacks - list of (callback, raw_mode) tuples
         # raw_mode=True means callback receives raw LXMF.LXMessage
@@ -106,6 +106,12 @@ class LXMFService:
         Returns:
             RNS.Destination for LXMF delivery, or None if not initialized.
         """
+        return self._delivery_destination
+
+    # Alias for backward compatibility
+    @property
+    def _destination(self) -> "RNS.Destination | None":
+        """Alias for delivery_destination (backward compatibility)."""
         return self._delivery_destination
 
     def initialize(self, identity: "RNS.Identity") -> bool:
@@ -193,10 +199,19 @@ class LXMFService:
     def send_message(self, destination_hash: str, payload: dict[str, object]) -> bool:
         """Send LXMF message to destination.
 
+        This method handles the complexity of looking up the correct identity
+        for sending messages. The destination_hash can be:
+        1. An operator destination hash (styrene_node:operator)
+        2. An LXMF delivery destination hash (lxmf:delivery)
+        3. An identity hash (direct public key hash)
+
+        We try multiple lookup strategies to find the identity needed for sending.
+
         Args:
-            destination_hash: Hex-encoded destination hash string (can be either
-                            destination hash or identity hash - we'll look up
-                            the identity hash from NodeStore if needed).
+            destination_hash: Hex-encoded destination hash string. Can be:
+                            - Operator destination hash (from device discovery)
+                            - LXMF destination hash (from announce app_data)
+                            - Identity hash (direct identity lookup)
             payload: JSON-serializable message payload.
 
         Returns:
@@ -207,46 +222,13 @@ class LXMFService:
             return False
 
         try:
-            # First, try to recall directly with the provided hash (as destination hash)
-            dest_bytes = bytes.fromhex(destination_hash)
-            dest_identity = RNS.Identity.recall(dest_bytes)
-            logger.debug(f"Direct recall({destination_hash[:16]}): {dest_identity is not None}")
-
-            # If not found, check if we have the identity hash in NodeStore
-            if dest_identity is None:
-                try:
-                    from styrened.services.node_store import get_node_store
-
-                    store = get_node_store()
-
-                    # Try looking up by operator destination hash first
-                    identity_hash = store.get_identity_for_destination(destination_hash)
-                    logger.debug(
-                        f"NodeStore.get_identity_for_destination({destination_hash[:16]}): {identity_hash[:16] if identity_hash else None}"
-                    )
-
-                    # If not found, try looking up by LXMF destination hash
-                    if not identity_hash:
-                        identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
-                        logger.debug(
-                            f"NodeStore.get_identity_for_lxmf_destination({destination_hash[:16]}): {identity_hash[:16] if identity_hash else None}"
-                        )
-
-                    if identity_hash and identity_hash != destination_hash:
-                        logger.info(
-                            f"Found identity hash {identity_hash[:16]}... for destination {destination_hash[:16]}..."
-                        )
-                        identity_bytes = bytes.fromhex(identity_hash)
-                        # Use from_identity_hash=True since we're looking up by identity hash
-                        dest_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
-                        logger.info(f"Recall by identity hash: {dest_identity is not None}")
-                except Exception as e:
-                    logger.warning(f"NodeStore lookup failed: {e}")
+            dest_identity = self._resolve_identity(destination_hash)
 
             if dest_identity is None:
                 logger.warning(
-                    f"Cannot send to {destination_hash}: identity not known. "
-                    "Destination must announce before receiving messages."
+                    f"[HASH] Cannot send to {destination_hash[:16]}...: identity not known. "
+                    "Destination must announce before receiving messages. "
+                    "Check that the target node has announced its LXMF destination."
                 )
                 return False
 
@@ -259,10 +241,16 @@ class LXMFService:
                 "delivery",
             )
 
+            logger.debug(
+                f"[HASH] Created LXMF destination: "
+                f"lxmf_dest={dest_destination.hash.hex()[:16]}... "
+                f"(from identity {dest_identity.hash.hex()[:16]}...)"
+            )
+
             # Validate path exists before attempting to send
             if not self._ensure_path(dest_destination.hash):
                 logger.warning(
-                    f"No path to {destination_hash[:16]}..., message not sent. "
+                    f"No path to {dest_destination.hash.hex()[:16]}..., message not sent. "
                     "Use send_with_retry() to wait for path discovery."
                 )
                 return False
@@ -290,13 +278,100 @@ class LXMFService:
             self._router.handle_outbound(message)
 
             logger.info(
-                f"Sent LXMF message to {dest_destination.hash.hex()[:16]}... (type={payload.get('type')}, protocol={payload.get('protocol')})"
+                f"[HASH] Sent LXMF message to {dest_destination.hash.hex()[:16]}... "
+                f"(type={payload.get('type')}, protocol={payload.get('protocol')})"
             )
             return True
 
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
             return False
+
+    def _resolve_identity(self, destination_hash: str) -> "RNS.Identity | None":
+        """Resolve a destination hash to an RNS Identity.
+
+        This method implements a multi-strategy lookup to find the identity:
+        1. Try direct RNS.Identity.recall() with destination_hash
+        2. Try NodeStore lookup by operator destination hash
+        3. Try NodeStore lookup by LXMF destination hash
+        4. Try direct identity hash recall (from_identity_hash=True)
+
+        Args:
+            destination_hash: Hex-encoded hash (could be destination or identity).
+
+        Returns:
+            RNS.Identity if found, None otherwise.
+        """
+        dest_bytes = bytes.fromhex(destination_hash)
+
+        # Strategy 1: Direct recall (RNS may have it from announce processing)
+        dest_identity = RNS.Identity.recall(dest_bytes)
+        if dest_identity:
+            logger.debug(
+                f"[HASH] Strategy 1 success: direct recall({destination_hash[:16]}...) -> "
+                f"identity_hash={dest_identity.hash.hex()[:16]}..."
+            )
+            return dest_identity
+
+        logger.debug(f"[HASH] Strategy 1 failed: direct recall({destination_hash[:16]}...) -> None")
+
+        # Strategy 2 & 3: NodeStore lookup
+        identity_hash = None
+        try:
+            from styrened.services.node_store import get_node_store
+
+            store = get_node_store()
+
+            # Strategy 2: Try operator destination hash
+            identity_hash = store.get_identity_for_destination(destination_hash)
+            if identity_hash:
+                logger.debug(
+                    f"[HASH] Strategy 2 success: operator_dest lookup -> "
+                    f"identity_hash={identity_hash[:16]}..."
+                )
+
+            # Strategy 3: Try LXMF destination hash
+            if not identity_hash:
+                identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
+                if identity_hash:
+                    logger.debug(
+                        f"[HASH] Strategy 3 success: lxmf_dest lookup -> "
+                        f"identity_hash={identity_hash[:16]}..."
+                    )
+
+        except Exception as e:
+            logger.warning(f"[HASH] NodeStore lookup failed: {e}")
+
+        # If we found an identity hash in NodeStore, recall it
+        if identity_hash:
+            identity_bytes = bytes.fromhex(identity_hash)
+            # MUST use from_identity_hash=True since this is an identity hash
+            dest_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
+            if dest_identity:
+                logger.info(
+                    f"[HASH] Identity resolved: destination={destination_hash[:16]}... -> "
+                    f"identity_hash={identity_hash[:16]}... -> Identity OK"
+                )
+                return dest_identity
+            else:
+                logger.warning(
+                    f"[HASH] NodeStore had identity_hash={identity_hash[:16]}... "
+                    f"but RNS.Identity.recall() failed. Identity may not be in RNS cache."
+                )
+
+        # Strategy 4: Maybe destination_hash IS the identity hash
+        dest_identity = RNS.Identity.recall(dest_bytes, from_identity_hash=True)
+        if dest_identity:
+            logger.debug(
+                f"[HASH] Strategy 4 success: destination WAS identity hash "
+                f"({destination_hash[:16]}...)"
+            )
+            return dest_identity
+
+        logger.debug(
+            f"[HASH] All strategies failed for {destination_hash[:16]}... - identity not found"
+        )
+        return None
 
     def send_with_retry(
         self,
@@ -310,8 +385,13 @@ class LXMFService:
         This method will wait for a path to become available before sending.
         Useful when the destination may not have an established path yet.
 
+        Uses the same multi-strategy identity lookup as send_message().
+
         Args:
-            destination_hash: Hex-encoded destination hash string.
+            destination_hash: Hex-encoded destination hash string. Can be:
+                            - Operator destination hash (from device discovery)
+                            - LXMF destination hash (from announce app_data)
+                            - Identity hash (direct identity lookup)
             payload: JSON-serializable message payload.
             max_wait: Maximum time to wait for path discovery (seconds).
             check_interval: Time between path checks (seconds).
@@ -324,39 +404,14 @@ class LXMFService:
             return False
 
         try:
-            # First, try to recall directly with the provided hash (as destination hash)
-            dest_bytes = bytes.fromhex(destination_hash)
-            dest_identity = RNS.Identity.recall(dest_bytes)
-
-            # If not found, check if we have the identity hash in NodeStore
-            if dest_identity is None:
-                try:
-                    from styrened.services.node_store import get_node_store
-
-                    store = get_node_store()
-
-                    # Try looking up by operator destination hash first
-                    identity_hash = store.get_identity_for_destination(destination_hash)
-
-                    # If not found, try looking up by LXMF destination hash
-                    if not identity_hash:
-                        identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
-
-                    if identity_hash and identity_hash != destination_hash:
-                        logger.info(
-                            f"Found identity hash {identity_hash[:16]}... for destination {destination_hash[:16]}..."
-                        )
-                        identity_bytes = bytes.fromhex(identity_hash)
-                        # Use from_identity_hash=True since we're looking up by identity hash
-                        dest_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
-                        logger.info(f"Recall by identity hash: {dest_identity is not None}")
-                except Exception as e:
-                    logger.warning(f"NodeStore lookup failed: {e}")
+            # Use shared identity resolution logic
+            dest_identity = self._resolve_identity(destination_hash)
 
             if dest_identity is None:
                 logger.warning(
-                    f"Cannot send to {destination_hash}: identity not known. "
-                    "Destination must announce before receiving messages."
+                    f"[HASH] Cannot send to {destination_hash[:16]}...: identity not known. "
+                    "Destination must announce before receiving messages. "
+                    "Check that the target node has announced its LXMF destination."
                 )
                 return False
 
@@ -371,7 +426,9 @@ class LXMFService:
 
             # Wait for path to become available
             logger.info(
-                f"Dest destination hash: {dest_destination.hash.hex()[:16]}... (from identity {dest_identity.hash.hex()[:16]}...)"
+                f"[HASH] Waiting for path to LXMF destination: "
+                f"lxmf_dest={dest_destination.hash.hex()[:16]}... "
+                f"(from identity {dest_identity.hash.hex()[:16]}...)"
             )
             start_time = time.monotonic()
             path_available = self._ensure_path(dest_destination.hash)
@@ -380,16 +437,19 @@ class LXMFService:
                 time.sleep(check_interval)
                 path_available = RNS.Transport.has_path(dest_destination.hash)
                 elapsed = time.monotonic() - start_time
-                logger.info(f"Path check: has_path={path_available}, elapsed={elapsed:.1f}s")
+                logger.debug(
+                    f"[HASH] Path check: has_path={path_available}, elapsed={elapsed:.1f}s"
+                )
 
             if not path_available:
                 logger.warning(
-                    f"Timeout waiting for path to {destination_hash[:16]}... after {max_wait}s"
+                    f"[HASH] Timeout waiting for path to {dest_destination.hash.hex()[:16]}... "
+                    f"after {max_wait}s"
                 )
                 return False
 
             logger.debug(
-                f"Path to {destination_hash[:16]}... available after "
+                f"[HASH] Path to {dest_destination.hash.hex()[:16]}... available after "
                 f"{time.monotonic() - start_time:.1f}s"
             )
 
@@ -416,7 +476,8 @@ class LXMFService:
             self._router.handle_outbound(message)
 
             logger.info(
-                f"Sent LXMF message (with retry) to {dest_destination.hash.hex()[:16]}... (type={payload.get('type')}, protocol={payload.get('protocol')})"
+                f"[HASH] Sent LXMF message (with retry) to {dest_destination.hash.hex()[:16]}... "
+                f"(type={payload.get('type')}, protocol={payload.get('protocol')})"
             )
             return True
 
@@ -426,7 +487,7 @@ class LXMFService:
 
     def register_callback(
         self,
-        callback: Callable[[str, dict[str, object]], None],
+        callback: Callable[..., None],
         raw_mode: bool = False,
     ) -> None:
         """Register callback for incoming messages.

@@ -1,0 +1,332 @@
+"""Unit tests for IPC handlers.
+
+Tests null checks and error handling for IPC request handlers,
+ensuring proper error responses when daemon or dependencies are unavailable.
+"""
+
+import pytest
+
+from styrened.ipc.handlers import IPCHandlers
+from styrened.ipc.messages import (
+    CmdDeviceStatusRequest,
+    CmdExecRequest,
+    CmdSendRequest,
+    ErrorResponse,
+)
+
+
+class MockDaemon:
+    """Mock daemon for testing IPC handlers."""
+
+    def __init__(
+        self,
+        rpc_client=None,
+        operator_destination=None,
+        lxmf_service=None,
+        start_time=0.0,
+    ):
+        self._rpc_client = rpc_client
+        self._operator_destination = operator_destination
+        self._lxmf_service = lxmf_service
+        self._start_time = start_time
+        self.config = MockConfig()
+        self.lifecycle = MockLifecycle()
+
+    def _announce(self):
+        """Mock announce method."""
+        pass
+
+
+class MockConfig:
+    """Mock config for testing."""
+
+    def __init__(self):
+        self.reticulum = MockReticulumConfig()
+        self.rpc = MockRpcConfig()
+        self.discovery = MockDiscoveryConfig()
+        self.chat = MockChatConfig()
+        self.api = MockApiConfig()
+
+
+class MockReticulumConfig:
+    def __init__(self):
+        self.mode = MockMode()
+        self.announce_interval = 300
+        self.hub_enabled = False
+
+
+class MockMode:
+    def __init__(self):
+        self.value = "standalone"
+
+
+class MockRpcConfig:
+    def __init__(self):
+        self.enabled = True
+        self.relay_mode = False
+        self.allow_command_execution = True
+
+
+class MockDiscoveryConfig:
+    def __init__(self):
+        self.enabled = True
+        self.auto_announce = True
+
+
+class MockChatConfig:
+    def __init__(self):
+        self.enabled = True
+        self.auto_reply_enabled = False
+        self.auto_reply_cooldown = 60
+        self.persist_messages = False
+
+
+class MockApiConfig:
+    def __init__(self):
+        self.enabled = False
+        self.port = 8080
+
+
+class MockLifecycle:
+    def __init__(self):
+        self._initialized = True
+
+
+class TestIPCHandlersNullChecks:
+    """Tests for null daemon/dependency checks."""
+
+    @pytest.mark.asyncio
+    async def test_handle_exec_returns_error_when_daemon_none(self):
+        """CMD_EXEC should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        request = CmdExecRequest(
+            destination="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            command="uptime",
+        )
+
+        response = await handlers.handle_cmd_exec(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_exec_returns_error_when_rpc_client_none(self):
+        """CMD_EXEC should return error when RPC client is None."""
+        daemon = MockDaemon(rpc_client=None)
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdExecRequest(
+            destination="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            command="uptime",
+        )
+
+        response = await handlers.handle_cmd_exec(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "RPC client not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_device_status_returns_error_when_daemon_none(self):
+        """CMD_DEVICE_STATUS should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        request = CmdDeviceStatusRequest(
+            destination="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+        )
+
+        response = await handlers.handle_cmd_device_status(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_device_status_returns_error_when_rpc_client_none(self):
+        """CMD_DEVICE_STATUS should return error when RPC client is None."""
+        daemon = MockDaemon(rpc_client=None)
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdDeviceStatusRequest(
+            destination="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+        )
+
+        response = await handlers.handle_cmd_device_status(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "RPC client not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_announce_returns_error_when_daemon_none(self):
+        """CMD_ANNOUNCE should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import CmdAnnounceRequest
+
+        request = CmdAnnounceRequest()
+
+        response = await handlers.handle_cmd_announce(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_announce_returns_error_when_destination_none(self):
+        """CMD_ANNOUNCE should return error when operator destination is None."""
+        daemon = MockDaemon(operator_destination=None)
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdAnnounceRequest
+
+        request = CmdAnnounceRequest()
+
+        response = await handlers.handle_cmd_announce(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Operator destination not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_query_status_returns_error_when_daemon_none(self):
+        """QUERY_STATUS should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryStatusRequest
+
+        request = QueryStatusRequest()
+
+        response = await handlers.handle_query_status(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_query_identity_returns_error_when_daemon_none(self):
+        """QUERY_IDENTITY should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryIdentityRequest
+
+        request = QueryIdentityRequest()
+
+        response = await handlers.handle_query_identity(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+
+class TestIPCHandlersValidation:
+    """Tests for request validation."""
+
+    @pytest.mark.asyncio
+    async def test_handle_exec_requires_destination(self):
+        """CMD_EXEC should require destination."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdExecRequest(destination="", command="uptime")
+
+        response = await handlers.handle_cmd_exec(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "destination is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_exec_requires_command(self):
+        """CMD_EXEC should require command."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdExecRequest(
+            destination="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            command="",
+        )
+
+        response = await handlers.handle_cmd_exec(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "command is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_device_status_requires_destination(self):
+        """CMD_DEVICE_STATUS should require destination."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdDeviceStatusRequest(destination="")
+
+        response = await handlers.handle_cmd_device_status(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "destination is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_send_requires_destination(self):
+        """CMD_SEND should require destination."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdSendRequest(destination="", message="hello")
+
+        response = await handlers.handle_cmd_send(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "destination is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_send_requires_message(self):
+        """CMD_SEND should require message."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        request = CmdSendRequest(
+            destination="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            message="",
+        )
+
+        response = await handlers.handle_cmd_send(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "message is required" in response.message
+
+
+class TestIPCHandlersPing:
+    """Tests for ping handler."""
+
+    @pytest.mark.asyncio
+    async def test_handle_ping_returns_version(self):
+        """PING should return daemon version."""
+        # Ping doesn't require daemon
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import PingRequest
+
+        request = PingRequest()
+
+        response = await handlers.handle_ping(request)
+
+        from styrened.ipc.messages import PongResponse
+
+        assert isinstance(response, PongResponse)
+        assert response.daemon_version is not None
+
+
+class TestIPCHandlersQueryConfig:
+    """Tests for config query handler."""
+
+    @pytest.mark.asyncio
+    async def test_handle_query_config_returns_sanitized_config(self):
+        """QUERY_CONFIG should return sanitized config."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import QueryConfigRequest
+
+        request = QueryConfigRequest()
+
+        response = await handlers.handle_query_config(request)
+
+        from styrened.ipc.messages import ResultResponse
+
+        assert isinstance(response, ResultResponse)
+        assert "config" in response.data
+        assert "reticulum" in response.data["config"]
+        assert "rpc" in response.data["config"]

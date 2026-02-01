@@ -117,6 +117,17 @@ class RNSService:
         """
         return self._error_state
 
+    @property
+    def identity(self) -> RNS.Identity | None:
+        """Get the operator identity.
+
+        Returns:
+            RNS.Identity instance, or None if not available.
+        """
+        from styrened.services.reticulum import get_operator_identity_object
+
+        return get_operator_identity_object()
+
     def initialize(self, config_override: Path | None = None) -> bool:
         """Initialize RNS.Reticulum instance.
 

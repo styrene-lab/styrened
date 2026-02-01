@@ -25,9 +25,29 @@ import asyncio
 import logging
 import sys
 import time
-from typing import NoReturn
+from typing import Any, NoReturn, cast
 
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# IPC Helper
+# -----------------------------------------------------------------------------
+
+
+async def _try_ipc_client():
+    """Try to connect to a running daemon via IPC.
+
+    Returns:
+        Connected ControlClient if daemon is running, None otherwise.
+    """
+    try:
+        from styrened.ipc import get_daemon_client
+
+        return await get_daemon_client()
+    except Exception as e:
+        logger.debug(f"IPC connection failed: {e}")
+        return None
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -82,6 +102,47 @@ def cmd_devices(args: argparse.Namespace) -> int:
 
 async def _cmd_devices_async(args: argparse.Namespace) -> int:
     """Async implementation of devices command."""
+    # Try IPC first (instant if daemon is running)
+    client = await _try_ipc_client()
+    if client:
+        try:
+            devices = await client.query_devices()
+            await client.disconnect()
+
+            if not devices:
+                print("No devices discovered")
+                return 0
+
+            print(f"\nDiscovered {len(devices)} device(s):\n")
+
+            if args.json:
+                import json
+
+                output = [d.to_dict() for d in devices]
+                print(json.dumps(output, indent=2))
+            else:
+                for device in devices:
+                    styrene_marker = " [styrene]" if device.is_styrene_node else ""
+                    print(f"  {device.name}{styrene_marker}")
+                    dest = device.destination_hash or ""
+                    ident = device.identity_hash or ""
+                    print(
+                        f"    Destination: {dest[:32]}..." if dest else "    Destination: (unknown)"
+                    )
+                    print(
+                        f"    Identity:    {ident[:32]}..." if ident else "    Identity: (unknown)"
+                    )
+                    print(f"    Type:        {device.device_type}")
+                    print(f"    Status:      {device.status}")
+                    print(f"    Announces:   {device.announce_count}")
+                    print()
+
+            return 0
+        except Exception as e:
+            logger.warning(f"IPC query failed, falling back to standalone: {e}")
+            await client.disconnect()
+
+    # Fallback: standalone discovery mode
     from styrened.services.config import get_default_core_config, load_core_config
     from styrened.services.lifecycle import CoreLifecycle
     from styrened.services.reticulum import discover_devices, start_discovery
@@ -98,54 +159,55 @@ async def _cmd_devices_async(args: argparse.Namespace) -> int:
         print("Failed to initialize services", file=sys.stderr)
         return 1
 
-    # Start discovery
-    start_discovery()
+    try:
+        # Start discovery
+        start_discovery()
 
-    # Wait for announces
-    wait_time = args.wait if hasattr(args, "wait") else 5
-    print(f"Listening for announces ({wait_time}s)...")
-    await asyncio.sleep(wait_time)
+        # Wait for announces
+        wait_time = args.wait if hasattr(args, "wait") else 5
+        print(f"Listening for announces ({wait_time}s)...")
+        await asyncio.sleep(wait_time)
 
-    # Get discovered devices
-    devices = discover_devices()
+        # Get discovered devices
+        devices = discover_devices()
 
-    if not devices:
-        print("No devices discovered")
-        lifecycle.shutdown()
+        if not devices:
+            print("No devices discovered")
+            return 0
+
+        # Display devices
+        print(f"\nDiscovered {len(devices)} device(s):\n")
+
+        if args.json:
+            import json
+
+            output = [
+                {
+                    "name": d.name,
+                    "destination_hash": d.destination_hash,
+                    "identity_hash": d.identity_hash,
+                    "device_type": d.device_type.value,
+                    "status": d.status.value,
+                    "is_styrene": d.is_styrene_node,
+                    "announce_count": d.announce_count,
+                }
+                for d in devices
+            ]
+            print(json.dumps(output, indent=2))
+        else:
+            for device in devices:
+                styrene_marker = " [styrene]" if device.is_styrene_node else ""
+                print(f"  {device.name}{styrene_marker}")
+                print(f"    Destination: {device.destination_hash[:32]}...")
+                print(f"    Identity:    {device.identity_hash[:32]}...")
+                print(f"    Type:        {device.device_type.value}")
+                print(f"    Status:      {device.status.value}")
+                print(f"    Announces:   {device.announce_count}")
+                print()
+
         return 0
-
-    # Display devices
-    print(f"\nDiscovered {len(devices)} device(s):\n")
-
-    if args.json:
-        import json
-
-        output = [
-            {
-                "name": d.name,
-                "destination_hash": d.destination_hash,
-                "identity_hash": d.identity_hash,
-                "device_type": d.device_type.value,
-                "status": d.status.value,
-                "is_styrene": d.is_styrene_node,
-                "announce_count": d.announce_count,
-            }
-            for d in devices
-        ]
-        print(json.dumps(output, indent=2))
-    else:
-        for device in devices:
-            styrene_marker = " [styrene]" if device.is_styrene_node else ""
-            print(f"  {device.name}{styrene_marker}")
-            print(f"    Destination: {device.destination_hash[:32]}...")
-            print(f"    Identity:    {device.identity_hash[:32]}...")
-            print(f"    Type:        {device.device_type.value}")
-            print(f"    Status:      {device.status.value}")
-            print(f"    Announces:   {device.announce_count}")
-            print()
-
-    lifecycle.shutdown()
-    return 0
+    finally:
+        lifecycle.shutdown()
 
 
 # -----------------------------------------------------------------------------
@@ -167,6 +229,55 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 async def _cmd_status_async(args: argparse.Namespace) -> int:
     """Async implementation of status command."""
+    destination = args.destination
+    timeout = args.timeout if hasattr(args, "timeout") else 30.0
+
+    # Try IPC first (uses daemon's mesh stack)
+    client = await _try_ipc_client()
+    if client:
+        try:
+            print(f"Querying status via daemon (timeout: {timeout}s)...")
+            status = await client.device_status(destination, timeout=timeout)
+            await client.disconnect()
+
+            if args.json:
+                import json
+
+                output = status.to_dict()
+                # Add formatted fields
+                hours, remainder = divmod(int(status.uptime), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                output["uptime_formatted"] = f"{hours}h {minutes}m {seconds}s"
+                if status.disk_total > 0:
+                    pct = (status.disk_used / status.disk_total) * 100
+                    output["disk_formatted"] = (
+                        f"{status.disk_used // (1024**3)}GB / {status.disk_total // (1024**3)}GB ({pct:.1f}%)"
+                    )
+                print(json.dumps(output, indent=2))
+            else:
+                hours, remainder = divmod(int(status.uptime), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                uptime_str = f"{hours}h {minutes}m {seconds}s"
+                disk_str = "unknown"
+                if status.disk_total > 0:
+                    pct = (status.disk_used / status.disk_total) * 100
+                    disk_str = f"{status.disk_used // (1024**3)}GB / {status.disk_total // (1024**3)}GB ({pct:.1f}%)"
+
+                print(f"\nStatus of {destination[:16]}...:")
+                print(f"  Uptime:   {uptime_str}")
+                print(f"  IP:       {status.ip}")
+                print(f"  Disk:     {disk_str}")
+                print(f"  Services: {', '.join(status.services) or 'none'}")
+
+            return 0
+        except Exception as e:
+            logger.warning(f"IPC status failed, falling back to standalone: {e}")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+    # Fallback: standalone mode
     from styrened.rpc import RPCClient
     from styrened.rpc.errors import RPCTimeoutError, RPCTransportError
     from styrened.services.config import get_default_core_config, load_core_config
@@ -178,6 +289,8 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
         start_discovery,
         stop_discovery,
     )
+
+    discovery_wait = getattr(args, "wait", 10)
 
     # Load config
     try:
@@ -199,10 +312,6 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    destination = args.destination
-    timeout = args.timeout if hasattr(args, "timeout") else 30.0
-    discovery_wait = getattr(args, "wait", 10)
-
     # Start discovery and wait for target device to announce
     # Pass node_store for persistence so we can look up identity later
     from styrened.services.node_store import get_node_store
@@ -218,8 +327,15 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
     while time.time() - start_time < discovery_wait:
         devices = discover_devices()
         for device in devices:
-            # Match by destination hash prefix
-            if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+            # Match by any hash: destination, LXMF destination, or identity
+            prefix = destination[:16]
+            if (
+                (device.destination_hash and device.destination_hash.startswith(prefix))
+                or (
+                    device.lxmf_destination_hash and device.lxmf_destination_hash.startswith(prefix)
+                )
+                or (device.identity_hash and device.identity_hash.startswith(prefix))
+            ):
                 target_device = device
                 break
         if target_device:
@@ -257,12 +373,50 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
         # Use from_identity_hash=True since we have identity hash, not destination hash
         recalled_identity = RNS.Identity.recall(identity_bytes, from_identity_hash=True)
         if recalled_identity:
-            print(f"Identity recalled successfully")
+            print("Identity recalled successfully")
         else:
-            print(f"Warning: Identity not recalled - may need to wait for LXMF announce")
+            print("Warning: Identity not recalled - may need to wait for LXMF announce")
 
-    # Create RPC client
-    rpc_client = RPCClient(lxmf_service)
+    # Create StyreneProtocol for RPC transport
+    # RPCClient requires StyreneProtocol, not LXMFService
+    from styrened.models.messages import init_db
+    from styrened.protocols.base import LXMFMessage
+    from styrened.protocols.styrene import StyreneProtocol
+
+    db_engine = init_db()
+    styrene_protocol = StyreneProtocol(
+        router=lxmf_service.router,
+        identity=lxmf_service._identity,
+        db_engine=db_engine,
+    )
+
+    # Register LXMF callback to dispatch messages to StyreneProtocol
+    # This is required for receiving RPC responses
+    def dispatch_to_styrene(lxmf_message: Any) -> None:
+        import asyncio
+
+        wrapped = LXMFMessage(
+            source_hash=lxmf_message.source_hash.hex(),
+            destination_hash=lxmf_message.destination_hash.hex()
+            if lxmf_message.destination_hash
+            else "",
+            timestamp=lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else 0.0,
+            content=lxmf_message.content.decode("utf-8")
+            if isinstance(lxmf_message.content, bytes)
+            else (lxmf_message.content or ""),
+            fields=lxmf_message.fields or {},
+        )
+        if styrene_protocol.can_handle(wrapped):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(styrene_protocol.handle_message(wrapped))
+            except RuntimeError:
+                asyncio.run(styrene_protocol.handle_message(wrapped))
+
+    lxmf_service.register_callback(dispatch_to_styrene, raw_mode=True)
+
+    # Create RPC client with StyreneProtocol
+    rpc_client = RPCClient(styrene_protocol)
 
     print(f"Querying status (timeout: {timeout}s)...")
 
@@ -325,6 +479,33 @@ def cmd_send(args: argparse.Namespace) -> int:
 
 async def _cmd_send_async(args: argparse.Namespace) -> int:
     """Async implementation of send command."""
+    destination = args.destination
+    message = args.message
+    retry = args.retry if hasattr(args, "retry") else False
+    max_wait = args.max_wait if hasattr(args, "max_wait") else 30.0
+
+    # Try IPC first (uses daemon's mesh stack)
+    client = await _try_ipc_client()
+    if client:
+        try:
+            print("Sending message via daemon...")
+            success = await client.send_message(destination, message, retry=retry, timeout=max_wait)
+            await client.disconnect()
+
+            if success:
+                print("Message sent successfully")
+                return 0
+            else:
+                print("Failed to send message", file=sys.stderr)
+                return 1
+        except Exception as e:
+            logger.warning(f"IPC send failed, falling back to standalone: {e}")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+    # Fallback: standalone mode
     from styrened.services.config import get_default_core_config, load_core_config
     from styrened.services.lifecycle import CoreLifecycle
     from styrened.services.lxmf_service import get_lxmf_service
@@ -335,6 +516,8 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
         start_discovery,
         stop_discovery,
     )
+
+    discovery_wait = getattr(args, "wait", 10)
 
     # Load config
     try:
@@ -356,12 +539,6 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    destination = args.destination
-    message = args.message
-    retry = args.retry if hasattr(args, "retry") else False
-    max_wait = args.max_wait if hasattr(args, "max_wait") else 30.0
-    discovery_wait = getattr(args, "wait", 10)
-
     # Start discovery and wait for target device to announce
     # This is required to get the identity into memory for sending
     node_store = get_node_store()
@@ -371,11 +548,18 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
     # Wait for announce from target device
     target_device = None
     start_time = time.time()
+    prefix = destination[:16]
     while time.time() - start_time < discovery_wait:
         devices = discover_devices()
         for device in devices:
-            # Match by destination hash prefix
-            if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+            # Match by any hash: destination, LXMF destination, or identity
+            if (
+                (device.destination_hash and device.destination_hash.startswith(prefix))
+                or (
+                    device.lxmf_destination_hash and device.lxmf_destination_hash.startswith(prefix)
+                )
+                or (device.identity_hash and device.identity_hash.startswith(prefix))
+            ):
                 target_device = device
                 break
         if target_device:
@@ -384,7 +568,14 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
             # Refresh device info to get LXMF destination if it arrived
             devices = discover_devices()
             for device in devices:
-                if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                if (
+                    (device.destination_hash and device.destination_hash.startswith(prefix))
+                    or (
+                        device.lxmf_destination_hash
+                        and device.lxmf_destination_hash.startswith(prefix)
+                    )
+                    or (device.identity_hash and device.identity_hash.startswith(prefix))
+                ):
                     target_device = device
                     break
             break
@@ -441,6 +632,42 @@ def cmd_exec(args: argparse.Namespace) -> int:
 
 async def _cmd_exec_async(args: argparse.Namespace) -> int:
     """Async implementation of exec command."""
+    destination = args.destination
+    command = args.command
+    cmd_args = args.args if hasattr(args, "args") and args.args else []
+    timeout = args.timeout if hasattr(args, "timeout") else 60.0
+
+    # Try IPC first (uses daemon's mesh stack)
+    client = await _try_ipc_client()
+    if client:
+        try:
+            print(f"Executing '{command} {' '.join(cmd_args)}' via daemon...")
+            result = await client.exec_command(destination, command, cmd_args, timeout=timeout)
+            await client.disconnect()
+
+            if args.json:
+                import json
+
+                output = result.to_dict()
+                output["success"] = result.success
+                print(json.dumps(output, indent=2))
+            else:
+                if result.stdout:
+                    print(result.stdout)
+                if result.stderr:
+                    print(result.stderr, file=sys.stderr)
+                if not result.success:
+                    print(f"\nExit code: {result.exit_code}", file=sys.stderr)
+
+            return cast(int, result.exit_code)
+        except Exception as e:
+            logger.warning(f"IPC exec failed, falling back to standalone: {e}")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+    # Fallback: standalone mode
     from styrened.rpc import RPCClient
     from styrened.rpc.errors import RPCTimeoutError, RPCTransportError
     from styrened.services.config import get_default_core_config, load_core_config
@@ -453,6 +680,8 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
         start_discovery,
         stop_discovery,
     )
+
+    discovery_wait = getattr(args, "wait", 10)
 
     # Load config
     try:
@@ -474,12 +703,6 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    destination = args.destination
-    command = args.command
-    cmd_args = args.args if hasattr(args, "args") and args.args else []
-    timeout = args.timeout if hasattr(args, "timeout") else 60.0
-    discovery_wait = getattr(args, "wait", 10)
-
     # Start discovery and wait for target device to announce
     node_store = get_node_store()
     print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
@@ -488,10 +711,18 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
     # Wait for announce from target device
     target_device = None
     start_time = time.time()
+    prefix = destination[:16]
     while time.time() - start_time < discovery_wait:
         devices = discover_devices()
         for device in devices:
-            if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+            # Match by any hash: destination, LXMF destination, or identity
+            if (
+                (device.destination_hash and device.destination_hash.startswith(prefix))
+                or (
+                    device.lxmf_destination_hash and device.lxmf_destination_hash.startswith(prefix)
+                )
+                or (device.identity_hash and device.identity_hash.startswith(prefix))
+            ):
                 target_device = device
                 break
         if target_device:
@@ -500,7 +731,14 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
             # Refresh device info to get LXMF destination if it arrived
             devices = discover_devices()
             for device in devices:
-                if device.destination_hash and device.destination_hash.startswith(destination[:16]):
+                if (
+                    (device.destination_hash and device.destination_hash.startswith(prefix))
+                    or (
+                        device.lxmf_destination_hash
+                        and device.lxmf_destination_hash.startswith(prefix)
+                    )
+                    or (device.identity_hash and device.identity_hash.startswith(prefix))
+                ):
                     target_device = device
                     break
             break
@@ -519,8 +757,46 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
     lxmf_dest = target_device.lxmf_destination_hash or destination
     print(f"Found {target_device.name or 'device'}, LXMF dest {lxmf_dest[:16]}...")
 
-    # Create RPC client
-    rpc_client = RPCClient(lxmf_service)
+    # Create StyreneProtocol for RPC transport
+    # RPCClient requires StyreneProtocol, not LXMFService
+    from styrened.models.messages import init_db
+    from styrened.protocols.base import LXMFMessage
+    from styrened.protocols.styrene import StyreneProtocol
+
+    db_engine = init_db()
+    styrene_protocol = StyreneProtocol(
+        router=lxmf_service.router,
+        identity=lxmf_service._identity,
+        db_engine=db_engine,
+    )
+
+    # Register LXMF callback to dispatch messages to StyreneProtocol
+    # This is required for receiving RPC responses
+    def dispatch_to_styrene(lxmf_message: Any) -> None:
+        import asyncio
+
+        wrapped = LXMFMessage(
+            source_hash=lxmf_message.source_hash.hex(),
+            destination_hash=lxmf_message.destination_hash.hex()
+            if lxmf_message.destination_hash
+            else "",
+            timestamp=lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else 0.0,
+            content=lxmf_message.content.decode("utf-8")
+            if isinstance(lxmf_message.content, bytes)
+            else (lxmf_message.content or ""),
+            fields=lxmf_message.fields or {},
+        )
+        if styrene_protocol.can_handle(wrapped):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(styrene_protocol.handle_message(wrapped))
+            except RuntimeError:
+                asyncio.run(styrene_protocol.handle_message(wrapped))
+
+    lxmf_service.register_callback(dispatch_to_styrene, raw_mode=True)
+
+    # Create RPC client with StyreneProtocol
+    rpc_client = RPCClient(styrene_protocol)
 
     print(f"Executing '{command} {' '.join(cmd_args)}'...")
 
@@ -581,6 +857,24 @@ def cmd_announce(args: argparse.Namespace) -> int:
 
 async def _cmd_announce_async(args: argparse.Namespace) -> int:
     """Async implementation of announce command."""
+    # Try IPC first (uses daemon's destination)
+    client = await _try_ipc_client()
+    if client:
+        try:
+            dest_hash = await client.announce()
+            await client.disconnect()
+
+            print("Announced via daemon")
+            print(f"  Destination: {dest_hash}")
+            return 0
+        except Exception as e:
+            logger.warning(f"IPC announce failed, falling back to standalone: {e}")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+    # Fallback: standalone mode
     import socket
 
     from styrened.services.config import get_default_core_config, load_core_config
@@ -650,6 +944,7 @@ def cmd_identity(args: argparse.Namespace) -> int:
     )
 
     # Get or create identity
+    identity_hash: str | None = None
     try:
         if args.create:
             identity_hash = ensure_operator_identity()
@@ -673,9 +968,193 @@ def cmd_identity(args: argparse.Namespace) -> int:
         }
         print(json.dumps(output, indent=2))
     else:
-        print(f"Operator Identity:")
+        print("Operator Identity:")
         print(f"  Hash: {identity_hash}")
         print(f"  Path: {OPERATOR_IDENTITY_PATH}")
+
+    return 0
+
+
+def cmd_identity_status(args: argparse.Namespace) -> int:
+    """Show identity sharing status with other LXMF applications.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    from styrened.services.reticulum import (
+        OPERATOR_IDENTITY_PATH,
+        get_identity_sharing_status,
+        get_operator_identity,
+    )
+
+    identity_hash = get_operator_identity()
+
+    if args.json:
+        import json
+
+        status = get_identity_sharing_status()
+        # Convert Path objects to strings for JSON
+        output = {
+            "styrened": {
+                "identity_hash": identity_hash,
+                "identity_path": str(OPERATOR_IDENTITY_PATH),
+                "exists": OPERATOR_IDENTITY_PATH.exists(),
+            },
+            "apps": {
+                app: {
+                    "path": str(info["path"]),
+                    "exists": info["exists"],
+                    "is_symlink": info["is_symlink"],
+                    "points_to_styrened": info["points_to_styrened"],
+                    "symlink_target": str(info["symlink_target"])
+                    if info["symlink_target"]
+                    else None,
+                }
+                for app, info in status.items()
+            },
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print("Styrened Identity:")
+        if identity_hash:
+            print(f"  Hash: {identity_hash}")
+            print(f"  Path: {OPERATOR_IDENTITY_PATH}")
+        else:
+            print("  Not created yet (use 'styrened identity --create')")
+        print()
+
+        print("LXMF Application Status:")
+        status = get_identity_sharing_status()
+        for app, info in status.items():
+            status_str = ""
+            if info["points_to_styrened"]:
+                status_str = "-> styrened (shared)"
+            elif info["is_symlink"]:
+                status_str = f"-> {info['symlink_target']} (other)"
+            elif info["exists"]:
+                status_str = "(independent identity)"
+            else:
+                status_str = "(not installed)"
+            print(f"  {app}: {status_str}")
+            print(f"    Path: {info['path']}")
+
+    return 0
+
+
+def cmd_identity_share(args: argparse.Namespace) -> int:
+    """Share styrened identity with other LXMF applications.
+
+    Creates symlinks from other applications' identity paths to styrened's identity,
+    making styrened the source of truth for mesh identity.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    from styrened.services.reticulum import (
+        LXMF_SYMLINK_TARGETS,
+        share_identity_with_apps,
+    )
+
+    apps = args.apps if args.apps else None  # None means all apps
+
+    if apps:
+        # Validate app names
+        invalid = [a for a in apps if a not in LXMF_SYMLINK_TARGETS]
+        if invalid:
+            print(f"Unknown apps: {', '.join(invalid)}", file=sys.stderr)
+            print(f"Valid apps: {', '.join(LXMF_SYMLINK_TARGETS.keys())}", file=sys.stderr)
+            return 1
+
+    try:
+        results = share_identity_with_apps(
+            apps=apps,
+            backup=not args.no_backup,
+            force=args.force,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        import json
+
+        output = [
+            {
+                "app": r.app,
+                "path": str(r.path),
+                "success": r.success,
+                "message": r.message,
+                "backed_up_to": str(r.backed_up_to) if r.backed_up_to else None,
+            }
+            for r in results
+        ]
+        print(json.dumps(output, indent=2))
+    else:
+        for r in results:
+            status = "OK" if r.success else "FAILED"
+            print(f"[{status}] {r.app}: {r.message}")
+            if r.backed_up_to:
+                print(f"       Backup: {r.backed_up_to}")
+
+    # Return error if any failed
+    return 0 if all(r.success for r in results) else 1
+
+
+def cmd_identity_unshare(args: argparse.Namespace) -> int:
+    """Remove identity sharing with other LXMF applications.
+
+    Removes symlinks from other applications and optionally restores their
+    original identity files from backups.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    from styrened.services.reticulum import (
+        LXMF_SYMLINK_TARGETS,
+        unshare_identity_from_apps,
+    )
+
+    apps = args.apps if args.apps else None  # None means all apps
+
+    if apps:
+        # Validate app names
+        invalid = [a for a in apps if a not in LXMF_SYMLINK_TARGETS]
+        if invalid:
+            print(f"Unknown apps: {', '.join(invalid)}", file=sys.stderr)
+            print(f"Valid apps: {', '.join(LXMF_SYMLINK_TARGETS.keys())}", file=sys.stderr)
+            return 1
+
+    results = unshare_identity_from_apps(
+        apps=apps,
+        restore_backup=not args.no_restore,
+    )
+
+    if args.json:
+        import json
+
+        output = [
+            {
+                "app": r.app,
+                "path": str(r.path),
+                "success": r.success,
+                "message": r.message,
+            }
+            for r in results
+        ]
+        print(json.dumps(output, indent=2))
+    else:
+        for r in results:
+            status = "OK" if r.success else "SKIPPED"
+            print(f"[{status}] {r.app}: {r.message}")
 
     return 0
 
@@ -685,16 +1164,41 @@ def cmd_identity(args: argparse.Namespace) -> int:
 # -----------------------------------------------------------------------------
 
 
+def cmd_version(args: argparse.Namespace) -> int:
+    """Show version information.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    from styrened import __version__
+
+    if args.json:
+        import json
+
+        output = {"version": __version__, "name": "styrened"}
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"styrened {__version__}")
+
+    return 0
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for styrened CLI.
 
     Returns:
         Configured ArgumentParser.
     """
+    from styrened import __version__
+
     parser = argparse.ArgumentParser(
         prog="styrened",
         description="Styrene headless daemon and mesh network tools",
     )
+    parser.add_argument("--version", action="version", version=f"styrened {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -765,6 +1269,61 @@ def create_parser() -> argparse.ArgumentParser:
     identity_parser.add_argument("--create", action="store_true", help="Create identity if missing")
     identity_parser.add_argument("--json", action="store_true", help="Output as JSON")
     identity_parser.set_defaults(func=cmd_identity)
+
+    # identity status - show sharing status with other apps
+    identity_status_parser = subparsers.add_parser(
+        "identity-status",
+        help="Show identity sharing status with LXMF apps",
+    )
+    identity_status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    identity_status_parser.set_defaults(func=cmd_identity_status)
+
+    # identity share - share identity with other apps
+    identity_share_parser = subparsers.add_parser(
+        "identity-share",
+        help="Share identity with other LXMF applications (NomadNet, Sideband, etc.)",
+    )
+    identity_share_parser.add_argument(
+        "apps",
+        nargs="*",
+        help="Apps to share with (nomadnet, sideband, meshchat, lxmf). All if omitted.",
+    )
+    identity_share_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Replace existing identity files",
+    )
+    identity_share_parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Don't backup existing identity files",
+    )
+    identity_share_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    identity_share_parser.set_defaults(func=cmd_identity_share)
+
+    # identity unshare - remove identity sharing
+    identity_unshare_parser = subparsers.add_parser(
+        "identity-unshare",
+        help="Remove identity sharing with other LXMF applications",
+    )
+    identity_unshare_parser.add_argument(
+        "apps",
+        nargs="*",
+        help="Apps to unshare from (nomadnet, sideband, meshchat, lxmf). All if omitted.",
+    )
+    identity_unshare_parser.add_argument(
+        "--no-restore",
+        action="store_true",
+        help="Don't restore backed-up identity files",
+    )
+    identity_unshare_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    identity_unshare_parser.set_defaults(func=cmd_identity_unshare)
+
+    # version
+    version_parser = subparsers.add_parser("version", help="Show version information")
+    version_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    version_parser.set_defaults(func=cmd_version)
 
     return parser
 

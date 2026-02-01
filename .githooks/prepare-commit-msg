@@ -1,0 +1,24 @@
+#!/bin/bash
+# Prepare commit message hook - adds a checklist reminder
+#
+# Install: git config core.hooksPath .githooks
+# Or symlink: ln -sf ../../.githooks/prepare-commit-msg .git/hooks/prepare-commit-msg
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+
+# Only add reminder for new commits (not merges, squashes, or amends)
+if [ -z "$COMMIT_SOURCE" ]; then
+    # Prepend the checklist to the commit message file
+    cat - "$COMMIT_MSG_FILE" > "$COMMIT_MSG_FILE.tmp" << 'EOF'
+
+# ─── Commit Checklist ───────────────────────────────────────────
+# Before committing, verify:
+#   [ ] Conventional commit format? (feat:/fix:/chore:/docs:/refactor:/test:)
+#   [ ] Tests pass locally? (make test-unit or make validate)
+#   [ ] No secrets or credentials in staged files?
+#   [ ] Version sources synchronized? (pyproject.toml, __init__.py, VERSION)
+# ────────────────────────────────────────────────────────────────
+EOF
+    mv "$COMMIT_MSG_FILE.tmp" "$COMMIT_MSG_FILE"
+fi

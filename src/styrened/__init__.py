@@ -14,94 +14,94 @@ Daemon usage:
     # or run via: styrened command
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Daemon exports
 from styrened.daemon import StyreneDaemon, main
 
-# RPC exports (most commonly used from library)
-from styrened.rpc import (
-    RPCClient,
-    RPCServer,
-    get_rpc_server,
-    StatusRequest,
-    StatusResponse,
-    ExecCommand,
-    ExecResult,
-    RebootCommand,
-    RebootResult,
-    UpdateConfigCommand,
-    UpdateConfigResult,
-    RPCError,
-    RPCTimeoutError,
-    RPCTransportError,
-    RPCInvalidResponseError,
-)
-
 # Core model exports
 from styrened.models import (
-    # Config
-    CoreConfig,
+    RNS_ERROR_INFO,
     APIConfig,
     ChatConfig,
-    RPCConfig,
-    ReticulumConfig,
-    DiscoveryConfig,
-    DeploymentMode,
-    GatewayMode,
-    LogLevel,
+    ConfigFieldError,
     ConfigLoadError,
     ConfigValidationError,
-    ConfigValidationErrors,
+    # Config
+    CoreConfig,
+    DeploymentMode,
+    DeviceType,
+    DiscoveryConfig,
+    GatewayMode,
+    LogLevel,
     # Mesh devices
     MeshDevice,
-    DeviceType,
     NodeStatus,
-    create_mesh_device,
-    parse_announce_data,
-    # Reticulum state
-    ReticulumState,
+    ReticulumConfig,
     ReticulumIdentity,
     ReticulumInterface,
     ReticulumNotConfiguredError,
+    # Reticulum state
+    ReticulumState,
+    RNSErrorCategory,
     # RNS errors
     RNSErrorState,
-    RNSErrorCategory,
-    RNS_ERROR_INFO,
+    RPCConfig,
     # Wire protocol
     StyreneEnvelope,
     StyreneMessageType,
     StyreneWireError,
+    create_announce,
+    create_chat,
+    create_mesh_device,
     create_ping,
     create_pong,
-    create_chat,
-    create_announce,
     create_status_request,
     create_status_response,
-    encode_payload,
     decode_payload,
-)
-
-# Service exports
-from styrened.services import (
-    load_core_config,
-    save_core_config,
-    get_default_core_config,
-    get_config_dir,
-    get_data_dir,
-    get_cache_dir,
-    get_log_dir,
-    ensure_directories,
+    encode_payload,
+    parse_announce_data,
 )
 
 # Protocol exports
 from styrened.protocols import (
-    Protocol,
-    LXMFMessage,
     ChatProtocol,
-    StyreneProtocol,
-    ProtocolRegistry,
+    LXMFMessage,
+    Protocol,
     ProtocolNotFoundError,
+    ProtocolRegistry,
+    StyreneProtocol,
+)
+
+# RPC exports (most commonly used from library)
+# Note: Request classes removed in wire protocol migration.
+# Use RPCClient.call_status(), call_exec(), etc. or create_*() from styrene_wire.
+from styrened.rpc import (
+    ExecResult,
+    RebootResult,
+    RPCClient,
+    # Errors
+    RPCError,
+    RPCInvalidResponseError,
+    RPCServer,
+    RPCTimeoutError,
+    RPCTransportError,
+    # Response types (for type hints and deserialization)
+    StatusResponse,
+    UpdateConfigResult,
+    get_rpc_server,
+)
+
+# Service exports
+from styrened.services import (
+    ensure_directories,
+    get_cache_dir,
+    get_config_dir,
+    get_data_dir,
+    get_default_core_config,
+    get_log_dir,
+    load_core_config,
+    save_core_config,
 )
 
 __all__ = [
@@ -114,14 +114,10 @@ __all__ = [
     "RPCClient",
     "RPCServer",
     "get_rpc_server",
-    # RPC Messages
-    "StatusRequest",
+    # RPC Response Types
     "StatusResponse",
-    "ExecCommand",
     "ExecResult",
-    "RebootCommand",
     "RebootResult",
-    "UpdateConfigCommand",
     "UpdateConfigResult",
     # RPC Errors
     "RPCError",
@@ -138,9 +134,9 @@ __all__ = [
     "DeploymentMode",
     "GatewayMode",
     "LogLevel",
+    "ConfigFieldError",
     "ConfigLoadError",
     "ConfigValidationError",
-    "ConfigValidationErrors",
     # Mesh device models
     "MeshDevice",
     "DeviceType",

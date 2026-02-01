@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for styrened k8s testing
 # Optimized for fast iteration with layer caching
 
-# Stage 1: Base dependencies
+# Stage 1: Base with system dependencies
 FROM python:3.11-slim AS base
 
 WORKDIR /app
@@ -13,53 +13,64 @@ RUN apt-get update && apt-get install -y \
     git \
     iputils-ping \
     procps \
-    iptables \
     && rm -rf /var/lib/apt/lists/*
 
-# Install build tool
-RUN pip install --no-cache-dir build
+# Stage 2: Dependencies layer (cached unless pyproject.toml changes)
+FROM base AS deps
 
-# Stage 2: Install styrene-core first
-FROM base AS core
+WORKDIR /app
 
-WORKDIR /app/styrene-core
+# Copy only dependency specification first for better caching
+COPY pyproject.toml README.md ./
 
-# Copy styrene-core package
-COPY styrene-core/pyproject.toml styrene-core/README.md ./
-COPY styrene-core/src/ ./src/
-
-# Install styrene-core
-RUN pip install --no-cache-dir -e .
+# Install dependencies without the package itself
+RUN pip install --no-cache-dir \
+    rns>=0.7.5 \
+    lxmf>=0.4.3 \
+    pyyaml>=6.0 \
+    platformdirs>=4.0 \
+    sqlalchemy>=2.0 \
+    msgpack>=1.0
 
 # Stage 3: Application layer
-FROM core AS app
+FROM deps AS app
 
-WORKDIR /app/styrened
+WORKDIR /app
 
-# Copy styrened source code
-COPY styrened/pyproject.toml styrened/README.md ./
-COPY styrened/src/ ./src/
+# Copy source code
+COPY src/ ./src/
 
-# Now install styrened (which depends on styrene-core)
+# Install styrened in editable mode
 RUN pip install --no-cache-dir -e .
 
 # Stage 4: Test layer
 FROM app AS test
 
 # Install test dependencies
-RUN pip install --no-cache-dir pytest pytest-asyncio kubernetes
+RUN pip install --no-cache-dir pytest pytest-asyncio
 
-# Copy test utilities (not full test suite - that's mounted)
-COPY styrened/tests/k8s/docker/entrypoint.sh /entrypoint.sh
+# Copy entrypoint
+COPY tests/k8s/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Create directories for RNS and styrene data
-RUN mkdir -p /root/.styrene /root/.reticulum
+RUN mkdir -p /root/.styrene /root/.reticulum /config /data
+
+# Build args for version info
+ARG VERSION=0.0.0-dev
+ARG COMMIT_SHA=unknown
+ARG BUILD_DATE=unknown
+
+# Labels
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
     RNS_LOGLEVEL=4 \
-    STYRENE_CONFIG_DIR=/root/.styrene
+    STYRENE_CONFIG_DIR=/config \
+    STYRENE_VERSION=${VERSION}
 
 # Entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

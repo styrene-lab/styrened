@@ -1,13 +1,33 @@
 # Default values for styrened-test Helm chart
+#
+# Override patterns:
+#   Local testing (make test-k8s-local):
+#     Uses defaults below - image pre-loaded via `k3s ctr images import`
+#
+#   CI/CD (GHCR):
+#     --set image.repository=ghcr.io/styrene-lab/styrened-test
+#     --set image.tag=<commit-sha>
+#     --set image.pullPolicy=Always
+#
+#   Remote registry:
+#     --set image.repository=<registry>/<image>
+#     --set image.tag=<tag>
+#     --set image.pullPolicy=IfNotPresent
 
 # Number of styrened pods to deploy
 replicaCount: 3
 
 # Container image configuration
+# Defaults are for local testing with pre-loaded images (make build-amd64 && make load-k8s-image)
 image:
   repository: styrened-test
-  pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: "local-amd64"
+  pullPolicy: Never
+
+# Image pull secrets for private registries (e.g., GHCR)
+# For GHCR images: create secret with `make create-ghcr-secret`
+imagePullSecrets: []
+# - name: ghcr-secret
 
 # Resource limits per pod (cost-efficient)
 resources:
@@ -21,7 +41,7 @@ resources:
 # Styrene configuration (merged into ConfigMap)
 styrene:
   reticulum:
-    mode: standalone  # standalone, hub, peer
+    mode: standalone # standalone, hub, peer
     transport_enabled: false
     announce_interval: 300
 
@@ -68,15 +88,15 @@ networkPolicy:
     - Egress
   ingress:
     - from:
-      - podSelector: {}
+        - podSelector: {}
   egress:
     - to:
-      - podSelector: {}
+        - podSelector: {}
     - to:
-      - namespaceSelector: {}
+        - namespaceSelector: {}
       ports:
-      - protocol: TCP
-        port: 53  # DNS
+        - protocol: TCP
+          port: 53 # DNS
 
 # Pod annotations
 podAnnotations: {}
@@ -89,9 +109,9 @@ podSecurityContext:
 securityContext:
   capabilities:
     drop:
-    - ALL
+      - ALL
   readOnlyRootFilesystem: false
-  runAsNonRoot: false  # RNS needs to bind to ports
+  runAsNonRoot: false # RNS needs to bind to ports
   runAsUser: 0
 
 # Node selector
@@ -104,9 +124,9 @@ tolerations: []
 affinity:
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      podAffinityTerm:
-        labelSelector:
-          matchLabels:
-            app: styrened-test
-        topologyKey: kubernetes.io/hostname
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: styrened-test
+          topologyKey: kubernetes.io/hostname

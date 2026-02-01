@@ -31,7 +31,7 @@ Successfully deployed and validated the complete containerized integration test 
 
 ## Test Execution Results
 
-### Successful Test Run ✅
+### Successful Test Run
 
 **Test:** `test_pods_isolated_via_network_policy`
 **Duration:** 78.85s (first run), 104.31s (validation run)
@@ -39,13 +39,13 @@ Successfully deployed and validated the complete containerized integration test 
 
 #### What Was Validated
 
-1. **Helm Deployment** ✅
+1. **Helm Deployment** - Passed
    - StatefulSet with 3 replicas deployed successfully
    - ConfigMaps created and mounted correctly
    - Service (headless) created for pod DNS
    - NetworkPolicy template applied successfully
 
-2. **Pod Lifecycle** ✅
+2. **Pod Lifecycle** - Passed
    - Pods scheduled to cluster node
    - Container images pulled (already cached)
    - Entrypoint script executed
@@ -53,7 +53,7 @@ Successfully deployed and validated the complete containerized integration test 
    - All 3 pods reached `Running` state
    - Readiness probes passed (~90s startup time)
 
-3. **Container Runtime** ✅
+3. **Container Runtime** - Passed
    - Python 3.11 environment initialized
    - RNS library imported successfully
    - LXMF service started
@@ -61,13 +61,13 @@ Successfully deployed and validated the complete containerized integration test 
    - Device discovery service active
    - Auto-reply handler started
 
-4. **Network Connectivity** ✅
+4. **Network Connectivity** - Passed
    - Pod-to-pod communication via pod IPs
    - DNS resolution attempted (service mesh pattern)
    - Ping utility functional
    - NetworkPolicy mechanics operational (apply/remove)
 
-5. **Test Harness** ✅
+5. **Test Harness** - Passed
    - Cluster detection (identified as "cloud" cluster)
    - Namespace isolation per test
    - Automatic cleanup on test completion
@@ -95,7 +95,7 @@ Successfully deployed and validated the complete containerized integration test 
 [k8s-tests] Created namespace: styrene-test-26fc0013
 
 networkpolicy.networking.k8s.io/isolate-pod-0 created
-⚠️  NetworkPolicy not enforced (CNI may not support it)
+WARN: NetworkPolicy not enforced (CNI may not support it)
 PASSED
 
 [k8s-tests] Cleaning up release: test-1a12d2
@@ -108,31 +108,31 @@ PASSED
 **Problem:** Initial ARM64 build failed on AMD64 cluster
 **Error:** `exec format error`
 **Solution:** Cross-compile with `--platform linux/amd64`
-**Status:** ✅ Resolved
+**Status:** Resolved
 
 ### 2. Startup Timeout
 **Problem:** Pods not ready within 60s
 **Cause:** RNS + LXMF initialization overhead (~90s)
 **Solution:** Increased timeout to 120s
-**Status:** ✅ Resolved
+**Status:** Resolved
 
 ### 3. Missing Utilities
 **Problem:** `ping`, `pgrep`, `iptables` not in python:3.11-slim
 **Solution:** Added `iputils-ping`, `procps`, `iptables` to Dockerfile
-**Status:** ✅ Resolved
+**Status:** Resolved
 
 ### 4. NetworkPolicy Enforcement
 **Problem:** NetworkPolicy applied but pods still connected
 **Cause:** K3s default networking doesn't enforce NetworkPolicies
 **Solution:** Made test adaptive (validates mechanics, not enforcement)
-**Status:** ✅ Adapted (expected behavior)
+**Status:** Adapted (expected behavior)
 **Note:** Full enforcement requires Calico/Cilium CNI
 
 ### 5. Delete Manifest Arguments
 **Problem:** Test passed too many args to `delete_manifest()`
 **Cause:** Test code error
 **Solution:** Removed extra namespace argument
-**Status:** ✅ Resolved
+**Status:** Resolved
 
 ## Performance Metrics
 
@@ -147,19 +147,19 @@ PASSED
 
 ## Architecture Validation
 
-### Multi-Stage Build ✅
+### Multi-Stage Build
 - **Stage 1 (base):** System dependencies, build tools
 - **Stage 2 (core):** styrene-core package installation
 - **Stage 3 (app):** styrened package installation
 - **Stage 4 (test):** Test tools, entrypoint, runtime dirs
 
-### Helm Chart ✅
+### Helm Chart
 - **StatefulSet:** Stable pod DNS names
 - **ConfigMaps:** Config injection (styrened + RNS)
 - **Service:** Headless service for pod-to-pod DNS
 - **NetworkPolicy:** Isolation template (requires CNI)
 
-### Pytest Integration ✅
+### Pytest Integration
 - **Session Fixture:** Cluster detection and validation
 - **Function Fixtures:** Namespace isolation, stack deployment
 - **Async Support:** `pytest-asyncio` for concurrent operations
@@ -169,9 +169,9 @@ PASSED
 
 | Category | Tests Implemented | Tests Passing | Status |
 |----------|-------------------|---------------|--------|
-| **Edge Cases** | 8 | 1 verified | 🟡 Partial |
-| **Load Tests** | 4 | Not run | ⚪ Pending |
-| **Scaling Tests** | 4 | Not run | ⚪ Pending |
+| **Edge Cases** | 8 | 1 verified | Partial |
+| **Load Tests** | 4 | Not run | Pending |
+| **Scaling Tests** | 4 | Not run | Pending |
 | **Total** | **16** | **1** | **6.25%** |
 
 **Note:** Only 1 test fully executed. Others require:
@@ -181,20 +181,20 @@ PASSED
 
 ## Successful Validations
 
-✅ **Infrastructure Layer**
+**Infrastructure Layer**
 - Multi-stage Docker build works
 - Helm chart deploys successfully
 - ConfigMaps mount correctly
 - StatefulSet creates stable pods
 
-✅ **Runtime Layer**
+**Runtime Layer**
 - styrened daemon starts successfully
 - RNS initializes without errors
 - LXMF service starts and announces
 - RPC server listens on configured port
 - Identity generation works automatically
 
-✅ **Test Harness Layer**
+**Test Harness Layer**
 - Cluster detection and validation
 - Namespace isolation per test
 - Helm-based deployment automation
@@ -202,7 +202,7 @@ PASSED
 - Log collection for debugging
 - Automatic cleanup
 
-✅ **Networking Layer**
+**Networking Layer**
 - Pod-to-pod connectivity (direct IP)
 - NetworkPolicy mechanics (apply/remove)
 - DNS resolution attempted (service mesh)
@@ -210,7 +210,7 @@ PASSED
 ## Recommendations for Next Steps
 
 ### Immediate (Required for Full Test Suite)
-1. ✅ Add missing utilities to Dockerfile (`procps`, `iptables` already added)
+1. Add missing utilities to Dockerfile (`procps`, `iptables` already added) - Done
 2. Run remaining edge case tests individually
 3. Fix test code based on actual cluster behavior
 4. Document k3s-specific quirks (NetworkPolicy, DNS)
@@ -231,12 +231,12 @@ PASSED
 
 The styrened containerized test suite is **functionally complete and operational**. The first live test run successfully validated:
 
-- ✅ Complete build pipeline (Docker → k3s)
-- ✅ Helm chart deployment mechanics
-- ✅ Pod lifecycle management
-- ✅ styrened runtime behavior
-- ✅ Test harness automation
-- ✅ Cleanup and resource management
+- Complete build pipeline (Docker -> k3s)
+- Helm chart deployment mechanics
+- Pod lifecycle management
+- styrened runtime behavior
+- Test harness automation
+- Cleanup and resource management
 
 **All core infrastructure components are working as designed.** The remaining work is:
 1. Running the other 15 tests to validate edge cases, load, and scaling

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "styrened"
-version = "0.2.0"
+version = "0.3.0"
 description = "Unified Styrene library and headless daemon for RNS/LXMF mesh networking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -48,6 +48,9 @@ dev = [
     "ruff>=0.1.6",
     "types-pyyaml>=6.0",
 ]
+docs = [
+    "pdoc>=14.0",
+]
 
 [project.scripts]
 styrened = "styrened.__main__:main"
@@ -55,7 +58,7 @@ styrened = "styrened.__main__:main"
 [project.urls]
 Homepage = "https://github.com/styrene-lab/styrened"
 Repository = "https://github.com/styrene-lab/styrened"
-Documentation = "https://github.com/styrene-lab/styrened#readme"
+Documentation = "https://styrene-lab.github.io/styrened/"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -102,12 +105,15 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --strict-markers"
 markers = [
-    "slow: marks tests as slow (load/scaling tests)",
+    "slow: marks tests as slow (load/scaling tests, >10min)",
     "requires_metrics: requires metrics-server (for resource usage tests)",
     "smoke: marks tests as smoke tests (fast validation, <2min)",
     "integration: marks tests as integration tests (moderate complexity, <10min)",
     "comprehensive: marks tests as comprehensive tests (deep validation, <30min)",
     "rns_singleton: tests requiring RNS singleton isolation",
+    "propagation: LXMF propagation and multi-hop routing tests",
+    "resilience: failover and recovery tests",
+    "convergence: mesh discovery and convergence tests",
 ]
 # pytest-xdist configuration
 # Use --dist loadscope to keep session-scoped fixtures shared within workers
