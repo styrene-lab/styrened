@@ -209,11 +209,10 @@ systemctl --user enable --now styrened
 
 Track deployed test devices:
 
-| Hostname | IP | OS | Hardware | Status | Notes |
-|----------|----|----|----------|--------|-------|
-| styrene-node | 192.168.0.57 | NixOS 24.11 | ASUS Q502LA | Active | First test node |
-| | | | | | |
-| | | | | | |
+| Hostname | IP | OS | Hardware | Identity Hash | Status |
+|----------|----|----|----------|---------------|--------|
+| styrene-node | 192.168.0.57 | NixOS 24.11 | ASUS Q502LA | 698f2232d4ddab45... | Active |
+| t100ta | 192.168.0.59 | NixOS 24.11 | ASUS T100TA | 8b9527306ab83fd8... | Active |
 
 ## Validation Checklist
 
