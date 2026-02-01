@@ -241,15 +241,23 @@ def test_namespace(k8s_cluster: K8sTestHarness, request) -> str:
         worker_num = worker_id.replace("gw", "")
         namespace = f"styrene-test-w{worker_num}-{test_id}"
 
-    # Create namespace with labels for tracking
+    # Create namespace
+    subprocess.run(
+        ["kubectl", "create", "namespace", namespace],
+        check=True,
+        capture_output=True,
+    )
+    # Add labels for tracking (separate command for compatibility)
     subprocess.run(
         [
             "kubectl",
-            "create",
+            "label",
             "namespace",
             namespace,
-            "--labels",
-            f"styrened-test=true,created-by=pytest,worker={worker_id},scope=function",
+            "styrened-test=true",
+            f"created-by=pytest",
+            f"worker={worker_id}",
+            "scope=function",
         ],
         check=True,
         capture_output=True,
