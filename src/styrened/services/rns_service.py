@@ -177,6 +177,9 @@ class RNSService:
             self._error_state = RNSErrorState.none()
             logger.info("RNS initialized successfully")
 
+            # Log interface status
+            self._log_interface_status()
+
             return True
 
         except Exception as e:
@@ -324,6 +327,52 @@ class RNSService:
             # Fallback if method doesn't exist or isn't callable
             logger.warning(f"Could not determine transport status: {e}")
             return False
+
+    def _log_interface_status(self) -> None:
+        """Log status of all configured RNS interfaces.
+
+        Called after RNS initialization to provide visibility into which
+        interfaces are active. This helps diagnose connectivity issues
+        on bare-metal deployments.
+        """
+        if not self._initialized:
+            return
+
+        try:
+            interfaces = RNS.Transport.interfaces
+            if not interfaces:
+                logger.info("RNS interfaces: none configured")
+                return
+
+            logger.info(f"RNS interfaces ({len(interfaces)} active):")
+            for iface in interfaces:
+                iface_type = type(iface).__name__
+                name = getattr(iface, "name", "unnamed")
+
+                # Build status string
+                status_parts = []
+
+                # Check if interface is online
+                if hasattr(iface, "online"):
+                    status = "UP" if iface.online else "DOWN"
+                    status_parts.append(status)
+
+                # Get connection details for TCP interfaces
+                if hasattr(iface, "target_ip") and hasattr(iface, "target_port"):
+                    status_parts.append(f"target={iface.target_ip}:{iface.target_port}")
+                elif hasattr(iface, "bind_ip") and hasattr(iface, "bind_port"):
+                    status_parts.append(f"listen={iface.bind_ip}:{iface.bind_port}")
+
+                # Get bitrate if available
+                if hasattr(iface, "bitrate") and iface.bitrate:
+                    bitrate_mbps = iface.bitrate / 1_000_000
+                    status_parts.append(f"{bitrate_mbps:.1f}Mbps")
+
+                status_str = ", ".join(status_parts) if status_parts else "initializing"
+                logger.info(f"  [{iface_type}] {name}: {status_str}")
+
+        except Exception as e:
+            logger.debug(f"Could not enumerate interfaces: {e}")
 
     def shutdown(self) -> None:
         """Shutdown the RNS instance and clean up resources.

@@ -317,9 +317,10 @@ class StyreneProtocol(Protocol):
 
         This method implements a multi-strategy lookup to find the identity:
         1. Try direct RNS.Identity.recall() with destination_hash
-        2. Try NodeStore lookup by operator destination hash
-        3. Try NodeStore lookup by LXMF destination hash
-        4. Try direct identity hash recall (from_identity_hash=True)
+        2. Try in-memory discovered_devices lookup (from announce handler)
+        3. Try NodeStore lookup by operator destination hash
+        4. Try NodeStore lookup by LXMF destination hash
+        5. Try direct identity hash recall (from_identity_hash=True)
 
         Args:
             destination_hash: Hex-encoded hash (could be destination or identity).
@@ -340,34 +341,48 @@ class StyreneProtocol(Protocol):
 
         logger.debug(f"[HASH] Strategy 1 failed: direct recall({destination_hash[:16]}...) -> None")
 
-        # Strategy 2 & 3: NodeStore lookup
+        # Strategy 2: In-memory discovered devices lookup (from announce handler)
         identity_hash = None
         try:
-            from styrened.services.node_store import get_node_store
+            from styrened.services.reticulum import get_identity_for_lxmf_destination
 
-            store = get_node_store()
-
-            # Strategy 2: Try operator destination hash
-            identity_hash = store.get_identity_for_destination(destination_hash)
+            identity_hash = get_identity_for_lxmf_destination(destination_hash)
             if identity_hash:
                 logger.debug(
-                    f"[HASH] Strategy 2 success: operator_dest lookup -> "
+                    f"[HASH] Strategy 2 success: discovered_devices lookup -> "
                     f"identity_hash={identity_hash[:16]}..."
                 )
+        except Exception as e:
+            logger.warning(f"[HASH] Discovered devices lookup failed: {e}")
 
-            # Strategy 3: Try LXMF destination hash
-            if not identity_hash:
-                identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
+        # Strategy 3 & 4: NodeStore lookup (persistent storage)
+        if not identity_hash:
+            try:
+                from styrened.services.node_store import get_node_store
+
+                store = get_node_store()
+
+                # Strategy 3: Try operator destination hash
+                identity_hash = store.get_identity_for_destination(destination_hash)
                 if identity_hash:
                     logger.debug(
-                        f"[HASH] Strategy 3 success: lxmf_dest lookup -> "
+                        f"[HASH] Strategy 3 success: NodeStore operator_dest lookup -> "
                         f"identity_hash={identity_hash[:16]}..."
                     )
 
-        except Exception as e:
-            logger.warning(f"[HASH] NodeStore lookup failed: {e}")
+                # Strategy 4: Try LXMF destination hash
+                if not identity_hash:
+                    identity_hash = store.get_identity_for_lxmf_destination(destination_hash)
+                    if identity_hash:
+                        logger.debug(
+                            f"[HASH] Strategy 4 success: NodeStore lxmf_dest lookup -> "
+                            f"identity_hash={identity_hash[:16]}..."
+                        )
 
-        # If we found an identity hash in NodeStore, recall it
+            except Exception as e:
+                logger.warning(f"[HASH] NodeStore lookup failed: {e}")
+
+        # If we found an identity hash from lookup, recall it
         if identity_hash:
             identity_bytes = bytes.fromhex(identity_hash)
             # MUST use from_identity_hash=True since this is an identity hash
@@ -380,15 +395,15 @@ class StyreneProtocol(Protocol):
                 return dest_identity
             else:
                 logger.warning(
-                    f"[HASH] NodeStore had identity_hash={identity_hash[:16]}... "
+                    f"[HASH] Lookup found identity_hash={identity_hash[:16]}... "
                     f"but RNS.Identity.recall() failed. Identity may not be in RNS cache."
                 )
 
-        # Strategy 4: Maybe destination_hash IS the identity hash
+        # Strategy 5: Maybe destination_hash IS the identity hash
         dest_identity = RNS.Identity.recall(dest_bytes, from_identity_hash=True)
         if dest_identity:
             logger.debug(
-                f"[HASH] Strategy 4 success: destination WAS identity hash "
+                f"[HASH] Strategy 5 success: destination WAS identity hash "
                 f"({destination_hash[:16]}...)"
             )
             return dest_identity

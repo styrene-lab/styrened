@@ -170,6 +170,27 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         if "enable_transport" in ret:
             config.reticulum.enable_transport = _parse_bool(ret["enable_transport"])
 
+        # Parse config_path_override (new in v0.3.5)
+        if "config_path_override" in ret:
+            override = ret["config_path_override"]
+            # Handle null, empty string, whitespace-only, or "null" string as None
+            # Also handle non-string types (e.g., YAML integers) gracefully
+            if override is None:
+                config.reticulum.config_path_override = None
+            elif not isinstance(override, str):
+                # Non-string types (int, float, etc.) - ignore with warning
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"config_path_override has invalid type {type(override).__name__}, ignoring"
+                )
+                config.reticulum.config_path_override = None
+            elif override.strip() == "" or override.strip().lower() == "null":
+                config.reticulum.config_path_override = None
+            else:
+                # Expand ~ to home directory
+                config.reticulum.config_path_override = Path(override).expanduser()
+
         # Parse interfaces
         if "interfaces" in ret and isinstance(ret["interfaces"], dict):
             ifaces = ret["interfaces"]
@@ -259,11 +280,16 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
 
     # Convert CoreConfig to dictionary
     # For now, minimal implementation - full serialization can be added later
+    reticulum_dict: dict[str, Any] = {
+        "mode": config.reticulum.mode.value,
+        "announce_interval": config.reticulum.announce_interval,
+    }
+    # Include config_path_override if set
+    if config.reticulum.config_path_override is not None:
+        reticulum_dict["config_path_override"] = str(config.reticulum.config_path_override)
+
     config_dict: dict[str, Any] = {
-        "reticulum": {
-            "mode": config.reticulum.mode.value,
-            "announce_interval": config.reticulum.announce_interval,
-        },
+        "reticulum": reticulum_dict,
         "rpc": {
             "enabled": config.rpc.enabled,
         },

@@ -1070,6 +1070,32 @@ def get_rnodes() -> list[MeshDevice]:
     return [device for device in _announce_handler.discovered_devices.values() if device.is_rnode]
 
 
+def get_identity_for_lxmf_destination(lxmf_dest_hash: str) -> str | None:
+    """Look up identity hash for an LXMF destination hash.
+
+    Searches discovered devices for one with a matching LXMF destination
+    and returns its identity hash if found.
+
+    Args:
+        lxmf_dest_hash: Hex-encoded LXMF destination hash.
+
+    Returns:
+        Hex-encoded identity hash if found, None otherwise.
+    """
+    if not _announce_handler:
+        return None
+
+    # Search by LXMF destination hash
+    for device in _announce_handler.discovered_devices.values():
+        if device.lxmf_destination_hash == lxmf_dest_hash:
+            return device.identity_hash
+        # Also check if the operator destination matches (fallback)
+        if device.destination_hash == lxmf_dest_hash:
+            return device.identity_hash
+
+    return None
+
+
 def generate_rns_config(config: CoreConfig, client_only: bool = False) -> str:
     """Generate Reticulum configuration from CoreConfig.
 

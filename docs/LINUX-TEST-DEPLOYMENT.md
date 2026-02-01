@@ -209,10 +209,64 @@ systemctl --user enable --now styrened
 
 Track deployed test devices:
 
-| Hostname | IP | OS | Hardware | Identity Hash | Status |
-|----------|----|----|----------|---------------|--------|
-| styrene-node | 192.168.0.57 | NixOS 24.11 | ASUS Q502LA | 698f2232d4ddab45... | Active |
-| t100ta | 192.168.0.59 | NixOS 24.11 | ASUS T100TA | 8b9527306ab83fd8... | Active |
+| Hostname | IP | OS | Hardware | Identity Hash | LXMF Dest | Status |
+|----------|----|----|----------|---------------|-----------|--------|
+| styrene-node | 192.168.0.57 | NixOS 24.11 | ASUS Q502LA | 698f2232d4ddab45... | f3e11839bf683643... | Active |
+| t100ta | 192.168.0.59 | NixOS 24.11 | ASUS T100TA | 8b9527306ab83fd8... | 2d0d7f044c0bfa29... | Active |
+
+## Integration Test Results (2026-02-01)
+
+Validated full mesh communication between styrene-node and t100ta:
+
+### Test Summary
+
+| Test | styrene-node → t100ta | t100ta → styrene-node |
+|------|:---------------------:|:---------------------:|
+| TCP Connectivity | ✅ | ✅ |
+| Mesh Discovery | ✅ | ✅ |
+| RPC Status Query | ✅ | ✅ |
+| RPC Exec (hostname) | ✅ | ✅ |
+| RPC Exec (uptime) | ✅ | ✅ |
+| Chat Send | ✅ | ✅ |
+| Auto-Reply | ✅ | ✅ |
+
+### Key Findings
+
+1. **Config Path**: RNS uses `~/.config/reticulum/config` by default, NOT `~/.reticulum/config`. The styrened lifecycle code generates configs to a temp directory if neither exists.
+
+2. **TCP Server Required**: For bidirectional communication, both nodes need TCP server interfaces. The config should include:
+   ```
+   [[Local TCP Server]]
+   type = TCPServerInterface
+   enabled = true
+   listen_ip = 0.0.0.0
+   listen_port = 4242
+   ```
+
+3. **Firewall**: NixOS requires explicit firewall rules for port 4242:
+   ```bash
+   sudo iptables -I nixos-fw 4 -p tcp --dport 4242 -j nixos-fw-accept
+   ```
+
+4. **Identity Resolution**: The daemon correctly resolves LXMF destination hashes to identities using the multi-strategy lookup (in-memory discovered devices, then NodeStore).
+
+5. **Auto-Reply Cooldown**: Works correctly, preventing message storms.
+
+### Sample Commands
+
+```bash
+# Status query (from styrene-node to t100ta)
+styrened status 2d0d7f044c0bfa297e1de72b0f473759
+# Output: Uptime 230h, IP 192.168.0.59, Disk 4GB/26GB
+
+# Command execution (from t100ta to styrene-node)  
+styrened exec f3e11839bf6836433681cb4ee19a629e hostname
+# Output: styrene-node
+
+# Chat message
+styrened send 2d0d7f044c0bfa297e1de72b0f473759 "Hello!"
+# Output: Message sent successfully (auto-reply received)
+```
 
 ## Validation Checklist
 

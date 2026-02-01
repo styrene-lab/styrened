@@ -24,7 +24,9 @@ Usage:
     lifecycle.shutdown()
 """
 
+import atexit
 import logging
+import shutil
 from pathlib import Path
 
 from styrened.models.config import CoreConfig
@@ -34,6 +36,25 @@ from styrened.services.reticulum import (
     get_operator_identity_object,
 )
 from styrened.services.rns_service import get_rns_service
+
+# Track temp directories for atexit cleanup (backup for crash/SIGKILL scenarios)
+_temp_config_dirs: set[Path] = set()
+
+
+def _cleanup_temp_dirs() -> None:
+    """Atexit handler to clean up any remaining temp config directories."""
+    for temp_dir in list(_temp_config_dirs):
+        try:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logging.getLogger(__name__).debug(f"Atexit cleanup: {temp_dir}")
+        except Exception:
+            pass  # Best effort cleanup
+    _temp_config_dirs.clear()
+
+
+# Register atexit handler
+atexit.register(_cleanup_temp_dirs)
 
 logger = logging.getLogger(__name__)
 
@@ -129,28 +150,48 @@ class CoreLifecycle:
             return False
 
         try:
-            # Initialize RNS with core config
+            # Initialize RNS with proper config precedence
             import tempfile
             from pathlib import Path
 
-            from styrened.services.reticulum import generate_rns_config
+            from styrened.services.reticulum import (
+                find_reticulum_config,
+                generate_rns_config,
+                get_reticulum_config_paths,
+            )
 
-            # Check for pre-existing RNS config (e.g., mounted in K8s)
-            # This allows containerized deployments to provide custom network interfaces
-            system_rns_config = Path.home() / ".reticulum" / "config"
-            if system_rns_config.exists():
-                logger.info(f"Using existing RNS config: {system_rns_config}")
-                config_dir = system_rns_config.parent
-                self._rns_config_dir = None  # Don't cleanup system config
+            # Config precedence:
+            # 1. Explicit override from core-config.yaml (config_path_override)
+            # 2. Standard RNS paths: /etc/reticulum, ~/.config/reticulum, ~/.reticulum
+            # 3. Generate temp config if none found
+            override = self.config.reticulum.config_path_override
+            existing_config = find_reticulum_config(override=override)
+
+            if existing_config:
+                logger.info(f"Using existing RNS config: {existing_config / 'config'}")
+                if override and existing_config == override:
+                    logger.debug(f"Config from explicit override: {override}")
+                config_dir = existing_config
+                self._rns_config_dir = None  # Don't cleanup existing config
             else:
+                # Log what we searched
+                searched_paths = []
+                if override:
+                    searched_paths.append(str(override))
+                searched_paths.extend(str(p) for p in get_reticulum_config_paths())
+                logger.info(f"No existing RNS config found (searched: {', '.join(searched_paths)})")
+                logger.info("Generating temporary RNS config from core-config.yaml interfaces")
+
                 # Generate RNS config from CoreConfig
                 config_content = generate_rns_config(self.config, client_only=self._client_only)
+                logger.debug(f"Generated RNS config:\n{config_content}")
 
                 # Create temporary config directory that persists for daemon lifetime
                 # Note: We use mkdtemp instead of TemporaryDirectory context manager
                 # because RNS needs the config to remain accessible while running
                 config_dir = Path(tempfile.mkdtemp(prefix="styrened_rns_"))
                 self._rns_config_dir = config_dir  # Store reference for cleanup
+                _temp_config_dirs.add(config_dir)  # Register for atexit cleanup
                 config_file = config_dir / "config"
                 config_file.write_text(config_content)
 
@@ -244,13 +285,13 @@ class CoreLifecycle:
 
             # Clean up temporary RNS config directory
             if self._rns_config_dir and self._rns_config_dir.exists():
-                import shutil
-
                 try:
-                    shutil.rmtree(self._rns_config_dir)
+                    shutil.rmtree(self._rns_config_dir, ignore_errors=True)
                     logger.debug(f"Cleaned up RNS config dir: {self._rns_config_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to clean up RNS config dir: {e}")
+                # Remove from atexit tracker
+                _temp_config_dirs.discard(self._rns_config_dir)
                 self._rns_config_dir = None
 
             self._initialized = False
