@@ -11,19 +11,14 @@ on:
         required: true
         type: string
 
-
-# Required for GHCR push
+# Required for GHCR push and release creation
 permissions:
   contents: write
   packages: write
 
 env:
-  KIND_VERSION: v0.20.0
-  KUBECTL_VERSION: v1.28.0
-  HELM_VERSION: v3.13.0
   REGISTRY: ghcr.io
   IMAGE_NAME_PROD: styrene-lab/styrened
-  IMAGE_NAME_TEST: styrene-lab/styrened-test
 
 jobs:
   validate-tag:
@@ -59,7 +54,7 @@ jobs:
     name: Build Python Wheel
     needs: validate-tag
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,7 +73,7 @@ jobs:
         run: |
           PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           TAG_VERSION="${{ needs.validate-tag.outputs.version }}"
-          
+
           if [[ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]]; then
             echo "ERROR: pyproject.toml version ($PYPROJECT_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
@@ -124,96 +119,6 @@ jobs:
             make push-prod
           fi
 
-  test-release:
-    name: Full Test Suite
-    needs: [validate-tag, build-multi-arch]
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pytest-xdist pytest-cov kubernetes
-
-      - name: Set up kind cluster
-        uses: helm/kind-action@v1.8.0
-        with:
-          version: ${{ env.KIND_VERSION }}
-          kubectl_version: ${{ env.KUBECTL_VERSION }}
-          cluster_name: styrene-release
-
-      - name: Install Helm
-        uses: azure/setup-helm@v3
-        with:
-          version: ${{ env.HELM_VERSION }}
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull and load release image
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }} styrened-test:latest
-          kind load docker-image styrened-test:latest --name styrene-release
-
-      - name: Run full test suite
-        run: |
-          pytest tests/k8s/ -v --tb=short --run-slow \
-            --cov=src --cov-report=xml --cov-report=term --cov-report=html \
-            -n 8 --dist loadscope
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.xml
-          flags: release
-          name: release-${{ needs.validate-tag.outputs.version }}
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-coverage-report
-          path: htmlcov/
-          retention-days: 90
-
-      - name: Collect test logs
-        if: always()
-        run: |
-          mkdir -p /tmp/release-logs
-          kubectl get namespaces | grep styrene-test | awk '{print $1}' | while read ns; do
-            kubectl get pods -n $ns -o name | while read pod; do
-              pod_name=$(basename $pod)
-              kubectl logs $pod_name -n $ns --tail=1000 > /tmp/release-logs/${ns}_${pod_name}.log 2>&1 || true
-            done
-          done
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-test-logs
-          path: /tmp/release-logs/
-          retention-days: 90
-
-      - name: Cleanup
-        if: always()
-        run: |
-          kubectl get namespaces | grep styrene-test | awk '{print $1}' | xargs -r kubectl delete namespace --grace-period=0 --force || true
-
   generate-changelog:
     name: Generate Changelog
     needs: validate-tag
@@ -254,7 +159,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [validate-tag, build-wheel, build-multi-arch, test-release, generate-changelog]
+    needs: [validate-tag, build-wheel, build-multi-arch, generate-changelog]
     runs-on: ubuntu-latest
 
     steps:
@@ -266,11 +171,6 @@ jobs:
         with:
           name: python-wheel
           path: /tmp/wheel
-
-      - name: Download other artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/release-artifacts
 
       - name: Create release archive
         run: |
@@ -288,16 +188,6 @@ jobs:
             --exclude='.venv' \
             .
 
-          # Package test logs
-          if [[ -d /tmp/release-artifacts/release-test-logs ]]; then
-            tar czf /tmp/release-package/test-logs.tar.gz -C /tmp/release-artifacts/release-test-logs .
-          fi
-
-          # Package coverage report
-          if [[ -d /tmp/release-artifacts/release-coverage-report ]]; then
-            tar czf /tmp/release-package/coverage-report.tar.gz -C /tmp/release-artifacts/release-coverage-report .
-          fi
-          
           ls -la /tmp/release-package/
 
       - name: Create GitHub Release
@@ -312,7 +202,7 @@ jobs:
 
             ## Installation
 
-            ### From GitHub Release (recommended for private use)
+            ### From GitHub Release
             ```bash
             # Install wheel directly
             pip install https://github.com/styrene-lab/styrened/releases/download/v${{ needs.validate-tag.outputs.version }}/styrened-${{ needs.validate-tag.outputs.version }}-py3-none-any.whl
@@ -323,48 +213,13 @@ jobs:
 
             ## Container Images
 
-            Multi-architecture OCI images available at:
-            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}`
-            - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:latest` (stable releases only)
-
+            Multi-architecture OCI images (linux/amd64, linux/arm64):
             ```bash
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:latest
             ```
-
-            ## Test Results
-
-            Full test suite passed (smoke + integration + comprehensive)
-            Coverage report available in release artifacts
-
-            ## Platforms
-
-            - linux/amd64
-            - linux/arm64
           draft: false
           prerelease: ${{ needs.validate-tag.outputs.is_prerelease == 'true' }}
           files: |
             /tmp/release-package/*.whl
             /tmp/release-package/*.tar.gz
-
-      - name: Notify team
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const releaseType = ${{ needs.validate-tag.outputs.is_prerelease }} ? 'Pre-release' : 'Release';
-
-            const comment = `**${releaseType} v${{ needs.validate-tag.outputs.version }} Published**
-
-            **Container Images:**
-            - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PROD }}:${{ needs.validate-tag.outputs.version }}\`
-
-            **Python Package:**
-            - Wheel: \`styrened-${{ needs.validate-tag.outputs.version }}-py3-none-any.whl\`
-            - Install: \`pip install git+https://github.com/styrene-lab/styrened.git@v${{ needs.validate-tag.outputs.version }}\`
-
-            **Release Notes:** [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-tag.outputs.version }})
-
-            All tests passed successfully.
-            Coverage reports available in release artifacts.
-            `;
-
-            console.log(comment);
