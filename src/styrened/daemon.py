@@ -69,6 +69,7 @@ class StyreneDaemon:
         self._rpc_client: Any = None  # Exposed for IPC handlers
         self._control_server: Any = None  # IPC control socket server
         self._lxmf_service: Any = None  # Cached for IPC handlers
+        self._conversation_service: Any = None  # Chat backend for IPC handlers
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
 
@@ -86,6 +87,9 @@ class StyreneDaemon:
 
         # Start RPC server for incoming requests
         self._start_rpc_server()
+
+        # Initialize conversation service for chat backend
+        self._init_conversation_service()
 
         # Start auto-reply handler for chat messages
         self._start_auto_reply()
@@ -173,6 +177,100 @@ class StyreneDaemon:
                 logger.info("[RECONNECT] Daemon re-announced after reconnection")
             except Exception as e:
                 logger.warning(f"[RECONNECT] Failed to re-announce: {e}")
+
+    def _init_conversation_service(self) -> None:
+        """Initialize the conversation service for chat backend.
+
+        Creates the ConversationService which manages conversations,
+        message history, and delivery tracking for the chat protocol.
+        """
+        if not self.config.chat.enabled:
+            logger.info("Chat disabled, conversation service not started")
+            return
+
+        try:
+            from styrened.models.messages import init_db
+            from styrened.services.conversation_service import ConversationService
+            from styrened.services.lxmf_service import get_lxmf_service
+            from styrened.services.node_store import get_node_store
+            from styrened.services.reticulum import get_operator_identity
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service.is_initialized:
+                logger.warning("LXMF not initialized, conversation service not started")
+                return
+
+            # Get local identity hash for determining message direction
+            local_identity_hash = get_operator_identity()
+            if not local_identity_hash:
+                logger.warning("No operator identity, conversation service not started")
+                return
+
+            # Initialize database
+            db_engine = init_db()
+
+            # Get node store for display name lookups
+            node_store = get_node_store()
+
+            # Create conversation service
+            self._conversation_service = ConversationService(
+                db_engine=db_engine,
+                local_identity_hash=local_identity_hash,
+                node_store=node_store,
+            )
+            self._conversation_service.initialize()
+
+            # Register callback for incoming chat messages
+            lxmf_service.register_callback(
+                self._handle_chat_message_for_conversation,
+                raw_mode=True,
+            )
+
+            logger.info("Conversation service initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize conversation service: {e}")
+
+    def _handle_chat_message_for_conversation(self, lxmf_message: "LXMF.LXMessage") -> None:
+        """Handle incoming LXMF message for conversation service.
+
+        Saves chat messages to the conversation service for history tracking.
+
+        Args:
+            lxmf_message: Raw LXMF message from the library.
+        """
+        if not self._conversation_service:
+            return
+
+        try:
+            # Check if this is a chat protocol message
+            fields = lxmf_message.fields or {}
+            protocol = fields.get("protocol", "")
+            if protocol != "chat":
+                # Not a chat message, skip
+                return
+
+            # Extract message data
+            source_hash = lxmf_message.source_hash.hex()
+            content = (
+                lxmf_message.content.decode("utf-8")
+                if isinstance(lxmf_message.content, bytes)
+                else (lxmf_message.content or "")
+            )
+            timestamp = lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else None
+
+            # Save to conversation service
+            self._conversation_service.save_incoming_message(
+                source_hash=source_hash,
+                content=content,
+                timestamp=timestamp,
+                fields=fields,
+            )
+
+            logger.debug(f"Saved incoming chat message from {source_hash[:16]}...")
+
+        except Exception as e:
+            logger.warning(f"Failed to save chat message to conversation service: {e}")
 
     def _start_rpc_server(self) -> None:
         """Start the RPC server for handling incoming requests."""
@@ -537,6 +635,11 @@ class StyreneDaemon:
         if self._control_server:
             await self._control_server.stop()
             self._control_server = None
+
+        # Shutdown conversation service
+        if self._conversation_service:
+            self._conversation_service.shutdown()
+            self._conversation_service = None
 
         # Stop RPC server
         if self._rpc_server:

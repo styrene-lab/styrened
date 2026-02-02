@@ -53,6 +53,10 @@ class Message(Base):
         Index("ix_messages_protocol_id", "protocol_id"),
         Index("ix_messages_status", "status"),
         Index("ix_messages_timestamp", "timestamp"),
+        # Conversation queries: find messages between two parties
+        Index("ix_messages_source_dest", "source_hash", "destination_hash"),
+        # Unread count queries: find received messages by status
+        Index("ix_messages_dest_status", "destination_hash", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

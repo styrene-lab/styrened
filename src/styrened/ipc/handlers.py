@@ -15,8 +15,12 @@ import time
 from typing import TYPE_CHECKING
 
 from styrened.ipc.messages import (
+    CmdDeleteConversationRequest,
+    CmdDeleteMessageRequest,
     CmdDeviceStatusRequest,
     CmdExecRequest,
+    CmdMarkReadRequest,
+    CmdSendChatRequest,
     CmdSendRequest,
     DaemonStatus,
     DeviceInfo,
@@ -26,7 +30,9 @@ from styrened.ipc.messages import (
     IPCRequest,
     IPCResponse,
     PongResponse,
+    QueryConversationsRequest,
     QueryDevicesRequest,
+    QueryMessagesRequest,
     RemoteStatusInfo,
     ResultResponse,
 )
@@ -452,3 +458,251 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error querying device status: {e}")
             return ErrorResponse.internal_error(f"Failed to query device status: {e}")
+
+    # -------------------------------------------------------------------------
+    # Conversation handlers
+    # -------------------------------------------------------------------------
+
+    def _check_conversation_service(self) -> ErrorResponse | None:
+        """Check if conversation service is available.
+
+        Returns:
+            ErrorResponse if service is not available, None otherwise.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not self.daemon._conversation_service:
+            return ErrorResponse.internal_error("Conversation service not initialized")
+        return None
+
+    async def handle_query_conversations(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_CONVERSATIONS request.
+
+        Args:
+            request: QueryConversationsRequest instance.
+
+        Returns:
+            ResultResponse with list of conversations.
+        """
+        req = (
+            request
+            if isinstance(request, QueryConversationsRequest)
+            else QueryConversationsRequest()
+        )
+        _ = req  # Currently unused but available for future filtering
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            conversations = self.daemon._conversation_service.list_conversations()
+            conv_list = [c.to_dict() for c in conversations]
+
+            return ResultResponse(data={"conversations": conv_list})
+
+        except Exception as e:
+            logger.exception(f"Error querying conversations: {e}")
+            return ErrorResponse.internal_error(f"Failed to query conversations: {e}")
+
+    async def handle_query_messages(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_MESSAGES request.
+
+        Args:
+            request: QueryMessagesRequest instance.
+
+        Returns:
+            ResultResponse with message history.
+        """
+        req = request if isinstance(request, QueryMessagesRequest) else QueryMessagesRequest()
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            messages = self.daemon._conversation_service.get_messages(
+                peer_hash=req.peer_hash,
+                limit=req.limit,
+                before_timestamp=req.before_timestamp,
+                status_filter=req.status_filter,
+            )
+            msg_list = [m.to_dict() for m in messages]
+
+            return ResultResponse(data={"messages": msg_list})
+
+        except Exception as e:
+            logger.exception(f"Error querying messages: {e}")
+            return ErrorResponse.internal_error(f"Failed to query messages: {e}")
+
+    async def handle_cmd_send_chat(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SEND_CHAT request.
+
+        Sends a chat message and persists it via ConversationService.
+
+        Args:
+            request: CmdSendChatRequest instance.
+
+        Returns:
+            ResultResponse with message ID.
+        """
+        from styrened.services.lxmf_service import get_lxmf_service
+
+        req = request if isinstance(request, CmdSendChatRequest) else CmdSendChatRequest()
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+        if not req.content:
+            return ErrorResponse.invalid_request("content is required")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service:
+                return ErrorResponse.internal_error("LXMF service not initialized")
+
+            # Build message fields
+            fields: dict[str, object] = {"protocol": "chat"}
+            if req.title:
+                fields["title"] = req.title
+
+            # Save message first (gets ID for tracking)
+            msg_id = self.daemon._conversation_service.save_outgoing_message(
+                destination_hash=req.peer_hash,
+                content=req.content,
+                fields=fields,
+            )
+
+            # Send via LXMF
+            payload: dict[str, object] = {
+                "type": "chat",
+                "protocol": "chat",
+                "content": req.content,
+            }
+            if req.title:
+                payload["title"] = req.title
+
+            success = lxmf_service.send_message(req.peer_hash, payload)
+
+            if success:
+                # Mark as sent
+                self.daemon._conversation_service.mark_sent(msg_id)
+
+            return ResultResponse(
+                data={
+                    "message_id": msg_id,
+                    "sent": success,
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error sending chat message: {e}")
+            return ErrorResponse.internal_error(f"Failed to send chat message: {e}")
+
+    async def handle_cmd_mark_read(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_MARK_READ request.
+
+        Marks all messages in a conversation as read.
+
+        Args:
+            request: CmdMarkReadRequest instance.
+
+        Returns:
+            ResultResponse with count of messages marked read.
+        """
+        req = request if isinstance(request, CmdMarkReadRequest) else CmdMarkReadRequest()
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            count = self.daemon._conversation_service.mark_read(req.peer_hash)
+
+            return ResultResponse(data={"marked_read": count})
+
+        except Exception as e:
+            logger.exception(f"Error marking messages as read: {e}")
+            return ErrorResponse.internal_error(f"Failed to mark messages as read: {e}")
+
+    async def handle_cmd_delete_conversation(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_DELETE_CONVERSATION request.
+
+        Deletes all messages in a conversation.
+
+        Args:
+            request: CmdDeleteConversationRequest instance.
+
+        Returns:
+            ResultResponse with count of messages deleted.
+        """
+        req = (
+            request
+            if isinstance(request, CmdDeleteConversationRequest)
+            else CmdDeleteConversationRequest()
+        )
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            count = self.daemon._conversation_service.delete_conversation(req.peer_hash)
+
+            return ResultResponse(data={"deleted": count})
+
+        except Exception as e:
+            logger.exception(f"Error deleting conversation: {e}")
+            return ErrorResponse.internal_error(f"Failed to delete conversation: {e}")
+
+    async def handle_cmd_delete_message(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_DELETE_MESSAGE request.
+
+        Deletes a specific message.
+
+        Args:
+            request: CmdDeleteMessageRequest instance.
+
+        Returns:
+            ResultResponse with deletion status.
+        """
+        req = request if isinstance(request, CmdDeleteMessageRequest) else CmdDeleteMessageRequest()
+
+        if not req.message_id:
+            return ErrorResponse.invalid_request("message_id is required")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            deleted = self.daemon._conversation_service.delete_message(req.message_id)
+
+            if not deleted:
+                return ErrorResponse.not_found(f"Message {req.message_id} not found")
+
+            return ResultResponse(data={"deleted": True})
+
+        except Exception as e:
+            logger.exception(f"Error deleting message: {e}")
+            return ErrorResponse.internal_error(f"Failed to delete message: {e}")

@@ -251,10 +251,16 @@ class ControlServer:
             IPCMessageType.QUERY_IDENTITY: self._handlers.handle_query_identity,
             IPCMessageType.QUERY_STATUS: self._handlers.handle_query_status,
             IPCMessageType.QUERY_CONFIG: self._handlers.handle_query_config,
+            IPCMessageType.QUERY_CONVERSATIONS: self._handlers.handle_query_conversations,
+            IPCMessageType.QUERY_MESSAGES: self._handlers.handle_query_messages,
             IPCMessageType.CMD_SEND: self._handlers.handle_cmd_send,
             IPCMessageType.CMD_EXEC: self._handlers.handle_cmd_exec,
             IPCMessageType.CMD_ANNOUNCE: self._handlers.handle_cmd_announce,
             IPCMessageType.CMD_DEVICE_STATUS: self._handlers.handle_cmd_device_status,
+            IPCMessageType.CMD_SEND_CHAT: self._handlers.handle_cmd_send_chat,
+            IPCMessageType.CMD_MARK_READ: self._handlers.handle_cmd_mark_read,
+            IPCMessageType.CMD_DELETE_CONVERSATION: self._handlers.handle_cmd_delete_conversation,
+            IPCMessageType.CMD_DELETE_MESSAGE: self._handlers.handle_cmd_delete_message,
         }
 
     async def _handle_client(
