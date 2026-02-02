@@ -19,7 +19,10 @@ from typing import TYPE_CHECKING, Any
 # Constants for input validation
 MAX_CHAT_CONTENT_LENGTH = 65536  # 64KB - reasonable limit for chat messages
 MAX_TITLE_LENGTH = 256  # Max title length
+MAX_MESSAGE_LIMIT = 1000  # Max messages per query
 HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")  # 16-32 hex chars (truncated or full)
+LXMF_HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")  # 64 hex chars for LXMF message hash
+VALID_DELIVERY_METHODS = {"auto", "direct", "propagated"}
 
 try:
     import LXMF
@@ -545,6 +548,9 @@ class IPCHandlers:
                 f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
             )
 
+        # Validate and bound limit parameter
+        limit = min(max(1, req.limit), MAX_MESSAGE_LIMIT) if req.limit else MAX_MESSAGE_LIMIT
+
         try:
             err = self._check_conversation_service()
             if err:
@@ -553,7 +559,7 @@ class IPCHandlers:
 
             messages = self.daemon._conversation_service.get_messages(
                 peer_hash=req.peer_hash,
-                limit=req.limit,
+                limit=limit,
                 before_timestamp=req.before_timestamp,
                 status_filter=req.status_filter,
             )
@@ -585,6 +591,9 @@ class IPCHandlers:
         if not req.query or len(req.query.strip()) < 2:
             return ErrorResponse.invalid_request("Query must be at least 2 characters")
 
+        # Validate and bound limit parameter
+        limit = min(max(1, req.limit), MAX_MESSAGE_LIMIT) if req.limit else MAX_MESSAGE_LIMIT
+
         try:
             err = self._check_conversation_service()
             if err:
@@ -594,7 +603,7 @@ class IPCHandlers:
             messages = self.daemon._conversation_service.search_messages(
                 query=req.query,
                 peer_hash=req.peer_hash,
-                limit=req.limit,
+                limit=limit,
             )
             msg_list = [m.to_dict() for m in messages]
 
@@ -649,8 +658,21 @@ class IPCHandlers:
                 f"title exceeds maximum length of {MAX_TITLE_LENGTH} characters"
             )
 
-        # Extract delivery method from request (default "auto")
+        # Validate reply_to_hash format if provided (64 hex chars for LXMF message hash)
+        if req.reply_to_hash:
+            if not isinstance(req.reply_to_hash, str) or not LXMF_HASH_PATTERN.match(
+                req.reply_to_hash
+            ):
+                return ErrorResponse.invalid_request(
+                    "reply_to_hash must be a 64-character hex string"
+                )
+
+        # Validate and extract delivery method
         delivery_method = req.delivery_method if req.delivery_method else "auto"
+        if delivery_method not in VALID_DELIVERY_METHODS:
+            return ErrorResponse.invalid_request(
+                f"delivery_method must be one of: {', '.join(sorted(VALID_DELIVERY_METHODS))}"
+            )
 
         try:
             err = self._check_conversation_service()
@@ -909,8 +931,8 @@ class IPCHandlers:
         """
         req = request if isinstance(request, CmdDeleteMessageRequest) else CmdDeleteMessageRequest()
 
-        if not req.message_id:
-            return ErrorResponse.invalid_request("message_id is required")
+        if not isinstance(req.message_id, int) or req.message_id <= 0:
+            return ErrorResponse.invalid_request("message_id must be a positive integer")
 
         try:
             err = self._check_conversation_service()
@@ -942,8 +964,8 @@ class IPCHandlers:
         """
         req = request if isinstance(request, CmdRetryMessageRequest) else CmdRetryMessageRequest()
 
-        if not req.message_id:
-            return ErrorResponse.invalid_request("message_id is required")
+        if not isinstance(req.message_id, int) or req.message_id <= 0:
+            return ErrorResponse.invalid_request("message_id must be a positive integer")
 
         try:
             from styrened.services.lxmf_service import get_lxmf_service

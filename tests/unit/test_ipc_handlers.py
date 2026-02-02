@@ -453,7 +453,7 @@ class TestIPCHandlersChatValidation:
         response = await handlers.handle_cmd_delete_message(request)
 
         assert isinstance(response, ErrorResponse)
-        assert "message_id is required" in response.message
+        assert "message_id must be a positive integer" in response.message
 
     @pytest.mark.asyncio
     async def test_handle_cmd_retry_message_requires_message_id(self):
@@ -468,7 +468,7 @@ class TestIPCHandlersChatValidation:
         response = await handlers.handle_cmd_retry_message(request)
 
         assert isinstance(response, ErrorResponse)
-        assert "message_id is required" in response.message
+        assert "message_id must be a positive integer" in response.message
 
 
 class TestIPCHandlersChatNullChecks:
