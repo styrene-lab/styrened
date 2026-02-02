@@ -607,18 +607,26 @@ class IPCHandlers:
             # Step 2: Create thread-safe tracking registration and callbacks
             # We use a closure to capture the message_id and handle the race condition
             # where callbacks might fire before we can register tracking.
-            tracking_registered = {"hash": None, "lock": conversation_service._lock}
+            # IMPORTANT: Use a separate lock for tracking_registered state to avoid
+            # deadlock - conversation_service methods acquire their own internal lock.
+            import threading
+
+            tracking_lock = threading.Lock()
+            tracking_registered: dict[str, bytes | None] = {"hash": None}
 
             def register_and_callback_delivery(lxmf_message: Any) -> None:
                 """Handle successful delivery with race-safe tracking."""
                 try:
                     msg_hash = lxmf_message.hash
-                    with tracking_registered["lock"]:
-                        # If tracking wasn't registered yet (race condition),
-                        # register it now before processing the callback
+                    needs_registration = False
+                    with tracking_lock:
+                        # Check if tracking wasn't registered yet (race condition)
                         if tracking_registered["hash"] is None:
                             tracking_registered["hash"] = msg_hash
-                            conversation_service.register_delivery_tracking(msg_id, msg_hash)
+                            needs_registration = True
+                    # Register OUTSIDE the lock to avoid deadlock
+                    if needs_registration:
+                        conversation_service.register_delivery_tracking(msg_id, msg_hash)
                     conversation_service.on_delivery_callback(msg_hash)
                     logger.debug(f"Chat message {msg_id} delivered: {msg_hash.hex()[:16]}...")
                 except Exception as e:
@@ -628,12 +636,15 @@ class IPCHandlers:
                 """Handle delivery failure with race-safe tracking."""
                 try:
                     msg_hash = lxmf_message.hash
-                    with tracking_registered["lock"]:
-                        # If tracking wasn't registered yet (race condition),
-                        # register it now before processing the callback
+                    needs_registration = False
+                    with tracking_lock:
+                        # Check if tracking wasn't registered yet (race condition)
                         if tracking_registered["hash"] is None:
                             tracking_registered["hash"] = msg_hash
-                            conversation_service.register_delivery_tracking(msg_id, msg_hash)
+                            needs_registration = True
+                    # Register OUTSIDE the lock to avoid deadlock
+                    if needs_registration:
+                        conversation_service.register_delivery_tracking(msg_id, msg_hash)
                     conversation_service.on_failed_callback(msg_hash)
                     logger.warning(
                         f"Chat message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
@@ -669,10 +680,13 @@ class IPCHandlers:
                 conversation_service.update_destination_hash(msg_id, actual_dest_hash)
 
             # Step 5: Register delivery tracking (if not already done by callback race)
-            # Note: We use a simple check without blocking the async event loop.
-            # The threading lock is only for callbacks running on RNS threads.
-            if tracking_registered["hash"] is None:
-                tracking_registered["hash"] = lxmf_hash
+            # Use the tracking_lock to safely check/update state.
+            needs_registration = False
+            with tracking_lock:
+                if tracking_registered["hash"] is None:
+                    tracking_registered["hash"] = lxmf_hash
+                    needs_registration = True
+            if needs_registration:
                 conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
 
             # Step 6: Mark as sent (handed off to network)

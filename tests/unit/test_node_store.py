@@ -13,8 +13,10 @@ import pytest
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.services.node_store import (
+    MIN_PREFIX_LENGTH,
     NodeStore,
     _is_valid_hash,
+    _is_valid_hash_prefix,
     get_node_store,
 )
 
@@ -73,6 +75,54 @@ class TestIsValidHash:
         assert _is_valid_hash(" 1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6") is False
         assert _is_valid_hash("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d ") is False
         assert _is_valid_hash("a1b2c3d4e5f6a7b8 c9d0e1f2a3b4c5d6") is False
+
+
+class TestIsValidHashPrefix:
+    """Tests for _is_valid_hash_prefix() validation function."""
+
+    def test_accepts_valid_prefix_at_minimum_length(self):
+        """Prefix at exactly MIN_PREFIX_LENGTH should be valid."""
+        prefix = "a" * MIN_PREFIX_LENGTH
+        assert _is_valid_hash_prefix(prefix) is True
+
+    def test_accepts_valid_prefix_longer_than_minimum(self):
+        """Prefix longer than MIN_PREFIX_LENGTH should be valid."""
+        prefix = "a1b2c3d4e5f6"  # 12 chars
+        assert _is_valid_hash_prefix(prefix) is True
+
+    def test_accepts_full_32_char_hash_as_prefix(self):
+        """Full 32-char hash should be valid as prefix."""
+        assert _is_valid_hash_prefix("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6") is True
+
+    def test_rejects_prefix_too_short(self):
+        """Prefix shorter than MIN_PREFIX_LENGTH should be rejected."""
+        short_prefix = "a" * (MIN_PREFIX_LENGTH - 1)
+        assert _is_valid_hash_prefix(short_prefix) is False
+
+    def test_rejects_single_char(self):
+        """Single character should be rejected."""
+        assert _is_valid_hash_prefix("a") is False
+
+    def test_rejects_empty_string(self):
+        """Empty string should be rejected."""
+        assert _is_valid_hash_prefix("") is False
+
+    def test_rejects_none(self):
+        """None should be rejected."""
+        assert _is_valid_hash_prefix(None) is False
+
+    def test_rejects_non_hex_characters(self):
+        """Non-hex characters should be rejected."""
+        assert _is_valid_hash_prefix("a1b2c3g4") is False  # 'g' is not hex
+        assert _is_valid_hash_prefix("a1b2c3z4") is False  # 'z' is not hex
+
+    def test_accepts_mixed_case_hex(self):
+        """Mixed case hex should be valid."""
+        assert _is_valid_hash_prefix("A1b2C3d4") is True
+
+    def test_minimum_prefix_length_is_reasonable(self):
+        """MIN_PREFIX_LENGTH should be at least 8 for collision resistance."""
+        assert MIN_PREFIX_LENGTH >= 8
 
 
 class TestNodeStoreSaveValidation:
