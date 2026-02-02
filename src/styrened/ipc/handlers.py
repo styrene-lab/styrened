@@ -12,7 +12,7 @@ Usage:
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from styrened.ipc.messages import (
     CmdDeleteConversationRequest,
@@ -20,6 +20,7 @@ from styrened.ipc.messages import (
     CmdDeviceStatusRequest,
     CmdExecRequest,
     CmdMarkReadRequest,
+    CmdRetryMessageRequest,
     CmdSendChatRequest,
     CmdSendRequest,
     DaemonStatus,
@@ -334,7 +335,8 @@ class IPCHandlers:
                     max_wait=req.timeout,
                 )
             else:
-                success = lxmf_service.send_message(req.destination, payload)
+                result = lxmf_service.send_message(req.destination, payload)
+                success = result is not None
 
             return ResultResponse(data={"sent": success})
 
@@ -546,21 +548,26 @@ class IPCHandlers:
         """Handle CMD_SEND_CHAT request.
 
         Sends a chat message and persists it via ConversationService.
+        Registers delivery callbacks to track message status.
 
         Args:
             request: CmdSendChatRequest instance.
 
         Returns:
-            ResultResponse with message ID.
+            ResultResponse with message ID and delivery method.
         """
         from styrened.services.lxmf_service import get_lxmf_service
 
         req = request if isinstance(request, CmdSendChatRequest) else CmdSendChatRequest()
 
-        if not req.peer_hash:
-            return ErrorResponse.invalid_request("peer_hash is required")
-        if not req.content:
-            return ErrorResponse.invalid_request("content is required")
+        # Validate required fields (handle None, empty string, and wrong types)
+        if not req.peer_hash or not isinstance(req.peer_hash, str):
+            return ErrorResponse.invalid_request("peer_hash is required and must be a string")
+        if not req.content or not isinstance(req.content, str):
+            return ErrorResponse.invalid_request("content is required and must be a string")
+
+        # Extract delivery method from request (default "auto")
+        delivery_method = req.delivery_method if req.delivery_method else "auto"
 
         try:
             err = self._check_conversation_service()
@@ -577,14 +584,7 @@ class IPCHandlers:
             if req.title:
                 fields["title"] = req.title
 
-            # Save message first (gets ID for tracking)
-            msg_id = self.daemon._conversation_service.save_outgoing_message(
-                destination_hash=req.peer_hash,
-                content=req.content,
-                fields=fields,
-            )
-
-            # Send via LXMF
+            # Build LXMF payload
             payload: dict[str, object] = {
                 "type": "chat",
                 "protocol": "chat",
@@ -593,16 +593,90 @@ class IPCHandlers:
             if req.title:
                 payload["title"] = req.title
 
-            success = lxmf_service.send_message(req.peer_hash, payload)
+            # Get conversation service reference for callbacks
+            conversation_service = self.daemon._conversation_service
 
-            if success:
-                # Mark as sent
-                self.daemon._conversation_service.mark_sent(msg_id)
+            # Step 1: Save message FIRST (avoids race with fast delivery callbacks)
+            msg_id = conversation_service.save_outgoing_message(
+                destination_hash=req.peer_hash,
+                content=req.content,
+                fields=fields,
+                # Don't pass lxmf_hash yet - we register tracking after send
+            )
+
+            # Step 2: Create thread-safe tracking registration and callbacks
+            # We use a closure to capture the message_id and handle the race condition
+            # where callbacks might fire before we can register tracking.
+            tracking_registered = {"hash": None, "lock": conversation_service._lock}
+
+            def register_and_callback_delivery(lxmf_message: Any) -> None:
+                """Handle successful delivery with race-safe tracking."""
+                try:
+                    msg_hash = lxmf_message.hash
+                    with tracking_registered["lock"]:
+                        # If tracking wasn't registered yet (race condition),
+                        # register it now before processing the callback
+                        if tracking_registered["hash"] is None:
+                            tracking_registered["hash"] = msg_hash
+                            conversation_service.register_delivery_tracking(msg_id, msg_hash)
+                    conversation_service.on_delivery_callback(msg_hash)
+                    logger.debug(f"Chat message {msg_id} delivered: {msg_hash.hex()[:16]}...")
+                except Exception as e:
+                    logger.warning(f"Error in delivery callback: {e}")
+
+            def register_and_callback_failed(lxmf_message: Any) -> None:
+                """Handle delivery failure with race-safe tracking."""
+                try:
+                    msg_hash = lxmf_message.hash
+                    with tracking_registered["lock"]:
+                        # If tracking wasn't registered yet (race condition),
+                        # register it now before processing the callback
+                        if tracking_registered["hash"] is None:
+                            tracking_registered["hash"] = msg_hash
+                            conversation_service.register_delivery_tracking(msg_id, msg_hash)
+                    conversation_service.on_failed_callback(msg_hash)
+                    logger.warning(
+                        f"Chat message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"Error in failed callback: {e}")
+
+            # Step 3: Send via LXMF with race-safe callbacks
+            result = lxmf_service.send_message(
+                req.peer_hash,
+                payload,
+                on_delivery=register_and_callback_delivery,
+                on_failed=register_and_callback_failed,
+                delivery_method=delivery_method,
+            )
+
+            if result is None:
+                # Send failed - mark message as failed
+                conversation_service.update_message_status(msg_id, "failed")
+                return ErrorResponse.internal_error(
+                    f"Failed to send message to {req.peer_hash[:16]}... "
+                    "(no path or identity not known)"
+                )
+
+            # Extract hash and method from result safely
+            lxmf_hash: bytes = result["hash"]
+            delivery_method_used: str = result.get("method", delivery_method)
+
+            # Step 4: Register delivery tracking (if not already done by callback race)
+            with tracking_registered["lock"]:
+                if tracking_registered["hash"] is None:
+                    tracking_registered["hash"] = lxmf_hash
+                    conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
+
+            # Step 5: Mark as sent (handed off to network)
+            conversation_service.mark_sent(msg_id)
 
             return ResultResponse(
                 data={
                     "message_id": msg_id,
-                    "sent": success,
+                    "sent": True,
+                    "lxmf_hash": lxmf_hash.hex(),
+                    "delivery_method": delivery_method_used,
                 }
             )
 
@@ -706,3 +780,111 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error deleting message: {e}")
             return ErrorResponse.internal_error(f"Failed to delete message: {e}")
+
+    async def handle_cmd_retry_message(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_RETRY_MESSAGE request.
+
+        Retries sending a failed message.
+
+        Args:
+            request: CmdRetryMessageRequest instance.
+
+        Returns:
+            ResultResponse with new LXMF hash if successful.
+        """
+        req = request if isinstance(request, CmdRetryMessageRequest) else CmdRetryMessageRequest()
+
+        if not req.message_id:
+            return ErrorResponse.invalid_request("message_id is required")
+
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service:
+                return ErrorResponse.internal_error("LXMF service not initialized")
+
+            conversation_service = self.daemon._conversation_service
+
+            # Get message details and reset to PENDING
+            retry_data = conversation_service.prepare_retry(req.message_id)
+            if retry_data is None:
+                return ErrorResponse.not_found(
+                    f"Message {req.message_id} not found or not in FAILED state"
+                )
+
+            dest_hash, content, fields = retry_data
+
+            # Build LXMF payload
+            payload: dict[str, object] = {
+                "type": "chat",
+                "protocol": "chat",
+                "content": content,
+            }
+            if fields.get("title"):
+                payload["title"] = fields["title"]
+
+            # Create delivery callbacks
+            msg_id = req.message_id
+
+            def on_delivery(lxmf_message: Any) -> None:
+                """Handle successful delivery."""
+                try:
+                    msg_hash = lxmf_message.hash
+                    conversation_service.on_delivery_callback(msg_hash)
+                    logger.debug(f"Retried message {msg_id} delivered: {msg_hash.hex()[:16]}...")
+                except Exception as e:
+                    logger.warning(f"Error in delivery callback: {e}")
+
+            def on_failed(lxmf_message: Any) -> None:
+                """Handle delivery failure."""
+                try:
+                    msg_hash = lxmf_message.hash
+                    conversation_service.on_failed_callback(msg_hash)
+                    logger.warning(
+                        f"Retried message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"Error in failed callback: {e}")
+
+            # Send via LXMF
+            result = lxmf_service.send_message(
+                dest_hash,
+                payload,
+                on_delivery=on_delivery,
+                on_failed=on_failed,
+            )
+
+            if result is None:
+                # Send failed again - mark as failed
+                conversation_service.update_message_status(msg_id, "failed")
+                return ErrorResponse.internal_error(
+                    f"Failed to retry message to {dest_hash[:16]}... "
+                    "(no path or identity not known)"
+                )
+
+            # Extract hash and method from result
+            lxmf_hash = result["hash"]
+            delivery_method_used = result.get("method", "direct")
+
+            # Register delivery tracking and mark as sent
+            conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
+            conversation_service.mark_sent(msg_id)
+
+            return ResultResponse(
+                data={
+                    "message_id": msg_id,
+                    "retried": True,
+                    "lxmf_hash": lxmf_hash.hex(),
+                    "delivery_method": delivery_method_used,
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error retrying message: {e}")
+            return ErrorResponse.internal_error(f"Failed to retry message: {e}")

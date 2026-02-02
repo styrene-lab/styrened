@@ -248,11 +248,13 @@ class CmdSendChatRequest(IPCRequest):
     peer_hash: str = ""
     content: str = ""
     title: str | None = None
+    delivery_method: str = "auto"  # "auto", "direct", or "propagated"
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "peer_hash": self.peer_hash,
             "content": self.content,
+            "delivery_method": self.delivery_method,
         }
         if self.title is not None:
             payload["title"] = self.title
@@ -286,6 +288,17 @@ class CmdDeleteMessageRequest(IPCRequest):
     """Delete a specific message."""
 
     MSG_TYPE = IPCMessageType.CMD_DELETE_MESSAGE
+    message_id: int = 0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"message_id": self.message_id}
+
+
+@dataclass
+class CmdRetryMessageRequest(IPCRequest):
+    """Retry sending a failed message."""
+
+    MSG_TYPE = IPCMessageType.CMD_RETRY_MESSAGE
     message_id: int = 0
 
     def to_payload(self) -> dict[str, Any]:
@@ -575,6 +588,49 @@ class RemoteStatusInfo:
         )
 
 
+@dataclass
+class MessageEventPayload:
+    """Payload for EVENT_MESSAGE notifications.
+
+    Used to notify clients of message-related events such as new messages,
+    status changes, delivery confirmations, or failures.
+    """
+
+    event_type: str  # "new", "status_changed", "delivered", "failed"
+    message_id: int
+    peer_hash: str
+    content: str | None = None
+    timestamp: float = 0.0
+    status: str = "pending"
+    is_outgoing: bool = False
+    delivery_method: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "event_type": self.event_type,
+            "message_id": self.message_id,
+            "peer_hash": self.peer_hash,
+            "content": self.content,
+            "timestamp": self.timestamp,
+            "status": self.status,
+            "is_outgoing": self.is_outgoing,
+            "delivery_method": self.delivery_method,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "MessageEventPayload":
+        return cls(
+            event_type=payload.get("event_type", ""),
+            message_id=payload.get("message_id", 0),
+            peer_hash=payload.get("peer_hash", ""),
+            content=payload.get("content"),
+            timestamp=payload.get("timestamp", 0.0),
+            status=payload.get("status", "pending"),
+            is_outgoing=payload.get("is_outgoing", False),
+            delivery_method=payload.get("delivery_method"),
+        )
+
+
 # -----------------------------------------------------------------------------
 # Request factory
 # -----------------------------------------------------------------------------
@@ -637,10 +693,14 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             timeout=payload.get("timeout", 30.0),
         )
     elif msg_type == IPCMessageType.CMD_SEND_CHAT:
+        # Coerce values to correct types (handle null from msgpack)
+        peer_hash = payload.get("peer_hash")
+        content = payload.get("content")
         return CmdSendChatRequest(
-            peer_hash=payload.get("peer_hash", ""),
-            content=payload.get("content", ""),
+            peer_hash=peer_hash if isinstance(peer_hash, str) else "",
+            content=content if isinstance(content, str) else "",
             title=payload.get("title"),
+            delivery_method=payload.get("delivery_method", "auto"),
         )
     elif msg_type == IPCMessageType.CMD_MARK_READ:
         return CmdMarkReadRequest(peer_hash=payload.get("peer_hash", ""))
@@ -648,5 +708,7 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdDeleteConversationRequest(peer_hash=payload.get("peer_hash", ""))
     elif msg_type == IPCMessageType.CMD_DELETE_MESSAGE:
         return CmdDeleteMessageRequest(message_id=payload.get("message_id", 0))
+    elif msg_type == IPCMessageType.CMD_RETRY_MESSAGE:
+        return CmdRetryMessageRequest(message_id=payload.get("message_id", 0))
     else:
         raise ValueError(f"Unknown request type: {msg_type}")

@@ -67,6 +67,7 @@ class IPCMessageType(IntEnum):
     CMD_MARK_READ = 0x25
     CMD_DELETE_CONVERSATION = 0x26
     CMD_DELETE_MESSAGE = 0x27
+    CMD_RETRY_MESSAGE = 0x28
 
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30

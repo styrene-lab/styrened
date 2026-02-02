@@ -601,7 +601,8 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
             lxmf_dest, payload, max_wait=max_wait, check_interval=2.0
         )
     else:
-        success = lxmf_service.send_message(lxmf_dest, payload)
+        result = lxmf_service.send_message(lxmf_dest, payload)
+        success = result is not None
 
     if success:
         print("Message sent successfully")

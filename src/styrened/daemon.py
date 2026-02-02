@@ -41,6 +41,7 @@ from styrened.models.config import CoreConfig
 from styrened.services.auto_reply import AutoReplyHandler
 from styrened.services.config import get_default_core_config, load_core_config
 from styrened.services.lifecycle import CoreLifecycle
+from styrened.services.node_store import get_node_store
 from styrened.services.reticulum import discover_devices, start_discovery
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class StyreneDaemon:
         self._conversation_service: Any = None  # Chat backend for IPC handlers
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
+        self._node_store: Any = None  # NodeStore for device persistence
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -94,8 +96,11 @@ class StyreneDaemon:
         # Start auto-reply handler for chat messages
         self._start_auto_reply()
 
-        # Start device discovery
-        start_discovery(callback=self._on_device_discovered)
+        # Start device discovery with NodeStore for persistence
+        # This ensures discovered devices are persisted and their identity_hash
+        # mappings are available for identity resolution when sending messages
+        self._node_store = get_node_store()
+        start_discovery(callback=self._on_device_discovered, node_store=self._node_store)
 
         # Start HTTP API if enabled
         if self.config.api.enabled:
@@ -192,31 +197,37 @@ class StyreneDaemon:
             from styrened.models.messages import init_db
             from styrened.services.conversation_service import ConversationService
             from styrened.services.lxmf_service import get_lxmf_service
-            from styrened.services.node_store import get_node_store
-            from styrened.services.reticulum import get_operator_identity
 
             lxmf_service = get_lxmf_service()
             if not lxmf_service.is_initialized:
                 logger.warning("LXMF not initialized, conversation service not started")
                 return
 
-            # Get local identity hash for determining message direction
-            local_identity_hash = get_operator_identity()
-            if not local_identity_hash:
-                logger.warning("No operator identity, conversation service not started")
+            # Get local LXMF destination hash for determining message direction
+            # This must be the LXMF delivery destination hash, NOT the identity hash,
+            # because LXMF messages use destination hashes for source/dest identification
+            if not lxmf_service.delivery_destination:
+                logger.warning("No LXMF delivery destination, conversation service not started")
                 return
+            local_lxmf_dest_hash = lxmf_service.delivery_destination.hexhash
+            logger.debug(
+                f"Using local LXMF dest hash for conversations: {local_lxmf_dest_hash[:16]}..."
+            )
 
             # Initialize database
             db_engine = init_db()
 
-            # Get node store for display name lookups
-            node_store = get_node_store()
+            # Use the shared node_store (initialized in start() before discovery)
+            # This ensures devices discovered via announces are available for
+            # conversation service display name lookups
+            if self._node_store is None:
+                self._node_store = get_node_store()
 
             # Create conversation service
             self._conversation_service = ConversationService(
                 db_engine=db_engine,
-                local_identity_hash=local_identity_hash,
-                node_store=node_store,
+                local_identity_hash=local_lxmf_dest_hash,  # Actually LXMF dest hash
+                node_store=self._node_store,
             )
             self._conversation_service.initialize()
 
@@ -234,7 +245,8 @@ class StyreneDaemon:
     def _handle_chat_message_for_conversation(self, lxmf_message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message for conversation service.
 
-        Saves chat messages to the conversation service for history tracking.
+        Saves chat messages to the conversation service for history tracking,
+        and broadcasts an event to connected IPC clients.
 
         Args:
             lxmf_message: Raw LXMF message from the library.
@@ -259,8 +271,22 @@ class StyreneDaemon:
             )
             timestamp = lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else None
 
+            # Extract security metadata from LXMF message
+            # These attributes may or may not exist depending on LXMF version
+            signature_valid: bool | None = None
+            transport_encrypted: bool | None = None
+            if hasattr(lxmf_message, "signature_validated"):
+                signature_valid = lxmf_message.signature_validated
+            if hasattr(lxmf_message, "transport_encrypted"):
+                transport_encrypted = lxmf_message.transport_encrypted
+
+            # Store security metadata in fields dict for persistence
+            # The conversation service will store these in the fields JSON
+            fields["signature_valid"] = signature_valid
+            fields["transport_encrypted"] = transport_encrypted
+
             # Save to conversation service
-            self._conversation_service.save_incoming_message(
+            msg_id = self._conversation_service.save_incoming_message(
                 source_hash=source_hash,
                 content=content,
                 timestamp=timestamp,
@@ -269,8 +295,137 @@ class StyreneDaemon:
 
             logger.debug(f"Saved incoming chat message from {source_hash[:16]}...")
 
+            # Broadcast event to connected IPC clients
+            self._broadcast_chat_event(
+                msg_id=msg_id,
+                peer_hash=source_hash,
+                content=content,
+                timestamp=timestamp or 0.0,
+                is_outgoing=False,
+                fields=fields,
+                signature_valid=signature_valid,
+                transport_encrypted=transport_encrypted,
+            )
+
         except Exception as e:
             logger.warning(f"Failed to save chat message to conversation service: {e}")
+
+    def _broadcast_chat_event(
+        self,
+        msg_id: int,
+        peer_hash: str,
+        content: str,
+        timestamp: float,
+        is_outgoing: bool,
+        fields: dict[str, object] | None = None,
+        signature_valid: bool | None = None,
+        transport_encrypted: bool | None = None,
+        status: str | None = None,
+        delivery_method: str | None = None,
+    ) -> None:
+        """Broadcast a chat message event to connected IPC clients.
+
+        Args:
+            msg_id: Database message ID
+            peer_hash: LXMF hash of the peer
+            content: Message content
+            timestamp: Message timestamp
+            is_outgoing: Whether this is an outgoing message
+            fields: Optional LXMF fields
+            signature_valid: Whether LXMF signature was validated (incoming only)
+            transport_encrypted: Whether transport encryption was used (incoming only)
+            status: Message status (pending, sent, delivered, failed, received)
+            delivery_method: How message was delivered (direct, propagated, or None)
+        """
+        if not self._control_server:
+            return
+
+        try:
+            import asyncio
+
+            from styrened.ipc.protocol import IPCMessageType
+
+            # Determine default status based on direction
+            if status is None:
+                status = "received" if not is_outgoing else "pending"
+
+            event_payload = {
+                "event_type": "new",
+                "message_id": msg_id,
+                "peer_hash": peer_hash,
+                "content": content,
+                "timestamp": timestamp,
+                "is_outgoing": is_outgoing,
+                "status": status,
+                "delivery_method": delivery_method,
+                "signature_valid": signature_valid,
+                "transport_encrypted": transport_encrypted,
+                "fields": fields or {},
+            }
+
+            # Schedule the async broadcast on the event loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._control_server.broadcast_event(
+                        IPCMessageType.EVENT_MESSAGE, event_payload
+                    )
+                )
+            except RuntimeError:
+                # No running loop - skip broadcast
+                logger.debug("No event loop for chat event broadcast")
+
+        except Exception as e:
+            logger.warning(f"Failed to broadcast chat event: {e}")
+
+    def _broadcast_delivery_status_event(
+        self,
+        msg_id: int,
+        peer_hash: str,
+        status: str,
+        delivery_method: str | None = None,
+    ) -> None:
+        """Broadcast delivery status change to IPC clients.
+
+        This is used to notify connected clients when a message's delivery
+        status changes (e.g., from pending to sent, or sent to delivered).
+
+        Args:
+            msg_id: Database message ID
+            peer_hash: LXMF hash of the peer
+            status: New message status (sent, delivered, failed)
+            delivery_method: How message was delivered (direct, propagated, or None)
+        """
+        if not self._control_server:
+            return
+
+        try:
+            import asyncio
+
+            from styrened.ipc.protocol import IPCMessageType
+
+            event_payload = {
+                "event_type": "status_changed",
+                "message_id": msg_id,
+                "peer_hash": peer_hash,
+                "status": status,
+                "delivery_method": delivery_method,
+            }
+
+            # Schedule the async broadcast on the event loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._control_server.broadcast_event(
+                        IPCMessageType.EVENT_MESSAGE, event_payload
+                    )
+                )
+            except RuntimeError:
+                # No running loop - skip broadcast
+                logger.debug("No event loop for delivery status event broadcast")
+
+        except Exception as e:
+            logger.warning(f"Failed to broadcast delivery status event: {e}")
 
     def _start_rpc_server(self) -> None:
         """Start the RPC server for handling incoming requests."""
