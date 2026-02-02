@@ -12,6 +12,7 @@ Design decisions:
 """
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -513,7 +514,16 @@ class ConversationService:
             )
 
             if before_timestamp is not None:
-                query = query.filter(Message.timestamp < before_timestamp)
+                # Validate timestamp is a valid finite non-negative number
+                if (
+                    not isinstance(before_timestamp, (int, float))
+                    or before_timestamp < 0
+                    or math.isnan(before_timestamp)
+                    or math.isinf(before_timestamp)
+                ):
+                    logger.warning(f"Invalid before_timestamp: {before_timestamp}, ignoring")
+                else:
+                    query = query.filter(Message.timestamp < before_timestamp)
 
             if status_filter is not None:
                 query = query.filter(Message.status == status_filter)
@@ -570,11 +580,20 @@ class ConversationService:
                 message_ids = [row[0] for row in result]
             except OperationalError as e:
                 # FTS5 syntax errors (unclosed quotes, invalid operators, etc.)
+                # Use multiple patterns to catch various SQLite/FTS5 error formats
                 error_str = str(e).lower()
-                if "fts5" in error_str or "syntax error" in error_str:
-                    logger.warning(f"Invalid FTS5 query syntax: {query!r}")
+                fts_error_patterns = [
+                    "fts5",
+                    "syntax error",
+                    "parse error",
+                    "unexpected token",
+                    "no such column",  # Invalid FTS5 column reference
+                    "malformed match",  # Malformed MATCH expression
+                ]
+                if any(pattern in error_str for pattern in fts_error_patterns):
+                    logger.warning(f"Invalid FTS5 query syntax: {query!r} - {e}")
                     return []
-                # Re-raise other operational errors
+                # Re-raise other operational errors (db locked, connection issues, etc.)
                 raise
 
             # Fetch full Message objects

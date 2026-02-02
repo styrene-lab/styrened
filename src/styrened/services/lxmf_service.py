@@ -851,7 +851,7 @@ class LXMFService:
                 self._router = None
 
             self._identity = None
-            self._message_callback = None
+            self._message_callbacks.clear()
             self._initialized = False
             logger.info("LXMF shutdown complete")
 
@@ -859,7 +859,7 @@ class LXMFService:
             logger.error(f"Error during LXMF shutdown: {e}")
             self._router = None
             self._identity = None
-            self._message_callback = None
+            self._message_callbacks.clear()
             self._initialized = False
 
 
