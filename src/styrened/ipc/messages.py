@@ -140,6 +140,39 @@ class QueryConfigRequest(IPCRequest):
     MSG_TYPE = IPCMessageType.QUERY_CONFIG
 
 
+@dataclass
+class QueryConversationsRequest(IPCRequest):
+    """Request list of conversations."""
+
+    MSG_TYPE = IPCMessageType.QUERY_CONVERSATIONS
+    include_unread_count: bool = True
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"include_unread_count": self.include_unread_count}
+
+
+@dataclass
+class QueryMessagesRequest(IPCRequest):
+    """Request message history for a conversation."""
+
+    MSG_TYPE = IPCMessageType.QUERY_MESSAGES
+    peer_hash: str = ""
+    limit: int = 50
+    before_timestamp: float | None = None
+    status_filter: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "peer_hash": self.peer_hash,
+            "limit": self.limit,
+        }
+        if self.before_timestamp is not None:
+            payload["before_timestamp"] = self.before_timestamp
+        if self.status_filter is not None:
+            payload["status_filter"] = self.status_filter
+        return payload
+
+
 # -----------------------------------------------------------------------------
 # Command requests
 # -----------------------------------------------------------------------------
@@ -205,6 +238,58 @@ class CmdDeviceStatusRequest(IPCRequest):
             "destination": self.destination,
             "timeout": self.timeout,
         }
+
+
+@dataclass
+class CmdSendChatRequest(IPCRequest):
+    """Send a chat message to a peer."""
+
+    MSG_TYPE = IPCMessageType.CMD_SEND_CHAT
+    peer_hash: str = ""
+    content: str = ""
+    title: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "peer_hash": self.peer_hash,
+            "content": self.content,
+        }
+        if self.title is not None:
+            payload["title"] = self.title
+        return payload
+
+
+@dataclass
+class CmdMarkReadRequest(IPCRequest):
+    """Mark all messages in a conversation as read."""
+
+    MSG_TYPE = IPCMessageType.CMD_MARK_READ
+    peer_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"peer_hash": self.peer_hash}
+
+
+@dataclass
+class CmdDeleteConversationRequest(IPCRequest):
+    """Delete all messages in a conversation."""
+
+    MSG_TYPE = IPCMessageType.CMD_DELETE_CONVERSATION
+    peer_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"peer_hash": self.peer_hash}
+
+
+@dataclass
+class CmdDeleteMessageRequest(IPCRequest):
+    """Delete a specific message."""
+
+    MSG_TYPE = IPCMessageType.CMD_DELETE_MESSAGE
+    message_id: int = 0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"message_id": self.message_id}
 
 
 # -----------------------------------------------------------------------------
@@ -518,6 +603,17 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return QueryStatusRequest()
     elif msg_type == IPCMessageType.QUERY_CONFIG:
         return QueryConfigRequest()
+    elif msg_type == IPCMessageType.QUERY_CONVERSATIONS:
+        return QueryConversationsRequest(
+            include_unread_count=payload.get("include_unread_count", True)
+        )
+    elif msg_type == IPCMessageType.QUERY_MESSAGES:
+        return QueryMessagesRequest(
+            peer_hash=payload.get("peer_hash", ""),
+            limit=payload.get("limit", 50),
+            before_timestamp=payload.get("before_timestamp"),
+            status_filter=payload.get("status_filter"),
+        )
     elif msg_type == IPCMessageType.CMD_SEND:
         return CmdSendRequest(
             destination=payload.get("destination", ""),
@@ -540,5 +636,17 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             destination=payload.get("destination", ""),
             timeout=payload.get("timeout", 30.0),
         )
+    elif msg_type == IPCMessageType.CMD_SEND_CHAT:
+        return CmdSendChatRequest(
+            peer_hash=payload.get("peer_hash", ""),
+            content=payload.get("content", ""),
+            title=payload.get("title"),
+        )
+    elif msg_type == IPCMessageType.CMD_MARK_READ:
+        return CmdMarkReadRequest(peer_hash=payload.get("peer_hash", ""))
+    elif msg_type == IPCMessageType.CMD_DELETE_CONVERSATION:
+        return CmdDeleteConversationRequest(peer_hash=payload.get("peer_hash", ""))
+    elif msg_type == IPCMessageType.CMD_DELETE_MESSAGE:
+        return CmdDeleteMessageRequest(message_id=payload.get("message_id", 0))
     else:
         raise ValueError(f"Unknown request type: {msg_type}")

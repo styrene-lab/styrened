@@ -347,6 +347,27 @@ class NodeStore:
                 )
                 return None
 
+    def get_node_by_lxmf_destination(self, lxmf_destination_hash: str) -> MeshDevice | None:
+        """Get a node by its LXMF destination hash.
+
+        Thread-safe: read operations allow concurrent access.
+
+        Args:
+            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash.
+
+        Returns:
+            MeshDevice if found, None otherwise.
+        """
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM nodes WHERE lxmf_destination_hash = ?",
+                (lxmf_destination_hash,),
+            ).fetchone()
+
+            if row:
+                return self._row_to_device(row)
+            return None
+
     def get_identity_for_lxmf_destination(self, lxmf_destination_hash: str) -> str | None:
         """Get identity hash for an LXMF destination hash.
 
