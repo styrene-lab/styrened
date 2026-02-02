@@ -319,19 +319,30 @@ class NodeStore:
         (from `styrene_node:operator` announces). For LXMF destinations,
         use get_identity_for_lxmf_destination() instead.
 
+        Supports both exact match and prefix match for truncated hashes
+        (common when users copy partial hashes from CLI output).
+
         Thread-safe: read operations allow concurrent access.
 
         Args:
-            destination_hash: Hex-encoded operator destination hash.
+            destination_hash: Hex-encoded operator destination hash (full or truncated).
 
         Returns:
             Identity hash if found, None otherwise.
         """
         with self._connection() as conn:
+            # First try exact match
             row = conn.execute(
                 "SELECT identity_hash FROM nodes WHERE destination_hash = ?",
                 (destination_hash,),
             ).fetchone()
+
+            # If not found, try prefix match for truncated hashes
+            if not row and len(destination_hash) < 32:
+                row = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE destination_hash LIKE ?",
+                    (destination_hash + "%",),
+                ).fetchone()
 
             if row:
                 identity_hash: str = row["identity_hash"]
@@ -377,19 +388,29 @@ class NodeStore:
         - The LXMF destination is different from the operator destination,
           but both share the same identity_hash
 
+        Supports both exact match and prefix match for truncated hashes.
+
         Thread-safe: read operations allow concurrent access.
 
         Args:
-            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash.
+            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash (full or truncated).
 
         Returns:
             Identity hash if found, None otherwise.
         """
         with self._connection() as conn:
+            # First try exact match
             row = conn.execute(
                 "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash = ?",
                 (lxmf_destination_hash,),
             ).fetchone()
+
+            # If not found, try prefix match for truncated hashes
+            if not row and len(lxmf_destination_hash) < 32:
+                row = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash LIKE ?",
+                    (lxmf_destination_hash + "%",),
+                ).fetchone()
 
             if row:
                 identity_hash: str = row["identity_hash"]

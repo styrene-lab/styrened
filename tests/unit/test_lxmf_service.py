@@ -365,7 +365,7 @@ class TestMockLXMFService:
 
     def test_mock_service_tracks_sent_messages(self):
         """MockLXMFService should track sent messages."""
-        from styrened.services.lxmf_service import MockLXMFService
+        from styrened.services.lxmf_service import DeliveryMethod, MockLXMFService
 
         service = MockLXMFService()
 
@@ -373,8 +373,9 @@ class TestMockLXMFService:
         service.send_message("dest2", {"type": "test2"})
 
         assert len(service.sent_messages) == 2
-        assert service.sent_messages[0] == ("dest1", {"type": "test1"})
-        assert service.sent_messages[1] == ("dest2", {"type": "test2"})
+        # Now includes delivery method as third element
+        assert service.sent_messages[0] == ("dest1", {"type": "test1"}, DeliveryMethod.DIRECT)
+        assert service.sent_messages[1] == ("dest2", {"type": "test2"}, DeliveryMethod.DIRECT)
 
     def test_mock_service_can_simulate_failure(self):
         """MockLXMFService can simulate send failures."""
@@ -385,7 +386,7 @@ class TestMockLXMFService:
 
         result = service.send_message("dest", {"type": "test"})
 
-        assert result is False
+        assert result is None
         assert len(service.sent_messages) == 0
 
     def test_mock_service_can_simulate_receive(self):

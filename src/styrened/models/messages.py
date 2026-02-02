@@ -23,6 +23,19 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 logger = logging.getLogger(__name__)
 
 
+class MessageStatus:
+    """Message delivery status constants."""
+
+    PENDING = "pending"
+    SENDING = "sending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    RECEIVED = "received"
+    FAILED = "failed"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
 class Base(DeclarativeBase):
     """SQLAlchemy declarative base."""
 
@@ -68,6 +81,21 @@ class Message(Base):
     protocol_id: Mapped[str] = mapped_column(String(50), nullable=False, default=lambda: "")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=lambda: "pending")
 
+    # LXMF delivery tracking columns (Phase 2a)
+    delivery_method: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default=None
+    )  # "direct", "propagated", or None
+    delivery_attempts: Mapped[int] = mapped_column(nullable=False, default=0)
+    lxmf_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )  # hex-encoded LXMF message hash
+    signature_valid: Mapped[bool | None] = mapped_column(
+        nullable=True, default=None
+    )  # LXMF signature validation result
+    transport_encrypted: Mapped[bool | None] = mapped_column(
+        nullable=True, default=None
+    )  # transport encryption status
+
     def __init__(
         self,
         source_hash: str,
@@ -77,6 +105,11 @@ class Message(Base):
         fields: str = "{}",
         protocol_id: str = "",
         status: str = "pending",
+        delivery_method: str | None = None,
+        delivery_attempts: int = 0,
+        lxmf_hash: str | None = None,
+        signature_valid: bool | None = None,
+        transport_encrypted: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize Message with defaults.
@@ -89,6 +122,11 @@ class Message(Base):
             fields: JSON-encoded fields dictionary
             protocol_id: Protocol identifier
             status: Message status
+            delivery_method: How message was/will be delivered ("direct", "propagated")
+            delivery_attempts: Number of delivery attempts made
+            lxmf_hash: Hex-encoded LXMF message hash
+            signature_valid: Whether LXMF signature was validated
+            transport_encrypted: Whether transport encryption was used
             **kwargs: Additional keyword arguments for SQLAlchemy
         """
         super().__init__(
@@ -99,6 +137,11 @@ class Message(Base):
             fields=fields,
             protocol_id=protocol_id,
             status=status,
+            delivery_method=delivery_method,
+            delivery_attempts=delivery_attempts,
+            lxmf_hash=lxmf_hash,
+            signature_valid=signature_valid,
+            transport_encrypted=transport_encrypted,
             **kwargs,
         )
 

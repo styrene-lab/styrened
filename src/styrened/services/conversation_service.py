@@ -82,6 +82,9 @@ class MessageInfo:
     is_outgoing: bool
     signature_valid: bool | None = None
     transport_encrypted: bool | None = None
+    delivery_method: str | None = None  # "direct", "propagated", or None
+    delivery_attempts: int = 0
+    lxmf_hash: str | None = None  # hex-encoded LXMF message hash
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for IPC."""
@@ -97,6 +100,9 @@ class MessageInfo:
             "is_outgoing": self.is_outgoing,
             "signature_valid": self.signature_valid,
             "transport_encrypted": self.transport_encrypted,
+            "delivery_method": self.delivery_method,
+            "delivery_attempts": self.delivery_attempts,
+            "lxmf_hash": self.lxmf_hash,
         }
 
     @classmethod
@@ -114,6 +120,9 @@ class MessageInfo:
             is_outgoing=data.get("is_outgoing", False),
             signature_valid=data.get("signature_valid"),
             transport_encrypted=data.get("transport_encrypted"),
+            delivery_method=data.get("delivery_method"),
+            delivery_attempts=data.get("delivery_attempts", 0),
+            lxmf_hash=data.get("lxmf_hash"),
         )
 
     @classmethod
@@ -128,6 +137,16 @@ class MessageInfo:
             MessageInfo with data from the Message
         """
         fields = msg.get_fields_dict()
+
+        # Read from Message columns first, fall back to fields dict for backward compatibility
+        signature_valid = msg.signature_valid
+        if signature_valid is None:
+            signature_valid = fields.get("signature_valid")
+
+        transport_encrypted = msg.transport_encrypted
+        if transport_encrypted is None:
+            transport_encrypted = fields.get("transport_encrypted")
+
         return cls(
             id=msg.id,
             source_hash=msg.source_hash,
@@ -138,8 +157,11 @@ class MessageInfo:
             protocol=msg.protocol_id,
             status=msg.status,
             is_outgoing=(msg.source_hash == local_identity_hash),
-            signature_valid=fields.get("signature_valid"),
-            transport_encrypted=fields.get("transport_encrypted"),
+            signature_valid=signature_valid,
+            transport_encrypted=transport_encrypted,
+            delivery_method=msg.delivery_method,
+            delivery_attempts=msg.delivery_attempts or 0,
+            lxmf_hash=msg.lxmf_hash,
         )
 
 
@@ -170,7 +192,7 @@ class ConversationService:
     for unread counts and pending deliveries, backed by SQLite persistence.
 
     Usage:
-        service = ConversationService(db_engine, local_identity_hash)
+        service = ConversationService(db_engine, local_lxmf_hash)
         service.initialize()
 
         # List conversations
@@ -196,11 +218,14 @@ class ConversationService:
 
         Args:
             db_engine: SQLAlchemy engine for message persistence
-            local_identity_hash: Our local identity hash (for determining outgoing)
+            local_identity_hash: Our local LXMF destination hash (hexhash).
+                NOTE: Despite the name, this is the LXMF delivery destination hash,
+                NOT the RNS identity hash. LXMF messages use destination hashes
+                for source/dest identification in message.source_hash/destination_hash.
             node_store: Optional NodeStore for display name lookups
         """
         self._db_engine = db_engine
-        self._local_identity_hash = local_identity_hash
+        self._local_identity_hash = local_identity_hash  # Actually LXMF dest hash
         self._node_store = node_store
 
         # Thread safety
@@ -436,6 +461,10 @@ class ConversationService:
         content: str,
         timestamp: float | None = None,
         fields: dict[str, Any] | None = None,
+        lxmf_hash: bytes | None = None,
+        delivery_method: str | None = None,
+        signature_valid: bool | None = None,
+        transport_encrypted: bool | None = None,
     ) -> int:
         """Save an incoming chat message.
 
@@ -446,12 +475,21 @@ class ConversationService:
             content: Message content
             timestamp: Message timestamp (defaults to now)
             fields: Optional LXMF fields dict
+            lxmf_hash: Optional LXMF message hash (bytes)
+            delivery_method: How the message was delivered ("direct", "propagated")
+            signature_valid: Whether the LXMF signature was validated
+            transport_encrypted: Whether transport encryption was used
 
         Returns:
             Database ID of saved message
         """
         if timestamp is None:
             timestamp = time.time()
+
+        # Convert lxmf_hash bytes to hex string for storage
+        lxmf_hash_hex: str | None = None
+        if lxmf_hash is not None:
+            lxmf_hash_hex = lxmf_hash.hex()
 
         with Session(self._db_engine) as session:
             msg = Message(
@@ -461,6 +499,10 @@ class ConversationService:
                 content=content,
                 protocol_id="chat",
                 status=MessageStatus.RECEIVED,
+                lxmf_hash=lxmf_hash_hex,
+                delivery_method=delivery_method,
+                signature_valid=signature_valid,
+                transport_encrypted=transport_encrypted,
             )
             if fields:
                 msg.set_fields_dict(fields)
@@ -483,6 +525,8 @@ class ConversationService:
         timestamp: float | None = None,
         fields: dict[str, Any] | None = None,
         lxmf_hash: bytes | None = None,
+        delivery_method: str | None = None,
+        delivery_attempts: int = 0,
     ) -> int:
         """Save an outgoing chat message.
 
@@ -491,13 +535,20 @@ class ConversationService:
             content: Message content
             timestamp: Message timestamp (defaults to now)
             fields: Optional LXMF fields dict
-            lxmf_hash: Optional LXMF message hash for delivery tracking
+            lxmf_hash: Optional LXMF message hash for delivery tracking (bytes)
+            delivery_method: How the message will be delivered ("direct", "propagated")
+            delivery_attempts: Number of delivery attempts made
 
         Returns:
             Database ID of saved message
         """
         if timestamp is None:
             timestamp = time.time()
+
+        # Convert lxmf_hash bytes to hex string for storage
+        lxmf_hash_hex: str | None = None
+        if lxmf_hash is not None:
+            lxmf_hash_hex = lxmf_hash.hex()
 
         with Session(self._db_engine) as session:
             msg = Message(
@@ -507,6 +558,9 @@ class ConversationService:
                 content=content,
                 protocol_id="chat",
                 status=MessageStatus.PENDING,
+                delivery_method=delivery_method,
+                delivery_attempts=delivery_attempts,
+                lxmf_hash=lxmf_hash_hex,
             )
             if fields:
                 msg.set_fields_dict(fields)
@@ -580,6 +634,84 @@ class ConversationService:
             message_id: Database ID of the message
         """
         self.update_message_status(message_id, MessageStatus.SENT)
+
+    def register_delivery_tracking(self, message_id: int, lxmf_hash: bytes) -> None:
+        """Register a message for delivery tracking after it's been sent.
+
+        This allows separating message creation from send, avoiding race conditions
+        where a delivery callback arrives before the message is saved.
+
+        Args:
+            message_id: Database ID of the message
+            lxmf_hash: LXMF message hash for correlating callbacks
+        """
+        with self._lock:
+            self._pending_deliveries[lxmf_hash] = DeliveryTracker(
+                message_id=message_id,
+                lxmf_hash=lxmf_hash,
+            )
+        logger.debug(f"Registered delivery tracking for message {message_id}")
+
+    def get_failed_messages(self, peer_hash: str | None = None) -> list[MessageInfo]:
+        """Get all failed messages, optionally filtered by peer.
+
+        Args:
+            peer_hash: Optional peer hash to filter by
+
+        Returns:
+            List of failed messages
+        """
+        with Session(self._db_engine) as session:
+            query = session.query(Message).filter(
+                Message.protocol_id == "chat",
+                Message.status == MessageStatus.FAILED,
+                Message.source_hash == self._local_identity_hash,  # Only outgoing
+            )
+            if peer_hash:
+                query = query.filter(Message.destination_hash == peer_hash)
+
+            query = query.order_by(desc(Message.timestamp))
+            messages = query.all()
+
+            # Use from_message for consistent field handling
+            return [MessageInfo.from_message(msg, self._local_identity_hash) for msg in messages]
+
+    def prepare_retry(self, message_id: int) -> tuple[str, str, dict[str, Any]] | None:
+        """Prepare a failed message for retry.
+
+        Retrieves message details and resets status to PENDING.
+
+        Args:
+            message_id: Database ID of the message to retry
+
+        Returns:
+            Tuple of (destination_hash, content, fields) if found, None otherwise
+        """
+        with Session(self._db_engine) as session:
+            msg = (
+                session.query(Message)
+                .filter(
+                    Message.id == message_id,
+                    Message.status == MessageStatus.FAILED,
+                )
+                .first()
+            )
+
+            if msg is None:
+                logger.warning(f"Message {message_id} not found or not in FAILED state")
+                return None
+
+            # Capture values before modifying
+            dest_hash = msg.destination_hash
+            content = msg.content or ""  # Ensure content is never None
+            fields = msg.get_fields_dict()
+
+            # Reset to pending for retry
+            msg.status = MessageStatus.PENDING
+            session.commit()
+
+        logger.info(f"Prepared message {message_id} for retry to {dest_hash[:16]}...")
+        return (dest_hash, content, fields)
 
     def mark_read(self, peer_hash: str) -> int:
         """Mark all messages in a conversation as read.
