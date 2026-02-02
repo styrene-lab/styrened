@@ -543,9 +543,11 @@ class ConversationService:
             limit: Maximum results to return
 
         Returns:
-            List of matching messages, most recent first
+            List of matching messages, most recent first.
+            Returns empty list if query has invalid FTS5 syntax.
         """
         from sqlalchemy import text
+        from sqlalchemy.exc import OperationalError
 
         with Session(self._db_engine) as session:
             # Build FTS query joining with messages table
@@ -563,8 +565,17 @@ class ConversationService:
 
             sql += " ORDER BY m.timestamp DESC LIMIT :limit"
 
-            result = session.execute(text(sql), params)
-            message_ids = [row[0] for row in result]
+            try:
+                result = session.execute(text(sql), params)
+                message_ids = [row[0] for row in result]
+            except OperationalError as e:
+                # FTS5 syntax errors (unclosed quotes, invalid operators, etc.)
+                error_str = str(e).lower()
+                if "fts5" in error_str or "syntax error" in error_str:
+                    logger.warning(f"Invalid FTS5 query syntax: {query!r}")
+                    return []
+                # Re-raise other operational errors
+                raise
 
             # Fetch full Message objects
             messages = []

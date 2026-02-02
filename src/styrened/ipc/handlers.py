@@ -11,9 +11,15 @@ Usage:
 """
 
 import logging
+import re
 import threading
 import time
 from typing import TYPE_CHECKING, Any
+
+# Constants for input validation
+MAX_CHAT_CONTENT_LENGTH = 65536  # 64KB - reasonable limit for chat messages
+MAX_TITLE_LENGTH = 256  # Max title length
+HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")  # 16-32 hex chars (truncated or full)
 
 try:
     import LXMF
@@ -533,6 +539,12 @@ class IPCHandlers:
         if not req.peer_hash:
             return ErrorResponse.invalid_request("peer_hash is required")
 
+        # Validate peer_hash format
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
         try:
             err = self._check_conversation_service()
             if err:
@@ -619,6 +631,24 @@ class IPCHandlers:
         if not req.content or not isinstance(req.content, str):
             return ErrorResponse.invalid_request("content is required and must be a string")
 
+        # Validate peer_hash format (16-32 hex chars)
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
+        # Validate content size limits
+        if len(req.content) > MAX_CHAT_CONTENT_LENGTH:
+            return ErrorResponse.invalid_request(
+                f"content exceeds maximum length of {MAX_CHAT_CONTENT_LENGTH} bytes"
+            )
+
+        # Validate title length if provided
+        if req.title and len(req.title) > MAX_TITLE_LENGTH:
+            return ErrorResponse.invalid_request(
+                f"title exceeds maximum length of {MAX_TITLE_LENGTH} characters"
+            )
+
         # Extract delivery method from request (default "auto")
         delivery_method = req.delivery_method if req.delivery_method else "auto"
 
@@ -670,6 +700,13 @@ class IPCHandlers:
             def register_and_callback_delivery(lxmf_message: Any) -> None:
                 """Handle successful delivery with race-safe tracking."""
                 try:
+                    # Check if service is still running (could be shutting down)
+                    if not conversation_service._initialized:
+                        logger.debug(
+                            f"Delivery callback for msg {msg_id} ignored - service shutdown"
+                        )
+                        return
+
                     msg_hash = lxmf_message.hash
                     needs_registration = False
                     with tracking_lock:
@@ -688,6 +725,11 @@ class IPCHandlers:
             def register_and_callback_failed(lxmf_message: Any) -> None:
                 """Handle delivery failure with race-safe tracking."""
                 try:
+                    # Check if service is still running (could be shutting down)
+                    if not conversation_service._initialized:
+                        logger.debug(f"Failed callback for msg {msg_id} ignored - service shutdown")
+                        return
+
                     msg_hash = lxmf_message.hash
                     needs_registration = False
                     with tracking_lock:
@@ -787,6 +829,12 @@ class IPCHandlers:
         if not req.peer_hash:
             return ErrorResponse.invalid_request("peer_hash is required")
 
+        # Validate peer_hash format
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
         try:
             err = self._check_conversation_service()
             if err:
@@ -827,6 +875,12 @@ class IPCHandlers:
 
         if not req.peer_hash:
             return ErrorResponse.invalid_request("peer_hash is required")
+
+        # Validate peer_hash format
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
 
         try:
             err = self._check_conversation_service()
