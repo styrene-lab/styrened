@@ -10,6 +10,7 @@ The service handles:
 - Graceful shutdown and cleanup
 - Capturing and exposing initialization error states
 - Suppressing cosmetic outbound packet errors in client-hub architecture
+- Monitoring LocalInterface connection state and handling reconnections
 
 Usage:
     from styrened.services.rns_service import get_rns_service
@@ -41,6 +42,9 @@ Usage:
 """
 
 import logging
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import RNS
@@ -79,7 +83,16 @@ class RNSService:
 
     The service also tracks initialization error states to enable informative
     UX when running in degraded mode.
+
+    Connection State Monitoring:
+        When using LocalInterface to connect to a shared rnsd instance,
+        the socket may drop and reconnect. This service monitors interface
+        states and clears destination caches on disconnect to prevent
+        "already registered" errors during reconnection.
     """
+
+    # Minimum interval between interface status checks (seconds)
+    INTERFACE_CHECK_INTERVAL = 5.0
 
     def __init__(self) -> None:
         """Initialize the RNSService (not the RNS instance yet)."""
@@ -88,6 +101,17 @@ class RNSService:
         self._error_state: RNSErrorState = RNSErrorState.none()
         self._destinations: dict[str, RNS.Destination] = {}
         self._outbound_error_filter_installed: bool = False
+
+        # Connection state monitoring
+        self._interface_monitor_thread: threading.Thread | None = None
+        self._monitor_stop_event = threading.Event()
+        self._last_interface_states: dict[str, bool] = {}
+        # Track disconnect time per interface to avoid cross-interface confusion
+        self._disconnect_times: dict[str, float] = {}
+        self._reconnect_callbacks: list[Callable[[], None]] = []
+
+        # Thread safety lock for shared state (_destinations, _reconnect_callbacks)
+        self._lock = threading.Lock()
 
     @property
     def is_initialized(self) -> bool:
@@ -177,8 +201,12 @@ class RNSService:
             self._error_state = RNSErrorState.none()
             logger.info("RNS initialized successfully")
 
-            # Log interface status
+            # Log interface status and capture initial states
             self._log_interface_status()
+            self._capture_interface_states()
+
+            # Start interface monitoring thread for LocalInterface reconnection handling
+            self._start_interface_monitor()
 
             return True
 
@@ -205,6 +233,8 @@ class RNSService:
         If a destination with the same app_name and aspect already exists in
         the cache, the cached instance is returned instead of creating a new one.
 
+        Thread-safe: Uses internal lock for cache access.
+
         Args:
             identity: RNS.Identity to use for the destination.
             app_name: Application name for the destination (e.g., "styrene.tui").
@@ -221,28 +251,31 @@ class RNSService:
             logger.warning("Cannot create destination: identity is None")
             return None
 
-        # Check cache for existing destination
         cache_key = f"{app_name}.{aspect}"
-        if cache_key in self._destinations:
-            logger.debug(f"Returning cached destination: {cache_key}")
-            return self._destinations[cache_key]
 
-        try:
-            destination = RNS.Destination(
-                identity,
-                RNS.Destination.IN,  # Incoming direction
-                RNS.Destination.SINGLE,  # Single destination (not group)
-                app_name,
-                aspect,
-            )
-            # Cache the destination
-            self._destinations[cache_key] = destination
-            logger.info(f"Created destination: {cache_key}")
-            return destination
+        # Thread-safe cache check and update
+        with self._lock:
+            # Check cache for existing destination
+            if cache_key in self._destinations:
+                logger.debug(f"Returning cached destination: {cache_key}")
+                return self._destinations[cache_key]
 
-        except Exception as e:
-            logger.error(f"Failed to create destination: {e}")
-            return None
+            try:
+                destination = RNS.Destination(
+                    identity,
+                    RNS.Destination.IN,  # Incoming direction
+                    RNS.Destination.SINGLE,  # Single destination (not group)
+                    app_name,
+                    aspect,
+                )
+                # Cache the destination
+                self._destinations[cache_key] = destination
+                logger.info(f"Created destination: {cache_key}")
+                return destination
+
+            except Exception as e:
+                logger.error(f"Failed to create destination: {e}")
+                return None
 
     def get_or_create_destination(
         self,
@@ -271,9 +304,12 @@ class RNSService:
 
         This removes all destinations from the cache. Useful for cleanup
         during shutdown or when reinitializing the service.
+
+        Thread-safe: Uses internal lock for cache access.
         """
-        count = len(self._destinations)
-        self._destinations.clear()
+        with self._lock:
+            count = len(self._destinations)
+            self._destinations.clear()
         if count > 0:
             logger.info(f"Cleared {count} cached destination(s)")
 
@@ -327,6 +363,170 @@ class RNSService:
             # Fallback if method doesn't exist or isn't callable
             logger.warning(f"Could not determine transport status: {e}")
             return False
+
+    def register_reconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be invoked after interface reconnection.
+
+        Callbacks are invoked after destination caches have been cleared
+        and the interface has stabilized. Use this to re-register destinations
+        or reinitialize LXMF routers.
+
+        Thread-safe: Uses internal lock for callback list access.
+
+        Args:
+            callback: Function to call after reconnection. Called with no arguments.
+        """
+        with self._lock:
+            self._reconnect_callbacks.append(callback)
+            count = len(self._reconnect_callbacks)
+        logger.debug(f"Registered reconnect callback, total: {count}")
+
+    def _capture_interface_states(self) -> None:
+        """Capture current interface online states for change detection."""
+        try:
+            interfaces = RNS.Transport.interfaces
+            if not interfaces:
+                return
+
+            for iface in interfaces:
+                name = getattr(iface, "name", str(id(iface)))
+                online = getattr(iface, "online", True)
+                self._last_interface_states[name] = online
+
+            logger.debug(f"Captured interface states: {self._last_interface_states}")
+
+        except Exception as e:
+            logger.debug(f"Could not capture interface states: {e}")
+
+    def _start_interface_monitor(self) -> None:
+        """Start background thread to monitor interface connection states."""
+        if self._interface_monitor_thread is not None:
+            logger.debug("Interface monitor already running")
+            return
+
+        self._monitor_stop_event.clear()
+        self._interface_monitor_thread = threading.Thread(
+            target=self._interface_monitor_loop,
+            name="rns-interface-monitor",
+            daemon=True,
+        )
+        self._interface_monitor_thread.start()
+        logger.info("Started interface connection monitor")
+
+    def _stop_interface_monitor(self) -> None:
+        """Stop the interface monitoring thread."""
+        if self._interface_monitor_thread is None:
+            return
+
+        self._monitor_stop_event.set()
+        self._interface_monitor_thread.join(timeout=2.0)
+        self._interface_monitor_thread = None
+        logger.debug("Stopped interface monitor")
+
+    def _interface_monitor_loop(self) -> None:
+        """Background loop to monitor interface states and handle reconnections.
+
+        Detects LocalInterface disconnects and clears destination caches
+        to prevent 'already registered' errors on reconnection.
+        """
+        logger.debug("Interface monitor loop started")
+
+        while not self._monitor_stop_event.is_set():
+            try:
+                self._check_interface_states()
+            except Exception as e:
+                logger.warning(f"Interface monitor error: {e}")
+
+            # Wait for next check interval or stop event
+            self._monitor_stop_event.wait(timeout=self.INTERFACE_CHECK_INTERVAL)
+
+        logger.debug("Interface monitor loop exited")
+
+    def _check_interface_states(self) -> None:
+        """Check interface states and handle disconnections.
+
+        Compares current states to last known states and triggers
+        cache clearing when LocalInterface goes offline.
+        """
+        try:
+            interfaces = RNS.Transport.interfaces
+            if not interfaces:
+                return
+
+            for iface in interfaces:
+                name = getattr(iface, "name", str(id(iface)))
+                online = getattr(iface, "online", True)
+                iface_type = type(iface).__name__
+
+                # Get previous state (default to True for new interfaces)
+                prev_online = self._last_interface_states.get(name, True)
+
+                # Detect state change
+                if prev_online and not online:
+                    # Interface went offline
+                    logger.warning(f"[RECONNECT] Interface offline: [{iface_type}] {name}")
+                    self._disconnect_times[name] = time.monotonic()
+
+                    # For LocalInterface, this is the critical case
+                    if "LocalInterface" in iface_type:
+                        logger.warning(
+                            "[RECONNECT] LocalInterface disconnect detected - "
+                            "will clear caches on reconnection"
+                        )
+
+                elif not prev_online and online:
+                    # Interface came back online
+                    logger.info(f"[RECONNECT] Interface online: [{iface_type}] {name}")
+
+                    # Check if THIS interface had a disconnect that needs handling
+                    disconnect_time = self._disconnect_times.get(name)
+                    if disconnect_time is not None:
+                        elapsed = time.monotonic() - disconnect_time
+                        logger.info(f"[RECONNECT] {name} reconnected after {elapsed:.1f}s offline")
+
+                        # Clear caches and invoke callbacks
+                        self._handle_reconnection(iface_type, name)
+                        del self._disconnect_times[name]
+
+                # Update tracked state
+                self._last_interface_states[name] = online
+
+        except Exception as e:
+            logger.debug(f"Interface state check failed: {e}")
+
+    def _handle_reconnection(self, iface_type: str, iface_name: str) -> None:
+        """Handle interface reconnection by clearing caches and notifying listeners.
+
+        Thread-safe: Uses internal lock for cache and callback list access.
+        Callbacks are invoked outside the lock to prevent deadlocks.
+
+        Args:
+            iface_type: Type name of the reconnected interface.
+            iface_name: Name of the reconnected interface.
+        """
+        logger.info(f"[RECONNECT] Handling reconnection for [{iface_type}] {iface_name}")
+
+        # Thread-safe: clear caches and copy callback list while holding lock
+        with self._lock:
+            dest_count = len(self._destinations)
+            if dest_count > 0:
+                logger.info(
+                    f"[RECONNECT] Clearing {dest_count} cached destination(s) to allow re-registration"
+                )
+                self._destinations.clear()
+
+            # Copy callback list to avoid holding lock during invocation
+            callbacks = list(self._reconnect_callbacks)
+
+        # Invoke callbacks outside the lock to prevent deadlocks
+        for callback in callbacks:
+            try:
+                logger.debug(f"[RECONNECT] Invoking callback: {callback}")
+                callback()
+            except Exception as e:
+                logger.error(f"[RECONNECT] Callback error: {e}")
+
+        logger.info("[RECONNECT] Reconnection handling complete")
 
     def _log_interface_status(self) -> None:
         """Log status of all configured RNS interfaces.
@@ -385,11 +585,17 @@ class RNSService:
             return
 
         try:
+            # Stop interface monitor thread first
+            self._stop_interface_monitor()
+
             # Note: We don't remove the RNS.log monkey-patch on shutdown
             # since it's a permanent filter for expected errors
 
             # Clear cached destinations first
             self.clear_destinations()
+
+            # Clear reconnect callbacks
+            self._reconnect_callbacks.clear()
 
             if self._reticulum:
                 # RNS doesn't have an explicit shutdown method, but we can

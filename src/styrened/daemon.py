@@ -123,6 +123,9 @@ class StyreneDaemon:
         Creates the operator destination once during startup using the
         RNS service's destination caching. This avoids "already registered"
         errors when re-announcing in the main loop.
+
+        Also registers for reconnection events to refresh the destination
+        if LocalInterface drops and reconnects.
         """
         try:
             from styrened.services.reticulum import get_operator_identity_object
@@ -136,12 +139,40 @@ class StyreneDaemon:
                 )
                 if self._operator_destination:
                     logger.info("Operator destination initialized and cached")
+
+                    # Register for reconnection events (only once)
+                    if not hasattr(self, "_reconnect_registered"):
+                        rns_service.register_reconnect_callback(self._handle_rns_reconnection)
+                        self._reconnect_registered = True
+                        logger.debug("Registered daemon reconnection callback")
                 else:
                     logger.warning("Failed to create operator destination")
             else:
                 logger.warning("No operator identity available")
         except Exception as e:
             logger.error(f"Failed to initialize operator destination: {e}")
+
+    def _handle_rns_reconnection(self) -> None:
+        """Handle RNS interface reconnection by refreshing cached state.
+
+        Called by RNSService when a LocalInterface reconnects after disconnect.
+        Clears cached operator destination and re-initializes it.
+        """
+        logger.info("[RECONNECT] Daemon handling RNS reconnection")
+
+        # Clear stale cached destination
+        self._operator_destination = None
+
+        # Re-initialize operator destination (RNS caches will be empty)
+        self._init_operator_destination()
+
+        # Trigger a re-announce to make ourselves visible again
+        if self._operator_destination:
+            try:
+                self._announce()
+                logger.info("[RECONNECT] Daemon re-announced after reconnection")
+            except Exception as e:
+                logger.warning(f"[RECONNECT] Failed to re-announce: {e}")
 
     def _start_rpc_server(self) -> None:
         """Start the RPC server for handling incoming requests."""
