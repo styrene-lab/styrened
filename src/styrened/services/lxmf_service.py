@@ -807,6 +807,8 @@ class MockLXMFService:
         self,
         destination: str,
         payload: dict[str, Any],
+        on_delivery: Callable[[Any], None] | None = None,
+        on_failed: Callable[[Any], None] | None = None,
         delivery_method: str = DeliveryMethod.AUTO,
     ) -> SendMessageResult | None:
         """Mock send message.
@@ -814,6 +816,8 @@ class MockLXMFService:
         Args:
             destination: Destination hash.
             payload: Message payload.
+            on_delivery: Optional callback invoked when message is delivered.
+            on_failed: Optional callback invoked when delivery fails.
             delivery_method: Delivery method (direct, propagated, or auto).
 
         Returns:
@@ -828,9 +832,17 @@ class MockLXMFService:
         )
         self.sent_messages.append((destination, payload, method_used))
 
-        # Generate a mock hash
+        # Generate a mock hash and simulate full destination hash
         mock_hash = bytes.fromhex("a" * 32)
-        return SendMessageResult(hash=mock_hash, method=method_used)
+        # If destination is truncated, simulate resolving to full hash
+        full_destination = (
+            destination if len(destination) == 32 else destination + "0" * (32 - len(destination))
+        )
+        return SendMessageResult(
+            hash=mock_hash,
+            method=method_used,
+            destination_hash=full_destination,
+        )
 
     def register_callback(self, callback: Callable[[str, dict[str, Any]], None]) -> None:
         """Register message callback.
