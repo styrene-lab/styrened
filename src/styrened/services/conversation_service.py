@@ -635,6 +635,30 @@ class ConversationService:
         """
         self.update_message_status(message_id, MessageStatus.SENT)
 
+    def update_destination_hash(self, message_id: int, destination_hash: str) -> bool:
+        """Update the destination_hash of a message.
+
+        Used to normalize truncated destination hashes to full 32-char hashes
+        after LXMF resolves the identity and creates the actual destination.
+
+        Args:
+            message_id: Database ID of the message
+            destination_hash: Full 32-char hex LXMF destination hash
+
+        Returns:
+            True if message was found and updated
+        """
+        with Session(self._db_engine) as session:
+            msg = session.query(Message).filter(Message.id == message_id).first()
+            if msg is None:
+                return False
+
+            msg.destination_hash = destination_hash
+            session.commit()
+
+        logger.debug(f"Updated message {message_id} destination_hash to {destination_hash[:16]}...")
+        return True
+
     def register_delivery_tracking(self, message_id: int, lxmf_hash: bytes) -> None:
         """Register a message for delivery tracking after it's been sent.
 
