@@ -57,6 +57,7 @@ class IPCMessageType(IntEnum):
     QUERY_CONFIG = 0x13
     QUERY_CONVERSATIONS = 0x14
     QUERY_MESSAGES = 0x15
+    QUERY_SEARCH_MESSAGES = 0x16
 
     # Command requests (0x20-0x2F)
     CMD_SEND = 0x20

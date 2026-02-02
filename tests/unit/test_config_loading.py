@@ -180,6 +180,7 @@ discovery:
 chat:
   enabled: "true"
   auto_reply_enabled: "false"
+  persist_messages: "false"
 api:
   enabled: "false"
 """
@@ -198,7 +199,21 @@ api:
         assert config.discovery.auto_announce is False
         assert config.chat.enabled is True
         assert config.chat.auto_reply_enabled is False
+        assert config.chat.persist_messages is False
         assert config.api.enabled is False
+
+    def test_load_config_persist_messages_default(self) -> None:
+        """Test that persist_messages defaults to True when not specified."""
+        yaml_content = """
+chat:
+  enabled: true
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.chat.persist_messages is True  # Default value
 
 
 class TestSaveCoreConfig:
@@ -435,3 +450,206 @@ reticulum:
             config = load_core_config(Path(f.name))
 
         assert config.reticulum.config_path_override is None
+
+
+class TestLXMFConfigLoading:
+    """Tests for LXMF configuration loading."""
+
+    def test_lxmf_config_defaults(self) -> None:
+        """LXMF config should have sensible defaults when not specified."""
+        yaml_content = """
+reticulum:
+  mode: standalone
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        # Check defaults
+        assert config.lxmf.autopeer is True
+        assert config.lxmf.autopeer_maxdepth == 4
+        assert config.lxmf.max_peers == 20
+        assert config.lxmf.propagation_limit == 256
+        assert config.lxmf.sync_limit == 10240
+        assert config.lxmf.delivery_limit == 1000
+        assert config.lxmf.propagation_node.enabled is False
+        assert config.lxmf.propagation_node.name is None
+        assert config.lxmf.propagation_destination is None
+        assert config.lxmf.static_peers == []
+        assert config.lxmf.from_static_only is False
+
+    def test_lxmf_propagation_node_enabled(self) -> None:
+        """Propagation node can be enabled via config."""
+        yaml_content = """
+lxmf:
+  propagation_node:
+    enabled: true
+    name: "Central Hub"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.propagation_node.enabled is True
+        assert config.lxmf.propagation_node.name == "Central Hub"
+
+    def test_lxmf_propagation_destination(self) -> None:
+        """Propagation destination hash is parsed correctly."""
+        yaml_content = """
+lxmf:
+  propagation_destination: "abcdef0123456789abcdef0123456789"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.propagation_destination == "abcdef0123456789abcdef0123456789"
+
+    def test_lxmf_propagation_destination_invalid_length_ignored(self) -> None:
+        """Invalid length propagation destination is ignored."""
+        yaml_content = """
+lxmf:
+  propagation_destination: "tooshort"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.propagation_destination is None
+
+    def test_lxmf_sync_limits(self) -> None:
+        """Sync limits are parsed correctly."""
+        yaml_content = """
+lxmf:
+  propagation_limit: 512
+  sync_limit: 20480
+  delivery_limit: 2000
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.propagation_limit == 512
+        assert config.lxmf.sync_limit == 20480
+        assert config.lxmf.delivery_limit == 2000
+
+    def test_lxmf_peer_management(self) -> None:
+        """Peer management settings are parsed correctly."""
+        yaml_content = """
+lxmf:
+  autopeer: false
+  autopeer_maxdepth: 8
+  max_peers: 50
+  from_static_only: true
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.autopeer is False
+        assert config.lxmf.autopeer_maxdepth == 8
+        assert config.lxmf.max_peers == 50
+        assert config.lxmf.from_static_only is True
+
+    def test_lxmf_static_peers(self) -> None:
+        """Static peers list is parsed correctly."""
+        yaml_content = """
+lxmf:
+  static_peers:
+    - "abcdef0123456789abcdef0123456789"
+    - "fedcba9876543210fedcba9876543210"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert len(config.lxmf.static_peers) == 2
+        assert "abcdef0123456789abcdef0123456789" in config.lxmf.static_peers
+        assert "fedcba9876543210fedcba9876543210" in config.lxmf.static_peers
+
+    def test_lxmf_static_peers_invalid_length_filtered(self) -> None:
+        """Invalid length static peers are filtered out."""
+        yaml_content = """
+lxmf:
+  static_peers:
+    - "abcdef0123456789abcdef0123456789"
+    - "tooshort"
+    - "fedcba9876543210fedcba9876543210"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        # Only valid 32-char hashes should be included
+        assert len(config.lxmf.static_peers) == 2
+        assert "tooshort" not in config.lxmf.static_peers
+
+    def test_lxmf_cost_settings(self) -> None:
+        """Cost settings are parsed correctly."""
+        yaml_content = """
+lxmf:
+  propagation_cost: 32
+  propagation_cost_flexibility: 5
+  peering_cost: 24
+  max_peering_cost: 48
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.propagation_cost == 32
+        assert config.lxmf.propagation_cost_flexibility == 5
+        assert config.lxmf.peering_cost == 24
+        assert config.lxmf.max_peering_cost == 48
+
+    def test_lxmf_full_config(self) -> None:
+        """Full LXMF configuration is parsed correctly."""
+        yaml_content = """
+lxmf:
+  propagation_node:
+    enabled: true
+    name: "Test Hub"
+  propagation_destination: "1234567890abcdef1234567890abcdef"
+  propagation_limit: 512
+  sync_limit: 20480
+  delivery_limit: 2000
+  autopeer: true
+  autopeer_maxdepth: 6
+  max_peers: 30
+  static_peers:
+    - "abcdef0123456789abcdef0123456789"
+  from_static_only: false
+  propagation_cost: 20
+  propagation_cost_flexibility: 4
+  peering_cost: 22
+  max_peering_cost: 30
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.lxmf.propagation_node.enabled is True
+        assert config.lxmf.propagation_node.name == "Test Hub"
+        assert config.lxmf.propagation_destination == "1234567890abcdef1234567890abcdef"
+        assert config.lxmf.propagation_limit == 512
+        assert config.lxmf.sync_limit == 20480
+        assert config.lxmf.delivery_limit == 2000
+        assert config.lxmf.autopeer is True
+        assert config.lxmf.autopeer_maxdepth == 6
+        assert config.lxmf.max_peers == 30
+        assert len(config.lxmf.static_peers) == 1
+        assert config.lxmf.from_static_only is False
+        assert config.lxmf.propagation_cost == 20
+        assert config.lxmf.propagation_cost_flexibility == 4
+        assert config.lxmf.peering_cost == 22
+        assert config.lxmf.max_peering_cost == 30

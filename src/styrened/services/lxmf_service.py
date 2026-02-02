@@ -41,7 +41,10 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from styrened.models.config import LXMFConfig
 
 import platformdirs
 
@@ -131,7 +134,12 @@ class LXMFService:
         """Alias for delivery_destination (backward compatibility)."""
         return self._delivery_destination
 
-    def initialize(self, identity: "RNS.Identity") -> bool:
+    def initialize(
+        self,
+        identity: "RNS.Identity",
+        lxmf_config: "LXMFConfig | None" = None,
+        display_name: str | None = None,
+    ) -> bool:
         """Initialize LXMF router instance.
 
         This creates the LXMF router instance which handles message
@@ -139,6 +147,11 @@ class LXMFService:
 
         Args:
             identity: RNS.Identity to use for the router.
+            lxmf_config: Optional LXMFConfig with propagation and peer settings.
+            display_name: Display name for LXMF announces. When set, the delivery
+                         destination will include this name in announces using the
+                         standard LXMF msgpack format [name, stamp_cost]. This enables
+                         proper display in ecosystem clients (Sideband, NomadNet, MeshChat).
 
         Returns:
             True if initialization succeeded, False otherwise.
@@ -166,6 +179,48 @@ class LXMFService:
 
             logger.info(f"Initializing LXMF with storage: {lxmf_storage}")
 
+            # Build router kwargs from config
+            router_kwargs: dict[str, Any] = {
+                "identity": identity,
+                "storagepath": str(lxmf_storage),
+            }
+
+            # Apply config if provided
+            if lxmf_config is not None:
+                # Peer management
+                router_kwargs["autopeer"] = lxmf_config.autopeer
+                router_kwargs["autopeer_maxdepth"] = lxmf_config.autopeer_maxdepth
+                router_kwargs["max_peers"] = lxmf_config.max_peers
+                router_kwargs["from_static_only"] = lxmf_config.from_static_only
+
+                # Sync limits
+                router_kwargs["propagation_limit"] = lxmf_config.propagation_limit
+                router_kwargs["sync_limit"] = lxmf_config.sync_limit
+                router_kwargs["delivery_limit"] = lxmf_config.delivery_limit
+
+                # Static peers
+                if lxmf_config.static_peers:
+                    router_kwargs["static_peers"] = [
+                        bytes.fromhex(p) for p in lxmf_config.static_peers
+                    ]
+
+                # Propagation node mode cost settings
+                if lxmf_config.propagation_node.enabled:
+                    router_kwargs["propagation_cost"] = lxmf_config.propagation_cost
+                    router_kwargs["propagation_cost_flexibility"] = (
+                        lxmf_config.propagation_cost_flexibility
+                    )
+                    router_kwargs["peering_cost"] = lxmf_config.peering_cost
+                    router_kwargs["max_peering_cost"] = lxmf_config.max_peering_cost
+                    if lxmf_config.propagation_node.name:
+                        router_kwargs["name"] = lxmf_config.propagation_node.name
+
+                logger.info(
+                    f"LXMF config: autopeer={lxmf_config.autopeer}, "
+                    f"max_peers={lxmf_config.max_peers}, "
+                    f"propagation_node={lxmf_config.propagation_node.enabled}"
+                )
+
             # Create LXMF router
             # TODO(upstream): LXMRouter.process_deferred_stamps() throws TypeError when
             # RNS.Transport.identity is None. Triggered by propagated delivery which spawns
@@ -176,14 +231,35 @@ class LXMFService:
             # at RNS/Transport.py:2556. We cannot catch this - it's in LXMF's internal thread.
             # The daemon continues running but errors pollute logs. This needs an upstream
             # fix in LXMF to guard against None identity. See: https://github.com/markqvist/LXMF
-            self._router = LXMF.LXMRouter(
-                identity=identity,
-                storagepath=str(lxmf_storage),
-            )
+            self._router = LXMF.LXMRouter(**router_kwargs)
+
+            # Set outbound propagation node if configured
+            if lxmf_config is not None and lxmf_config.propagation_destination:
+                try:
+                    dest_bytes = bytes.fromhex(lxmf_config.propagation_destination)
+                    self._router.set_outbound_propagation_node(dest_bytes)
+                    logger.info(
+                        f"Set outbound propagation node: "
+                        f"{lxmf_config.propagation_destination[:16]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to set propagation destination: {e}")
+
+            # Enable propagation node mode if configured
+            if lxmf_config is not None and lxmf_config.propagation_node.enabled:
+                self._router.enable_propagation()
+                logger.info("Enabled propagation node mode")
 
             # Register our identity for receiving messages - this creates the actual
             # delivery destination that will receive incoming LXMF messages
-            self._delivery_destination = self._router.register_delivery_identity(identity)
+            # Pass display_name to register_delivery_identity for proper LXMF announce format
+            self._delivery_destination = self._router.register_delivery_identity(
+                identity, display_name=display_name
+            )
+
+            # Log the display_name setting for debugging ecosystem compatibility
+            if display_name:
+                logger.info(f"LXMF delivery destination display_name set to: {display_name}")
 
             # Register message received callback
             self._router.register_delivery_callback(self._handle_lxmf_message)
@@ -232,6 +308,7 @@ class LXMFService:
         on_delivery: "Callable[[LXMF.LXMessage], None] | None" = None,
         on_failed: "Callable[[LXMF.LXMessage], None] | None" = None,
         delivery_method: str = DeliveryMethod.AUTO,
+        lxmf_fields: dict[int, Any] | None = None,
     ) -> "SendMessageResult | None":
         """Send LXMF message to destination.
 
@@ -255,6 +332,9 @@ class LXMFService:
                             - DeliveryMethod.DIRECT: Direct delivery only
                             - DeliveryMethod.PROPAGATED: Store-and-forward via propagation nodes
                             - DeliveryMethod.AUTO: Try direct first, fall back to propagated
+            lxmf_fields: Optional dict of LXMF fields (integer keys like FIELD_RENDERER,
+                        FIELD_THREAD) to include in the message. These are standard LXMF
+                        fields that enable ecosystem interoperability.
 
         Returns:
             SendMessageResult dict with 'hash' (bytes) and 'method' (str) if queued
@@ -316,12 +396,27 @@ class LXMFService:
             # Serialize payload to JSON
             content = json.dumps(payload).encode("utf-8")
 
-            # Create LXMF message with proper destination objects
+            # Build LXMF fields dict for ecosystem interoperability
+            # Start with provided fields or empty dict
+            fields: dict[int, Any] = lxmf_fields.copy() if lxmf_fields else {}
+
+            # Default to plain text renderer if not specified (FIELD_RENDERER = 0x0F)
+            # This helps ecosystem clients (Sideband, NomadNet, MeshChat) render correctly
+            if LXMF.FIELD_RENDERER not in fields:
+                fields[LXMF.FIELD_RENDERER] = LXMF.RENDERER_PLAIN
+
+            # Create LXMF message with proper destination objects and fields
             message = LXMF.LXMessage(
                 destination=dest_destination,
                 source=source_destination,
                 content=content,
+                fields=fields if fields else None,
             )
+
+            # Set native LXMF title for ecosystem compatibility (MeshChat/Sideband)
+            if isinstance(payload, dict) and payload.get("title"):
+                message.title = str(payload["title"])
+                logger.debug(f"[LXMF] Set native title: {message.title[:50]}...")
 
             # Determine and set delivery method
             # LXMF constants: DIRECT = 2, PROPAGATED = 3
@@ -834,10 +929,16 @@ class MockLXMFService:
 
         # Generate a mock hash and simulate full destination hash
         mock_hash = bytes.fromhex("a" * 32)
-        # If destination is truncated, simulate resolving to full hash
-        full_destination = (
-            destination if len(destination) == 32 else destination + "0" * (32 - len(destination))
-        )
+        # If destination is truncated, simulate resolving to full 32-char hex hash.
+        # Validate input is hex before padding to avoid creating invalid hashes.
+        if len(destination) == 32 and all(c in "0123456789abcdefABCDEF" for c in destination):
+            full_destination = destination
+        elif all(c in "0123456789abcdefABCDEF" for c in destination):
+            # Valid hex prefix - pad with zeros
+            full_destination = destination + "0" * (32 - len(destination))
+        else:
+            # Invalid input - use a deterministic mock hash
+            full_destination = "0" * 32
         return SendMessageResult(
             hash=mock_hash,
             method=method_used,

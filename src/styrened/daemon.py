@@ -32,9 +32,14 @@ from typing import TYPE_CHECKING, Any
 
 import RNS  # type: ignore
 
-if TYPE_CHECKING:
+try:
     import LXMF
 
+    LXMF_AVAILABLE = True
+except ImportError:
+    LXMF_AVAILABLE = False
+
+if TYPE_CHECKING:
     from styrened.models.mesh_device import MeshDevice
 
 from styrened.models.config import CoreConfig
@@ -71,6 +76,7 @@ class StyreneDaemon:
         self._control_server: Any = None  # IPC control socket server
         self._lxmf_service: Any = None  # Cached for IPC handlers
         self._conversation_service: Any = None  # Chat backend for IPC handlers
+        self._read_receipt_protocol: Any = None  # Read receipt protocol handler
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
         self._node_store: Any = None  # NodeStore for device persistence
@@ -237,10 +243,126 @@ class StyreneDaemon:
                 raw_mode=True,
             )
 
+            # Initialize read receipt protocol for ecosystem compatibility
+            self._init_read_receipt_protocol(lxmf_service)
+
             logger.info("Conversation service initialized")
 
         except Exception as e:
             logger.error(f"Failed to initialize conversation service: {e}")
+
+    def _init_read_receipt_protocol(self, lxmf_service: Any) -> None:
+        """Initialize the read receipt protocol handler.
+
+        Creates and registers the ReadReceiptProtocol for handling incoming
+        read receipts and sending outgoing receipts when messages are marked read.
+
+        Args:
+            lxmf_service: Initialized LXMFService instance.
+        """
+        if not self._conversation_service:
+            logger.warning("Conversation service not available, skipping read receipt protocol")
+            return
+
+        try:
+            from styrened.protocols.read_receipt import ReadReceiptProtocol
+
+            self._read_receipt_protocol = ReadReceiptProtocol(
+                conversation_service=self._conversation_service,
+                lxmf_service=lxmf_service,
+            )
+
+            # Register callback for incoming read receipt messages
+            lxmf_service.register_callback(
+                self._handle_read_receipt_message,
+                raw_mode=True,
+            )
+
+            logger.info("Read receipt protocol initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize read receipt protocol: {e}")
+
+    def _handle_read_receipt_message(self, lxmf_message: "LXMF.LXMessage") -> None:
+        """Handle incoming LXMF message that might be a read receipt.
+
+        Routes read receipt protocol messages to the ReadReceiptProtocol handler.
+
+        Args:
+            lxmf_message: Raw LXMF message from the library.
+        """
+        if not self._read_receipt_protocol:
+            return
+
+        try:
+            # Check if this is a read receipt protocol message
+            fields = lxmf_message.fields or {}
+            protocol = fields.get("protocol", "")
+            if protocol != "read_receipt":
+                # Not a read receipt, skip
+                return
+
+            # Create an LXMFMessage wrapper for the protocol handler
+            from styrened.protocols.base import LXMFMessage
+
+            wrapped_message = LXMFMessage(
+                source_hash=lxmf_message.source_hash.hex(),
+                destination_hash=lxmf_message.destination_hash.hex()
+                if hasattr(lxmf_message, "destination_hash")
+                else "",
+                content=lxmf_message.content.decode("utf-8")
+                if isinstance(lxmf_message.content, bytes)
+                else (lxmf_message.content or ""),
+                fields=fields,
+                timestamp=float(lxmf_message.timestamp)
+                if hasattr(lxmf_message, "timestamp") and lxmf_message.timestamp is not None
+                else 0.0,
+            )
+
+            # Handle asynchronously
+            asyncio.create_task(self._read_receipt_protocol.handle_message(wrapped_message))
+
+            logger.debug(f"Routed read receipt from {wrapped_message.source_hash[:16]}...")
+
+        except Exception as e:
+            logger.warning(f"Failed to handle read receipt message: {e}")
+
+    async def send_read_receipts(self, peer_hash: str) -> bool:
+        """Send read receipts for messages we've read from a peer.
+
+        Called when marking a conversation as read. Collects message hashes
+        that haven't had receipts sent yet and sends a batched read receipt.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+
+        Returns:
+            True if receipts were sent (or none needed), False on error.
+        """
+        if not self._read_receipt_protocol or not self._conversation_service:
+            return False
+
+        try:
+            # Get hashes of messages we've read but haven't sent receipts for
+            hashes = self._conversation_service.get_unread_hashes_for_receipt(peer_hash)
+
+            if not hashes:
+                logger.debug(f"No pending read receipts for {peer_hash[:16]}...")
+                return True
+
+            # Send the read receipt
+            success: bool = self._read_receipt_protocol.send_read_receipt(peer_hash, hashes)
+
+            if success:
+                # Mark these messages as having receipts sent
+                self._conversation_service.mark_receipts_sent(hashes)
+                logger.info(f"Sent read receipts for {len(hashes)} messages to {peer_hash[:16]}...")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to send read receipts: {e}")
+            return False
 
     def _handle_chat_message_for_conversation(self, lxmf_message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message for conversation service.
@@ -271,6 +393,13 @@ class StyreneDaemon:
             )
             timestamp = lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else None
 
+            # Extract title from native LXMF field or fields dict (for ecosystem compatibility)
+            title: str | None = None
+            if hasattr(lxmf_message, "title") and lxmf_message.title:
+                title = str(lxmf_message.title)
+            elif fields.get("title"):
+                title = str(fields["title"])
+
             # Extract security metadata from LXMF message
             # These attributes may or may not exist depending on LXMF version
             signature_valid: bool | None = None
@@ -285,12 +414,102 @@ class StyreneDaemon:
             fields["signature_valid"] = signature_valid
             fields["transport_encrypted"] = transport_encrypted
 
+            # Extract threading information (LXMF FIELD_THREAD = 0x08)
+            # Supports dict format {thread_id, reply_to} or list format [thread_id, reply_to]
+            thread_id: str | None = None
+            reply_to_hash: str | None = None
+            thread_field = fields.get(LXMF.FIELD_THREAD) if LXMF_AVAILABLE else fields.get(0x08)
+            if thread_field:
+                if isinstance(thread_field, dict):
+                    # Dict format: {"thread_id": "...", "reply_to": "..."}
+                    thread_id = thread_field.get("thread_id") or thread_field.get("t")
+                    reply_to_hash = thread_field.get("reply_to") or thread_field.get("r")
+                elif isinstance(thread_field, (list, tuple)) and len(thread_field) >= 2:
+                    # List format: [thread_id, reply_to]
+                    thread_id = str(thread_field[0]) if thread_field[0] else None
+                    reply_to_hash = str(thread_field[1]) if thread_field[1] else None
+                # Convert bytes to hex string if needed
+                if isinstance(thread_id, bytes):
+                    thread_id = thread_id.hex()
+                if isinstance(reply_to_hash, bytes):
+                    reply_to_hash = reply_to_hash.hex()
+
+            # Extract attachment information from LXMF fields
+            # FIELD_IMAGE = 0x06, FIELD_AUDIO = 0x07, FIELD_FILE_ATTACHMENTS = 0x05
+            has_attachment = False
+            attachment_type: str | None = None
+            attachment_name: str | None = None
+            attachment_size: int | None = None
+            attachment_mime: str | None = None
+
+            # Check for image (FIELD_IMAGE = 0x06)
+            image_field = fields.get(LXMF.FIELD_IMAGE) if LXMF_AVAILABLE else fields.get(0x06)
+            if image_field:
+                has_attachment = True
+                attachment_type = "image"
+                if isinstance(image_field, tuple) and len(image_field) >= 2:
+                    # Format: (mime_type, data)
+                    attachment_mime = str(image_field[0]) if image_field[0] else None
+                    attachment_size = (
+                        len(image_field[1]) if isinstance(image_field[1], bytes) else None
+                    )
+                elif isinstance(image_field, bytes):
+                    attachment_size = len(image_field)
+
+            # Check for audio (FIELD_AUDIO = 0x07)
+            if not has_attachment:
+                audio_field = fields.get(LXMF.FIELD_AUDIO) if LXMF_AVAILABLE else fields.get(0x07)
+                if audio_field:
+                    has_attachment = True
+                    attachment_type = "audio"
+                    if isinstance(audio_field, tuple) and len(audio_field) >= 2:
+                        # Format: (codec_mode, data) or (mime_type, data)
+                        # The first element may be an integer codec mode or a mime string
+                        first_elem = audio_field[0]
+                        if isinstance(first_elem, int):
+                            # Codec mode - map to mime type if needed
+                            attachment_mime = f"audio/codec2;mode={first_elem}"
+                        elif first_elem:
+                            attachment_mime = str(first_elem)
+                        attachment_size = (
+                            len(audio_field[1]) if isinstance(audio_field[1], bytes) else None
+                        )
+                    elif isinstance(audio_field, bytes):
+                        attachment_size = len(audio_field)
+
+            # Check for file attachments (FIELD_FILE_ATTACHMENTS = 0x05)
+            if not has_attachment:
+                file_field = (
+                    fields.get(LXMF.FIELD_FILE_ATTACHMENTS) if LXMF_AVAILABLE else fields.get(0x05)
+                )
+                if file_field:
+                    has_attachment = True
+                    attachment_type = "file"
+                    if isinstance(file_field, list) and len(file_field) > 0:
+                        first_file = file_field[0]
+                        if isinstance(first_file, tuple) and len(first_file) >= 2:
+                            # Format: (filename, data) or (filename, data, mime_type)
+                            attachment_name = str(first_file[0]) if first_file[0] else None
+                            attachment_size = (
+                                len(first_file[1]) if isinstance(first_file[1], bytes) else None
+                            )
+                            if len(first_file) >= 3 and first_file[2]:
+                                attachment_mime = str(first_file[2])
+
             # Save to conversation service
             msg_id = self._conversation_service.save_incoming_message(
                 source_hash=source_hash,
                 content=content,
                 timestamp=timestamp,
+                title=title,
                 fields=fields,
+                thread_id=thread_id,
+                reply_to_hash=reply_to_hash,
+                has_attachment=has_attachment,
+                attachment_type=attachment_type,
+                attachment_name=attachment_name,
+                attachment_size=attachment_size,
+                attachment_mime=attachment_mime,
             )
 
             logger.debug(f"Saved incoming chat message from {source_hash[:16]}...")
@@ -662,6 +881,12 @@ class StyreneDaemon:
 
             caps_str = ",".join(capabilities) if capabilities else "node"
 
+            # Use display_name from config, fall back to hostname
+            display_name = self.config.identity.display_name or hostname
+            # Include icon in display_name if configured
+            if self.config.identity.icon:
+                display_name = f"{self.config.identity.icon} {display_name}"
+
             # Include LXMF delivery destination in announce
             lxmf_dest = ""
             try:
@@ -673,9 +898,10 @@ class StyreneDaemon:
             except Exception as e:
                 logger.warning(f"Could not get LXMF destination for announce: {e}")
 
-            app_data = f"styrene:{hostname}:{version}:{caps_str}:{lxmf_dest}".encode()
+            # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}
+            app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}".encode()
             self._operator_destination.announce(app_data=app_data)
-            logger.info(f"Announced as Styrene node: {hostname}")
+            logger.info(f"Announced as Styrene node: {display_name}")
 
             # Also announce LXMF delivery destination
             try:
@@ -729,6 +955,12 @@ class StyreneDaemon:
 
                     caps_str = ",".join(capabilities) if capabilities else "node"
 
+                    # Use display_name from config, fall back to hostname
+                    display_name = self.config.identity.display_name or hostname
+                    # Include icon in display_name if configured
+                    if self.config.identity.icon:
+                        display_name = f"{self.config.identity.icon} {display_name}"
+
                     # Include LXMF delivery destination in announce
                     lxmf_dest = ""
                     try:
@@ -747,9 +979,10 @@ class StyreneDaemon:
                             f"Could not get LXMF destination for re-announce: {e}", exc_info=True
                         )
 
-                    app_data = f"styrene:{hostname}:{version}:{caps_str}:{lxmf_dest}".encode()
+                    # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}
+                    app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}".encode()
                     destination.announce(app_data=app_data)
-                    logger.info(f"Re-announced as Styrene node: {hostname}")
+                    logger.info(f"Re-announced as Styrene node: {display_name}")
 
                     # Also re-announce LXMF delivery destination so clients can send to us
                     try:
@@ -780,6 +1013,11 @@ class StyreneDaemon:
             # Cleanup stale auto-reply cooldowns to prevent memory growth
             if self._auto_reply_handler:
                 self._auto_reply_handler.cleanup_stale_cooldowns()
+
+            # Cleanup stale delivery trackers to prevent memory leaks
+            # (for messages where LXMF callbacks never fired)
+            if self._conversation_service:
+                self._conversation_service.cleanup_stale_deliveries()
 
     async def stop(self) -> None:
         """Stop the daemon services."""

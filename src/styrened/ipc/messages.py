@@ -173,6 +173,25 @@ class QueryMessagesRequest(IPCRequest):
         return payload
 
 
+@dataclass
+class QuerySearchMessagesRequest(IPCRequest):
+    """Search messages by content using full-text search."""
+
+    MSG_TYPE = IPCMessageType.QUERY_SEARCH_MESSAGES
+    query: str = ""
+    peer_hash: str | None = None
+    limit: int = 50
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "query": self.query,
+            "limit": self.limit,
+        }
+        if self.peer_hash is not None:
+            payload["peer_hash"] = self.peer_hash
+        return payload
+
+
 # -----------------------------------------------------------------------------
 # Command requests
 # -----------------------------------------------------------------------------
@@ -249,6 +268,7 @@ class CmdSendChatRequest(IPCRequest):
     content: str = ""
     title: str | None = None
     delivery_method: str = "auto"  # "auto", "direct", or "propagated"
+    reply_to_hash: str | None = None  # LXMF hash of message being replied to
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -258,6 +278,8 @@ class CmdSendChatRequest(IPCRequest):
         }
         if self.title is not None:
             payload["title"] = self.title
+        if self.reply_to_hash is not None:
+            payload["reply_to_hash"] = self.reply_to_hash
         return payload
 
 
@@ -670,6 +692,12 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             before_timestamp=payload.get("before_timestamp"),
             status_filter=payload.get("status_filter"),
         )
+    elif msg_type == IPCMessageType.QUERY_SEARCH_MESSAGES:
+        return QuerySearchMessagesRequest(
+            query=payload.get("query", ""),
+            peer_hash=payload.get("peer_hash"),
+            limit=payload.get("limit", 50),
+        )
     elif msg_type == IPCMessageType.CMD_SEND:
         return CmdSendRequest(
             destination=payload.get("destination", ""),
@@ -701,6 +729,7 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             content=content if isinstance(content, str) else "",
             title=payload.get("title"),
             delivery_method=payload.get("delivery_method", "auto"),
+            reply_to_hash=payload.get("reply_to_hash"),
         )
     elif msg_type == IPCMessageType.CMD_MARK_READ:
         return CmdMarkReadRequest(peer_hash=payload.get("peer_hash", ""))
