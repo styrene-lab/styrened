@@ -4,12 +4,12 @@ Tests conversation management, message history, unread tracking,
 and delivery status functionality.
 """
 
+import tempfile
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
 
-from styrened.models.messages import Base
+from styrened.models.messages import init_db
 from styrened.services.conversation_service import (
     ConversationInfo,
     ConversationService,
@@ -20,9 +20,11 @@ from styrened.services.conversation_service import (
 
 @pytest.fixture
 def db_engine():
-    """Create a temporary in-memory database for testing."""
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    """Create a temporary database for testing with FTS5 support."""
+    # Use a temp file instead of :memory: because init_db needs a path
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+    engine = init_db(db_path)
     return engine
 
 
@@ -144,6 +146,60 @@ class TestMessagePersistence:
         messages = conversation_service.get_messages(peer_hash, limit=1)
         assert len(messages) == 1
         assert messages[0].title == "Test Title"
+
+    def test_save_incoming_message_with_native_title(self, conversation_service, peer_hash):
+        """Test saving an incoming message with native title column."""
+        msg_id = conversation_service.save_incoming_message(
+            source_hash=peer_hash,
+            content="Hello!",
+            title="Important Message",
+        )
+
+        messages = conversation_service.get_messages(peer_hash, limit=1)
+        assert len(messages) == 1
+        assert messages[0].title == "Important Message"
+        assert messages[0].id == msg_id
+
+    def test_save_outgoing_message_with_native_title(self, conversation_service, peer_hash):
+        """Test saving an outgoing message with native title column."""
+        msg_id = conversation_service.save_outgoing_message(
+            destination_hash=peer_hash,
+            content="Hello!",
+            title="Outgoing Title",
+        )
+
+        messages = conversation_service.get_messages(peer_hash, limit=1)
+        assert len(messages) == 1
+        assert messages[0].title == "Outgoing Title"
+        assert messages[0].id == msg_id
+
+    def test_native_title_takes_precedence_over_fields_title(self, conversation_service, peer_hash):
+        """Test that native title column takes precedence over fields dict title."""
+        # When both native title and fields title exist, native should win
+        conversation_service.save_incoming_message(
+            source_hash=peer_hash,
+            content="Test",
+            title="Native Title",
+            fields={"protocol": "chat", "title": "Fields Title"},
+        )
+
+        messages = conversation_service.get_messages(peer_hash, limit=1)
+        assert len(messages) == 1
+        assert messages[0].title == "Native Title"
+
+    def test_fields_title_fallback_when_no_native_title(self, conversation_service, peer_hash):
+        """Test that fields title is used when native title is None."""
+        # When only fields title exists, should fall back to it
+        conversation_service.save_incoming_message(
+            source_hash=peer_hash,
+            content="Test",
+            title=None,  # No native title
+            fields={"protocol": "chat", "title": "Fields Title"},
+        )
+
+        messages = conversation_service.get_messages(peer_hash, limit=1)
+        assert len(messages) == 1
+        assert messages[0].title == "Fields Title"
 
 
 class TestMessageRetrieval:
@@ -551,3 +607,290 @@ class TestDataClasses:
         assert info.content == "Another message"
         assert info.title == "Title"
         assert info.status == "sent"
+
+
+class TestMessageSearch:
+    """Tests for full-text search functionality."""
+
+    def test_search_messages_basic(self, conversation_service, peer_hash):
+        """Test basic full-text search finds matching messages."""
+        conversation_service.save_incoming_message(peer_hash, "Hello world")
+        conversation_service.save_incoming_message(peer_hash, "Goodbye moon")
+        conversation_service.save_incoming_message(peer_hash, "Hello again")
+
+        results = conversation_service.search_messages("hello")
+
+        assert len(results) == 2
+        contents = {r.content for r in results}
+        assert "Hello world" in contents
+        assert "Hello again" in contents
+
+    def test_search_messages_no_results(self, conversation_service, peer_hash):
+        """Test search returns empty list when no matches."""
+        conversation_service.save_incoming_message(peer_hash, "Hello world")
+
+        results = conversation_service.search_messages("nonexistent")
+
+        assert results == []
+
+    def test_search_messages_by_peer(self, conversation_service):
+        """Test search can filter by peer hash."""
+        peer1 = "1" * 32
+        peer2 = "2" * 32
+
+        conversation_service.save_incoming_message(peer1, "Hello from peer 1")
+        conversation_service.save_incoming_message(peer2, "Hello from peer 2")
+
+        results = conversation_service.search_messages("hello", peer_hash=peer1)
+
+        assert len(results) == 1
+        assert results[0].content == "Hello from peer 1"
+
+    def test_search_messages_respects_limit(self, conversation_service, peer_hash):
+        """Test search respects limit parameter."""
+        for i in range(10):
+            conversation_service.save_incoming_message(peer_hash, f"Test message {i}")
+
+        results = conversation_service.search_messages("test", limit=3)
+
+        assert len(results) == 3
+
+    def test_search_messages_returns_most_recent_first(self, conversation_service, peer_hash):
+        """Test search returns results ordered by most recent first."""
+        conversation_service.save_incoming_message(peer_hash, "Test old", timestamp=1000.0)
+        conversation_service.save_incoming_message(peer_hash, "Test new", timestamp=2000.0)
+
+        results = conversation_service.search_messages("test")
+
+        assert len(results) == 2
+        assert results[0].content == "Test new"  # Most recent first
+        assert results[1].content == "Test old"
+
+    def test_search_messages_searches_title(self, conversation_service, peer_hash):
+        """Test search includes message titles."""
+        conversation_service.save_incoming_message(
+            peer_hash, "Some content", title="Important announcement"
+        )
+        conversation_service.save_incoming_message(
+            peer_hash, "Other content", title="Regular message"
+        )
+
+        results = conversation_service.search_messages("important")
+
+        assert len(results) == 1
+        assert results[0].title == "Important announcement"
+
+    def test_search_messages_fts_syntax_and(self, conversation_service, peer_hash):
+        """Test FTS5 AND syntax works."""
+        conversation_service.save_incoming_message(peer_hash, "Hello beautiful world")
+        conversation_service.save_incoming_message(peer_hash, "Hello universe")
+        conversation_service.save_incoming_message(peer_hash, "Goodbye world")
+
+        # Search for messages containing both "hello" AND "world"
+        results = conversation_service.search_messages("hello world")
+
+        assert len(results) == 1
+        assert results[0].content == "Hello beautiful world"
+
+    def test_search_messages_only_chat_protocol(self, conversation_service, peer_hash):
+        """Test search only returns chat protocol messages."""
+        # Save a chat message
+        conversation_service.save_incoming_message(peer_hash, "Chat message")
+
+        # Save a non-chat message directly (simulating other protocol)
+        from sqlalchemy.orm import Session
+
+        from styrened.models.messages import Message
+
+        with Session(conversation_service._db_engine) as session:
+            msg = Message(
+                source_hash=peer_hash,
+                destination_hash=conversation_service._local_identity_hash,
+                timestamp=1000.0,
+                content="RPC message",
+                protocol_id="rpc",  # Not chat
+                status="received",
+            )
+            session.add(msg)
+            session.commit()
+
+        # Search should only find chat messages
+        results = conversation_service.search_messages("message")
+
+        assert len(results) == 1
+        assert results[0].content == "Chat message"
+
+
+class TestReadReceipts:
+    """Tests for read receipt tracking functionality."""
+
+    def test_mark_read_by_recipient(self, conversation_service, peer_hash):
+        """Test marking an outgoing message as read by recipient."""
+        # Create outgoing message with lxmf_hash (bytes)
+        lxmf_hash = b"test_hash_1234"
+        conversation_service.save_outgoing_message(peer_hash, "Hello", lxmf_hash=lxmf_hash)
+
+        # The hash is stored as hex, so we need to use the hex version
+        result = conversation_service.mark_read_by_recipient(
+            lxmf_hash=lxmf_hash.hex(),
+            read_at=1234567890.0,
+        )
+
+        assert result is True
+
+    def test_mark_read_by_recipient_already_read(self, conversation_service, peer_hash):
+        """Test that marking already-read message returns False."""
+        lxmf_hash = b"test_hash_1234"
+        conversation_service.save_outgoing_message(peer_hash, "Hello", lxmf_hash=lxmf_hash)
+
+        # Mark as read first time
+        result1 = conversation_service.mark_read_by_recipient(
+            lxmf_hash=lxmf_hash.hex(),
+            read_at=1234567890.0,
+        )
+        assert result1 is True
+
+        # Mark as read second time
+        result2 = conversation_service.mark_read_by_recipient(
+            lxmf_hash=lxmf_hash.hex(),
+            read_at=1234567891.0,
+        )
+        assert result2 is False  # Already marked
+
+    def test_mark_read_by_recipient_unknown_hash(self, conversation_service):
+        """Test marking unknown message returns False."""
+        result = conversation_service.mark_read_by_recipient(
+            lxmf_hash="nonexistent_hash",
+            read_at=1234567890.0,
+        )
+        assert result is False
+
+    def test_get_unread_hashes_for_receipt(self, conversation_service, peer_hash):
+        """Test getting hashes for messages needing receipts."""
+        # Create incoming messages with hashes
+        hash1 = b"hash_1"
+        hash2 = b"hash_2"
+
+        conversation_service.save_incoming_message(peer_hash, "Msg 1", lxmf_hash=hash1)
+        conversation_service.save_incoming_message(peer_hash, "Msg 2", lxmf_hash=hash2)
+
+        # Mark conversation as read
+        conversation_service.mark_read(peer_hash)
+
+        # Get hashes for receipt
+        hashes = conversation_service.get_unread_hashes_for_receipt(peer_hash)
+
+        assert len(hashes) == 2
+        assert hash1.hex() in hashes
+        assert hash2.hex() in hashes
+
+    def test_get_unread_hashes_excludes_sent_receipts(self, conversation_service, peer_hash):
+        """Test that already-receipted messages are excluded."""
+        hash1 = b"hash_1"
+        hash2 = b"hash_2"
+
+        conversation_service.save_incoming_message(peer_hash, "Msg 1", lxmf_hash=hash1)
+        conversation_service.save_incoming_message(peer_hash, "Msg 2", lxmf_hash=hash2)
+
+        # Mark as read
+        conversation_service.mark_read(peer_hash)
+
+        # Mark one as having receipt sent
+        conversation_service.mark_receipts_sent([hash1.hex()])
+
+        # Get hashes - should only get hash2
+        hashes = conversation_service.get_unread_hashes_for_receipt(peer_hash)
+
+        assert len(hashes) == 1
+        assert hash2.hex() in hashes
+        assert hash1.hex() not in hashes
+
+    def test_get_unread_hashes_excludes_unread(self, conversation_service, peer_hash):
+        """Test that unread messages are not included."""
+        hash1 = b"hash_1"
+
+        conversation_service.save_incoming_message(peer_hash, "Msg 1", lxmf_hash=hash1)
+
+        # Don't mark as read
+
+        # Should get empty list (messages not read yet)
+        hashes = conversation_service.get_unread_hashes_for_receipt(peer_hash)
+
+        assert hashes == []
+
+    def test_mark_receipts_sent(self, conversation_service, peer_hash):
+        """Test marking messages as having receipts sent."""
+        hash1 = b"hash_1"
+        hash2 = b"hash_2"
+
+        conversation_service.save_incoming_message(peer_hash, "Msg 1", lxmf_hash=hash1)
+        conversation_service.save_incoming_message(peer_hash, "Msg 2", lxmf_hash=hash2)
+
+        # Mark receipts as sent
+        count = conversation_service.mark_receipts_sent([hash1.hex(), hash2.hex()])
+
+        assert count == 2
+
+    def test_mark_receipts_sent_empty_list(self, conversation_service):
+        """Test marking empty list returns 0."""
+        count = conversation_service.mark_receipts_sent([])
+        assert count == 0
+
+
+class TestStaleDeliveryCleanup:
+    """Tests for cleanup_stale_deliveries functionality."""
+
+    def test_cleanup_removes_stale_trackers(self, conversation_service, peer_hash):
+        """Test that cleanup removes trackers older than max_age."""
+        import time
+
+        from styrened.services.conversation_service import DeliveryTracker
+
+        # Save a message and create a tracker
+        msg_id = conversation_service.save_outgoing_message(peer_hash, "Test message")
+
+        # Manually add a stale tracker (bypassing normal flow)
+        stale_hash = b"stale_hash_12345"
+        with conversation_service._lock:
+            conversation_service._pending_deliveries[stale_hash] = DeliveryTracker(
+                message_id=msg_id,
+                lxmf_hash=stale_hash,
+                created_at=time.time() - 7200,  # 2 hours ago
+            )
+
+        # Should have one tracker
+        assert len(conversation_service._pending_deliveries) == 1
+
+        # Cleanup with 1 hour max age
+        removed = conversation_service.cleanup_stale_deliveries(max_age=3600.0)
+
+        assert removed == 1
+        assert len(conversation_service._pending_deliveries) == 0
+
+    def test_cleanup_keeps_fresh_trackers(self, conversation_service, peer_hash):
+        """Test that cleanup keeps trackers newer than max_age."""
+        import time
+
+        from styrened.services.conversation_service import DeliveryTracker
+
+        msg_id = conversation_service.save_outgoing_message(peer_hash, "Test message")
+
+        # Manually add a fresh tracker
+        fresh_hash = b"fresh_hash_12345"
+        with conversation_service._lock:
+            conversation_service._pending_deliveries[fresh_hash] = DeliveryTracker(
+                message_id=msg_id,
+                lxmf_hash=fresh_hash,
+                created_at=time.time() - 60,  # 1 minute ago
+            )
+
+        # Cleanup with 1 hour max age
+        removed = conversation_service.cleanup_stale_deliveries(max_age=3600.0)
+
+        assert removed == 0
+        assert len(conversation_service._pending_deliveries) == 1
+
+    def test_cleanup_handles_empty_deliveries(self, conversation_service):
+        """Test cleanup with no pending deliveries."""
+        removed = conversation_service.cleanup_stale_deliveries()
+        assert removed == 0

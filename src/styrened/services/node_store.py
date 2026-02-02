@@ -358,11 +358,13 @@ class NodeStore:
             Returns None if prefix is ambiguous (matches multiple nodes).
         """
         with self._connection() as conn:
-            # First try exact match
-            row = conn.execute(
-                "SELECT identity_hash FROM nodes WHERE destination_hash = ?",
-                (destination_hash,),
-            ).fetchone()
+            # First try exact match (only if valid 32-char hex)
+            row = None
+            if _is_valid_hash(destination_hash):
+                row = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE destination_hash = ?",
+                    (destination_hash,),
+                ).fetchone()
 
             # If not found, try prefix match for truncated hashes
             if not row and len(destination_hash) < 32:
@@ -446,11 +448,13 @@ class NodeStore:
             Returns None if prefix is ambiguous (matches multiple nodes).
         """
         with self._connection() as conn:
-            # First try exact match
-            row = conn.execute(
-                "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash = ?",
-                (lxmf_destination_hash,),
-            ).fetchone()
+            # First try exact match (only if valid 32-char hex)
+            row = None
+            if _is_valid_hash(lxmf_destination_hash):
+                row = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash = ?",
+                    (lxmf_destination_hash,),
+                ).fetchone()
 
             # If not found, try prefix match for truncated hashes
             if not row and len(lxmf_destination_hash) < 32:

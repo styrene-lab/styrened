@@ -242,7 +242,17 @@ class CoreLifecycle:
                 return False
 
             lxmf_service = get_lxmf_service()
-            if lxmf_service.initialize(identity):
+            # Pass LXMF config if available in CoreConfig
+            lxmf_config = getattr(self.config, "lxmf", None)
+            # Pass display_name from identity config for proper LXMF announce format
+            # This enables ecosystem clients (Sideband, NomadNet, MeshChat) to display
+            # the configured name instead of showing "Unknown"
+            display_name = None
+            if hasattr(self.config, "identity") and self.config.identity:
+                display_name = self.config.identity.display_name
+            if lxmf_service.initialize(
+                identity, lxmf_config=lxmf_config, display_name=display_name
+            ):
                 logger.info("LXMF service initialized")
                 return True
             else:

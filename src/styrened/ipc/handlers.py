@@ -11,8 +11,16 @@ Usage:
 """
 
 import logging
+import threading
 import time
 from typing import TYPE_CHECKING, Any
+
+try:
+    import LXMF
+
+    LXMF_AVAILABLE = True
+except ImportError:
+    LXMF_AVAILABLE = False
 
 from styrened.ipc.messages import (
     CmdDeleteConversationRequest,
@@ -34,6 +42,7 @@ from styrened.ipc.messages import (
     QueryConversationsRequest,
     QueryDevicesRequest,
     QueryMessagesRequest,
+    QuerySearchMessagesRequest,
     RemoteStatusInfo,
     ResultResponse,
 )
@@ -544,6 +553,50 @@ class IPCHandlers:
             logger.exception(f"Error querying messages: {e}")
             return ErrorResponse.internal_error(f"Failed to query messages: {e}")
 
+    async def handle_query_search_messages(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_SEARCH_MESSAGES request.
+
+        Searches messages using full-text search.
+
+        Args:
+            request: QuerySearchMessagesRequest instance.
+
+        Returns:
+            ResultResponse with matching messages.
+        """
+        req = (
+            request
+            if isinstance(request, QuerySearchMessagesRequest)
+            else QuerySearchMessagesRequest()
+        )
+
+        if not req.query or len(req.query.strip()) < 2:
+            return ErrorResponse.invalid_request("Query must be at least 2 characters")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            messages = self.daemon._conversation_service.search_messages(
+                query=req.query,
+                peer_hash=req.peer_hash,
+                limit=req.limit,
+            )
+            msg_list = [m.to_dict() for m in messages]
+
+            return ResultResponse(
+                data={
+                    "messages": msg_list,
+                    "count": len(msg_list),
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error searching messages: {e}")
+            return ErrorResponse.internal_error(f"Failed to search messages: {e}")
+
     async def handle_cmd_send_chat(self, request: IPCRequest) -> IPCResponse:
         """Handle CMD_SEND_CHAT request.
 
@@ -600,7 +653,9 @@ class IPCHandlers:
             msg_id = conversation_service.save_outgoing_message(
                 destination_hash=req.peer_hash,
                 content=req.content,
+                title=req.title,
                 fields=fields,
+                reply_to_hash=req.reply_to_hash,
                 # Don't pass lxmf_hash yet - we register tracking after send
             )
 
@@ -609,8 +664,6 @@ class IPCHandlers:
             # where callbacks might fire before we can register tracking.
             # IMPORTANT: Use a separate lock for tracking_registered state to avoid
             # deadlock - conversation_service methods acquire their own internal lock.
-            import threading
-
             tracking_lock = threading.Lock()
             tracking_registered: dict[str, bytes | None] = {"hash": None}
 
@@ -652,13 +705,26 @@ class IPCHandlers:
                 except Exception as e:
                     logger.warning(f"Error in failed callback: {e}")
 
-            # Step 3: Send via LXMF with race-safe callbacks
+            # Step 3: Build LXMF fields for ecosystem interoperability
+            # FIELD_RENDERER tells clients how to render the message content
+            lxmf_fields: dict[int, Any] = {}
+            if LXMF_AVAILABLE:
+                lxmf_fields[LXMF.FIELD_RENDERER] = LXMF.RENDERER_PLAIN
+
+                # Add threading info if this is a reply (FIELD_THREAD = 0x08)
+                if req.reply_to_hash:
+                    lxmf_fields[LXMF.FIELD_THREAD] = {
+                        "reply_to": req.reply_to_hash,
+                    }
+
+            # Step 4: Send via LXMF with race-safe callbacks
             result = lxmf_service.send_message(
                 req.peer_hash,
                 payload,
                 on_delivery=register_and_callback_delivery,
                 on_failed=register_and_callback_failed,
                 delivery_method=delivery_method,
+                lxmf_fields=lxmf_fields if lxmf_fields else None,
             )
 
             if result is None:
@@ -674,12 +740,12 @@ class IPCHandlers:
             delivery_method_used: str = result.get("method", delivery_method)
             actual_dest_hash: str = result.get("destination_hash", req.peer_hash)
 
-            # Step 4: Update destination_hash to the full resolved hash
+            # Step 5: Update destination_hash to the full resolved hash
             # This normalizes truncated peer_hash inputs to full 32-char hashes
             if actual_dest_hash != req.peer_hash:
                 conversation_service.update_destination_hash(msg_id, actual_dest_hash)
 
-            # Step 5: Register delivery tracking (if not already done by callback race)
+            # Step 6: Register delivery tracking (if not already done by callback race)
             # Use the tracking_lock to safely check/update state.
             needs_registration = False
             with tracking_lock:
@@ -689,7 +755,7 @@ class IPCHandlers:
             if needs_registration:
                 conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
 
-            # Step 6: Mark as sent (handed off to network)
+            # Step 7: Mark as sent (handed off to network)
             conversation_service.mark_sent(msg_id)
 
             return ResultResponse(
@@ -728,6 +794,13 @@ class IPCHandlers:
             assert self.daemon is not None and self.daemon._conversation_service is not None
 
             count = self.daemon._conversation_service.mark_read(req.peer_hash)
+
+            # Send read receipts to peer for ecosystem compatibility
+            # This is fire-and-forget; don't fail the mark_read if receipts fail
+            try:
+                await self.daemon.send_read_receipts(req.peer_hash)
+            except Exception as receipt_err:
+                logger.warning(f"Failed to send read receipts: {receipt_err}")
 
             return ResultResponse(data={"marked_read": count})
 

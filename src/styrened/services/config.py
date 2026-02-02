@@ -14,6 +14,7 @@ from styrened.models.config import (
     ConfigLoadError,
     CoreConfig,
     DeploymentMode,
+    PropagationNodeConfig,
 )
 
 
@@ -249,6 +250,8 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.chat.auto_reply_message = str(chat["auto_reply_message"])
         if "auto_reply_cooldown" in chat:
             config.chat.auto_reply_cooldown = int(chat["auto_reply_cooldown"])
+        if "persist_messages" in chat:
+            config.chat.persist_messages = _parse_bool(chat["persist_messages"])
 
     # Parse api section
     if "api" in data and isinstance(data["api"], dict):
@@ -259,6 +262,68 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.api.host = str(api["host"])
         if "port" in api:
             config.api.port = int(api["port"])
+
+    # Parse identity section (ecosystem appearance)
+    if "identity" in data and isinstance(data["identity"], dict):
+        ident = data["identity"]
+        if "display_name" in ident and ident["display_name"]:
+            config.identity.display_name = str(ident["display_name"])
+        if "icon" in ident and ident["icon"]:
+            config.identity.icon = str(ident["icon"])
+
+    # Parse lxmf section
+    if "lxmf" in data and isinstance(data["lxmf"], dict):
+        lxmf = data["lxmf"]
+
+        # Parse propagation_node subsection
+        if "propagation_node" in lxmf and isinstance(lxmf["propagation_node"], dict):
+            pn = lxmf["propagation_node"]
+            config.lxmf.propagation_node = PropagationNodeConfig(
+                enabled=_parse_bool(pn.get("enabled", False)),
+                name=pn.get("name"),
+            )
+
+        # Parse propagation destination
+        if "propagation_destination" in lxmf:
+            dest = lxmf["propagation_destination"]
+            if dest and isinstance(dest, str) and len(dest) == 32:
+                config.lxmf.propagation_destination = dest
+
+        # Parse sync limits
+        if "propagation_limit" in lxmf:
+            config.lxmf.propagation_limit = int(lxmf["propagation_limit"])
+        if "sync_limit" in lxmf:
+            config.lxmf.sync_limit = int(lxmf["sync_limit"])
+        if "delivery_limit" in lxmf:
+            config.lxmf.delivery_limit = int(lxmf["delivery_limit"])
+
+        # Parse peer management
+        if "autopeer" in lxmf:
+            config.lxmf.autopeer = _parse_bool(lxmf["autopeer"])
+        if "autopeer_maxdepth" in lxmf:
+            config.lxmf.autopeer_maxdepth = int(lxmf["autopeer_maxdepth"])
+        if "max_peers" in lxmf:
+            config.lxmf.max_peers = int(lxmf["max_peers"])
+        if "from_static_only" in lxmf:
+            config.lxmf.from_static_only = _parse_bool(lxmf["from_static_only"])
+
+        # Parse static peers list
+        if "static_peers" in lxmf and isinstance(lxmf["static_peers"], list):
+            static_peers = []
+            for peer in lxmf["static_peers"]:
+                if isinstance(peer, str) and len(peer) == 32:
+                    static_peers.append(peer)
+            config.lxmf.static_peers = static_peers
+
+        # Parse cost settings
+        if "propagation_cost" in lxmf:
+            config.lxmf.propagation_cost = int(lxmf["propagation_cost"])
+        if "propagation_cost_flexibility" in lxmf:
+            config.lxmf.propagation_cost_flexibility = int(lxmf["propagation_cost_flexibility"])
+        if "peering_cost" in lxmf:
+            config.lxmf.peering_cost = int(lxmf["peering_cost"])
+        if "max_peering_cost" in lxmf:
+            config.lxmf.max_peering_cost = int(lxmf["max_peering_cost"])
 
     return config
 
