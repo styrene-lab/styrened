@@ -448,6 +448,27 @@ class TestDeliveryTracking:
 
         assert lxmf_hash not in conversation_service._pending_deliveries
 
+    def test_update_destination_hash(self, conversation_service, peer_hash):
+        """Test updating destination_hash normalizes truncated hashes."""
+        # Save with truncated hash (simulates what IPC receives from user)
+        truncated_hash = peer_hash[:16]
+        msg_id = conversation_service.save_outgoing_message(truncated_hash, "Test")
+
+        # Update to full hash (simulates LXMF resolution)
+        full_hash = "c" * 32
+        result = conversation_service.update_destination_hash(msg_id, full_hash)
+
+        assert result is True
+        # Get messages using the new full hash
+        messages = conversation_service.get_messages(full_hash)
+        assert len(messages) == 1
+        assert messages[0].content == "Test"
+
+    def test_update_destination_hash_not_found(self, conversation_service):
+        """Test update_destination_hash returns False for nonexistent message."""
+        result = conversation_service.update_destination_hash(99999, "c" * 32)
+        assert result is False
+
 
 class TestDataClasses:
     """Tests for ConversationInfo and MessageInfo dataclasses."""

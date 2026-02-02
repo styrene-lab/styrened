@@ -658,17 +658,24 @@ class IPCHandlers:
                     "(no path or identity not known)"
                 )
 
-            # Extract hash and method from result safely
+            # Extract hash, method, and actual destination hash from result
             lxmf_hash: bytes = result["hash"]
             delivery_method_used: str = result.get("method", delivery_method)
+            actual_dest_hash: str = result.get("destination_hash", req.peer_hash)
 
-            # Step 4: Register delivery tracking (if not already done by callback race)
-            with tracking_registered["lock"]:
-                if tracking_registered["hash"] is None:
-                    tracking_registered["hash"] = lxmf_hash
-                    conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
+            # Step 4: Update destination_hash to the full resolved hash
+            # This normalizes truncated peer_hash inputs to full 32-char hashes
+            if actual_dest_hash != req.peer_hash:
+                conversation_service.update_destination_hash(msg_id, actual_dest_hash)
 
-            # Step 5: Mark as sent (handed off to network)
+            # Step 5: Register delivery tracking (if not already done by callback race)
+            # Note: We use a simple check without blocking the async event loop.
+            # The threading lock is only for callbacks running on RNS threads.
+            if tracking_registered["hash"] is None:
+                tracking_registered["hash"] = lxmf_hash
+                conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
+
+            # Step 6: Mark as sent (handed off to network)
             conversation_service.mark_sent(msg_id)
 
             return ResultResponse(

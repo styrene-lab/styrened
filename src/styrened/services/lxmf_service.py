@@ -69,6 +69,7 @@ class SendMessageResult(TypedDict):
 
     hash: bytes
     method: str  # DeliveryMethod.DIRECT or DeliveryMethod.PROPAGATED
+    destination_hash: str  # Full 32-char hex LXMF destination hash
 
 
 # Setup logger
@@ -373,7 +374,11 @@ class LXMFService:
                     f"method={method_used})"
                 )
 
-            return SendMessageResult(hash=message_hash, method=method_used)
+            return SendMessageResult(
+                hash=message_hash,
+                method=method_used,
+                destination_hash=dest_destination.hash.hex(),
+            )
 
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
