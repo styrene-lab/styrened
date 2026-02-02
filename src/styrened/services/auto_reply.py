@@ -259,6 +259,10 @@ class AutoReplyHandler:
         Returns:
             Formatted string like "2d 5h 30m" or "45m 12s".
         """
+        # Guard against negative values (e.g., NTP sync issues causing future start_time)
+        if seconds < 0:
+            return "0s"
+
         days, remainder = divmod(int(seconds), 86400)
         hours, remainder = divmod(remainder, 3600)
         minutes, secs = divmod(remainder, 60)
