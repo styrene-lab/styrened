@@ -165,6 +165,9 @@ class LXMFService:
             self._identity = identity
             self._initialized = True
 
+            # Register for reconnection events to clear LXMF state on LocalInterface drop
+            rns_service.register_reconnect_callback(self._handle_reconnection)
+
             # Announce our LXMF delivery destination so others can send to us
             self._router.announce(self._delivery_destination.hash)
             logger.info(
@@ -505,6 +508,27 @@ class LXMFService:
         logger.debug(
             f"Registered message callback (raw_mode={raw_mode}), total: {len(self._message_callbacks)}"
         )
+
+    def _handle_reconnection(self) -> None:
+        """Handle RNS interface reconnection by clearing LXMF state.
+
+        Called by RNSService when a LocalInterface reconnects after disconnect.
+        Clears cached delivery destination to prevent "already registered" errors
+        when LXMF router tries to re-register on next operation.
+        """
+        logger.info("[RECONNECT] LXMF handling interface reconnection")
+
+        # Clear the cached delivery destination - it's now stale
+        if self._delivery_destination is not None:
+            old_hash = self._delivery_destination.hexhash[:16]
+            self._delivery_destination = None
+            logger.info(f"[RECONNECT] Cleared stale LXMF delivery destination: {old_hash}...")
+
+        # Note: We don't clear the router itself - it should handle reconnection
+        # internally. If we need to reinitialize, the daemon will need to restart.
+
+        # The next announce or message send will need to re-register the destination
+        logger.info("[RECONNECT] LXMF reconnection handling complete")
 
     def _handle_lxmf_message(self, message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message.
