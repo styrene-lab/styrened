@@ -167,6 +167,15 @@ class LXMFService:
             logger.info(f"Initializing LXMF with storage: {lxmf_storage}")
 
             # Create LXMF router
+            # TODO(upstream): LXMRouter.process_deferred_stamps() throws TypeError when
+            # RNS.Transport.identity is None. Triggered by propagated delivery which spawns
+            # a background thread calling get_outbound_propagation_cost() -> request_path().
+            # The root cause is that LXMF's get_outbound_propagation_cost() doesn't check
+            # if Transport.identity is initialized before calling Transport.request_path().
+            # Error: TypeError: unsupported operand type(s) for +: 'NoneType' and 'bytes'
+            # at RNS/Transport.py:2556. We cannot catch this - it's in LXMF's internal thread.
+            # The daemon continues running but errors pollute logs. This needs an upstream
+            # fix in LXMF to guard against None identity. See: https://github.com/markqvist/LXMF
             self._router = LXMF.LXMRouter(
                 identity=identity,
                 storagepath=str(lxmf_storage),
