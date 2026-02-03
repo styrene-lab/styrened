@@ -88,6 +88,9 @@ class AutoReplyHandler:
         This is registered as a callback with the LXMF router. It checks
         if auto-reply is enabled and sends a response if appropriate.
 
+        Only replies to chat messages - skips RPC, read receipts, and other
+        non-chat protocols to avoid unnecessary inter-daemon traffic.
+
         Args:
             message: Incoming LXMF message.
         """
@@ -98,6 +101,21 @@ class AutoReplyHandler:
             return
 
         try:
+            # Check if this is a chat message (or plain text from Sideband/NomadNet)
+            # Skip non-chat protocols to prevent auto-reply loops with other daemons
+            fields = message.fields or {}
+            protocol = fields.get("protocol", "")
+
+            # Skip explicit non-chat protocols
+            if protocol and protocol != "chat":
+                logger.debug(f"Skipping auto-reply for non-chat protocol: {protocol}")
+                return
+
+            # Skip StyreneProtocol messages (binary RPC, FIELD_CUSTOM_TYPE = 0xFB)
+            if fields.get(0xFB) or fields.get("custom_type"):
+                logger.debug("Skipping auto-reply for Styrene RPC message")
+                return
+
             # Keep as bytes for memory efficiency
             source_hash_bytes: bytes = message.source_hash
 

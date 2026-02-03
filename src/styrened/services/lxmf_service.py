@@ -793,6 +793,70 @@ class LXMFService:
         # The next announce or message send will need to re-register the destination
         logger.info("[RECONNECT] LXMF reconnection handling complete")
 
+    def _normalize_message_payload(self, message: "LXMF.LXMessage") -> dict[str, Any] | None:
+        """Normalize LXMF message content into a payload dict.
+
+        Handles both JSON payloads (from styrened/internal protocols) and plain
+        text messages (from Sideband, NomadNet, MeshChat, and other LXMF clients).
+
+        For plain text messages, creates a normalized payload:
+            {"type": "chat", "content": "<text>", "protocol": ""}
+
+        For JSON messages, returns the parsed dict as-is.
+
+        Args:
+            message: LXMF.LXMessage instance.
+
+        Returns:
+            Normalized payload dict, or None if content cannot be decoded.
+        """
+        if not message.content:
+            return None
+
+        try:
+            content = message.content.decode("utf-8")
+        except UnicodeDecodeError as e:
+            logger.debug(f"LXMF message content is not UTF-8: {e}")
+            return None
+
+        # Try JSON first (styrened internal protocol)
+        try:
+            payload = json.loads(content)
+            if isinstance(payload, dict):
+                return payload
+            # JSON but not a dict (e.g., plain string in JSON quotes)
+            # Fall through to plain text handling
+        except json.JSONDecodeError:
+            pass
+
+        # Plain text message (Sideband/NomadNet/MeshChat compatibility)
+        # Normalize to a payload dict for consistent callback handling
+        fields = message.fields or {}
+        protocol = fields.get("protocol", "")
+
+        # Extract title if present (LXMF standard field)
+        title = None
+        if hasattr(message, "title") and message.title:
+            title = str(message.title)
+        elif fields.get("title"):
+            title = str(fields["title"])
+
+        payload = {
+            "type": "chat",
+            "content": content,
+            "protocol": protocol,  # May be empty for Sideband
+        }
+
+        if title:
+            payload["title"] = title
+
+        logger.debug(
+            f"Normalized plain text LXMF message: {len(content)} chars, "
+            f"protocol={protocol or 'none'}"
+        )
+
+        return payload
+
     def _handle_lxmf_message(self, message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message.
 
@@ -809,16 +873,16 @@ class LXMFService:
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
 
-        # Try to parse JSON content for non-raw callbacks
-        payload = None
-        try:
-            content = message.content.decode("utf-8")
-            payload = json.loads(content)
+        # Normalize message content for non-raw callbacks
+        # Handles both JSON payloads (styrened) and plain text (Sideband/NomadNet)
+        payload = self._normalize_message_payload(message)
+
+        if payload:
+            msg_type = payload.get("type", "chat")
+            msg_protocol = payload.get("protocol", "")
             logger.info(
-                f"LXMF received from {source_hash[:16]}...: type={payload.get('type')}, protocol={payload.get('protocol')}"
+                f"LXMF received from {source_hash[:16]}...: type={msg_type}, protocol={msg_protocol or 'plain'}"
             )
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.debug(f"LXMF message from {source_hash[:16]}... is not JSON: {e}")
 
         # Dispatch to all callbacks
         for callback, raw_mode in self._message_callbacks:

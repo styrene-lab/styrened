@@ -340,18 +340,20 @@ class TestSignalWhitelist:
         from styrened.terminal.service import DEFAULT_ALLOWED_SIGNALS
 
         for sig in DEFAULT_ALLOWED_SIGNALS:
-            assert terminal_service.is_signal_allowed(sig), f"Signal {sig} should be allowed by default"
+            assert terminal_service.is_signal_allowed(sig), (
+                f"Signal {sig} should be allowed by default"
+            )
 
     def test_default_allowed_signals_list(self, terminal_service) -> None:
         """Verify specific default allowed signals."""
         # These are the expected default allowed signals
         expected_allowed = [
-            signal.SIGINT,   # 2 - Ctrl+C
+            signal.SIGINT,  # 2 - Ctrl+C
             signal.SIGTERM,  # 15 - Termination
-            signal.SIGHUP,   # 1 - Hangup
+            signal.SIGHUP,  # 1 - Hangup
             signal.SIGTSTP,  # 20 - Ctrl+Z
             signal.SIGCONT,  # 18 - Continue
-            signal.SIGWINCH, # 28 - Window change
+            signal.SIGWINCH,  # 28 - Window change
         ]
 
         for sig in expected_allowed:
@@ -402,7 +404,9 @@ class TestSignalWhitelist:
         # SIGTERM should NOT be allowed (not in custom list)
         assert not service.is_signal_allowed(signal.SIGTERM)
 
-    def test_custom_signals_still_block_dangerous(self, mock_rns_service, mock_styrene_protocol) -> None:
+    def test_custom_signals_still_block_dangerous(
+        self, mock_rns_service, mock_styrene_protocol
+    ) -> None:
         """Even with custom allowed signals, dangerous signals should be blocked."""
         from styrened.terminal.service import TerminalService
 
@@ -425,9 +429,9 @@ class TestSignalWhitelist:
     def test_signal_validation_with_numeric_values(self, terminal_service) -> None:
         """Signal validation should work with numeric signal values."""
         # Test with numeric values directly (use signal constants for cross-platform)
-        assert terminal_service.is_signal_allowed(signal.SIGINT)   # 2
+        assert terminal_service.is_signal_allowed(signal.SIGINT)  # 2
         assert terminal_service.is_signal_allowed(signal.SIGTERM)  # 15
-        assert not terminal_service.is_signal_allowed(signal.SIGKILL)   # 9
+        assert not terminal_service.is_signal_allowed(signal.SIGKILL)  # 9
         assert not terminal_service.is_signal_allowed(signal.SIGSTOP)  # 17 on macOS, 19 on Linux
 
     def test_empty_allowed_signals(self, mock_rns_service, mock_styrene_protocol) -> None:
@@ -485,10 +489,12 @@ class TestIdentityVerification:
             IDENTITY_VERIFICATION_RETRIES,
         )
 
-        assert IDENTITY_VERIFICATION_RETRIES == 3
-        assert IDENTITY_VERIFICATION_DELAY_MS == 100
+        # Constants were increased during adversarial review for robustness
+        assert IDENTITY_VERIFICATION_RETRIES == 10
+        assert IDENTITY_VERIFICATION_DELAY_MS == 200
 
-    def test_link_packet_rejects_when_identity_unavailable(self, terminal_service) -> None:
+    @pytest.mark.asyncio
+    async def test_async_verify_rejects_when_identity_unavailable(self, terminal_service) -> None:
         """Link should be torn down if identity is unavailable after retries."""
         from unittest.mock import MagicMock, patch
 
@@ -496,25 +502,30 @@ class TestIdentityVerification:
         mock_link = MagicMock()
         mock_link.get_remote_identity.return_value = None
         mock_link._terminal_session = None
+        mock_link._association_in_progress = True
 
         # Create a session to associate with
         session_id = b"0123456789abcdef"
-        terminal_service.sessions[session_id] = MagicMock(
+        mock_session = MagicMock(
             session_id=session_id,
             source_identity="abc123def456abc123def456abc123de",
+            _association_pending=True,
+            link=None,
         )
+        terminal_service.sessions[session_id] = mock_session
 
-        # Call _on_link_packet with session_id as data
-        with patch("time.sleep"):  # Don't actually sleep in tests
-            terminal_service._on_link_packet(mock_link, session_id, MagicMock())
+        # Call _async_verify_and_associate directly
+        with patch("asyncio.sleep", return_value=None):  # Mock async sleep
+            await terminal_service._async_verify_and_associate(mock_link, session_id, mock_session)
 
         # Link should be torn down
         mock_link.teardown.assert_called_once()
 
         # Session should not have been associated
-        assert not hasattr(mock_link, "_terminal_session") or mock_link._terminal_session is None
+        assert mock_session.link is None
 
-    def test_link_packet_retries_identity_verification(self, terminal_service) -> None:
+    @pytest.mark.asyncio
+    async def test_async_verify_retries_identity_verification(self, terminal_service) -> None:
         """Identity verification should retry before giving up."""
         from unittest.mock import MagicMock, patch
 
@@ -524,24 +535,34 @@ class TestIdentityVerification:
         mock_link = MagicMock()
         mock_link.get_remote_identity.return_value = None
         mock_link._terminal_session = None
+        mock_link._association_in_progress = True
 
         # Create a session
         session_id = b"0123456789abcdef"
-        terminal_service.sessions[session_id] = MagicMock(
+        mock_session = MagicMock(
             session_id=session_id,
             source_identity="abc123def456abc123def456abc123de",
+            _association_pending=True,
+            link=None,
         )
+        terminal_service.sessions[session_id] = mock_session
 
-        with patch("time.sleep") as mock_sleep:
-            terminal_service._on_link_packet(mock_link, session_id, MagicMock())
+        sleep_calls = []
+
+        async def mock_sleep(delay):
+            sleep_calls.append(delay)
+
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            await terminal_service._async_verify_and_associate(mock_link, session_id, mock_session)
 
         # Should have called get_remote_identity the configured number of times
         assert mock_link.get_remote_identity.call_count == IDENTITY_VERIFICATION_RETRIES
 
         # Should have slept between retries (one less sleep than retries)
-        assert mock_sleep.call_count == IDENTITY_VERIFICATION_RETRIES - 1
+        assert len(sleep_calls) == IDENTITY_VERIFICATION_RETRIES - 1
 
-    def test_link_packet_succeeds_on_retry(self, terminal_service) -> None:
+    @pytest.mark.asyncio
+    async def test_async_verify_succeeds_on_retry(self, terminal_service) -> None:
         """Link association should succeed if identity becomes available on retry."""
         from unittest.mock import MagicMock, patch
 
@@ -553,6 +574,7 @@ class TestIdentityVerification:
         mock_link = MagicMock()
         mock_link.get_remote_identity.side_effect = [None, mock_identity]
         mock_link._terminal_session = None
+        mock_link._association_in_progress = True
         mock_link.send = MagicMock()
 
         # Create a session
@@ -560,12 +582,16 @@ class TestIdentityVerification:
         mock_session = MagicMock(
             session_id=session_id,
             source_identity="abc123def456abc123def456abc123de",
+            _association_pending=True,
+            link=None,
         )
         terminal_service.sessions[session_id] = mock_session
 
-        # Mock asyncio.create_task to avoid event loop issues
-        with patch("time.sleep"), patch("asyncio.create_task"):
-            terminal_service._on_link_packet(mock_link, session_id, MagicMock())
+        with patch("asyncio.sleep", return_value=None):
+            with patch("asyncio.create_task"):
+                await terminal_service._async_verify_and_associate(
+                    mock_link, session_id, mock_session
+                )
 
         # Link should NOT be torn down
         mock_link.teardown.assert_not_called()
@@ -573,7 +599,8 @@ class TestIdentityVerification:
         # Session should have link associated
         assert mock_session.link == mock_link
 
-    def test_link_packet_rejects_identity_mismatch(self, terminal_service) -> None:
+    @pytest.mark.asyncio
+    async def test_async_verify_rejects_identity_mismatch(self, terminal_service) -> None:
         """Link should be torn down if identity doesn't match session."""
         from unittest.mock import MagicMock
 
@@ -584,20 +611,27 @@ class TestIdentityVerification:
         mock_link = MagicMock()
         mock_link.get_remote_identity.return_value = mock_identity
         mock_link._terminal_session = None
+        mock_link._association_in_progress = True
 
         # Create a session with different identity
         session_id = b"0123456789abcdef"
-        terminal_service.sessions[session_id] = MagicMock(
+        mock_session = MagicMock(
             session_id=session_id,
             source_identity="abc123def456abc123def456abc123de",
+            _association_pending=True,
+            link=None,
         )
+        terminal_service.sessions[session_id] = mock_session
 
-        terminal_service._on_link_packet(mock_link, session_id, MagicMock())
+        await terminal_service._async_verify_and_associate(mock_link, session_id, mock_session)
 
         # Link should be torn down due to identity mismatch
         mock_link.teardown.assert_called_once()
 
-    def test_link_packet_accepts_matching_identity_immediately(self, terminal_service) -> None:
+    @pytest.mark.asyncio
+    async def test_async_verify_accepts_matching_identity_immediately(
+        self, terminal_service
+    ) -> None:
         """Link should be associated immediately if identity matches on first try."""
         from unittest.mock import MagicMock, patch
 
@@ -608,6 +642,7 @@ class TestIdentityVerification:
         mock_link = MagicMock()
         mock_link.get_remote_identity.return_value = mock_identity
         mock_link._terminal_session = None
+        mock_link._association_in_progress = True
         mock_link.send = MagicMock()
 
         # Create a session
@@ -615,11 +650,13 @@ class TestIdentityVerification:
         mock_session = MagicMock(
             session_id=session_id,
             source_identity="abc123def456abc123def456abc123de",
+            _association_pending=True,
+            link=None,
         )
         terminal_service.sessions[session_id] = mock_session
 
         with patch("asyncio.create_task"):
-            terminal_service._on_link_packet(mock_link, session_id, MagicMock())
+            await terminal_service._async_verify_and_associate(mock_link, session_id, mock_session)
 
         # Should only call get_remote_identity once (no retries needed)
         assert mock_link.get_remote_identity.call_count == 1
@@ -636,6 +673,7 @@ class TestIdentityVerification:
 
         mock_link = MagicMock()
         mock_link._terminal_session = None
+        mock_link._association_in_progress = False  # Not already processing
 
         # Send data that is too short (less than 16 bytes)
         short_data = b"short"
@@ -651,6 +689,7 @@ class TestIdentityVerification:
 
         mock_link = MagicMock()
         mock_link._terminal_session = None
+        mock_link._association_in_progress = False  # Not already processing
 
         # Send a session_id that doesn't exist
         unknown_session_id = b"unknownsession01"
@@ -721,7 +760,9 @@ class TestRateLimiting:
         assert DEFAULT_SESSION_REQUEST_RATE_LIMIT == 10
         assert RATE_LIMIT_WINDOW_SECONDS == 60
 
-    def test_rate_limit_parameters_configurable(self, mock_rns_service, mock_styrene_protocol) -> None:
+    def test_rate_limit_parameters_configurable(
+        self, mock_rns_service, mock_styrene_protocol
+    ) -> None:
         """Rate limit parameters should be configurable."""
         from styrened.terminal.service import TerminalService
 
@@ -782,6 +823,7 @@ class TestRateLimiting:
         ]
         # Add them to the sessions dict
         from unittest.mock import MagicMock
+
         service_with_low_limits.sessions[b"session_id_00001"] = MagicMock()
         service_with_low_limits.sessions[b"session_id_00002"] = MagicMock()
 
@@ -820,7 +862,7 @@ class TestRateLimiting:
         # Add some old timestamps (older than the window)
         terminal_service._request_timestamps[identity] = [
             current_time - RATE_LIMIT_WINDOW_SECONDS - 10,  # Old
-            current_time - RATE_LIMIT_WINDOW_SECONDS - 5,   # Old
+            current_time - RATE_LIMIT_WINDOW_SECONDS - 5,  # Old
             current_time - 30,  # Recent
             current_time - 10,  # Recent
         ]
@@ -893,7 +935,7 @@ class TestRateLimiting:
         # Track both a real and a stale session
         service_with_low_limits._sessions_by_identity[identity] = [
             b"stale_session_00",  # Not in sessions
-            real_session_id,      # In sessions
+            real_session_id,  # In sessions
         ]
 
         # Check rate limits - should clean up stale reference
@@ -1087,7 +1129,9 @@ class TestCommandValidation:
         assert error is not None
         assert "command" in error.lower()
 
-    def test_validate_command_allowed_when_configured(self, mock_rns_service, mock_styrene_protocol) -> None:
+    def test_validate_command_allowed_when_configured(
+        self, mock_rns_service, mock_styrene_protocol
+    ) -> None:
         """Commands should be allowed when in allowed_commands."""
         from styrened.terminal.service import TerminalService
 
@@ -1101,7 +1145,9 @@ class TestCommandValidation:
         error = service._validate_command(shell="/bin/bash", command="/usr/bin/python3")
         assert error is None
 
-    def test_validate_command_rejected_when_not_in_list(self, mock_rns_service, mock_styrene_protocol) -> None:
+    def test_validate_command_rejected_when_not_in_list(
+        self, mock_rns_service, mock_styrene_protocol
+    ) -> None:
         """Commands not in allowed_commands should be rejected."""
         from styrened.terminal.service import TerminalService
 
@@ -1130,7 +1176,9 @@ class TestCommandValidation:
         error = service._validate_command(shell="/bin/evil", command="/usr/bin/anything")
         assert error is None
 
-    def test_validate_resolves_relative_paths(self, mock_rns_service, mock_styrene_protocol) -> None:
+    def test_validate_resolves_relative_paths(
+        self, mock_rns_service, mock_styrene_protocol
+    ) -> None:
         """Validation should resolve relative paths to absolute."""
         from styrened.terminal.service import TerminalService
 
@@ -1216,7 +1264,9 @@ class TestIdleTimeout:
 
         assert IDLE_CHECK_INTERVAL == 60  # 60 seconds
 
-    def test_idle_timeout_parameter_configurable(self, mock_rns_service, mock_styrene_protocol) -> None:
+    def test_idle_timeout_parameter_configurable(
+        self, mock_rns_service, mock_styrene_protocol
+    ) -> None:
         """Idle timeout should be configurable via constructor parameter."""
         from styrened.terminal.service import TerminalService
 
@@ -1289,12 +1339,15 @@ class TestIdleTimeout:
         from unittest.mock import MagicMock, patch
 
         # Create a mock session that is past the idle timeout
+        # Note: sessions with link=None are checked against handoff timeout using created_at
+        # Sessions with link set are checked against idle timeout using last_activity
         session_id = b"session_id_12345"
         mock_session = MagicMock()
         mock_session.session_id = session_id
         mock_session.source_identity = "test_identity"
         mock_session.last_activity = time.time() - 120  # 2 minutes ago (past 1 min timeout)
-        mock_session.link = None
+        mock_session.created_at = time.time()  # Recent creation (not handoff timeout)
+        mock_session.link = MagicMock()  # Link is established, so idle timeout applies
         mock_session._read_task = None
 
         service_with_short_timeout.sessions[session_id] = mock_session
@@ -1317,12 +1370,14 @@ class TestIdleTimeout:
         from unittest.mock import MagicMock, patch
 
         # Create a mock session with recent activity
+        # Sessions with link set are checked against idle timeout using last_activity
         session_id = b"session_id_12345"
         mock_session = MagicMock()
         mock_session.session_id = session_id
         mock_session.source_identity = "test_identity"
         mock_session.last_activity = time.time() - 10  # 10 seconds ago (within 1 min timeout)
-        mock_session.link = None
+        mock_session.created_at = time.time()  # Recent creation
+        mock_session.link = MagicMock()  # Link is established, so idle timeout applies
         mock_session._read_task = None
 
         service_with_short_timeout.sessions[session_id] = mock_session
@@ -1341,6 +1396,7 @@ class TestIdleTimeout:
         from unittest.mock import MagicMock, patch
 
         # Create one expired and one active session
+        # Sessions with link set are checked against idle timeout using last_activity
         expired_id = b"expired_session0"
         active_id = b"active_session00"
 
@@ -1348,14 +1404,16 @@ class TestIdleTimeout:
         expired_session.session_id = expired_id
         expired_session.source_identity = "test_identity"
         expired_session.last_activity = time.time() - 120  # Expired
-        expired_session.link = None
+        expired_session.created_at = time.time()  # Recent creation
+        expired_session.link = MagicMock()  # Link established
         expired_session._read_task = None
 
         active_session = MagicMock()
         active_session.session_id = active_id
         active_session.source_identity = "test_identity"
         active_session.last_activity = time.time() - 10  # Active
-        active_session.link = None
+        active_session.created_at = time.time()  # Recent creation
+        active_session.link = MagicMock()  # Link established
         active_session._read_task = None
 
         service_with_short_timeout.sessions[expired_id] = expired_session
@@ -1383,8 +1441,9 @@ class TestIdleTimeout:
         assert payload["exit_code"] == -1
         assert payload["reason"] == "idle_timeout"
 
-    def test_activity_updated_on_link_association(self, terminal_service) -> None:
-        """Activity should be updated when Link is associated."""
+    @pytest.mark.asyncio
+    async def test_activity_updated_on_link_association(self, terminal_service) -> None:
+        """Activity should be updated when Link is associated via async verification."""
         import time
         from unittest.mock import MagicMock, patch
 
@@ -1398,18 +1457,22 @@ class TestIdleTimeout:
         mock_link.send = MagicMock()
 
         # Create a session with old activity
+        # IMPORTANT: link must be None to allow association (prevents session hijacking)
         session_id = b"0123456789abcdef"
         mock_session = MagicMock()
         mock_session.session_id = session_id
         mock_session.source_identity = "abc123def456abc123def456abc123de"
         mock_session.last_activity = time.time() - 1000  # Old activity
+        mock_session._association_pending = False
+        mock_session.link = None  # No existing link - allows association
 
         terminal_service.sessions[session_id] = mock_session
 
-        with patch("asyncio.create_task"):
-            terminal_service._on_link_packet(mock_link, session_id, MagicMock())
+        # Call async verification directly (this is what gets scheduled)
+        with patch("asyncio.sleep", return_value=None):
+            await terminal_service._async_verify_and_associate(mock_link, session_id, mock_session)
 
-        # Activity should have been updated
+        # Activity should have been updated on successful association
         mock_session.update_activity.assert_called_once()
 
     def test_activity_updated_on_data_received(self, terminal_service) -> None:
@@ -1436,13 +1499,13 @@ class TestIdleTimeout:
 
     async def test_activity_updated_on_resize(self, terminal_service) -> None:
         """Activity should be updated on TERMINAL_RESIZE."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         # Create a session
         session_id = b"0123456789abcdef"
         mock_session = MagicMock()
         mock_session.session_id = session_id
-        mock_session.source_identity = "test_identity"
+        mock_session.source_identity = "test_identity_hash"
 
         terminal_service.sessions[session_id] = mock_session
 
@@ -1453,7 +1516,15 @@ class TestIdleTimeout:
             session_id=session_id,
         )
 
-        await terminal_service._handle_terminal_resize("test_identity", resize)
+        # Create mock LXMF message with source_hash
+        mock_message = MagicMock()
+        mock_message.source_hash = b"lxmf_source_hash"
+
+        # Mock identity resolution to return the session's source_identity
+        with patch.object(
+            terminal_service, "_resolve_identity_hash", return_value="test_identity_hash"
+        ):
+            await terminal_service._handle_terminal_resize(mock_message, resize)
 
         # Activity should have been updated
         mock_session.update_activity.assert_called_once()
@@ -1466,7 +1537,7 @@ class TestIdleTimeout:
         session_id = b"0123456789abcdef"
         mock_session = MagicMock()
         mock_session.session_id = session_id
-        mock_session.source_identity = "test_identity"
+        mock_session.source_identity = "test_identity_hash"
         mock_session.child_pid = 12345
 
         terminal_service.sessions[session_id] = mock_session
@@ -1477,8 +1548,18 @@ class TestIdleTimeout:
             session_id=session_id,
         )
 
-        with patch("os.kill"):
-            await terminal_service._handle_terminal_signal("test_identity", sig)
+        # Create mock LXMF message with source_hash
+        mock_message = MagicMock()
+        mock_message.source_hash = b"lxmf_source_hash"
+
+        # Mock identity resolution to return the session's source_identity
+        with (
+            patch("os.kill"),
+            patch.object(
+                terminal_service, "_resolve_identity_hash", return_value="test_identity_hash"
+            ),
+        ):
+            await terminal_service._handle_terminal_signal(mock_message, sig)
 
         # Activity should have been updated
         mock_session.update_activity.assert_called_once()

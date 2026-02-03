@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "styrened"
-version = "0.3.6"
+version = "0.4.0"
 description = "Unified Styrene library and headless daemon for RNS/LXMF mesh networking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -87,6 +87,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__ files
+"src/styrened/ipc/handlers.py" = ["E402"]  # Import after try/except for optional LXMF
+"tests/bare-metal/conftest.py" = ["E402"]  # Import after sys.path manipulation
+"tests/k8s/conftest.py" = ["E402"]  # Import after sys.path manipulation
 
 [tool.mypy]
 python_version = "3.11"

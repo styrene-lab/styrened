@@ -27,6 +27,7 @@ import fcntl
 import logging
 import os
 import pty
+import random
 import shutil
 import signal
 import struct
@@ -44,6 +45,7 @@ from styrened.models.styrene_wire import (
     create_terminal_reject,
     decode_payload,
 )
+from styrened.protocols.base import LXMFMessage
 from styrened.terminal.messages import (
     CommandExited,
     StreamData,
@@ -111,8 +113,18 @@ BLOCKED_SIGNALS: frozenset[int] = frozenset(
 # Identity verification retry configuration
 # Used during Link establishment to handle race conditions where
 # get_remote_identity() may return None before Link is fully established
-IDENTITY_VERIFICATION_RETRIES = 3
-IDENTITY_VERIFICATION_DELAY_MS = 100
+# Identity verification may take a round-trip for the identity proof
+# to be sent and verified, so we need to retry with reasonable delays
+IDENTITY_VERIFICATION_RETRIES = 10
+IDENTITY_VERIFICATION_DELAY_MS = 200
+
+# Maximum packets to queue during link association
+# Prevents memory exhaustion from malicious clients flooding packets
+MAX_PENDING_PACKETS = 10
+
+# Handoff timeout for sessions waiting for Link establishment
+# Sessions without a Link after this time are closed to prevent DoS
+HANDOFF_TIMEOUT_SECONDS = 30
 
 # Idle check interval in seconds
 IDLE_CHECK_INTERVAL = 60
@@ -146,6 +158,10 @@ class TerminalSession:
     created_at: float = field(default_factory=time.time)
     last_activity: float = field(default_factory=time.time)
     _read_task: asyncio.Task | None = field(default=None, repr=False)
+    _closed: bool = field(default=False, repr=False)  # Prevent double-close
+    _association_pending: bool = field(
+        default=False, repr=False
+    )  # Prevent concurrent Link association
 
     def update_activity(self) -> None:
         """Update last_activity timestamp to current time."""
@@ -165,21 +181,42 @@ class TerminalSession:
             xpixel: Width in pixels (optional)
             ypixel: Height in pixels (optional)
         """
+        session_hex = self.session_id.hex()[:16]
+
+        # Validate dimension ranges for struct.pack("HHHH") - unsigned short (0-65535)
+        # Terminal dimensions must be at least 1x1
+        if not isinstance(rows, int) or not isinstance(cols, int):
+            logger.warning(
+                f"[METRICS] session={session_hex} window_resize_rejected "
+                f"reason=invalid_types rows={type(rows).__name__} cols={type(cols).__name__}"
+            )
+            return
+        if not (1 <= rows <= 65535 and 1 <= cols <= 65535):
+            logger.warning(
+                f"[METRICS] session={session_hex} window_resize_rejected "
+                f"reason=out_of_range rows={rows} cols={cols}"
+            )
+            return
+
+        # Sanitize pixel values (optional, less critical)
+        if not isinstance(xpixel, int) or not (0 <= xpixel <= 65535):
+            xpixel = 0
+        if not isinstance(ypixel, int) or not (0 <= ypixel <= 65535):
+            ypixel = 0
+
         old_rows, old_cols = self.rows, self.cols
         self.rows = rows
         self.cols = cols
         logger.debug(
-            f"[METRICS] session={self.session_id.hex()[:16]} window_resize "
+            f"[METRICS] session={session_hex} window_resize "
             f"old={old_cols}x{old_rows} new={cols}x{rows}"
         )
         try:
             winsize = struct.pack("HHHH", rows, cols, xpixel, ypixel)
             fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
-            logger.debug(f"[METRICS] session={self.session_id.hex()[:16]} pty_resize_success")
+            logger.debug(f"[METRICS] session={session_hex} pty_resize_success")
         except OSError as e:
-            logger.warning(
-                f"[METRICS] session={self.session_id.hex()[:16]} pty_resize_failed error={e}"
-            )
+            logger.warning(f"[METRICS] session={session_hex} pty_resize_failed error={e}")
 
 
 class TerminalService:
@@ -281,6 +318,9 @@ class TerminalService:
         # Idle check background task
         self._idle_check_task: asyncio.Task | None = None
 
+        # Event loop reference for thread-safe callbacks from RNS
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+
         # Rate limiting configuration
         self._max_sessions_per_identity = max_sessions_per_identity
         self._max_total_sessions = max_total_sessions
@@ -372,6 +412,29 @@ class TerminalService:
         """
         self._authorized_identities.discard(identity_hash)
         logger.info(f"Removed authorized identity: {identity_hash[:16]}...")
+
+    def _send_link_packet(self, link: "RNS.Link", data: bytes) -> bool:
+        """Send data packet over an RNS Link.
+
+        Args:
+            link: The RNS Link to send over
+            data: Data to send
+
+        Returns:
+            True if sent successfully
+        """
+        import RNS
+
+        if not link or link.status != RNS.Link.ACTIVE:
+            return False
+
+        try:
+            packet = RNS.Packet(link, data)
+            packet.send()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send link packet: {e}")
+            return False
 
     def is_authorized(self, identity_hash: str) -> bool:
         """Check if an identity is authorized.
@@ -600,9 +663,64 @@ class TerminalService:
                 self._sessions_by_identity[source_identity].remove(session_id)
             except ValueError:
                 pass  # Session not in list
-            # Clean up empty lists
+            # Clean up empty lists and rate limit timestamps when identity has no sessions
             if not self._sessions_by_identity[source_identity]:
                 del self._sessions_by_identity[source_identity]
+                # Also clean up rate limit timestamps for this identity
+                if source_identity in self._request_timestamps:
+                    del self._request_timestamps[source_identity]
+                    logger.debug(
+                        f"[METRICS] rate_limit_timestamps_cleaned identity={source_identity[:16]}"
+                    )
+
+    def _resolve_identity_hash(self, lxmf_dest_hash: str) -> str | None:
+        """Resolve an LXMF destination hash to an RNS identity hash.
+
+        The LXMF destination hash is derived from (identity + "lxmf" + "delivery"),
+        but Link.get_remote_identity().hexhash returns the raw identity hash.
+        This method looks up the identity hash for a given LXMF destination.
+
+        Args:
+            lxmf_dest_hash: LXMF destination hash (hex string)
+
+        Returns:
+            RNS identity hash (hex string) or None if not found
+        """
+        # Strategy 1: In-memory discovered devices lookup
+        try:
+            from styrened.services.reticulum import get_identity_for_lxmf_destination
+
+            identity_hash = get_identity_for_lxmf_destination(lxmf_dest_hash)
+            if identity_hash:
+                logger.debug(
+                    f"[HASH] Resolved LXMF dest {lxmf_dest_hash[:16]}... -> "
+                    f"identity {identity_hash[:16]}... (discovered_devices)"
+                )
+                return identity_hash
+        except Exception as e:
+            logger.warning(f"[HASH] Discovered devices lookup failed: {e}")
+
+        # Strategy 2: NodeStore lookup
+        try:
+            from styrened.services.node_store import get_node_store
+
+            store = get_node_store()
+
+            # Try LXMF destination lookup
+            identity_hash = store.get_identity_for_lxmf_destination(lxmf_dest_hash)
+            if identity_hash:
+                logger.debug(
+                    f"[HASH] Resolved LXMF dest {lxmf_dest_hash[:16]}... -> "
+                    f"identity {identity_hash[:16]}... (NodeStore)"
+                )
+                return identity_hash
+        except Exception as e:
+            logger.warning(f"[HASH] NodeStore lookup failed: {e}")
+
+        logger.warning(
+            f"[HASH] Could not resolve identity hash for LXMF dest {lxmf_dest_hash[:16]}..."
+        )
+        return None
 
     def start(self) -> None:
         """Start the terminal service.
@@ -612,6 +730,13 @@ class TerminalService:
         """
         if self._registered:
             return
+
+        # Capture event loop for thread-safe RNS callbacks
+        try:
+            self._event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop, try to get the default loop
+            self._event_loop = asyncio.get_event_loop()
 
         # Create destination for terminal data Links
         import RNS
@@ -679,8 +804,24 @@ class TerminalService:
 
         # Deregister handlers
         if self._registered:
-            # TODO: Add deregister_handler to StyreneProtocol
+            self.styrene_protocol.unregister_handler(
+                StyreneMessageType.TERMINAL_REQUEST,
+                self._handle_terminal_request,
+            )
+            self.styrene_protocol.unregister_handler(
+                StyreneMessageType.TERMINAL_RESIZE,
+                self._handle_terminal_resize,
+            )
+            self.styrene_protocol.unregister_handler(
+                StyreneMessageType.TERMINAL_SIGNAL,
+                self._handle_terminal_signal,
+            )
+            self.styrene_protocol.unregister_handler(
+                StyreneMessageType.TERMINAL_CLOSE,
+                self._handle_terminal_close,
+            )
             self._registered = False
+            logger.debug("[METRICS] terminal_handlers_deregistered")
 
         logger.info(f"[METRICS] terminal_service_stopped sessions_closed={session_count}")
 
@@ -708,39 +849,54 @@ class TerminalService:
             logger.debug(f"[METRICS] idle_check_loop_cancelled total_checks={check_count}")
 
     async def _check_idle_sessions(self) -> None:
-        """Check all sessions for idle timeout and close expired ones."""
+        """Check all sessions for idle timeout and handoff timeout, closing expired ones."""
         now = time.time()
-        sessions_to_close: list[tuple[bytes, TerminalSession]] = []
+        sessions_to_close: list[tuple[bytes, TerminalSession, str]] = []  # (id, session, reason)
 
         for session_id, session in self.sessions.items():
+            session_hex = session_id.hex()[:16]
+
+            # Check handoff timeout - sessions waiting for Link establishment
+            if session.link is None:
+                handoff_age = now - session.created_at
+                if handoff_age >= HANDOFF_TIMEOUT_SECONDS:
+                    logger.warning(
+                        f"[METRICS] session_handoff_timeout session={session_hex} "
+                        f"age_seconds={handoff_age:.0f} timeout={HANDOFF_TIMEOUT_SECONDS}s"
+                    )
+                    sessions_to_close.append((session_id, session, "handoff_timeout"))
+                    continue  # Don't also check idle timeout
+
+            # Check idle timeout for established sessions
             idle_time = now - session.last_activity
             logger.debug(
-                f"[METRICS] session_idle_check session={session_id.hex()[:16]} "
+                f"[METRICS] session_idle_check session={session_hex} "
                 f"idle_seconds={idle_time:.2f} timeout={self.session_idle_timeout}s "
                 f"expires_in={max(0, self.session_idle_timeout - idle_time):.2f}s"
             )
             if idle_time >= self.session_idle_timeout:
                 logger.info(
-                    f"[METRICS] session_idle_timeout_exceeded session={session_id.hex()[:16]} "
+                    f"[METRICS] session_idle_timeout_exceeded session={session_hex} "
                     f"idle_seconds={idle_time:.0f} timeout={self.session_idle_timeout}s"
                 )
-                sessions_to_close.append((session_id, session))
+                sessions_to_close.append((session_id, session, "idle_timeout"))
 
-        # Close idle sessions (outside iteration to avoid modifying dict during iteration)
+        # Close expired sessions (outside iteration to avoid modifying dict during iteration)
         if sessions_to_close:
-            logger.info(f"[METRICS] idle_sessions_closing count={len(sessions_to_close)}")
+            logger.info(f"[METRICS] sessions_closing count={len(sessions_to_close)}")
 
-        for session_id, session in sessions_to_close:
+        for session_id, session, reason in sessions_to_close:
             # Store identity before closing (session will be removed from dict)
             source_identity = session.source_identity
+            session_hex = session_id.hex()[:16]
 
-            self._close_session(session_id, exit_code=-1, reason="idle_timeout")
+            self._close_session(session_id, exit_code=-1, reason=reason)
 
             # Send TERMINAL_CLOSED via LXMF control plane
             try:
                 closed_envelope = create_terminal_closed(
                     exit_code=-1,
-                    reason="idle_timeout",
+                    reason=reason,
                     session_id=session_id,
                 )
                 # Send via styrene protocol (async)
@@ -751,31 +907,79 @@ class TerminalService:
                     )
                 )
                 logger.debug(
-                    f"[METRICS] idle_timeout_notification_sent session={session_id.hex()[:16]} "
-                    f"identity={source_identity[:16]}"
+                    f"[METRICS] timeout_notification_sent session={session_hex} "
+                    f"identity={source_identity[:16]} reason={reason}"
                 )
             except Exception as e:
                 logger.warning(
-                    f"[METRICS] idle_timeout_notification_failed session={session_id.hex()[:16]} "
-                    f"error={e}"
+                    f"[METRICS] timeout_notification_failed session={session_hex} "
+                    f"reason={reason} error={e}"
                 )
 
     async def _handle_terminal_request(
         self,
-        source_identity: str,
+        message: "LXMFMessage",
         envelope: StyreneEnvelope,
-    ) -> StyreneEnvelope | None:
+    ) -> None:
         """Handle TERMINAL_REQUEST from client.
 
         Args:
-            source_identity: Client's RNS identity hash
+            message: LXMF message containing the request
             envelope: Request envelope
-
-        Returns:
-            TERMINAL_ACCEPT or TERMINAL_REJECT response
         """
+        lxmf_dest_hash = message.source_hash
         request_id = envelope.request_id
         payload = decode_payload(envelope.payload)
+
+        # Resolve the RNS identity hash from the LXMF destination hash
+        # This is needed because Link.get_remote_identity().hexhash returns the identity hash,
+        # not the LXMF destination hash
+        source_identity = self._resolve_identity_hash(lxmf_dest_hash)
+        if source_identity is None:
+            logger.warning(
+                f"[METRICS] terminal_request_rejected reason=identity_resolution_failed "
+                f"lxmf_dest={lxmf_dest_hash[:16]}"
+            )
+            # Reject the request - we cannot verify identity without the hash mapping
+            # Using LXMF dest hash as fallback would always fail identity verification later
+            reject_response = create_terminal_reject(
+                reason="Identity resolution failed - node not yet discovered",
+                code=1,
+                request_id=request_id,
+            )
+            try:
+                await self.styrene_protocol.send_to_identity(lxmf_dest_hash, reject_response)
+            except Exception as e:
+                logger.error(f"Failed to send rejection response: {e}")
+            return
+
+        # Process request and get response envelope
+        response = await self._process_terminal_request(source_identity, request_id, payload)
+
+        # Send response to client - use the LXMF dest hash for routing
+        if response:
+            try:
+                await self.styrene_protocol.send_to_identity(lxmf_dest_hash, response)
+                logger.debug(f"Sent {response.message_type.name} to {lxmf_dest_hash[:16]}...")
+            except Exception as e:
+                logger.error(f"Failed to send terminal response: {e}")
+
+    async def _process_terminal_request(
+        self,
+        source_identity: str,
+        request_id: bytes | None,
+        payload: dict,
+    ) -> StyreneEnvelope | None:
+        """Process TERMINAL_REQUEST and return response envelope.
+
+        Args:
+            source_identity: Client's RNS identity hash
+            request_id: Request correlation ID
+            payload: Decoded request payload
+
+        Returns:
+            TERMINAL_ACCEPT or TERMINAL_REJECT response envelope
+        """
 
         logger.info(
             f"[METRICS] terminal_request_received identity={source_identity[:16]} "
@@ -822,6 +1026,52 @@ class TerminalService:
         command = payload.get("command")
         args = payload.get("args", [])
 
+        # Validate terminal dimensions (must be positive integers within unsigned short range)
+        if not isinstance(rows, int) or not isinstance(cols, int):
+            logger.warning(
+                f"[METRICS] terminal_request_rejected identity={source_identity[:16]} "
+                f"reason=invalid_dimensions code=4 rows={type(rows).__name__} cols={type(cols).__name__}"
+            )
+            return create_terminal_reject(
+                reason="Invalid terminal dimensions: must be integers",
+                code=4,
+                request_id=request_id,
+            )
+        if not (1 <= rows <= 65535 and 1 <= cols <= 65535):
+            logger.warning(
+                f"[METRICS] terminal_request_rejected identity={source_identity[:16]} "
+                f"reason=dimensions_out_of_range code=4 rows={rows} cols={cols}"
+            )
+            return create_terminal_reject(
+                reason="Invalid terminal dimensions: must be 1-65535",
+                code=4,
+                request_id=request_id,
+            )
+
+        # Validate term_type (must be a reasonable string)
+        if not isinstance(term_type, str) or len(term_type) > 256 or len(term_type) == 0:
+            logger.warning(
+                f"[METRICS] terminal_request_rejected identity={source_identity[:16]} "
+                f"reason=invalid_term_type code=4"
+            )
+            return create_terminal_reject(
+                reason="Invalid terminal type",
+                code=4,
+                request_id=request_id,
+            )
+
+        # Validate args (must be a list of strings)
+        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+            logger.warning(
+                f"[METRICS] terminal_request_rejected identity={source_identity[:16]} "
+                f"reason=invalid_args code=4"
+            )
+            return create_terminal_reject(
+                reason="Invalid args: must be a list of strings",
+                code=4,
+                request_id=request_id,
+            )
+
         # Validate command/shell
         validation_error = self._validate_command(shell, command)
         if validation_error is not None:
@@ -853,12 +1103,15 @@ class TerminalService:
                 args=args,
             )
         except Exception as e:
+            # Log detailed error internally but return generic message to client
+            # to avoid leaking implementation details
             logger.error(
                 f"[METRICS] terminal_request_rejected identity={source_identity[:16]} "
-                f"reason=session_create_failed code=2 error={e}"
+                f"reason=session_create_failed code=2 error={e}",
+                exc_info=True,
             )
             return create_terminal_reject(
-                reason=f"Failed to create session: {e}",
+                reason="Failed to create session",
                 code=2,
                 request_id=request_id,
             )
@@ -881,10 +1134,16 @@ class TerminalService:
             f"link_dest={self._link_destination.hexhash[:16]}"
         )
 
+        # Get identity hash for Link establishment
+        identity_hash = None
+        if self.rns_service.identity:
+            identity_hash = self.rns_service.identity.hash.hex()
+
         return create_terminal_accept(
             link_destination=self._link_destination.hexhash,
             session_id=session.session_id,
             request_id=request_id,
+            identity_hash=identity_hash,
         )
 
     async def _create_session(
@@ -1070,7 +1329,9 @@ class TerminalService:
 
         # Set packet callback for session association
         link.set_packet_callback(lambda data, pkt: self._on_link_packet(link, data, pkt))
-        link.set_link_closed_callback(lambda lnk, reason: self._on_link_closed(lnk, reason))
+        # Note: RNS link_closed callback receives only (link), not (link, reason)
+        # Access reason via link.teardown_reason
+        link.set_link_closed_callback(lambda lnk: self._on_link_closed(lnk, lnk.teardown_reason))
 
     def _on_link_packet(self, link: "RNS.Link", data: bytes, packet: "RNS.Packet") -> None:
         """Handle packet received on terminal Link.
@@ -1084,7 +1345,33 @@ class TerminalService:
         session = getattr(link, "_terminal_session", None)
 
         if session is None:
+            # Check if we're already processing association for this link
+            if getattr(link, "_association_in_progress", False):
+                # Queue this packet for later processing (bounded to prevent memory exhaustion)
+                if not hasattr(link, "_pending_packets"):
+                    link._pending_packets = []
+                if len(link._pending_packets) < MAX_PENDING_PACKETS:
+                    link._pending_packets.append((data, packet))
+                    logger.debug(
+                        f"[METRICS] packet_queued_during_association data_len={len(data)} "
+                        f"queue_size={len(link._pending_packets)}"
+                    )
+                else:
+                    logger.warning(
+                        f"[METRICS] packet_dropped_queue_full data_len={len(data)} "
+                        f"max_queue={MAX_PENDING_PACKETS}"
+                    )
+                return
+
             # First packet must be session_id for association
+            logger.info(
+                f"[METRICS] first_packet_received data_len={len(data)} "
+                f"data_hex={data.hex()[:64]}{'...' if len(data) > 32 else ''}"
+            )
+
+            # Mark that we're processing association to prevent race conditions
+            link._association_in_progress = True
+
             if len(data) < 16:
                 logger.warning(
                     f"[METRICS] link_association_failed reason=invalid_packet data_len={len(data)}"
@@ -1093,75 +1380,46 @@ class TerminalService:
                 return
 
             session_id = data[:16]
+            session_hex = session_id.hex()[:16]
+            logger.info(f"[METRICS] extracted_session_id={session_hex}")
             session = self.sessions.get(session_id)
 
             if session is None:
                 logger.warning(
                     f"[METRICS] link_association_failed reason=unknown_session "
-                    f"session={session_id.hex()}"
+                    f"session={session_hex}"
                 )
                 link.teardown()
                 return
 
-            # Verify client identity matches session with retry logic
+            # Check session-level association lock to prevent race conditions
+            # between multiple Links trying to associate with the same session
+            if session._association_pending:
+                logger.warning(
+                    f"[METRICS] link_association_rejected reason=association_already_pending "
+                    f"session={session_hex}"
+                )
+                link._association_in_progress = False
+                link.teardown()
+                return
+
+            # Set session-level lock before async verification
+            session._association_pending = True
+
+            # Schedule async identity verification to avoid blocking RNS thread
             # The remote identity may not be immediately available during Link establishment
-            # due to race conditions, so we retry a few times before giving up
-            remote_identity = None
-            for attempt in range(IDENTITY_VERIFICATION_RETRIES):
-                remote_identity = link.get_remote_identity()
-                if remote_identity is not None:
-                    logger.debug(
-                        f"[METRICS] identity_verification_success session={session_id.hex()[:16]} "
-                        f"attempt={attempt + 1}/{IDENTITY_VERIFICATION_RETRIES}"
-                    )
-                    break
-                if attempt < IDENTITY_VERIFICATION_RETRIES - 1:
-                    logger.debug(
-                        f"[METRICS] identity_verification_retry session={session_id.hex()[:16]} "
-                        f"attempt={attempt + 1}/{IDENTITY_VERIFICATION_RETRIES} "
-                        f"delay_ms={IDENTITY_VERIFICATION_DELAY_MS}"
-                    )
-                    time.sleep(IDENTITY_VERIFICATION_DELAY_MS / 1000.0)
-
-            if remote_identity is None:
-                # Identity could not be verified after retries - reject the connection
-                # This is a security measure to prevent session hijacking
-                logger.warning(
-                    f"[METRICS] identity_verification_failed session={session_id.hex()[:16]} "
-                    f"reason=unavailable attempts={IDENTITY_VERIFICATION_RETRIES}"
+            if self._event_loop is not None:
+                asyncio.run_coroutine_threadsafe(
+                    self._async_verify_and_associate(link, session_id, session),
+                    self._event_loop,
                 )
-                link.teardown()
-                return
-
-            remote_hash = remote_identity.hexhash
-            if remote_hash != session.source_identity:
-                logger.warning(
-                    f"[METRICS] identity_verification_failed session={session_id.hex()[:16]} "
-                    f"reason=mismatch expected={session.source_identity[:16]} "
-                    f"actual={remote_hash[:16]}"
+            else:
+                logger.error(
+                    f"[METRICS] link_association_failed reason=no_event_loop session={session_hex}"
                 )
+                session._association_pending = False
+                link._association_in_progress = False
                 link.teardown()
-                return
-
-            # Associate Link with session
-            link._terminal_session = session
-            session.link = link
-
-            # Update activity on link association
-            session.update_activity()
-
-            logger.info(
-                f"[METRICS] link_associated session={session_id.hex()[:16]} "
-                f"identity={session.source_identity[:16]} pid={session.child_pid}"
-            )
-
-            # Start PTY read loop
-            session._read_task = asyncio.create_task(self._pty_read_loop(session))
-
-            # Send version info
-            version_msg = VersionInfo(version="1.0", software="styrened")
-            link.send(serialize_message(version_msg))
-            logger.debug(f"[METRICS] version_info_sent session={session_id.hex()[:16]} version=1.0")
 
             return
 
@@ -1207,6 +1465,124 @@ class TerminalService:
                 f"data_len={len(data)} error={e}"
             )
 
+    async def _async_verify_and_associate(
+        self,
+        link: "RNS.Link",
+        session_id: bytes,
+        session: TerminalSession,
+    ) -> None:
+        """Verify client identity and associate Link with session asynchronously.
+
+        This runs in the asyncio event loop, not the RNS thread, to avoid
+        blocking RNS network operations during identity verification retries.
+
+        Args:
+            link: RNS Link to verify and associate
+            session_id: Session ID from first packet
+            session: Session to associate with
+        """
+        session_hex = session_id.hex()[:16]
+
+        try:
+            # Verify client identity matches session with retry logic
+            # The remote identity may not be immediately available during Link establishment
+            remote_identity = None
+            for attempt in range(IDENTITY_VERIFICATION_RETRIES):
+                remote_identity = link.get_remote_identity()
+                if remote_identity is not None:
+                    logger.debug(
+                        f"[METRICS] identity_verification_success session={session_hex} "
+                        f"attempt={attempt + 1}/{IDENTITY_VERIFICATION_RETRIES}"
+                    )
+                    break
+                if attempt < IDENTITY_VERIFICATION_RETRIES - 1:
+                    # Add jitter (±25%) to prevent timing analysis attacks
+                    jitter = random.uniform(0.75, 1.25)
+                    delay_ms = int(IDENTITY_VERIFICATION_DELAY_MS * jitter)
+                    logger.debug(
+                        f"[METRICS] identity_verification_retry session={session_hex} "
+                        f"attempt={attempt + 1}/{IDENTITY_VERIFICATION_RETRIES} "
+                        f"delay_ms={delay_ms}"
+                    )
+                    # Use async sleep instead of blocking time.sleep()
+                    await asyncio.sleep(delay_ms / 1000.0)
+
+            if remote_identity is None:
+                # Identity could not be verified after retries - reject the connection
+                logger.warning(
+                    f"[METRICS] identity_verification_failed session={session_hex} "
+                    f"reason=unavailable attempts={IDENTITY_VERIFICATION_RETRIES}"
+                )
+                session._association_pending = False
+                link._association_in_progress = False
+                link.teardown()
+                return
+
+            remote_hash = remote_identity.hexhash
+            if remote_hash != session.source_identity:
+                logger.warning(
+                    f"[METRICS] identity_verification_failed session={session_hex} "
+                    f"reason=mismatch expected={session.source_identity[:16]} "
+                    f"actual={remote_hash[:16]}"
+                )
+                session._association_pending = False
+                link._association_in_progress = False
+                link.teardown()
+                return
+
+            # CRITICAL: Check if session already has a link (prevent session hijacking)
+            # This prevents an attacker from associating their Link with an existing session
+            if session.link is not None:
+                logger.warning(
+                    f"[METRICS] link_association_rejected session={session_hex} "
+                    f"reason=session_already_has_link"
+                )
+                session._association_pending = False
+                link._association_in_progress = False
+                link.teardown()
+                return
+
+            # Associate Link with session
+            link._terminal_session = session
+            session.link = link
+
+            # Update activity on link association
+            session.update_activity()
+
+            logger.info(
+                f"[METRICS] link_associated session={session_hex} "
+                f"identity={session.source_identity[:16]} pid={session.child_pid}"
+            )
+
+            # Start PTY read loop
+            session._read_task = asyncio.create_task(self._pty_read_loop(session))
+
+            # Send version info
+            version_msg = VersionInfo(version="1.0", software="styrened")
+            self._send_link_packet(link, serialize_message(version_msg))
+            logger.debug(f"[METRICS] version_info_sent session={session_hex} version=1.0")
+
+            # Process any packets that arrived during association
+            pending = getattr(link, "_pending_packets", [])
+            if pending:
+                logger.debug(f"[METRICS] processing_pending_packets count={len(pending)}")
+                link._pending_packets = []
+                for pending_data, pending_packet in pending:
+                    self._on_link_packet(link, pending_data, pending_packet)
+
+            # Clear association flags
+            session._association_pending = False
+            link._association_in_progress = False
+
+        except Exception as e:
+            logger.error(
+                f"[METRICS] async_verify_failed session={session_hex} error={e}",
+                exc_info=True,
+            )
+            session._association_pending = False
+            link._association_in_progress = False
+            link.teardown()
+
     def _on_link_closed(self, link: "RNS.Link", reason: int) -> None:
         """Handle Link closure.
 
@@ -1214,6 +1590,13 @@ class TerminalService:
             link: Closed Link
             reason: RNS Link closure reason code
         """
+        # Clear any pending packets to prevent memory leak
+        if hasattr(link, "_pending_packets"):
+            pending_count = len(link._pending_packets)
+            link._pending_packets = []
+            if pending_count > 0:
+                logger.debug(f"[METRICS] pending_packets_cleared count={pending_count}")
+
         session = getattr(link, "_terminal_session", None)
         if session:
             session_hex = session.session_id.hex()[:16]
@@ -1226,16 +1609,40 @@ class TerminalService:
         else:
             logger.debug(f"[METRICS] link_closed_unassociated reason_code={reason}")
 
+    def _get_max_payload_size(self, link: "RNS.Link") -> int:
+        """Calculate maximum payload size for StreamData messages.
+
+        Accounts for message framing overhead:
+        - 1 byte: message type
+        - 1 byte: stream type
+        - 2 bytes: data length prefix (msgpack)
+        - Additional msgpack overhead for larger payloads
+
+        Args:
+            link: RNS Link to check MTU
+
+        Returns:
+            Maximum data bytes that can be sent in a single StreamData message
+        """
+        mtu: int = link.get_mtu()
+        # Reserve space for StreamData message framing
+        # msgpack overhead: 1 (fixmap) + 1 (type key) + 1 (type val) + 1 (stream key) + 1 (stream val)
+        #                 + 1 (data key) + 3 (bin header for data up to 65535 bytes)
+        # Total overhead: ~10 bytes, use 32 for safety margin
+        overhead = 32
+        return max(64, mtu - overhead)  # Minimum 64 bytes per chunk
+
     async def _pty_read_loop(self, session: TerminalSession) -> None:
         """Read from PTY and send to client via Link.
 
         Args:
             session: Session to read from
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         session_hex = session.session_id.hex()[:16]
         total_bytes_read = 0
         read_count = 0
+        chunk_count = 0
 
         logger.debug(
             f"[METRICS] pty_read_loop_started session={session_hex} buffer_size={PTY_READ_SIZE}"
@@ -1255,13 +1662,19 @@ class TerminalService:
                         total_bytes_read += len(data)
                         # Update activity on output
                         session.update_activity()
-                        # Send to client
-                        msg = StreamData(stream=StreamData.STDOUT, data=data)
-                        session.link.send(serialize_message(msg))
+
+                        # Chunk data to respect Link MTU
+                        max_payload = self._get_max_payload_size(session.link)
+                        for i in range(0, len(data), max_payload):
+                            chunk = data[i : i + max_payload]
+                            chunk_count += 1
+                            msg = StreamData(stream=StreamData.STDOUT, data=chunk)
+                            self._send_link_packet(session.link, serialize_message(msg))
+
                         logger.debug(
                             f"[METRICS] stdout_data session={session_hex} "
-                            f"bytes={len(data)} total_bytes={total_bytes_read} "
-                            f"read_count={read_count}"
+                            f"bytes={len(data)} chunks={chunk_count} "
+                            f"total_bytes={total_bytes_read} read_count={read_count}"
                         )
                     else:
                         # EOF - shell exited
@@ -1293,7 +1706,7 @@ class TerminalService:
 
         logger.debug(
             f"[METRICS] pty_read_loop_ended session={session_hex} "
-            f"total_bytes={total_bytes_read} read_count={read_count}"
+            f"total_bytes={total_bytes_read} read_count={read_count} chunk_count={chunk_count}"
         )
 
     def _close_session(
@@ -1314,6 +1727,14 @@ class TerminalService:
         if not session:
             logger.debug(f"[METRICS] session_close_noop session={session_hex} reason=not_found")
             return
+
+        # Prevent double-close race condition
+        if session._closed:
+            logger.debug(
+                f"[METRICS] session_close_noop session={session_hex} reason=already_closed"
+            )
+            return
+        session._closed = True
 
         session_age = time.time() - session.created_at
         idle_time = time.time() - session.last_activity
@@ -1336,7 +1757,7 @@ class TerminalService:
         if session.link and session.link.status == 0x00:  # ACTIVE
             try:
                 msg = CommandExited(return_code=exit_code)
-                session.link.send(serialize_message(msg))
+                self._send_link_packet(session.link, serialize_message(msg))
                 logger.debug(
                     f"[METRICS] command_exited_sent session={session_hex} exit_code={exit_code}"
                 )
@@ -1360,11 +1781,27 @@ class TerminalService:
             logger.debug(f"[METRICS] pty_close_failed session={session_hex} error={e}")
 
         # Kill child process if still running
+        # First try SIGTERM, then SIGKILL if process doesn't exit
         try:
             os.kill(session.child_pid, signal.SIGTERM)
             logger.debug(
                 f"[METRICS] child_sigterm_sent session={session_hex} pid={session.child_pid}"
             )
+            # Check if process exited after a brief wait
+            try:
+                pid, status = os.waitpid(session.child_pid, os.WNOHANG)
+                if pid == 0:
+                    # Process still running, give it a moment then SIGKILL
+                    time.sleep(0.1)
+                    pid, status = os.waitpid(session.child_pid, os.WNOHANG)
+                    if pid == 0:
+                        os.kill(session.child_pid, signal.SIGKILL)
+                        logger.debug(
+                            f"[METRICS] child_sigkill_sent session={session_hex} pid={session.child_pid}"
+                        )
+                        os.waitpid(session.child_pid, 0)  # Reap zombie
+            except ChildProcessError:
+                pass  # Child already reaped
         except ProcessLookupError:
             logger.debug(
                 f"[METRICS] child_already_exited session={session_hex} pid={session.child_pid}"
@@ -1380,15 +1817,25 @@ class TerminalService:
 
     async def _handle_terminal_resize(
         self,
-        source_identity: str,
+        message: "LXMFMessage",
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_RESIZE from client (via LXMF control plane)."""
+        lxmf_dest_hash = message.source_hash
         payload = decode_payload(envelope.payload)
         session_id = (
             bytes.fromhex(payload["session_id"]) if "session_id" in payload else envelope.request_id
         )
         session_hex = session_id.hex()[:16] if session_id else "none"
+
+        # Resolve LXMF dest hash to identity hash for comparison with session.source_identity
+        source_identity = self._resolve_identity_hash(lxmf_dest_hash)
+        if source_identity is None:
+            logger.debug(
+                f"[METRICS] terminal_resize_ignored session={session_hex} "
+                f"reason=identity_resolution_failed lxmf_dest={lxmf_dest_hash[:16]}"
+            )
+            return
 
         logger.debug(
             f"[METRICS] terminal_resize_received session={session_hex} "
@@ -1397,8 +1844,17 @@ class TerminalService:
 
         session = self.sessions.get(session_id) if session_id else None
         if session and session_id and session.source_identity == source_identity:
+            # Validate dimensions before calling set_window_size
+            rows = payload.get("rows")
+            cols = payload.get("cols")
+            if rows is None or cols is None:
+                logger.debug(
+                    f"[METRICS] terminal_resize_ignored session={session_hex} "
+                    f"reason=missing_dimensions"
+                )
+                return
             session.update_activity()
-            session.set_window_size(payload["rows"], payload["cols"])
+            session.set_window_size(rows, cols)
         else:
             logger.debug(
                 f"[METRICS] terminal_resize_ignored session={session_hex} "
@@ -1407,20 +1863,42 @@ class TerminalService:
 
     async def _handle_terminal_signal(
         self,
-        source_identity: str,
+        message: "LXMFMessage",
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_SIGNAL from client.
 
         Validates the signal against the allowed signals whitelist before sending.
         Blocked signals (SIGKILL, SIGSTOP, SIGQUIT) are always rejected.
+
+        Args:
+            message: LXMF message containing the signal request
+            envelope: Request envelope
         """
+        lxmf_dest_hash = message.source_hash
         payload = decode_payload(envelope.payload)
         session_id = (
             bytes.fromhex(payload["session_id"]) if "session_id" in payload else envelope.request_id
         )
         sig = payload.get("signal", signal.SIGINT)
         session_hex = session_id.hex()[:16] if session_id else "none"
+
+        # Validate signal type before any processing
+        if not isinstance(sig, int):
+            logger.warning(
+                f"[METRICS] terminal_signal_ignored session={session_hex} "
+                f"reason=invalid_signal_type type={type(sig).__name__}"
+            )
+            return
+
+        # Resolve LXMF dest hash to identity hash for comparison with session.source_identity
+        source_identity = self._resolve_identity_hash(lxmf_dest_hash)
+        if source_identity is None:
+            logger.debug(
+                f"[METRICS] terminal_signal_ignored session={session_hex} "
+                f"reason=identity_resolution_failed lxmf_dest={lxmf_dest_hash[:16]}"
+            )
+            return
 
         logger.debug(
             f"[METRICS] terminal_signal_received session={session_hex} "
@@ -1458,15 +1936,30 @@ class TerminalService:
 
     async def _handle_terminal_close(
         self,
-        source_identity: str,
+        message: "LXMFMessage",
         envelope: StyreneEnvelope,
     ) -> StyreneEnvelope | None:
-        """Handle TERMINAL_CLOSE from client."""
+        """Handle TERMINAL_CLOSE from client.
+
+        Args:
+            message: LXMF message containing the close request
+            envelope: Request envelope
+        """
+        lxmf_dest_hash = message.source_hash
         payload = decode_payload(envelope.payload) if envelope.payload else {}
         session_id = (
             bytes.fromhex(payload["session_id"]) if "session_id" in payload else envelope.request_id
         )
         session_hex = session_id.hex()[:16] if session_id else "none"
+
+        # Resolve LXMF dest hash to identity hash for comparison with session.source_identity
+        source_identity = self._resolve_identity_hash(lxmf_dest_hash)
+        if source_identity is None:
+            logger.debug(
+                f"[METRICS] terminal_close_ignored session={session_hex} "
+                f"reason=identity_resolution_failed lxmf_dest={lxmf_dest_hash[:16]}"
+            )
+            return None
 
         logger.debug(
             f"[METRICS] terminal_close_received session={session_hex} "

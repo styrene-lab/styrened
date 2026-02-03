@@ -28,11 +28,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Build and push edge image
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-        run: make push-edge
+        run: just push-edge
 
       - name: Generate build summary
         run: |

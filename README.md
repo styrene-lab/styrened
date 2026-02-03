@@ -114,13 +114,13 @@ For local builds and development:
 
 ```bash
 # Build production image
-make build-prod
+just build-prod
 
 # Build test image (includes test dependencies)
-make build-test
+just build-test
 
 # Show version information
-make version
+just version
 ```
 
 See [CONTAINERS.md](CONTAINERS.md) for complete build pipeline documentation, including:
@@ -304,10 +304,10 @@ The API reference is built from source using [pdoc](https://pdoc.dev) and update
 pip install -e ".[docs]"
 
 # Generate static docs to docs/api/
-make docs
+just docs
 
 # Serve with live reload for development
-make docs-serve
+just docs-serve
 ```
 
 ### Related Documentation

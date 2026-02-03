@@ -40,6 +40,7 @@ from styrened.models.styrene_wire import (
     create_terminal_request,
     decode_payload,
 )
+from styrened.protocols.base import LXMFMessage
 from styrened.terminal.messages import (
     CommandExited,
     Error,
@@ -77,6 +78,7 @@ class TerminalClientSession:
     Attributes:
         session_id: Session identifier from server
         link_destination: RNS destination hash for data Link
+        identity_hash: Identity hash for resolving destination identity
         link: Established RNS Link (set after connect)
         remote_version: Server's protocol version info
         exit_code: Process exit code (set when session ends)
@@ -86,6 +88,7 @@ class TerminalClientSession:
     link_destination: str
     styrene_protocol: "StyreneProtocol"
     destination: str  # Remote destination hash
+    identity_hash: str | None = None  # Identity hash for RNS.Identity.recall()
 
     link: "RNS.Link | None" = None
     remote_version: VersionInfo | None = None
@@ -102,6 +105,19 @@ class TerminalClientSession:
     _original_termios: list | None = None
     _read_task: asyncio.Task | None = None
     _resize_handler_installed: bool = False
+    _event_loop: asyncio.AbstractEventLoop | None = field(default=None, repr=False)
+
+    def _thread_safe_event_set(self, event: asyncio.Event) -> None:
+        """Set an asyncio.Event in a thread-safe manner.
+
+        RNS callbacks run in RNS's thread, not the asyncio event loop thread.
+        This method ensures events are set safely from any thread.
+        """
+        if self._event_loop is not None and self._event_loop.is_running():
+            self._event_loop.call_soon_threadsafe(event.set)
+        else:
+            # Fallback for edge cases (shutdown, no loop)
+            event.set()
 
     async def connect(self, timeout: float = LINK_TIMEOUT) -> bool:
         """Establish RNS Link to server.
@@ -114,23 +130,39 @@ class TerminalClientSession:
         """
         import RNS
 
-        # Resolve destination
+        # Capture event loop for thread-safe callbacks
+        self._event_loop = asyncio.get_running_loop()
+
+        # Resolve identity - prefer identity_hash with from_identity_hash=True
         try:
-            dest_identity = RNS.Identity.recall(bytes.fromhex(self.link_destination))
+            dest_identity = None
+
+            # If we have identity_hash from TERMINAL_ACCEPT, use it with from_identity_hash=True
+            if self.identity_hash:
+                logger.debug(f"Using identity_hash {self.identity_hash[:16]}... for recall")
+                dest_identity = RNS.Identity.recall(
+                    bytes.fromhex(self.identity_hash),
+                    from_identity_hash=True,
+                )
+
             if not dest_identity:
-                # Try to resolve via path
+                # Fall back to path request using link destination hash
                 logger.info(f"Requesting path to {self.link_destination[:16]}...")
                 RNS.Transport.request_path(bytes.fromhex(self.link_destination))
 
-                # Wait for path resolution
+                # Wait for path resolution - this populates the identity cache
                 for _ in range(int(timeout * 10)):
+                    # After path resolution, try to recall by link_destination (dest hash)
                     dest_identity = RNS.Identity.recall(bytes.fromhex(self.link_destination))
                     if dest_identity:
                         break
                     await asyncio.sleep(0.1)
 
             if not dest_identity:
-                logger.error(f"Could not resolve identity for {self.link_destination[:16]}...")
+                logger.error(
+                    f"Could not resolve identity "
+                    f"(identity_hash={self.identity_hash[:16] if self.identity_hash else 'none'}...)"
+                )
                 return False
 
             # Create destination
@@ -166,34 +198,103 @@ class TerminalClientSession:
             logger.error(f"Link establishment failed: {e}")
             return False
 
+    def _send_packet(self, data: bytes) -> bool:
+        """Send data packet over the Link.
+
+        Args:
+            data: Data to send
+
+        Returns:
+            True if sent successfully
+        """
+        import RNS
+
+        if not self.link or self.link.status != RNS.Link.ACTIVE:
+            return False
+
+        try:
+            packet = RNS.Packet(self.link, data)
+            packet.send()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send packet: {e}")
+            return False
+
     def _on_link_established(self, link: "RNS.Link") -> None:
         """Handle Link establishment.
 
-        Sends session_id to associate Link with terminal session.
+        Identifies client to server and sends session_id to associate Link with terminal session.
         """
-        logger.info("Terminal Link established")
+        import RNS
 
-        # Send session_id to associate Link
-        link.send(self.session_id)
+        from styrened.services.reticulum import get_operator_identity_object
+
+        logger.info(f"Terminal Link established (link.status={link.status})")
+
+        # Identify ourselves to the server so it can verify our identity
+        # This is required for the server to call link.get_remote_identity()
+        identity = get_operator_identity_object()
+        if identity:
+            logger.info("Sending identity proof to server...")
+            link.identify(identity)
+        else:
+            logger.warning("No operator identity available for Link identification")
+
+        logger.info(
+            f"Sending session_id ({len(self.session_id)} bytes): {self.session_id.hex()[:16]}..."
+        )
+
+        # Send session_id to associate Link with terminal session
+        # Use the link parameter directly since self.link may not be ready yet
+        try:
+            packet1 = RNS.Packet(link, self.session_id)
+            logger.info(f"Created session_id packet, MTU={link.get_mtu()}")
+            receipt1 = packet1.send()
+            logger.info(
+                f"Session_id packet sent, receipt={receipt1}, status={receipt1.status if receipt1 else 'None'}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send session_id: {e}", exc_info=True)
+            return
 
         # Send version info
         version_msg = VersionInfo(version="1.0", software="styrene-client")
-        link.send(serialize_message(version_msg))
+        version_data = serialize_message(version_msg)
+        logger.info(
+            f"Sending version info ({len(version_data)} bytes): {version_data[:16].hex()}..."
+        )
+        try:
+            packet2 = RNS.Packet(link, version_data)
+            receipt2 = packet2.send()
+            logger.info(f"Version packet sent, receipt={receipt2}")
+        except Exception as e:
+            logger.error(f"Failed to send version info: {e}", exc_info=True)
 
-    def _on_link_closed(self, link: "RNS.Link", reason: int) -> None:
-        """Handle Link closure."""
-        logger.info(f"Terminal Link closed (reason: {reason})")
+        # Note: _connected is set in _on_link_packet when we receive VersionInfo from server
+        # This ensures the version handshake completes before we consider the connection ready
+        logger.info("Link established, waiting for server version exchange...")
+
+    def _on_link_closed(self, link: "RNS.Link") -> None:
+        """Handle Link closure.
+
+        Note: This callback runs in RNS's thread, not the asyncio event loop.
+        """
+        logger.info("Terminal Link closed")
 
         if self.exit_code is None:
             self.exit_code = -1
 
-        self._exited.set()
+        # Thread-safe event set (callback runs in RNS thread)
+        self._thread_safe_event_set(self._exited)
 
         if self.on_exit and self.exit_code is not None:
             self.on_exit(self.exit_code)
 
     def _on_link_packet(self, data: bytes, packet: "RNS.Packet") -> None:
-        """Handle data received from server."""
+        """Handle data received from server.
+
+        Note: This callback runs in RNS's thread, not the asyncio event loop.
+        """
         try:
             msg = deserialize_message(data)
 
@@ -212,22 +313,24 @@ class TerminalClientSession:
 
             elif isinstance(msg, CommandExited):
                 self.exit_code = msg.return_code
-                self._exited.set()
+                # Thread-safe event set (callback runs in RNS thread)
+                self._thread_safe_event_set(self._exited)
                 if self.on_exit:
                     self.on_exit(msg.return_code)
 
             elif isinstance(msg, VersionInfo):
                 self.remote_version = msg
                 logger.debug(f"Server version: {msg.version} ({msg.software})")
-                # Mark as connected after version exchange
-                self._connected.set()
+                # Mark as connected after version exchange (thread-safe)
+                self._thread_safe_event_set(self._connected)
 
             elif isinstance(msg, Error):
                 logger.error(f"Server error: {msg.message} (code={msg.code})")
                 if self.on_error:
                     self.on_error(msg.message)
                 if msg.fatal:
-                    self._exited.set()
+                    # Thread-safe event set (callback runs in RNS thread)
+                    self._thread_safe_event_set(self._exited)
 
         except Exception as e:
             logger.error(f"Failed to handle terminal packet: {e}")
@@ -241,12 +344,8 @@ class TerminalClientSession:
         Returns:
             True if sent successfully
         """
-        if not self.link or self.link.status != 0x00:  # RNS.Link.ACTIVE
-            return False
-
         msg = StreamData(stream=StreamData.STDIN, data=data)
-        self.link.send(serialize_message(msg))
-        return True
+        return self._send_packet(serialize_message(msg))
 
     def send_resize(self, rows: int, cols: int, xpixel: int = 0, ypixel: int = 0) -> bool:
         """Send window resize to remote terminal.
@@ -260,12 +359,8 @@ class TerminalClientSession:
         Returns:
             True if sent successfully
         """
-        if not self.link or self.link.status != 0x00:
-            return False
-
         msg = WindowSize(rows=rows, cols=cols, xpixel=xpixel, ypixel=ypixel)
-        self.link.send(serialize_message(msg))
-        return True
+        return self._send_packet(serialize_message(msg))
 
     async def close(self) -> None:
         """Close the terminal session gracefully."""
@@ -304,7 +399,7 @@ class TerminalClientSession:
             self._original_termios = None
 
         # Install SIGWINCH handler for window resize
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def handle_sigwinch(signum, frame):
             try:
@@ -351,7 +446,7 @@ class TerminalClientSession:
 
     async def _stdin_read_loop(self) -> None:
         """Read from stdin and send to remote terminal."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         stdin_fd = sys.stdin.fileno()
 
         try:
@@ -422,33 +517,67 @@ class TerminalClient:
 
     async def _handle_terminal_accept(
         self,
-        source_identity: str,
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_ACCEPT response."""
+        _ = message  # Not used, but required by protocol dispatch signature
         request_id = envelope.request_id
+        logger.info(
+            f"Received TERMINAL_ACCEPT, request_id={request_id.hex()[:16] if request_id else 'none'}"
+        )
         if not request_id:
+            logger.warning("TERMINAL_ACCEPT missing request_id")
             return
 
         future = self._pending_requests.get(request_id)
+        logger.info(
+            f"Looking for pending request {request_id.hex()[:16]}, found={future is not None}"
+        )
         if future and not future.done():
             payload = decode_payload(envelope.payload)
+
+            # Validate identity_hash format if provided
+            identity_hash = payload.get("identity_hash")
+            if identity_hash is not None:
+                # Identity hash should be a 64-character hex string (32 bytes)
+                if not isinstance(identity_hash, str) or len(identity_hash) != 64:
+                    logger.warning(
+                        f"Invalid identity_hash format in TERMINAL_ACCEPT: "
+                        f"expected 64 hex chars, got {type(identity_hash).__name__} "
+                        f"len={len(identity_hash) if isinstance(identity_hash, str) else 'N/A'}"
+                    )
+                    identity_hash = None
+                else:
+                    try:
+                        bytes.fromhex(identity_hash)  # Validate hex format
+                    except ValueError:
+                        logger.warning(
+                            f"Invalid identity_hash hex format in TERMINAL_ACCEPT: {identity_hash[:16]}..."
+                        )
+                        identity_hash = None
+
+            logger.info(f"Setting future result for {request_id.hex()[:16]}")
             future.set_result(
                 {
                     "accepted": True,
                     "link_destination": payload["link_destination"],
+                    "identity_hash": identity_hash,
                     "session_id": bytes.fromhex(payload["session_id"])
                     if isinstance(payload.get("session_id"), str)
                     else payload.get("session_id", request_id),
                 }
             )
+        else:
+            logger.warning(f"No pending request found for {request_id.hex()[:16]}")
 
     async def _handle_terminal_reject(
         self,
-        source_identity: str,
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_REJECT response."""
+        _ = message  # Not used, but required by protocol dispatch signature
         request_id = envelope.request_id
         if not request_id:
             return
@@ -466,10 +595,11 @@ class TerminalClient:
 
     async def _handle_terminal_closed(
         self,
-        source_identity: str,
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_CLOSED notification."""
+        _ = message  # Not used, but required by protocol dispatch signature
         # This is informational - the session will handle it via Link closure
         payload = decode_payload(envelope.payload) if envelope.payload else {}
         logger.info(
@@ -534,7 +664,7 @@ class TerminalClient:
             raise ValueError("Terminal request must have a request_id")
 
         # Create future for response
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending_requests[request_id] = future
 
         try:
@@ -553,12 +683,13 @@ class TerminalClient:
                     f"Terminal request rejected: {result['reason']} (code={result['code']})"
                 )
 
-            # Create session
+            # Create session with identity_hash for Link establishment
             session = TerminalClientSession(
                 session_id=result["session_id"],
                 link_destination=result["link_destination"],
                 styrene_protocol=self.styrene_protocol,
                 destination=destination,
+                identity_hash=result.get("identity_hash"),
             )
 
             # Establish Link

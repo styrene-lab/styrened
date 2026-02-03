@@ -1,0 +1,284 @@
+{
+  "name": "bare_metal_matrix",
+  "started_at": "2026-02-02T18:52:17.841550",
+  "completed_at": "2026-02-02T18:52:26.458090",
+  "summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0
+  },
+  "metadata": {
+    "backend": "ssh",
+    "description": "Bare-metal test matrix execution"
+  },
+  "scenarios": [
+    {
+      "name": "ssh_reachable_styrene_node",
+      "description": "Verify SSH connectivity to styrene-node",
+      "category": "connectivity",
+      "params": {
+        "node": "styrene-node",
+        "timeout": 10.0
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {}
+      },
+      "actual": {
+        "success": true,
+        "duration": 0.3166329860687256,
+        "data": {
+          "backend": "ssh"
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "ssh_reachable_t100ta",
+      "description": "Verify SSH connectivity to t100ta",
+      "category": "connectivity",
+      "params": {
+        "node": "t100ta",
+        "timeout": 10.0
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {}
+      },
+      "actual": {
+        "success": true,
+        "duration": 0.5647251605987549,
+        "data": {
+          "backend": "ssh"
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "ssh_reachable_nonexistent",
+      "description": "Verify SSH fails for nonexistent host",
+      "category": "connectivity",
+      "params": {
+        "node": "nonexistent.vanderlyn.local",
+        "timeout": 5.0
+      },
+      "expected": {
+        "outcome": "fail",
+        "duration_max": 10.0,
+        "data": {}
+      },
+      "actual": {
+        "success": false,
+        "duration": 0.022692203521728516,
+        "data": {
+          "return_code": 255
+        },
+        "error": "ssh: Could not resolve hostname nonexistent.vanderlyn.local: nodename nor servname provided, or not known\n"
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "version_installed_styrene_node",
+      "description": "Verify styrened is installed on styrene-node",
+      "category": "version",
+      "params": {
+        "node": "styrene-node"
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {
+          "version_pattern": "\\d+\\.\\d+\\.\\d+"
+        }
+      },
+      "actual": {
+        "success": true,
+        "duration": 0.923043966293335,
+        "data": {
+          "version": "0.3.6"
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "version_installed_t100ta",
+      "description": "Verify styrened is installed on t100ta",
+      "category": "version",
+      "params": {
+        "node": "t100ta"
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {}
+      },
+      "actual": {
+        "success": true,
+        "duration": 2.7591559886932373,
+        "data": {
+          "version": "0.3.6"
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "prereq_pip_styrene_node",
+      "description": "Verify pip prerequisites on styrene-node (venv)",
+      "category": "prerequisites",
+      "params": {
+        "node": "styrene-node",
+        "method": "pip_git"
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {
+          "python3": true,
+          "pip": true
+        }
+      },
+      "actual": {
+        "success": true,
+        "duration": 0.9666049480438232,
+        "data": {
+          "method": "pip_git",
+          "checks": {
+            "python3": true,
+            "pip": true
+          }
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "prereq_nix_styrene_node",
+      "description": "Verify nix prerequisites on styrene-node (NixOS)",
+      "category": "prerequisites",
+      "params": {
+        "node": "styrene-node",
+        "method": "nix_flake"
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {
+          "nix": true,
+          "flakes": true
+        }
+      },
+      "actual": {
+        "success": true,
+        "duration": 0.605633020401001,
+        "data": {
+          "method": "nix_flake",
+          "checks": {
+            "nix": true,
+            "flakes": true
+          }
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "prereq_pip_t100ta",
+      "description": "Verify pip prerequisites on t100ta (expected to fail - NixOS)",
+      "category": "prerequisites",
+      "params": {
+        "node": "t100ta",
+        "method": "pip_git"
+      },
+      "expected": {
+        "outcome": "fail",
+        "duration_max": 5.0,
+        "data": {}
+      },
+      "actual": {
+        "success": false,
+        "duration": 1.0759432315826416,
+        "data": {
+          "method": "pip_git",
+          "checks": {
+            "python3": false,
+            "pip": false
+          }
+        },
+        "error": "Missing prerequisites: python3, pip"
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    },
+    {
+      "name": "prereq_nix_t100ta",
+      "description": "Verify nix prerequisites on t100ta (NixOS)",
+      "category": "prerequisites",
+      "params": {
+        "node": "t100ta",
+        "method": "nix_flake"
+      },
+      "expected": {
+        "outcome": "pass",
+        "duration_max": 5.0,
+        "data": {
+          "nix": true,
+          "flakes": true
+        }
+      },
+      "actual": {
+        "success": true,
+        "duration": 1.3644092082977295,
+        "data": {
+          "method": "nix_flake",
+          "checks": {
+            "nix": true,
+            "flakes": true
+          }
+        },
+        "error": null
+      },
+      "analysis": {
+        "outcome_matched": true,
+        "duration_ok": true,
+        "notes": ""
+      }
+    }
+  ]
+}
