@@ -75,6 +75,26 @@ typecheck:
 # Run all validation checks (lint + typecheck + test)
 validate: lint typecheck test
 
+# ─── Documentation ──────────────────────────────────────────────────────────
+
+# Generate API documentation (output: docs/api/)
+docs:
+    @echo "Generating API documentation..."
+    @pip show pdoc >/dev/null 2>&1 || { echo "pdoc not installed. Run: pip install -e '.[docs]'"; exit 1; }
+    pdoc src/styrened -o docs/api --docformat google
+    @echo "Generated: docs/api/"
+
+# Serve API documentation locally (live reload)
+docs-serve:
+    @echo "Starting documentation server..."
+    @pip show pdoc >/dev/null 2>&1 || { echo "pdoc not installed. Run: pip install -e '.[docs]'"; exit 1; }
+    pdoc src/styrened --docformat google
+
+# Remove generated documentation
+docs-clean:
+    rm -rf docs/api/
+    @echo "Cleaned: docs/api/"
+
 # Check version synchronization across all sources
 check-versions:
     #!/usr/bin/env bash
@@ -553,3 +573,205 @@ identity:
 setup-hooks:
     git config core.hooksPath .githooks
     @echo "Git hooks configured to use .githooks/"
+
+# ─── Bare-Metal Testing ─────────────────────────────────────────────────────
+#
+# Hardware integration tests for physical devices.
+# Requires SSH access to registered devices (see tests/bare-metal/devices.yaml)
+# SSH config (~/.ssh/config) handles user/key selection.
+
+# Show status of all bare-metal devices
+bare-metal-status:
+    #!/usr/bin/env bash
+    echo "Bare-metal device status:"
+    for device in styrene-node t100ta; do
+        host="$device.vanderlyn.local"
+        printf "  %-14s " "$device:"
+        if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" "echo ok" >/dev/null 2>&1; then
+            version=$(ssh -o BatchMode=yes "$host" "source ~/.local/styrene-venv/bin/activate && styrened version 2>/dev/null" 2>/dev/null || echo "n/a")
+            daemon=$(ssh -o BatchMode=yes "$host" "systemctl --user is-active styrened 2>/dev/null" 2>/dev/null || echo "unknown")
+            echo "online | version: $version | daemon: $daemon"
+        else
+            echo "unreachable"
+        fi
+    done
+
+# Quick smoke tests on all bare-metal devices
+test-bare-metal-smoke:
+    @echo "Running bare-metal smoke tests..."
+    pytest tests/bare-metal/test_smoke.py -v
+
+# Deploy wheel to bare-metal devices and verify
+test-bare-metal-deploy:
+    @echo "Building wheel..."
+    python -m build --wheel
+    @echo "Running bare-metal deployment tests..."
+    pytest tests/bare-metal/test_deployment.py -v
+
+# Mesh integration tests (requires running daemons)
+test-bare-metal-mesh:
+    @echo "Running bare-metal mesh tests..."
+    pytest tests/bare-metal/test_mesh.py -v
+
+# Run all bare-metal tests (smoke + mesh)
+test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
+    @echo "All bare-metal tests complete"
+
+# Run bare-metal tests on specific device
+test-bare-metal-device device:
+    @echo "Running tests on {{ device }}..."
+    pytest tests/bare-metal/ -v -k "{{ device }}"
+
+# Start daemons on all bare-metal devices
+bare-metal-start:
+    #!/usr/bin/env bash
+    for device in styrene-node t100ta; do
+        host="$device.vanderlyn.local"
+        echo "Starting daemon on $device..."
+        ssh -o BatchMode=yes "$host" "systemctl --user start styrened 2>/dev/null || source ~/.local/styrene-venv/bin/activate && nohup styrened daemon > /tmp/styrened.log 2>&1 &"
+    done
+    echo "Daemons started"
+
+# Stop daemons on all bare-metal devices
+bare-metal-stop:
+    #!/usr/bin/env bash
+    for device in styrene-node t100ta; do
+        host="$device.vanderlyn.local"
+        echo "Stopping daemon on $device..."
+        ssh -o BatchMode=yes "$host" "systemctl --user stop styrened 2>/dev/null || pkill -f 'styrened daemon' 2>/dev/null || true"
+    done
+    echo "Daemons stopped"
+
+# Deploy current wheel to all bare-metal devices
+bare-metal-deploy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building wheel..."
+    python -m build --wheel
+    wheel=$(ls -t dist/styrened-*.whl | head -1)
+    echo "Deploying $wheel..."
+    for device in styrene-node t100ta; do
+        host="$device.vanderlyn.local"
+        echo "  → $device"
+        scp "$wheel" "$host:/tmp/"
+        ssh -o BatchMode=yes "$host" "source ~/.local/styrene-venv/bin/activate && pip install --upgrade /tmp/$(basename $wheel)"
+    done
+    echo "Deployment complete"
+
+# ─── Cross-Platform Test Scenarios ──────────────────────────────────────────
+#
+# Unified test scenarios that run on either SSH (bare-metal) or K8s backend.
+# Uses the unified test harness (tests/harness/).
+
+# Run cross-platform scenarios on SSH backend (bare-metal devices)
+test-scenarios-ssh:
+    @echo "Running cross-platform scenarios on SSH backend..."
+    pytest tests/scenarios/ --backend=ssh -v
+
+# Run cross-platform scenarios on K8s backend
+test-scenarios-k8s namespace="styrene-test":
+    @echo "Running cross-platform scenarios on K8s backend..."
+    pytest tests/scenarios/ --backend=k8s --k8s-namespace={{ namespace }} -v
+
+# Run cross-platform scenarios on both backends
+test-scenarios-both namespace="styrene-test":
+    @echo "Running cross-platform scenarios on both backends..."
+    pytest tests/scenarios/ --backend=both --k8s-namespace={{ namespace }} -v
+
+# Run smoke-tier cross-platform tests (fast validation)
+test-scenarios-smoke backend="ssh":
+    @echo "Running smoke scenarios on {{ backend }} backend..."
+    pytest tests/scenarios/ --backend={{ backend }} -m smoke -v
+
+# Run integration-tier cross-platform tests
+test-scenarios-integration backend="ssh":
+    @echo "Running integration scenarios on {{ backend }} backend..."
+    pytest tests/scenarios/ --backend={{ backend }} -m integration -v
+
+# Run comprehensive cross-platform tests
+test-scenarios-comprehensive backend="ssh":
+    @echo "Running comprehensive scenarios on {{ backend }} backend..."
+    pytest tests/scenarios/ --backend={{ backend }} -m comprehensive -v
+
+# ─── Installation Testing ───────────────────────────────────────────────────
+#
+# Installation tests handle deployment/provisioning of styrened.
+# These are separate from connectivity/mesh tests which assume working installation.
+
+# Run installation smoke tests (validate existing installation)
+test-install-smoke:
+    @echo "Running installation smoke tests..."
+    pytest tests/scenarios/test_installation.py --backend=ssh -m smoke -v
+
+# Run full installation tests (install/upgrade cycles)
+test-install:
+    @echo "Running installation tests..."
+    pytest tests/scenarios/test_installation.py --backend=ssh -m installation -v
+
+# Run provisioning tests (install + systemd setup)
+test-provision:
+    @echo "Running provisioning tests..."
+    pytest tests/scenarios/test_installation.py --backend=ssh -m provisioning -v
+
+# Install from specific git tag on all devices
+test-install-tag tag:
+    @echo "Installing tag {{ tag }} on all devices..."
+    pytest tests/scenarios/test_installation.py::TestPipGitInstallation::test_install_from_tag \
+        --backend=ssh --install-tag={{ tag }} -v
+
+# Install from wheel on all devices
+test-install-wheel wheel_path="":
+    #!/usr/bin/env bash
+    if [[ -z "{{ wheel_path }}" ]]; then
+        wheel=$(ls -t dist/styrened-*.whl 2>/dev/null | head -1)
+        if [[ -z "$wheel" ]]; then
+            echo "No wheel found. Build with: just build-wheel"
+            exit 1
+        fi
+    else
+        wheel="{{ wheel_path }}"
+    fi
+    echo "Installing wheel: $wheel"
+    pytest tests/scenarios/test_installation.py::TestWheelInstallation::test_install_from_wheel \
+        --backend=ssh --wheel-path="$wheel" -v
+
+# Full provisioning workflow on all devices
+test-provision-all:
+    @echo "Provisioning all devices..."
+    pytest tests/scenarios/test_installation.py::TestFullProvisioning::test_provision_all_nodes \
+        --backend=ssh -v
+
+# Build wheel for installation tests
+build-wheel:
+    @echo "Building wheel..."
+    python -m build --wheel
+    @ls -la dist/styrened-*.whl | tail -1
+
+# ─── Test Matrix ────────────────────────────────────────────────────────────
+#
+# Structured test scenarios with expected parameters and results for analysis.
+
+# Run full test matrix (smoke + integration)
+test-matrix:
+    @echo "Running test matrix..."
+    pytest tests/scenarios/test_matrix.py --backend=ssh -v -s 2>&1 | tee test-results/matrix-$(date +%Y%m%d_%H%M%S).log
+
+# Run smoke test matrix only
+test-matrix-smoke:
+    @echo "Running smoke test matrix..."
+    pytest tests/scenarios/test_matrix.py --backend=ssh -m smoke -v -s
+
+# Run integration test matrix (requires running daemons)
+test-matrix-integration:
+    @echo "Running integration test matrix..."
+    pytest tests/scenarios/test_matrix.py --backend=ssh -m integration -v -s
+
+# Analyze test matrix results
+test-matrix-analyze:
+    @echo "Analyzing test matrix results..."
+    python scripts/analyze_matrix.py test-results/
+
+# List recent test matrix results
+test-matrix-list:
+    @echo "Recent test matrix results:"
+    @ls -lt test-results/matrix_*.json 2>/dev/null | head -10 || echo "  No results found"

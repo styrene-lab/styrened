@@ -80,6 +80,8 @@ class StyreneDaemon:
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
         self._node_store: Any = None  # NodeStore for device persistence
+        self._terminal_service: Any = None  # Terminal session service
+        self._styrene_protocol: Any = None  # Styrene protocol for RPC/terminal
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -115,6 +117,10 @@ class StyreneDaemon:
         # Start IPC control server if enabled
         if self.config.ipc.enabled:
             await self._start_control_server()
+
+        # Start terminal service if enabled
+        if self.config.terminal.enabled:
+            self._start_terminal_service()
 
         self._running = True
         logger.info("Styrene daemon running")
@@ -378,10 +384,20 @@ class StyreneDaemon:
 
         try:
             # Check if this is a chat protocol message
+            # Sideband/NomadNet/MeshChat send messages WITHOUT a protocol field
+            # We treat missing/empty protocol as "chat" for ecosystem compatibility
             fields = lxmf_message.fields or {}
             protocol = fields.get("protocol", "")
-            if protocol != "chat":
-                # Not a chat message, skip
+
+            # Skip non-chat protocols (styrene RPC, read receipts, etc.)
+            # But treat empty protocol as chat (Sideband compatibility)
+            if protocol and protocol != "chat":
+                # Explicit non-chat protocol, skip
+                return
+
+            # Check for StyreneProtocol custom fields (binary protocol, not chat)
+            # FIELD_CUSTOM_TYPE = 0xFB
+            if fields.get(0xFB) or fields.get("custom_type"):
                 return
 
             # Extract message data
@@ -672,7 +688,7 @@ class StyreneDaemon:
             db_engine = init_db()
 
             # Create StyreneProtocol instance for RPC transport
-            styrene_protocol = StyreneProtocol(
+            self._styrene_protocol = StyreneProtocol(
                 router=lxmf_service.router,
                 identity=lxmf_service._identity,
                 db_engine=db_engine,
@@ -681,16 +697,16 @@ class StyreneDaemon:
             # Register StyreneProtocol as a callback handler for LXMF messages
             # so it can dispatch incoming Styrene messages to RPC handlers
             lxmf_service.register_callback(
-                self._handle_styrene_message_dispatch(styrene_protocol),
+                self._handle_styrene_message_dispatch(self._styrene_protocol),
                 raw_mode=True,
             )
 
-            self._rpc_server = RPCServer(styrene_protocol)
+            self._rpc_server = RPCServer(self._styrene_protocol)
 
             # Create RPC client for outgoing requests (used by IPC handlers)
             from styrened.rpc import RPCClient
 
-            self._rpc_client = RPCClient(styrene_protocol)
+            self._rpc_client = RPCClient(self._styrene_protocol)
             logger.debug("RPC client created for IPC handlers")
 
             # Configure based on deployment mode
@@ -809,6 +825,75 @@ class StyreneDaemon:
             logger.warning(f"Auto-reply not available: {e}")
         except Exception as e:
             logger.error(f"Failed to start auto-reply: {e}")
+
+    def _start_terminal_service(self) -> None:
+        """Start the terminal session service.
+
+        The terminal service enables remote shell access via the Styrene
+        terminal protocol. It uses:
+        - LXMF control plane for session establishment/teardown
+        - RNS Link data plane for I/O streaming
+        """
+        try:
+            from styrened.services.rns_service import get_rns_service
+            from styrened.terminal.service import TerminalService
+
+            rns_service = get_rns_service()
+            if not rns_service.is_initialized:
+                logger.warning("RNS not initialized, terminal service not started")
+                return
+
+            if not self._styrene_protocol:
+                logger.warning("Styrene protocol not available, terminal service not started")
+                return
+
+            # Build kwargs for terminal service
+            terminal_kwargs: dict[str, Any] = {
+                "rns_service": rns_service,
+                "styrene_protocol": self._styrene_protocol,
+                "authorized_identities": self.config.terminal.authorized_identities,
+                "allow_unauthenticated": self.config.terminal.allow_unauthenticated,
+                "session_idle_timeout": self.config.terminal.session_idle_timeout,
+                "max_sessions_per_identity": self.config.terminal.max_sessions_per_identity,
+                "max_total_sessions": self.config.terminal.max_total_sessions,
+            }
+
+            # Only pass default_shell if configured
+            if self.config.terminal.default_shell:
+                terminal_kwargs["default_shell"] = self.config.terminal.default_shell
+
+            # Only pass allowed_shells if configured (otherwise use defaults)
+            if self.config.terminal.allowed_shells:
+                terminal_kwargs["allowed_shells"] = self.config.terminal.allowed_shells
+
+            # Create terminal service with config
+            self._terminal_service = TerminalService(**terminal_kwargs)
+
+            # Start the service (registers handlers, creates destination)
+            self._terminal_service.start()
+
+            logger.info(
+                f"[METRICS] terminal_service_started "
+                f"authorized_identities={len(self.config.terminal.authorized_identities)} "
+                f"allow_unauthenticated={self.config.terminal.allow_unauthenticated} "
+                f"max_sessions={self.config.terminal.max_total_sessions}"
+            )
+
+        except ImportError as e:
+            logger.warning(f"Terminal service not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start terminal service: {e}")
+
+    def _stop_terminal_service(self) -> None:
+        """Stop the terminal session service gracefully."""
+        if self._terminal_service:
+            try:
+                self._terminal_service.stop()
+                logger.info("[METRICS] terminal_service_stopped")
+            except Exception as e:
+                logger.error(f"Error stopping terminal service: {e}")
+            finally:
+                self._terminal_service = None
 
     async def _start_api(self) -> None:
         """Start HTTP API server."""
@@ -1023,6 +1108,9 @@ class StyreneDaemon:
         """Stop the daemon services."""
         logger.info("Stopping Styrene daemon...")
         self._running = False
+
+        # Stop terminal service (closes all sessions)
+        self._stop_terminal_service()
 
         # Stop IPC control server
         if self._control_server:

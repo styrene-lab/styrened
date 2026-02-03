@@ -2,13 +2,13 @@ name: Nightly Build - Comprehensive Tests
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC daily
+    - cron: "0 2 * * *" # 2 AM UTC daily
   workflow_dispatch:
     inputs:
       test_tier:
-        description: 'Test tier to run'
+        description: "Test tier to run"
         required: false
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - smoke
@@ -16,9 +16,9 @@ on:
           - comprehensive
           - all
       workers:
-        description: 'Number of parallel workers'
+        description: "Number of parallel workers"
         required: false
-        default: '8'
+        default: "8"
         type: string
 
 env:
@@ -47,17 +47,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Build and push test images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-        run: make push-test-nightly
+        run: just push-test-nightly
 
       - name: Build and push edge image
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-        run: make push-edge
+        run: just push-edge
 
   test-smoke:
     name: Smoke Tests
@@ -73,8 +76,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install test dependencies
         run: |
@@ -157,8 +160,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install test dependencies
         run: |
@@ -241,8 +244,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install test dependencies
         run: |

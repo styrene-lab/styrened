@@ -164,8 +164,8 @@ kubectl cluster-info
 **Option A: Build locally (recommended for development)**
 
 ```bash
-# Build test image using Makefile
-make build-test
+# Build test image
+just build-test
 
 # Load into kind
 kind load docker-image styrene-lab/styrened-test:test --name styrene-test
@@ -187,7 +187,7 @@ kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-t
 k3d image import ghcr.io/styrene-lab/styrened-test:latest -c styrene-test
 ```
 
-**Option C: Build directly (if Makefile unavailable)**
+**Option C: Build directly (manual Docker command)**
 
 ```bash
 # Build for AMD64 (if on ARM Mac)
@@ -201,7 +201,7 @@ kind load docker-image styrened-test:latest --name styrene-test
 
 ```bash
 # One command: create secret, deploy from GHCR, run tests
-make test-k8s-remote
+just test-k8s-remote
 ```
 
 This is ideal for:

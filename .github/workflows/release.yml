@@ -108,15 +108,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Build and push production image
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
           if [[ "${{ needs.validate-tag.outputs.is_prerelease }}" == "false" ]]; then
-            make push-prod-latest
+            just push-prod-latest
           else
-            make push-prod
+            just push-prod
           fi
 
   generate-changelog:

@@ -325,6 +325,38 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         if "max_peering_cost" in lxmf:
             config.lxmf.max_peering_cost = int(lxmf["max_peering_cost"])
 
+    # Parse terminal section
+    if "terminal" in data and isinstance(data["terminal"], dict):
+        term = data["terminal"]
+        if "enabled" in term:
+            config.terminal.enabled = _parse_bool(term["enabled"])
+        if "allow_unauthenticated" in term:
+            config.terminal.allow_unauthenticated = _parse_bool(term["allow_unauthenticated"])
+        if "default_shell" in term and term["default_shell"]:
+            config.terminal.default_shell = str(term["default_shell"])
+        # Parse allowed_shells as a set of paths
+        if "allowed_shells" in term and isinstance(term["allowed_shells"], list):
+            shells = set()
+            for shell in term["allowed_shells"]:
+                if isinstance(shell, str) and shell.startswith("/"):
+                    shells.add(shell)
+            config.terminal.allowed_shells = shells
+        if "session_idle_timeout" in term:
+            config.terminal.session_idle_timeout = int(term["session_idle_timeout"])
+        if "max_sessions_per_identity" in term:
+            config.terminal.max_sessions_per_identity = int(term["max_sessions_per_identity"])
+        if "max_total_sessions" in term:
+            config.terminal.max_total_sessions = int(term["max_total_sessions"])
+        if "rate_limit_requests" in term:
+            config.terminal.rate_limit_requests = int(term["rate_limit_requests"])
+        # Parse authorized_identities as a set of hex strings
+        if "authorized_identities" in term and isinstance(term["authorized_identities"], list):
+            authorized = set()
+            for ident in term["authorized_identities"]:
+                if isinstance(ident, str) and len(ident) == 32:
+                    authorized.add(ident)
+            config.terminal.authorized_identities = authorized
+
     return config
 
 

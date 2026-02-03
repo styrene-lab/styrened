@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures for styrened k8s tests."""
 
 import os
+import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -9,7 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from .harness import K8sTestHarness
+# Ensure tests package is importable
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+# Import from unified harness package (K8sHarness) with backward-compatible alias
+from tests.harness.k8s import K8sHarness as K8sTestHarness
+
 from .metrics_collector import MetricsCollector
 
 

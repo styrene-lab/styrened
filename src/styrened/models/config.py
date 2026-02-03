@@ -396,6 +396,39 @@ class LXMFConfig:
 
 
 @dataclass
+class TerminalConfig:
+    """Terminal session configuration.
+
+    Controls remote terminal access to this node via the Styrene terminal protocol.
+    Terminal sessions use a two-plane architecture:
+    - LXMF control plane for session establishment/teardown
+    - RNS Link data plane for I/O streaming
+
+    Attributes:
+        enabled: Whether to enable terminal service.
+        authorized_identities: Set of identity hashes allowed to connect.
+            If empty and allow_unauthenticated=False, all connections rejected.
+        allow_unauthenticated: Allow connections from any identity.
+            WARNING: This grants remote shell access - use with caution.
+        default_shell: Shell to spawn for sessions (default: user's shell).
+        session_idle_timeout: Seconds of inactivity before session close (0=disabled).
+        max_sessions_per_identity: Maximum concurrent sessions per identity.
+        max_total_sessions: Maximum total concurrent sessions.
+        rate_limit_requests: Maximum session requests per minute per identity.
+    """
+
+    enabled: bool = False
+    authorized_identities: set[str] = field(default_factory=set)
+    allow_unauthenticated: bool = False
+    default_shell: str | None = None
+    allowed_shells: set[str] = field(default_factory=set)  # Empty = use defaults
+    session_idle_timeout: int = 3600  # 1 hour default
+    max_sessions_per_identity: int = 3
+    max_total_sessions: int = 10
+    rate_limit_requests: int = 10  # requests per minute per identity
+
+
+@dataclass
 class CoreConfig:
     """Core Styrene configuration for headless applications.
 
@@ -411,6 +444,7 @@ class CoreConfig:
         api: HTTP API configuration.
         ipc: IPC control socket configuration.
         lxmf: LXMF messaging and propagation configuration.
+        terminal: Terminal session configuration.
     """
 
     reticulum: ReticulumConfig = field(default_factory=ReticulumConfig)
@@ -421,3 +455,4 @@ class CoreConfig:
     api: APIConfig = field(default_factory=APIConfig)
     ipc: IPCConfig = field(default_factory=IPCConfig)
     lxmf: LXMFConfig = field(default_factory=LXMFConfig)
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)

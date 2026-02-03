@@ -1165,6 +1165,221 @@ def cmd_identity_unshare(args: argparse.Namespace) -> int:
 # -----------------------------------------------------------------------------
 
 
+def cmd_shell(args: argparse.Namespace) -> int:
+    """Start an interactive shell session on a remote node.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code from remote shell, or error code on failure.
+    """
+    return asyncio.run(_cmd_shell_async(args))
+
+
+async def _cmd_shell_async(args: argparse.Namespace) -> int:
+    """Async implementation of shell command."""
+    import os
+
+    destination = args.destination
+
+    # Validate destination format (32 hex chars = 16 bytes)
+    try:
+        dest_bytes = bytes.fromhex(destination)
+        if len(dest_bytes) != 16:
+            print("Invalid destination: must be 32 hex characters", file=sys.stderr)
+            return 1
+    except ValueError:
+        print("Invalid destination: must be hexadecimal", file=sys.stderr)
+        return 1
+
+    # Get terminal size
+    rows = args.rows
+    cols = args.cols
+    if rows is None or cols is None:
+        try:
+            term_size = os.get_terminal_size()
+            rows = rows or term_size.lines
+            cols = cols or term_size.columns
+        except OSError:
+            # Not a terminal, use defaults
+            rows = rows or 24
+            cols = cols or 80
+
+    term_type = args.term_type or os.environ.get("TERM", "xterm-256color")
+
+    # TODO: IPC mode for terminal sessions not yet implemented.
+    # Terminal sessions require bidirectional I/O streaming which is more
+    # complex than the request/response IPC pattern. For now, always use
+    # standalone mode which initializes its own mesh stack.
+    #
+    # Future: Implement IPC protocol for terminal sessions that:
+    # 1. Proxies session establishment through daemon
+    # 2. Forwards stdin/stdout/stderr via IPC
+    # 3. Handles window resize and signals
+
+    # Standalone mode
+    import RNS
+
+    from styrened.services.config import get_default_core_config, load_core_config
+    from styrened.services.lifecycle import CoreLifecycle
+    from styrened.services.lxmf_service import get_lxmf_service
+    from styrened.services.node_store import get_node_store
+    from styrened.services.reticulum import (
+        discover_devices,
+        get_operator_identity_object,
+        start_discovery,
+    )
+    from styrened.terminal.client import TerminalClient
+
+    discovery_wait = getattr(args, "wait", 15)
+
+    # Load config
+    try:
+        config = load_core_config()
+    except FileNotFoundError:
+        config = get_default_core_config()
+
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
+    if not lifecycle.initialize():
+        print("Failed to initialize services", file=sys.stderr)
+        return 1
+
+    # Initialize LXMF
+    lxmf_service = get_lxmf_service()
+    identity = get_operator_identity_object()
+    if not identity or not lxmf_service.initialize(identity):
+        print("Failed to initialize LXMF", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    # Try to resolve the destination identity first via RNS path resolution
+    # This allows connecting without waiting for fresh announces
+    print(f"Resolving path to {destination[:16]}...")
+
+    # Check if we already know this identity (from previous sessions)
+    dest_identity = RNS.Identity.recall(bytes.fromhex(destination))
+    if dest_identity:
+        print(f"Found cached identity for {destination[:16]}...")
+    else:
+        # Request path discovery and wait
+        print(f"Requesting path to {destination[:16]}... (waiting {discovery_wait}s)")
+        RNS.Transport.request_path(bytes.fromhex(destination))
+
+        start_time = time.time()
+        while time.time() - start_time < discovery_wait:
+            dest_identity = RNS.Identity.recall(bytes.fromhex(destination))
+            if dest_identity:
+                break
+            await asyncio.sleep(0.5)
+
+    if not dest_identity:
+        # Fall back to announce-based discovery
+        node_store = get_node_store()
+        print(f"Path not found, waiting for announce ({discovery_wait}s)...")
+        start_discovery(node_store=node_store)
+
+        target_device = None
+        start_time = time.time()
+        prefix = destination[:16]
+        while time.time() - start_time < discovery_wait:
+            devices = discover_devices()
+            for device in devices:
+                if (
+                    (device.destination_hash and device.destination_hash.startswith(prefix))
+                    or (
+                        device.lxmf_destination_hash
+                        and device.lxmf_destination_hash.startswith(prefix)
+                    )
+                    or (device.identity_hash and device.identity_hash.startswith(prefix))
+                ):
+                    target_device = device
+                    break
+            if target_device:
+                print(f"Found device: {target_device.name}")
+                break
+            await asyncio.sleep(0.5)
+
+        if not target_device:
+            print(
+                f"Device {destination[:16]}... not found after {discovery_wait}s", file=sys.stderr
+            )
+            lifecycle.shutdown()
+            return 1
+    else:
+        print(f"Path resolved to {destination[:16]}...")
+
+    # Create Styrene protocol for terminal client
+    from styrened.models.messages import init_db
+    from styrened.protocols.base import LXMFMessage
+    from styrened.protocols.styrene import StyreneProtocol
+
+    db_engine = init_db()
+    styrene_protocol = StyreneProtocol(
+        router=lxmf_service.router,
+        identity=lxmf_service._identity,
+        db_engine=db_engine,
+    )
+
+    # Get reference to the main event loop for thread-safe dispatch
+    main_loop = asyncio.get_event_loop()
+
+    # Register callback to dispatch incoming messages to StyreneProtocol
+    def _dispatch_to_styrene(lxmf_message: Any) -> None:
+        """Bridge LXMF messages to StyreneProtocol."""
+        wrapped = LXMFMessage(
+            source_hash=lxmf_message.source_hash.hex(),
+            destination_hash=lxmf_message.destination_hash.hex()
+            if lxmf_message.destination_hash
+            else "",
+            timestamp=lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else 0.0,
+            content=lxmf_message.content.decode("utf-8")
+            if isinstance(lxmf_message.content, bytes)
+            else (lxmf_message.content or ""),
+            fields=lxmf_message.fields or {},
+        )
+        if styrene_protocol.can_handle(wrapped):
+            # Schedule on main event loop (thread-safe)
+            main_loop.call_soon_threadsafe(
+                lambda: main_loop.create_task(styrene_protocol.handle_message(wrapped))
+            )
+
+    lxmf_service.register_callback(_dispatch_to_styrene, raw_mode=True)
+
+    # Create terminal client
+    terminal_client = TerminalClient(styrene_protocol=styrene_protocol)
+
+    try:
+        # Request terminal session
+        print("Requesting terminal session...")
+        session = await terminal_client.connect(
+            destination=destination,
+            term_type=term_type,
+            rows=rows,
+            cols=cols,
+        )
+
+        if not session:
+            print("Failed to establish terminal session", file=sys.stderr)
+            return 1
+
+        # Run interactive session
+        print("Connected. Type 'exit' or Ctrl-D to disconnect.\n")
+        exit_code = await session.run_interactive()
+
+        return exit_code
+
+    except KeyboardInterrupt:
+        print("\nInterrupted")
+        return 130  # Standard exit code for SIGINT
+    except Exception as e:
+        print(f"Terminal session error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        lifecycle.shutdown()
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     """Show version information.
 
@@ -1260,6 +1475,26 @@ def create_parser() -> argparse.ArgumentParser:
     )
     exec_parser.add_argument("--json", action="store_true", help="Output as JSON")
     exec_parser.set_defaults(func=cmd_exec)
+
+    # shell - interactive terminal session
+    shell_parser = subparsers.add_parser(
+        "shell", help="Start interactive shell session on remote node"
+    )
+    shell_parser.add_argument("destination", help="Destination hash (hex) of remote node")
+    shell_parser.add_argument(
+        "-T",
+        "--term-type",
+        dest="term_type",
+        help="Terminal type (default: $TERM or xterm-256color)",
+    )
+    shell_parser.add_argument("-r", "--rows", type=int, help="Terminal rows (default: auto-detect)")
+    shell_parser.add_argument(
+        "-c", "--cols", type=int, help="Terminal columns (default: auto-detect)"
+    )
+    shell_parser.add_argument(
+        "-w", "--wait", type=int, default=15, help="Discovery wait time in seconds (default: 15)"
+    )
+    shell_parser.set_defaults(func=cmd_shell)
 
     # announce
     announce_parser = subparsers.add_parser("announce", help="Trigger local announce")

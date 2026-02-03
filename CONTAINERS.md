@@ -31,23 +31,23 @@ Test images include pytest and test dependencies. Built from the `test` stage in
 
 ```bash
 # Build production image (local architecture)
-make build-prod
+just build-prod
 
 # Build production image (multi-arch: amd64, arm64)
-make build-prod-multi
+just build-prod-multi
 
 # Build test image for quick validation
-make build-test
+just build-test
 
 # Test built image
-make test-image-prod
+just test-image-prod
 ```
 
 ### Version Information
 
 ```bash
 # Show current version and build metadata
-make version
+just version
 ```
 
 Version is determined by `scripts/version.sh`:
@@ -68,23 +68,23 @@ export GITHUB_ACTOR=your-username
 
 Or authenticate manually:
 ```bash
-make container-login
+just container-login
 ```
 
 ### Push Commands
 
 ```bash
 # Push production image (version + commit-sha tags)
-make push-prod
+just push-prod
 
 # Push production image with 'latest' tag (releases only)
-make push-prod-latest
+just push-prod-latest
 
 # Push edge build (main branch)
-make push-edge
+just push-edge
 
 # Push test image (nightly builds)
-make push-test-nightly
+just push-test-nightly
 ```
 
 ## CI/CD Workflows
