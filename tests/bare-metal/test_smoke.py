@@ -7,20 +7,20 @@ Run with: pytest tests/bare-metal/test_smoke.py -v
 from __future__ import annotations
 
 import pytest
-from conftest import SSHHarness
+from conftest import ALL_DEVICES, DEVICES_WITH_IDENTITY, SSHHarness
 
 
 @pytest.mark.smoke
 class TestSmoke:
     """Fast smoke tests for release validation."""
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_device_reachable(self, harness: SSHHarness, device: str) -> None:
         """Device is SSH-accessible."""
         result = harness.run(device, "echo ok")
         assert result.stdout.strip() == "ok"
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_styrened_installed(self, harness: SSHHarness, device: str) -> None:
         """styrened is installed and runnable in venv."""
         version = harness.get_version(device)
@@ -28,23 +28,29 @@ class TestSmoke:
         # Version should be semver-ish
         assert "." in version, f"Unexpected version format: {version}"
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", DEVICES_WITH_IDENTITY)
     def test_identity_exists(self, harness: SSHHarness, device: str) -> None:
         """Device has valid identity."""
         identity = harness.get_identity(device)
-        assert identity is not None, "Expected identity hash"
-        assert len(identity) == 32, f"Expected 32-char hash, got {len(identity)}"
+        assert identity is not None, "Expected identity data"
+        assert identity.get("identity_hash"), "Expected identity_hash in response"
+        assert len(identity["identity_hash"]) == 32, (
+            f"Expected 32-char hash, got {len(identity['identity_hash'])}"
+        )
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", DEVICES_WITH_IDENTITY)
     def test_identity_matches_registry(self, harness: SSHHarness, device: str) -> None:
         """Device identity matches registry."""
         identity = harness.get_identity(device)
+        assert identity is not None, "Expected identity data"
         device_config = harness.get_device_config(device)
         assert device_config is not None
         expected_hash = device_config.identity_hash
-        assert identity == expected_hash, f"Identity mismatch: {identity} != {expected_hash}"
+        assert identity["identity_hash"] == expected_hash, (
+            f"Identity mismatch: {identity['identity_hash']} != {expected_hash}"
+        )
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_venv_exists(self, harness: SSHHarness, device: str) -> None:
         """Python venv exists on device."""
         device_config = harness.get_device_config(device)
@@ -55,7 +61,7 @@ class TestSmoke:
         )
         assert result.stdout.strip() == "exists"
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_config_exists(self, harness: SSHHarness, device: str) -> None:
         """Styrene config exists on device."""
         device_config = harness.get_device_config(device)
@@ -71,7 +77,7 @@ class TestSmoke:
 class TestDaemonStatus:
     """Tests for daemon service status."""
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_systemd_unit_exists(self, harness: SSHHarness, device: str) -> None:
         """Systemd unit file exists for styrened."""
         device_config = harness.get_device_config(device)

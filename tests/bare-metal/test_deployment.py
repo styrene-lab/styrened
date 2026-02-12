@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from harness import BareMetalHarness
+from conftest import ALL_DEVICES, DEVICES_WITH_IDENTITY
+from tests.harness.ssh import SSHHarness
 
 
 def get_wheel_path() -> Path | None:
@@ -36,17 +37,16 @@ def wheel_path() -> Path:
 class TestDeployment:
     """Test deployment to bare-metal devices."""
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_deploy_wheel(
         self,
-        harness: BareMetalHarness,
+        harness: SSHHarness,
         wheel_path: Path,
         device: str,
     ) -> None:
         """Deploy wheel and verify installation."""
-        # Deploy
-        success = harness.deploy_wheel(device, wheel_path)
-        assert success, f"Failed to deploy wheel to {device}"
+        result = harness.deploy_wheel(device, wheel_path)
+        assert result.success, f"Failed to deploy wheel to {device}: {result.stderr}"
 
         # Verify version matches
         version = harness.get_version(device)
@@ -54,44 +54,39 @@ class TestDeployment:
         expected = wheel_path.stem.split("-")[1]
         assert version == expected, f"Expected {expected}, got {version}"
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", DEVICES_WITH_IDENTITY)
     def test_identity_preserved_after_deploy(
         self,
-        harness: BareMetalHarness,
+        harness: SSHHarness,
         wheel_path: Path,
         device: str,
     ) -> None:
         """Verify identity is preserved after upgrade."""
-        # Get identity before (from registry - known good)
         expected_hash = harness.registry[device].identity_hash
 
-        # Deploy wheel (may be no-op if same version)
         harness.deploy_wheel(device, wheel_path)
 
-        # Verify identity unchanged
         identity = harness.get_identity(device)
+        assert identity is not None, "Identity missing after deploy"
         assert identity["identity_hash"] == expected_hash
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_config_preserved_after_deploy(
         self,
-        harness: BareMetalHarness,
+        harness: SSHHarness,
         wheel_path: Path,
         device: str,
     ) -> None:
         """Verify config files are not overwritten by deployment."""
         info = harness.registry[device]
 
-        # Get config hash before
         hash_before = harness.run(
             device,
             f"sha256sum {info.config_path}/core-config.yaml | cut -d' ' -f1",
         ).stdout.strip()
 
-        # Deploy
         harness.deploy_wheel(device, wheel_path)
 
-        # Get config hash after
         hash_after = harness.run(
             device,
             f"sha256sum {info.config_path}/core-config.yaml | cut -d' ' -f1",

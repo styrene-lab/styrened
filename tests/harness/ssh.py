@@ -26,7 +26,7 @@ class SSHDeviceConfig:
     os: str
     venv_path: str
     config_path: str
-    identity_hash: str
+    identity_hash: str | None = None
     capabilities: list[str] = field(default_factory=list)
 
 
@@ -87,6 +87,11 @@ class SSHHarness(TestHarness):
 
     def get_nodes(self) -> list[NodeInfo]:
         return list(self._nodes.values())
+
+    @property
+    def registry(self) -> dict[str, SSHDeviceConfig]:
+        """Access device registry by name."""
+        return self._devices
 
     def get_device_config(self, name: str) -> SSHDeviceConfig | None:
         """Get raw device config by name."""
@@ -242,21 +247,29 @@ class SSHHarness(TestHarness):
 
         return result.stdout.strip() == "active"
 
-    def get_identity(self, node: str | NodeInfo) -> str | None:
-        """Get LXMF identity hash for node."""
+    def get_identity(self, node: str | NodeInfo) -> dict[str, Any] | None:
+        """Get LXMF identity info for node.
+
+        Returns:
+            Dict with at least 'identity_hash' and 'exists' keys, or None.
+        """
         result = self.run_styrened(node, "identity --json")
         if result.success:
             try:
                 data = json.loads(result.stdout)
-                # Handle various possible formats
                 if isinstance(data, dict):
-                    return data.get("identity_hash") or data.get("hash")
+                    data.setdefault("exists", bool(data.get("identity_hash") or data.get("hash")))
+                    # Normalize hash key
+                    if "hash" in data and "identity_hash" not in data:
+                        data["identity_hash"] = data["hash"]
+                    return data
                 return None
             except json.JSONDecodeError:
                 # Try to parse non-JSON format
                 for line in result.stdout.splitlines():
                     if ":" in line:
-                        return line.split(":")[-1].strip()
+                        hash_val = line.split(":")[-1].strip()
+                        return {"identity_hash": hash_val, "exists": bool(hash_val)}
         return None
 
     def discover_devices(
