@@ -33,8 +33,39 @@ devices:
       - auto_interface
       - systemd_user
 
+  minigmk:
+    # GMKtec mini PC - Intel N150 test node
+    host: minigmk.vanderlyn.local
+    hardware: GMKtec Mini PC
+    cpu: Intel N150
+    arch: x86_64
+    os: Debian 13
+    venv_path: ~/.local/styrene-venv
+    config_path: ~/.config/styrene
+    identity_hash: 15ce1311291473da67ba0e62d4f302bd
+    capabilities:
+      - tcp_server
+      - auto_interface
+      - systemd_user
+
+  mobilepi:
+    # Raspberry Pi 4 Model B Rev 1.5 - First aarch64 test node
+    host: mobilepi.vanderlyn.local
+    hardware: Raspberry Pi 4 Model B Rev 1.5
+    cpu: Cortex-A72
+    arch: aarch64
+    os: Debian 12
+    venv_path: ~/.local/styrene-venv
+    config_path: ~/.config/styrene
+    capabilities:
+      - tcp_server
+      - auto_interface
+      - systemd_user
+
 # Device groups for targeted test runs
 groups:
-  all: [styrene-node, t100ta]
+  all: [styrene-node, t100ta, minigmk, mobilepi]
   nixos: [styrene-node, t100ta]
-  x86_64: [styrene-node, t100ta]
+  debian: [minigmk, mobilepi]
+  x86_64: [styrene-node, t100ta, minigmk]
+  aarch64: [mobilepi]

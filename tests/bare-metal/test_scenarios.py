@@ -8,8 +8,10 @@ Run with: pytest tests/bare-metal/test_scenarios.py -v
 
 from __future__ import annotations
 
+from itertools import permutations
+
 import pytest
-from harness import BareMetalHarness
+from conftest import ALL_DEVICES, DEVICES_WITH_IDENTITY, BareMetalHarness
 from primitives import (
     check_bidirectional_discovery,
     check_bidirectional_rpc,
@@ -37,18 +39,6 @@ from primitives import (
 # -----------------------------------------------------------------------------
 # Fixtures
 # -----------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def harness() -> BareMetalHarness:
-    """Module-scoped harness for all scenarios."""
-    return BareMetalHarness()
-
-
-@pytest.fixture(scope="module")
-def all_devices(harness: BareMetalHarness) -> list[str]:
-    """List of all registered devices."""
-    return list(harness.registry.keys())
 
 
 @pytest.fixture(scope="class")
@@ -86,21 +76,23 @@ class TestConnectivityScenario:
     """
 
     @pytest.mark.smoke
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_ssh_reachable(self, harness: BareMetalHarness, device: str) -> None:
         """Each device is reachable via SSH."""
         result = check_ssh_connectivity(harness, device)
         assert result.success, result.message
 
     @pytest.mark.smoke
-    def test_devices_can_reach_each_other(self, harness: BareMetalHarness) -> None:
-        """Devices can ping each other."""
-        # styrene-node -> t100ta
-        result = check_network_reachability(harness, "styrene-node", "t100ta")
-        assert result.success, result.message
-
-        # t100ta -> styrene-node
-        result = check_network_reachability(harness, "t100ta", "styrene-node")
+    @pytest.mark.parametrize(
+        "source,target",
+        [pair for pair in permutations(ALL_DEVICES, 2)],
+        ids=[f"{a}->{b}" for a, b in permutations(ALL_DEVICES, 2)],
+    )
+    def test_devices_can_reach_each_other(
+        self, harness: BareMetalHarness, source: str, target: str
+    ) -> None:
+        """Devices can ping each other (all directional pairs)."""
+        result = check_network_reachability(harness, source, target)
         assert result.success, result.message
 
 
@@ -117,14 +109,14 @@ class TestInstallationScenario:
     """
 
     @pytest.mark.smoke
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_venv_exists(self, harness: BareMetalHarness, device: str) -> None:
         """Python venv exists on device."""
         result = check_venv_exists(harness, device)
         assert result.success, result.message
 
     @pytest.mark.smoke
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_styrened_installed(self, harness: BareMetalHarness, device: str) -> None:
         """styrened is installed and runnable."""
         result = check_styrened_installed(harness, device)
@@ -132,21 +124,21 @@ class TestInstallationScenario:
         assert "version" in result.data
 
     @pytest.mark.smoke
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_config_exists(self, harness: BareMetalHarness, device: str) -> None:
         """Styrene config file exists."""
         result = check_config_exists(harness, device)
         assert result.success, result.message
 
     @pytest.mark.smoke
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", DEVICES_WITH_IDENTITY)
     def test_identity_exists(self, harness: BareMetalHarness, device: str) -> None:
         """Device has valid identity."""
         result = check_identity_exists(harness, device)
         assert result.success, result.message
 
     @pytest.mark.smoke
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", DEVICES_WITH_IDENTITY)
     def test_identity_matches_registry(self, harness: BareMetalHarness, device: str) -> None:
         """Device identity matches what's in registry."""
         result = check_identity_matches_registry(harness, device)
@@ -167,7 +159,7 @@ class TestDaemonLifecycleScenario:
     Validates: daemon control via systemd
     """
 
-    @pytest.mark.parametrize("device", ["styrene-node", "t100ta"])
+    @pytest.mark.parametrize("device", ALL_DEVICES)
     def test_daemon_start_stop_cycle(self, harness: BareMetalHarness, device: str) -> None:
         """Daemon can be started and stopped."""
         # Ensure stopped first
@@ -187,6 +179,8 @@ class TestDaemonLifecycleScenario:
 
 # -----------------------------------------------------------------------------
 # Scenario: Mesh Discovery
+# NOTE: Currently limited to devices with identity_hash (styrene-node, t100ta).
+# Expand to all device pairs when minigmk and mobilepi have identities.
 # -----------------------------------------------------------------------------
 
 
@@ -221,6 +215,8 @@ class TestMeshDiscoveryScenario:
 
 # -----------------------------------------------------------------------------
 # Scenario: RPC Communication
+# NOTE: Currently limited to styrene-node <-> t100ta (devices with identity_hash).
+# Expand to all identity-bearing device pairs when more devices have identities.
 # -----------------------------------------------------------------------------
 
 
@@ -271,6 +267,8 @@ class TestRPCScenario:
 
 # -----------------------------------------------------------------------------
 # Scenario: Chat/LXMF Messaging
+# NOTE: Currently limited to styrene-node <-> t100ta (devices with identity_hash).
+# Expand to all identity-bearing device pairs when more devices have identities.
 # -----------------------------------------------------------------------------
 
 
@@ -308,6 +306,8 @@ class TestChatScenario:
 
 # -----------------------------------------------------------------------------
 # Scenario: End-to-End Validation
+# NOTE: Currently limited to styrene-node <-> t100ta (devices with identity_hash).
+# Expand to all identity-bearing device pairs when more devices have identities.
 # -----------------------------------------------------------------------------
 
 

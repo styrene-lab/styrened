@@ -162,10 +162,9 @@ def check_network_reachability(
             from_device,
             f"ping -c 1 -W {timeout} {to_host}",
             timeout=timeout + 5,
-            check=False,
         )
         duration = time.time() - start
-        if result.returncode == 0:
+        if result.return_code == 0:
             return TestResult(
                 success=True,
                 name="check_network_reachability",
@@ -219,7 +218,6 @@ def check_venv_exists(
         result = harness.run(
             device,
             f"test -d {info.venv_path} && test -f {info.venv_path}/bin/activate && echo exists",
-            check=False,
         )
         duration = time.time() - start
         exists = result.stdout.strip() == "exists"
@@ -307,7 +305,6 @@ def check_config_exists(
         result = harness.run(
             device,
             f"test -f {config_file} && echo exists",
-            check=False,
         )
         duration = time.time() - start
         exists = result.stdout.strip() == "exists"
@@ -352,6 +349,14 @@ def check_identity_exists(
     try:
         identity = harness.get_identity(device)
         duration = time.time() - start
+        if identity is None:
+            return TestResult(
+                success=False,
+                name="check_identity_exists",
+                device=device,
+                duration=duration,
+                message="Identity query returned None",
+            )
         exists = identity.get("exists", False)
         identity_hash = identity.get("identity_hash", "")
         return TestResult(
@@ -390,6 +395,15 @@ def check_identity_matches_registry(
     expected_hash = harness.registry[device].identity_hash
     try:
         identity = harness.get_identity(device)
+        if identity is None:
+            return TestResult(
+                success=False,
+                name="check_identity_matches_registry",
+                device=device,
+                duration=time.time() - start,
+                message="Identity query returned None",
+                data={"expected": expected_hash, "actual": None},
+            )
         actual_hash = identity.get("identity_hash", "")
         duration = time.time() - start
         matches = actual_hash == expected_hash
@@ -707,27 +721,29 @@ def send_rpc_status(
     start = time.time()
     to_hash = harness.registry[to_device].identity_hash
     try:
-        status = harness.query_status(from_device, to_hash, timeout=timeout)
+        result = harness.query_status(from_device, to_hash, timeout=timeout)
         duration = time.time() - start
 
-        if status is not None:
-            return TestResult(
-                success=True,
-                name="send_rpc_status",
-                device=from_device,
-                duration=duration,
-                message=f"Status query to {to_device} succeeded",
-                data={"target": to_device, "status": status},
-            )
-        else:
-            return TestResult(
-                success=False,
-                name="send_rpc_status",
-                device=from_device,
-                duration=duration,
-                message=f"Status query to {to_device} returned None",
-                data={"target": to_device},
-            )
+        # Parse JSON from stdout if available
+        status_data: dict[str, Any] = {}
+        if result.success and result.stdout.strip():
+            try:
+                import json
+
+                parsed = json.loads(result.stdout.strip())
+                if isinstance(parsed, dict):
+                    status_data = parsed
+            except (json.JSONDecodeError, ValueError):
+                status_data = {"raw": result.stdout.strip()}
+
+        return TestResult(
+            success=result.success,
+            name="send_rpc_status",
+            device=from_device,
+            duration=duration,
+            message=f"Status query to {to_device} {'succeeded' if result.success else 'failed'}",
+            data={"target": to_device, "status": status_data},
+        )
     except Exception as e:
         return TestResult(
             success=False,
@@ -761,32 +777,25 @@ def send_rpc_exec(
     start = time.time()
     to_hash = harness.registry[to_device].identity_hash
     try:
-        result = harness.exec_command(from_device, to_hash, command, timeout=timeout)
+        result = harness.exec_remote(from_device, to_hash, command, timeout=timeout)
         duration = time.time() - start
 
-        if result is not None:
-            exit_code = result.get("exit_code", -1)
-            return TestResult(
-                success=exit_code == 0,
-                name="send_rpc_exec",
-                device=from_device,
-                duration=duration,
-                message=f"Exec '{command}' on {to_device}: exit={exit_code}",
-                data={
-                    "target": to_device,
-                    "command": command,
-                    "result": result,
+        return TestResult(
+            success=result.success,
+            name="send_rpc_exec",
+            device=from_device,
+            duration=duration,
+            message=f"Exec '{command}' on {to_device}: exit={result.return_code}",
+            data={
+                "target": to_device,
+                "command": command,
+                "result": {
+                    "exit_code": result.return_code,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
                 },
-            )
-        else:
-            return TestResult(
-                success=False,
-                name="send_rpc_exec",
-                device=from_device,
-                duration=duration,
-                message=f"Exec command on {to_device} returned None",
-                data={"target": to_device, "command": command},
-            )
+            },
+        )
     except Exception as e:
         return TestResult(
             success=False,
@@ -829,12 +838,11 @@ def send_chat_message(
             from_device,
             f'send {to_hash} "{message}"',
             timeout=timeout,
-            check=False,
         )
         duration = time.time() - start
 
         # Check for success indicators
-        success = result.returncode == 0 or "queued" in result.stdout.lower()
+        success = result.return_code == 0 or "queued" in result.stdout.lower()
         return TestResult(
             success=success,
             name="send_chat_message",

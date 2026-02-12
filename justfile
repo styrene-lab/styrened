@@ -582,19 +582,7 @@ setup-hooks:
 
 # Show status of all bare-metal devices
 bare-metal-status:
-    #!/usr/bin/env bash
-    echo "Bare-metal device status:"
-    for device in styrene-node t100ta; do
-        host="$device.vanderlyn.local"
-        printf "  %-14s " "$device:"
-        if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" "echo ok" >/dev/null 2>&1; then
-            version=$(ssh -o BatchMode=yes "$host" "source ~/.local/styrene-venv/bin/activate && styrened version 2>/dev/null" 2>/dev/null || echo "n/a")
-            daemon=$(ssh -o BatchMode=yes "$host" "systemctl --user is-active styrened 2>/dev/null" 2>/dev/null || echo "unknown")
-            echo "online | version: $version | daemon: $daemon"
-        else
-            echo "unreachable"
-        fi
-    done
+    ./scripts/bare-metal-deploy.sh --status
 
 # Quick smoke tests on all bare-metal devices
 test-bare-metal-smoke:
@@ -622,41 +610,53 @@ test-bare-metal-device device:
     @echo "Running tests on {{ device }}..."
     pytest tests/bare-metal/ -v -k "{{ device }}"
 
-# Start daemons on all bare-metal devices
+# Start daemons on all bare-metal devices (reads from devices.yaml)
 bare-metal-start:
     #!/usr/bin/env bash
-    for device in styrene-node t100ta; do
-        host="$device.vanderlyn.local"
-        echo "Starting daemon on $device..."
-        ssh -o BatchMode=yes "$host" "systemctl --user start styrened 2>/dev/null || source ~/.local/styrene-venv/bin/activate && nohup styrened daemon > /tmp/styrened.log 2>&1 &"
-    done
-    echo "Daemons started"
+    set -euo pipefail
+    devices=$(python3 -c "
+    import yaml
+    with open('tests/bare-metal/devices.yaml') as f:
+        data = yaml.safe_load(f)
+    for name, info in data.get('devices', {}).items():
+        print(f\"{name} {info['host']} {info.get('venv_path', '~/.local/styrene-venv')}\")
+    ")
+    while IFS=' ' read -r name host venv; do
+        printf "  %-14s " "$name:"
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "echo ok" &>/dev/null; then
+            ssh -o BatchMode=yes "$host" \
+                "systemctl --user start styrened 2>/dev/null || { source $venv/bin/activate && nohup styrened daemon > /tmp/styrened.log 2>&1 & }" 2>/dev/null
+            echo "started"
+        else
+            echo "unreachable"
+        fi
+    done <<< "$devices"
 
-# Stop daemons on all bare-metal devices
+# Stop daemons on all bare-metal devices (reads from devices.yaml)
 bare-metal-stop:
     #!/usr/bin/env bash
-    for device in styrene-node t100ta; do
-        host="$device.vanderlyn.local"
-        echo "Stopping daemon on $device..."
-        ssh -o BatchMode=yes "$host" "systemctl --user stop styrened 2>/dev/null || pkill -f 'styrened daemon' 2>/dev/null || true"
-    done
-    echo "Daemons stopped"
-
-# Deploy current wheel to all bare-metal devices
-bare-metal-deploy:
-    #!/usr/bin/env bash
     set -euo pipefail
-    echo "Building wheel..."
-    python -m build --wheel
-    wheel=$(ls -t dist/styrened-*.whl | head -1)
-    echo "Deploying $wheel..."
-    for device in styrene-node t100ta; do
-        host="$device.vanderlyn.local"
-        echo "  → $device"
-        scp "$wheel" "$host:/tmp/"
-        ssh -o BatchMode=yes "$host" "source ~/.local/styrene-venv/bin/activate && pip install --upgrade /tmp/$(basename $wheel)"
-    done
-    echo "Deployment complete"
+    devices=$(python3 -c "
+    import yaml
+    with open('tests/bare-metal/devices.yaml') as f:
+        data = yaml.safe_load(f)
+    for name, info in data.get('devices', {}).items():
+        print(f\"{name} {info['host']}\")
+    ")
+    while IFS=' ' read -r name host; do
+        printf "  %-14s " "$name:"
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "echo ok" &>/dev/null; then
+            ssh -o BatchMode=yes "$host" \
+                "systemctl --user stop styrened 2>/dev/null || pkill -f 'styrened daemon' 2>/dev/null || true" 2>/dev/null
+            echo "stopped"
+        else
+            echo "unreachable"
+        fi
+    done <<< "$devices"
+
+# Deploy current wheel to all bare-metal devices (or specify DEVICE)
+bare-metal-deploy device="":
+    ./scripts/bare-metal-deploy.sh --build {{ device }}
 
 # ─── Cross-Platform Test Scenarios ──────────────────────────────────────────
 #

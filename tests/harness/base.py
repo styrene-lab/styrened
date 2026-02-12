@@ -126,8 +126,12 @@ class TestHarness(ABC):
 
     # Discovery operations
     @abstractmethod
-    def get_identity(self, node: str | NodeInfo) -> str | None:
-        """Get LXMF identity hash for node."""
+    def get_identity(self, node: str | NodeInfo) -> dict[str, Any] | None:
+        """Get LXMF identity info for node.
+
+        Returns:
+            Dict with at least 'identity_hash' and 'exists' keys, or None.
+        """
         ...
 
     @abstractmethod
@@ -207,6 +211,9 @@ class TestHarness(ABC):
             f"exec {target_identity} '{escaped}'",
             timeout=timeout,
         )
+
+    # Alias for backward compatibility
+    exec_command = exec_remote
 
     def get_logs(
         self,
