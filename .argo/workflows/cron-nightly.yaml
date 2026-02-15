@@ -1,0 +1,18 @@
+# Nightly cron: runs comprehensive tests at 2 AM UTC daily
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: styrened-nightly
+  namespace: argo
+spec:
+  schedule: "0 2 * * *"
+  timezone: "UTC"
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 600
+  workflowSpec:
+    workflowTemplateRef:
+      name: styrened-nightly-tests
+    arguments:
+      parameters:
+        - name: test-tier
+          value: "smoke or integration"

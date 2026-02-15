@@ -1,0 +1,143 @@
+# Edge build: push to main → build OCI + push to GHCR with edge tag
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: styrened-edge-build
+  namespace: argo
+spec:
+  arguments:
+    parameters:
+      - name: commit-sha
+      - name: repo
+        value: styrene-lab/styrened
+  entrypoint: pipeline
+  serviceAccountName: ci-workflow-sa
+
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
+
+  volumes:
+    - name: nix-store
+      persistentVolumeClaim:
+        claimName: nix-store-cache
+    - name: ghcr-auth
+      secret:
+        secretName: ghcr-secret
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: checkout
+            template: git-checkout
+          - name: build
+            template: nix-build-oci
+            depends: "checkout"
+          - name: push
+            template: push-ghcr
+            depends: "build"
+
+    - name: git-checkout
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            git clone --depth 1 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            cd /workspace/src
+            git fetch --depth 1 origin {{workflow.parameters.commit-sha}}
+            git checkout {{workflow.parameters.commit-sha}}
+            echo "Checked out $(git rev-parse --short HEAD)"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: nix-build-oci
+      container:
+        image: nixos/nix:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            # Enable flakes
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+
+            cd /workspace/src
+            echo "Building OCI image..."
+            nix build .#oci --no-link --print-out-paths > /workspace/oci-path
+            echo "Build complete: $(cat /workspace/oci-path)"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: nix-store
+            mountPath: /nix
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            cpu: "4"
+            memory: 4Gi
+
+    - name: push-ghcr
+      container:
+        image: nixos/nix:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+
+            cd /workspace/src
+            SHORT_SHA=$(echo "{{workflow.parameters.commit-sha}}" | cut -c1-7)
+            VERSION=$(cat VERSION | tr -d '\n')
+
+            # Configure registry auth for skopeo (used by nix2container)
+            mkdir -p ~/.docker
+            GHCR_USER=$(cat /ghcr/username 2>/dev/null || echo "styrene-lab")
+            GHCR_TOKEN=$(cat /ghcr/password)
+            echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$(echo -n "${GHCR_USER}:${GHCR_TOKEN}" | base64)\"}}}" > ~/.docker/config.json
+
+            echo "Pushing edge image..."
+            nix run .#oci.copyToRegistry
+
+            # Tag as edge via skopeo
+            nix-env -iA nixpkgs.skopeo 2>/dev/null || true
+            skopeo copy \
+              --authfile ~/.docker/config.json \
+              docker://ghcr.io/styrene-lab/styrened:${VERSION} \
+              docker://ghcr.io/styrene-lab/styrened:edge
+            skopeo copy \
+              --authfile ~/.docker/config.json \
+              docker://ghcr.io/styrene-lab/styrened:${VERSION} \
+              docker://ghcr.io/styrene-lab/styrened:${SHORT_SHA}
+
+            echo "Pushed: edge, ${VERSION}, ${SHORT_SHA}"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: nix-store
+            mountPath: /nix
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi

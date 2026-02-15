@@ -37,7 +37,7 @@ env:
   KUBECTL_VERSION: v1.28.0
   HELM_VERSION: v3.13.0
   REGISTRY: ghcr.io
-  IMAGE_NAME: styrene-lab/styrened
+  IMAGE_NAME_TEST: styrene-lab/styrened-test
 
 jobs:
   integration-tests-kind:
@@ -93,8 +93,8 @@ jobs:
 
       - name: Pull and load test image
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image.outputs.tag }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image.outputs.tag }} styrened-test:latest
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_TEST }}:${{ steps.image.outputs.tag }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_TEST }}:${{ steps.image.outputs.tag }} styrened-test:latest
           kind load docker-image styrened-test:latest --name styrene-test
 
       - name: Determine test markers
@@ -207,7 +207,7 @@ jobs:
 
       - name: Run integration tests
         env:
-          STYRENED_TEST_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}
+          STYRENED_TEST_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_TEST }}:${{ inputs.image_tag }}
           STYRENED_TEST_CLUSTER: brutus
         run: |
           pytest tests/k8s/ -v --tb=short ${{ steps.markers.outputs.markers }} \

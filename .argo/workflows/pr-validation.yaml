@@ -1,0 +1,180 @@
+# PR validation: smoke tests on pull request
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: styrened-pr-validation
+  namespace: argo
+spec:
+  arguments:
+    parameters:
+      - name: commit-sha
+      - name: pr-number
+      - name: repo
+        value: styrene-lab/styrened
+  entrypoint: pipeline
+  serviceAccountName: ci-workflow-sa
+
+  # Report status back to GitHub on completion
+  hooks:
+    exit:
+      template: report-github-status
+
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
+
+  volumes:
+    - name: nix-store
+      persistentVolumeClaim:
+        claimName: nix-store-cache
+    - name: ghcr-auth
+      secret:
+        secretName: ghcr-secret
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: set-pending
+            template: github-status
+            arguments:
+              parameters:
+                - name: state
+                  value: pending
+                - name: description
+                  value: "Smoke tests running..."
+          - name: checkout
+            template: git-checkout
+          - name: build-test
+            template: nix-build-test
+            depends: "checkout"
+          - name: smoke-tests
+            template: run-smoke-tests
+            depends: "build-test"
+
+    - name: git-checkout
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            git clone --depth 50 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            cd /workspace/src
+            git fetch --depth 1 origin {{workflow.parameters.commit-sha}}
+            git checkout {{workflow.parameters.commit-sha}}
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: nix-build-test
+      container:
+        image: nixos/nix:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+
+            cd /workspace/src
+            echo "Building test OCI image..."
+            nix build .#oci-test --no-link --print-out-paths > /workspace/oci-test-path
+
+            echo "Loading test image into containerd..."
+            nix run .#oci-test.copyToRegistry -- --dest-tls-verify=false \
+              --dest docker://localhost:5000/styrened-test:ci 2>/dev/null || true
+            echo "Build complete"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: nix-store
+            mountPath: /nix
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            cpu: "4"
+            memory: 4Gi
+
+    - name: run-smoke-tests
+      container:
+        image: python:3.11-slim
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            pip install --quiet pytest pytest-asyncio pytest-xdist kubernetes pyyaml
+            cd /workspace/src
+            pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope \
+              --junitxml=/workspace/results/smoke-results.xml \
+              2>&1 | tee /workspace/results/smoke-output.log
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
+
+    - name: github-status
+      inputs:
+        parameters:
+          - name: state
+          - name: description
+            default: ""
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            STATE="{{inputs.parameters.state}}"
+            DESC="{{inputs.parameters.description}}"
+            [ -z "$DESC" ] && DESC="Argo Workflows CI"
+            curl -sf -X POST \
+              -H "Authorization: token $(cat /ghcr/password)" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/{{workflow.parameters.repo}}/statuses/{{workflow.parameters.commit-sha}}" \
+              -d "{\"state\":\"${STATE}\",\"target_url\":\"https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}\",\"description\":\"${DESC}\",\"context\":\"argo/smoke-tests\"}"
+        volumeMounts:
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+
+    - name: report-github-status
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            if [ "{{workflow.status}}" = "Succeeded" ]; then
+              STATE="success"
+              DESC="Smoke tests passed"
+            else
+              STATE="failure"
+              DESC="Smoke tests failed"
+            fi
+            curl -sf -X POST \
+              -H "Authorization: token $(cat /ghcr/password)" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/{{workflow.parameters.repo}}/statuses/{{workflow.parameters.commit-sha}}" \
+              -d "{\"state\":\"${STATE}\",\"target_url\":\"https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}\",\"description\":\"${DESC}\",\"context\":\"argo/smoke-tests\"}"
+        volumeMounts:
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true

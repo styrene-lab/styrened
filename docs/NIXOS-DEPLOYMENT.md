@@ -2,9 +2,49 @@
 
 Real hardware deployment notes for styrened on NixOS.
 
-## Quick Start (nix-shell + venv)
+## Quick Start (Nix Flake)
 
-Since the Nix flake is incomplete, use a Python venv inside nix-shell:
+The Nix flake builds successfully and is the recommended installation method on NixOS:
+
+```bash
+# Run directly from flake
+nix run github:styrene-lab/styrened
+
+# Or build locally
+nix build .#default
+./result/bin/styrened --version
+
+# Install into profile
+nix profile install .#default
+```
+
+### NixOS Module
+
+The flake exports a NixOS module for declarative configuration:
+
+```nix
+# In your NixOS flake.nix inputs:
+inputs.styrened.url = "github:styrene-lab/styrened";
+
+# In your NixOS configuration:
+{ inputs, ... }: {
+  imports = [ inputs.styrened.nixosModules.default ];
+  services.styrened.enable = true;
+}
+```
+
+### Dev Shell
+
+For development work:
+
+```bash
+nix develop
+# Provides: python3.11, setuptools, wheel, pytest, mypy, ruff, just
+```
+
+### Alternative: pip in venv
+
+If you prefer pip-based installation:
 
 ```bash
 # Create persistent venv
@@ -28,10 +68,7 @@ pip install git+https://github.com/styrene-lab/styrened.git@vX.Y.Z
 
 The `platformdirs` dependency is listed in pyproject.toml but the nix-shell provides its own copy that isn't accessible outside the shell.
 
-**Fix**: Already handled - wheel includes all dependencies. If installing from source:
-```bash
-pip install platformdirs
-```
+**Fix**: Already handled - wheel includes all dependencies. The Nix flake also includes platformdirs in propagatedBuildInputs.
 
 ### 2. Config Environment Variable
 
@@ -54,14 +91,6 @@ reticulum:
   mode: standalone
   config_path_override: /home/styrene/.reticulum
 ```
-
-### 4. Nix Flake Status
-
-The `flake.nix` is incomplete - dependencies like `rns`, `lxmf`, and `platformdirs` aren't properly wired up. The flake currently doesn't build successfully.
-
-**Workaround**: Use venv method above.
-
-**TODO**: Package RNS and LXMF for Nix, update flake.nix to use them.
 
 ## Configuration
 
@@ -113,6 +142,20 @@ logging:
 
 ## Running as Systemd Service
 
+### NixOS Module (Recommended)
+
+```nix
+{ inputs, ... }: {
+  imports = [ inputs.styrened.nixosModules.default ];
+  services.styrened = {
+    enable = true;
+    # Configuration is read from ~/.config/styrene/core-config.yaml
+  };
+}
+```
+
+### Manual User Service
+
 Create user service (no root required):
 
 ```bash
@@ -125,7 +168,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/styrene-venv/bin/styrened daemon
+ExecStart=%h/.nix-profile/bin/styrened daemon
 Restart=always
 RestartSec=10
 Environment=STYRENE_CONFIG_DIR=%h/.config/styrene
@@ -168,7 +211,7 @@ styrened exec <dest-hash> uptime
 - LXMF router and announcements
 - Device discovery (discovered 3000+ nodes on public mesh)
 - IPC socket creation at `/run/user/1000/styrened/control.sock`
-- Cross-platform discovery (Mac ↔ NixOS laptop)
+- Cross-platform discovery (Mac <-> NixOS laptop)
 
 **Not Yet Tested**:
 - Full RPC round-trip (status query sent, response pending)
@@ -183,7 +226,7 @@ styrened exec <dest-hash> uptime
 | Config dir | `~/Library/Application Support/styrene` | `~/.local/share/styrene` |
 | IPC socket | Not tested | `/run/user/1000/styrened/control.sock` |
 | RNS temp config | `/var/folders/.../styrened_rns_*` | `/tmp/styrened_rns_*` |
-| Python | System/Homebrew | nix-shell venv |
+| Python | System/Homebrew | Nix flake / nix-shell |
 
 ## Network Considerations
 
