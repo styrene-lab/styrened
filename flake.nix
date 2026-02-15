@@ -4,49 +4,57 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    nix2container = {
+      url = "github:nlewo/nix2container";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, nix2container }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
         python = pkgs.python311;
 
-        # TODO: Package styrene-core for Nix
-        # For now, this flake assumes styrene-core is available
+        version = builtins.replaceStrings [ "\n" ] [ "" ]
+          (builtins.readFile ./VERSION);
 
-        styrened = python.pkgs.buildPythonApplication {
-          pname = "styrened";
-          version = "0.1.0";
-          format = "pyproject";
+        commitSha =
+          if self ? shortRev then self.shortRev
+          else if self ? dirtyShortRev then self.dirtyShortRev
+          else "unknown";
 
-          src = ./.;
-
-          nativeBuildInputs = with python.pkgs; [
-            setuptools
-            wheel
-          ];
-
-          propagatedBuildInputs = with python.pkgs; [
-            # styrene-core  # TODO: Add when packaged
-            # For now, list direct dependencies:
-            # rns lxmf pyyaml platformdirs sqlalchemy msgpack
-          ];
-
-          # Skip tests for now (need styrene-core)
-          doCheck = false;
-
-          meta = with pkgs.lib; {
-            description = "Headless Styrene daemon for edge deployments";
-            homepage = "https://github.com/styrene-lab/styrened";
-            license = licenses.mit;
-            maintainers = [ ];
-            platforms = platforms.linux ++ platforms.darwin;
-          };
+        deps = import ./nix/deps.nix {
+          inherit python;
+          inherit (pkgs) fetchurl lib;
         };
+
+        src = pkgs.lib.cleanSource ./.;
+
+        styrened = import ./nix/package.nix {
+          inherit python deps version src;
+          inherit (pkgs) lib;
+        };
+
+        entrypoint = pkgs.writeShellApplication {
+          name = "entrypoint";
+          runtimeInputs = [ pkgs.coreutils python styrened ];
+          text = builtins.readFile ./container/entrypoint.sh;
+        };
+
+        images = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (
+          import ./nix/oci.nix {
+            inherit nix2container pkgs python deps styrened entrypoint version commitSha;
+          }
+        );
       in
       {
-        packages.default = styrened;
+        packages = {
+          default = styrened;
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          oci = images.oci;
+          oci-test = images.oci-test;
+        };
 
         apps.default = {
           type = "app";
@@ -59,8 +67,10 @@
             python.pkgs.setuptools
             python.pkgs.wheel
             python.pkgs.pytest
+            python.pkgs.pytest-asyncio
             python.pkgs.mypy
             python.pkgs.ruff
+            pkgs.just
           ];
         };
       }

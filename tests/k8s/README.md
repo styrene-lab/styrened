@@ -44,7 +44,8 @@ See [REMOTE-TESTING.md](REMOTE-TESTING.md) for complete guide.
 
 ### Required Tools
 
-- Container runtime (Docker, Podman, or similar)
+- Nix (for building OCI images)
+- Container runtime (Podman recommended, or Docker) for loading/pushing
 - Helm 3.x
 - kubectl
 - pytest
@@ -62,10 +63,10 @@ just build-test
 just test-image
 ```
 
-**Using Docker directly:**
+**Using nix directly:**
 ```bash
-cd tests/k8s
-docker build -t styrened-test:latest -f docker/Dockerfile ../..
+nix build .#oci-test
+nix run .#oci-test.copyToPodman
 ```
 
 **Image naming:**
@@ -98,7 +99,7 @@ k3d image import styrened-test:latest -c styrene-test
 For local clusters (kind/k3d):
 ```bash
 # Pull test image from registry
-docker pull ghcr.io/styrene-lab/styrened-test:latest
+podman pull ghcr.io/styrene-lab/styrened-test:latest
 kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-test
 ```
 
@@ -311,9 +312,8 @@ tests/k8s/
 │       ├── star.json          # Hub + clients
 │       ├── mesh.json          # Full mesh
 │       └── linear.json        # Linear chain
-├── docker/
-│   ├── Dockerfile             # Multi-stage build
-│   └── entrypoint.sh          # Container startup logic
+├── (container build via Nix — see nix/oci.nix)
+│   └── container/entrypoint.sh # Container startup logic (wrapped by Nix)
 ├── helm/
 │   └── styrened-test/         # Helm chart for test deployments
 ├── harness.py                 # K8sTestHarness orchestration class
@@ -593,16 +593,16 @@ kubectl describe node <node_name>
 
 Automated testing runs on every PR, nightly, and release. All workflows use composable justfile recipes for consistency between local development and CI environments.
 
-See [DOCKER.md](../../DOCKER.md) for complete build pipeline documentation.
+See [CONTAINERS.md](../../CONTAINERS.md) for complete build pipeline documentation.
 
 ### Workflows
 
 | Workflow | Trigger | Test Tier | Duration | Purpose | Build Target |
 |----------|---------|-----------|----------|---------|--------------|
-| **pr-validation.yml** | Pull requests | Smoke | ~10 min | Fast PR validation | `just build-test` |
-| **edge-build.yml** | Push to main | N/A | ~15 min | Edge images for main | `just push-edge` |
-| **nightly-build.yml** | Daily 2 AM UTC | All tiers | ~60-90 min | Nightly builds + tests | `just push-test-nightly` + `just push-edge` |
-| **release.yml** | Tag push (v*) | All tiers | ~90-120 min | Release validation | `just push-prod-latest` |
+| **pr-validation.yml** | Pull requests | Smoke | ~10 min | Fast PR validation | `nix build .#oci-test` |
+| **edge-build.yml** | Push to main | N/A | ~15 min | Edge images for main | `nix build .#oci` |
+| **nightly-build.yml** | Daily 2 AM UTC | All tiers | ~60-90 min | Nightly builds + tests | `nix build .#oci` + `nix build .#oci-test` |
+| **release.yml** | Tag push (v*) | All tiers | ~15-30 min | Release validation | `nix build .#oci` |
 | **manual-test.yml** | Manual only | Configurable | Variable | On-demand testing | N/A |
 
 ### Quick Reference
@@ -672,7 +672,7 @@ Runs on every pull request:
 ```yaml
 # .github/workflows/pr-validation.yml
 - name: Build test image
-  run: just build-test
+  run: nix build .#oci-test
 
 - name: Run smoke tests
   run: pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope
@@ -686,8 +686,13 @@ Runs on every push to main:
 
 ```yaml
 # .github/workflows/edge-build.yml
-- name: Build and push edge image
-  run: just push-edge
+- name: Build OCI image
+  run: nix build .#oci
+
+- name: Push edge image
+  run: |
+    nix run .#oci.copyToDockerDaemon
+    docker push ghcr.io/styrene-lab/styrened:edge
 ```
 
 Automatically publishes `ghcr.io/styrene-lab/styrened:edge` for bleeding-edge deployments.
@@ -698,11 +703,10 @@ Runs daily at 2 AM UTC:
 
 ```yaml
 # .github/workflows/nightly-build.yml
-- name: Build and push test images
-  run: just push-test-nightly
-
-- name: Build and push edge image
-  run: just push-edge
+- name: Build images
+  run: |
+    nix build .#oci-test
+    nix build .#oci
 
 # Smoke tier (~15 min)
 pytest tests/k8s/ -m smoke -v -n 8
@@ -714,7 +718,7 @@ pytest tests/k8s/ -m integration -v -n 8
 pytest tests/k8s/ -m comprehensive -v --run-slow -n 8
 ```
 
-Full coverage with multi-arch builds (amd64 + arm64) and comprehensive reporting.
+Full coverage with comprehensive reporting.
 
 #### Release Workflow (Full Suite)
 
@@ -722,19 +726,14 @@ Runs on tag push (v*):
 
 ```yaml
 # .github/workflows/release.yml
-- name: Build and push production image
-  run: |
-    if [[ "$IS_PRERELEASE" == "false" ]]; then
-      just push-prod-latest  # Includes 'latest' tag
-    else
-      just push-prod         # Version + commit tags only
-    fi
+- name: Build OCI image
+  run: nix build .#oci
 
-- name: Run full test suite
+- name: Push production image
   run: |
-    pytest tests/k8s/ -v --tb=short --run-slow \
-      --cov=src --cov-report=xml --cov-report=html \
-      -n 8 --dist loadscope
+    nix run .#oci.copyToDockerDaemon
+    docker push ghcr.io/styrene-lab/styrened:${VERSION}
+    # 'latest' tag only for non-prereleases
 ```
 
 Complete validation before release publication. Pushes to `ghcr.io/styrene-lab/styrened` with semantic versioning tags.
@@ -760,8 +759,8 @@ gh run view <run-id> --log | grep "Build"
 # Test build locally (same command as CI)
 just build-test
 
-# Or with Docker directly
-docker build -t styrened-test:latest -f tests/k8s/docker/Dockerfile .
+# Or with nix directly
+nix build .#oci-test -L
 ```
 
 **Test timeouts:**
@@ -807,7 +806,7 @@ kind create cluster --name styrene-test
 just build-test
 
 # 3. Load into kind
-kind load docker-image styrene-lab/styrened-test:test --name styrene-test
+just load-k8s-image
 
 # 4. Run smoke tests (same command as CI)
 pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope
@@ -819,7 +818,7 @@ kind delete cluster --name styrene-test
 **Alternative (using GHCR images):**
 ```bash
 # Skip build, use nightly test images
-docker pull ghcr.io/styrene-lab/styrened-test:latest
+podman pull ghcr.io/styrene-lab/styrened-test:latest
 kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-test
 pytest tests/k8s/ -m smoke -v --tb=short -n 4
 ```
@@ -841,7 +840,7 @@ Expected execution times in CI (GitHub Actions ubuntu-latest):
 
 **Image Building:**
 ```bash
-just build-amd64           # Build AMD64 image for x86_64 clusters
+just build-test            # Build OCI test image (nix build .#oci-test)
 just load-k8s-image        # Load image into cluster (auto-detect kind/k3d/k3s)
 ```
 
@@ -874,7 +873,7 @@ just helm-template         # Render templates (dry-run)
 ### Additional Resources
 
 - **Remote Cluster Testing**: [REMOTE-TESTING.md](./REMOTE-TESTING.md)
-- **Docker Build Pipeline**: [DOCKER.md](../../DOCKER.md)
+- **Container Build Pipeline**: [CONTAINERS.md](../../CONTAINERS.md)
 - **GitHub Actions Workflows**: [.github/workflows/](../../.github/workflows/)
 - **Main Project README**: [README.md](../../README.md)
 - **K8s Testing Guide**: [TESTING-GUIDE.md](./TESTING-GUIDE.md)
@@ -913,14 +912,17 @@ just build-test && \
 - **Headless Service**: Direct pod-to-pod communication (no load balancing)
 - **NetworkPolicy**: Controlled pod isolation for partition tests
 - **ConfigMaps**: Config/RNS config injection per deployment
-- **Multi-stage Dockerfile**: Fast rebuilds via layer caching
+- **nix2container**: Reproducible OCI builds with smart layer splitting
 - **Namespace Isolation**: Clean slate per test, parallel execution safe
 - **Helm Templating**: Parameterized deployments, easy config variations
 
 ## References
 
 - Helm chart: `helm/styrened-test/`
-- Docker image: `docker/Dockerfile`
+- OCI image config: `../../nix/oci.nix`
+- Nix package: `../../nix/package.nix`
+- Nix dependencies: `../../nix/deps.nix`
+- Entrypoint: `../../container/entrypoint.sh`
 - Test harness: `harness.py`
 - Pytest config: `conftest.py`
 - Setup guide: `README-setup.md` (detailed cluster setup)

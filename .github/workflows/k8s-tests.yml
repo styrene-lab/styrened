@@ -22,6 +22,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build test image
+        run: nix build .#oci-test
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -50,13 +59,11 @@ jobs:
           kubectl cluster-info
           kubectl get nodes
 
-      - name: Build test image
-        run: |
-          cd tests/k8s
-          docker build -t styrened-test:latest -f docker/Dockerfile ../..
-
       - name: Load image into kind
         run: |
+          nix run .#oci-test.copyToDockerDaemon
+          VERSION=$(cat VERSION | tr -d '\n')
+          docker tag ghcr.io/styrene-lab/styrened-test:${VERSION} styrened-test:latest
           kind load docker-image styrened-test:latest --name styrene-test
 
       - name: Verify image loaded
@@ -112,11 +119,20 @@ jobs:
   quick-smoke:
     name: Quick Smoke Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build test image
+        run: nix build .#oci-test
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -141,13 +157,11 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Build test image
-        run: |
-          cd tests/k8s
-          docker build -t styrened-test:latest -f docker/Dockerfile ../..
-
       - name: Load image into kind
         run: |
+          nix run .#oci-test.copyToDockerDaemon
+          VERSION=$(cat VERSION | tr -d '\n')
+          docker tag ghcr.io/styrene-lab/styrened-test:${VERSION} styrened-test:latest
           kind load docker-image styrened-test:latest --name styrene-smoke
 
       - name: Run single smoke test

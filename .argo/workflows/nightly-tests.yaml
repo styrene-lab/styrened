@@ -1,0 +1,109 @@
+# Nightly tests: comprehensive test suite against latest edge image
+# Triggered by CronWorkflow (see cron-nightly.yaml)
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: styrened-nightly-tests
+  namespace: argo
+spec:
+  arguments:
+    parameters:
+      - name: test-tier
+        value: "smoke or integration"
+      - name: repo
+        value: styrene-lab/styrened
+  entrypoint: pipeline
+  serviceAccountName: ci-workflow-sa
+
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: checkout
+            template: git-checkout
+          - name: smoke
+            template: run-tests
+            depends: "checkout"
+            arguments:
+              parameters:
+                - name: marker
+                  value: smoke
+                - name: timeout
+                  value: "600"
+          - name: integration
+            template: run-tests
+            depends: "smoke.Succeeded"
+            when: "'{{workflow.parameters.test-tier}}' != 'smoke'"
+            arguments:
+              parameters:
+                - name: marker
+                  value: integration
+                - name: timeout
+                  value: "1800"
+          - name: comprehensive
+            template: run-tests
+            depends: "integration.Succeeded"
+            when: "'{{workflow.parameters.test-tier}}' == 'all'"
+            arguments:
+              parameters:
+                - name: marker
+                  value: comprehensive
+                - name: timeout
+                  value: "3600"
+
+    - name: git-checkout
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            git clone --depth 1 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: run-tests
+      inputs:
+        parameters:
+          - name: marker
+          - name: timeout
+      activeDeadlineSeconds: "{{inputs.parameters.timeout}}"
+      container:
+        image: python:3.11-slim
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            pip install --quiet pytest pytest-asyncio pytest-xdist kubernetes pyyaml msgpack-python
+            cd /workspace/src
+            MARKER="{{inputs.parameters.marker}}"
+            echo "Running ${MARKER} tests..."
+            pytest tests/k8s/ -m "${MARKER}" -v --tb=short -n 4 --dist loadscope \
+              --junitxml=/workspace/results/${MARKER}-results.xml \
+              2>&1 | tee /workspace/results/${MARKER}-output.log
+            echo "exit_code=$?" > /workspace/results/${MARKER}-status
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi

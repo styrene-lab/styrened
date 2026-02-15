@@ -18,7 +18,7 @@
 replicaCount: 3
 
 # Container image configuration
-# Defaults are for local testing with pre-loaded images (just build-amd64 && just load-k8s-image)
+# Defaults are for local testing with pre-loaded images (just build-test && just load-k8s-image)
 image:
   repository: styrened-test
   tag: "local-amd64"

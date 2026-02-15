@@ -2,23 +2,48 @@
 
 This document describes the OCI container build and release pipeline for styrened.
 
+## Architecture
+
+The build pipeline uses **nix2container** to produce OCI images directly from the Nix flake. No Dockerfile, no buildx, no multi-stage builds. Nix handles dependency resolution, source filtering, and layer splitting.
+
+```
+flake.nix
+├── nix/deps.nix       →  RNS + LXMF packages
+├── nix/package.nix    →  styrened application
+└── nix/oci.nix        →  OCI images (nix2container)
+                              ↓
+                   nix build .#oci        →  production image
+                   nix build .#oci-test   →  test image (+ pytest, ping, ps)
+```
+
+### Layer Structure
+
+Images use smart layer splitting for efficient caching:
+
+| Layer | Contents | Changes When |
+|-------|----------|-------------|
+| 1 | Python 3.11 runtime | Rarely (nixpkgs update) |
+| 2 | RNS, LXMF, pyyaml, platformdirs, sqlalchemy, msgpack | Dependency bumps |
+| 3 | styrened + entrypoint + coreutils | Code changes |
+| 4 (test only) | pytest, pytest-asyncio, iputils, procps | Test tool updates |
+
 ## Image Variants
 
 ### Production Images
 **Registry**: `ghcr.io/styrene-lab/styrened`
 
-Production images contain only the application runtime (no test dependencies). Built from the `app` stage in the Containerfile.
+Production images contain only the application runtime (no test dependencies).
 
 **Tags**:
 - `latest` - Latest stable release (only for non-prerelease versions)
 - `edge` - Latest build from main branch
-- `v0.2.1` - Specific release version
+- `X.Y.Z` - Specific release version
 - `<commit-sha>` - Build from specific commit
 
 ### Test Images
 **Registry**: `ghcr.io/styrene-lab/styrened-test`
 
-Test images include pytest and test dependencies. Built from the `test` stage in the Containerfile.
+Test images extend production with pytest and diagnostic tools.
 
 **Tags**:
 - `latest` - Latest nightly build
@@ -30,17 +55,22 @@ Test images include pytest and test dependencies. Built from the `test` stage in
 ### Build Commands
 
 ```bash
-# Build production image (local architecture)
-just build-prod
+# Build production OCI image
+just build
 
-# Build production image (multi-arch: amd64, arm64)
-just build-prod-multi
-
-# Build test image for quick validation
+# Build test OCI image
 just build-test
 
-# Test built image
-just test-image-prod
+# Load into local podman
+just load        # production
+just load-test   # test
+
+# Validate built images
+just test-image       # production
+just test-image-test  # test
+
+# Build Python wheel (for PyPI / pip distribution)
+just build-wheel
 ```
 
 ### Version Information
@@ -87,23 +117,26 @@ just push-edge
 just push-test-nightly
 ```
 
+Push flow: `nix build .#oci` → `nix run .#oci.copyToPodman` → `podman push`
+
 ## CI/CD Workflows
 
 ### PR Validation (`.github/workflows/pr-validation.yml`)
 **Trigger**: Pull requests to main/develop
 
 **Actions**:
-1. Build test image from PR code
-2. Run smoke tests in kind cluster
-3. Report results as PR comment
+1. Install Nix, build test image (`nix build .#oci-test`)
+2. Load into kind cluster
+3. Run smoke tests
+4. Report results
 
-**Duration**: ~5-10 minutes
+**Duration**: ~10-15 minutes
 
 ### Edge Build (`.github/workflows/edge-build.yml`)
 **Trigger**: Push to main branch
 
 **Actions**:
-1. Build production multi-arch image
+1. Install Nix, build production image (`nix build .#oci`)
 2. Push to `ghcr.io/styrene-lab/styrened:edge`
 
 **Duration**: ~10-15 minutes
@@ -112,10 +145,9 @@ just push-test-nightly
 **Trigger**: Scheduled (2 AM UTC daily) or manual
 
 **Actions**:
-1. Build and push test images (`latest` tag)
-2. Build and push edge images
-3. Run comprehensive test suite
-4. Generate test reports
+1. Install Nix, build and push test + edge images
+2. Run comprehensive test suite (smoke, integration, comprehensive tiers)
+3. Generate test reports
 
 **Duration**: ~30-90 minutes (depending on test tier)
 
@@ -124,41 +156,35 @@ just push-test-nightly
 
 **Actions**:
 1. Validate version tag
-2. Build multi-arch production images
-3. Push with semantic version tags:
-   - `v0.2.1`
-   - `0.2` (major.minor)
-   - `0` (major, if stable)
-   - `latest` (if stable, not prerelease)
-4. Run full test suite
-5. Create GitHub release with changelog
+2. Build Python wheel (uploaded as release artifact)
+3. Build production OCI image via Nix
+4. Push with semantic version tags + optional `latest`
+5. Create GitHub release with wheel + changelog
 
-**Duration**: ~45-90 minutes
+**Duration**: ~15-30 minutes
 
-## Multi-Architecture Builds
+## Multi-Architecture Strategy
 
-Images are built for:
-- `linux/amd64` - x86_64 servers, desktops
-- `linux/arm64` - ARM64 devices (Raspberry Pi 4+, ARM servers)
+**Current (v0.4.0)**: amd64 only. All K8s targets (kind, k3s on brutus) are amd64. ARM64 edge SBCs use the Nix package directly (not OCI).
 
-Multi-arch builds use Buildx with QEMU emulation in CI.
+**Future**: ARM64 OCI via QEMU binfmt on CI runner or Nix remote builder on ARM64 machine.
 
 ## Build Configuration
 
-### Containerfile (`tests/k8s/docker/Dockerfile`)
+### Nix Flake (`flake.nix`)
 
-Multi-stage build:
-1. **base** - System dependencies
-2. **deps** - Python dependencies
-3. **app** - Application code (production stage)
-4. **test** - Test dependencies (test stage)
+Defines three build outputs:
+- `packages.default` - Nix package (for NixOS deployment, systemd service)
+- `packages.oci` - Production OCI image
+- `packages.oci-test` - Test OCI image
 
-### Buildx Bake (`tests/k8s/docker/docker-bake.hcl`)
+### nix2container (`nix/oci.nix`)
 
-Defines build targets and configurations:
-- `local` - Single-arch local builds
-- `multi` - Multi-arch builds for registry
-- `test` - Test image builds
+Image definitions with layered structure, OCI labels, and environment configuration.
+
+### Entrypoint (`container/entrypoint.sh`)
+
+Container startup script that handles config injection, RNS config, and identity generation. Wrapped as a `writeShellApplication` Nix derivation with explicit runtime dependencies.
 
 ## Troubleshooting
 
@@ -166,15 +192,7 @@ Defines build targets and configurations:
 
 ```bash
 # Ensure GITHUB_TOKEN has packages:write permission
-echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
-```
-
-### Multi-arch Build Fails
-
-```bash
-# Ensure Buildx is set up with QEMU
-docker buildx create --use --name multiarch
-docker run --privileged --rm tonistiigi/binfmt --install all
+echo $GITHUB_TOKEN | podman login ghcr.io -u $GITHUB_ACTOR --password-stdin
 ```
 
 ### Image Not Found in Kind
@@ -184,23 +202,36 @@ docker run --privileged --rm tonistiigi/binfmt --install all
 docker exec <cluster>-control-plane crictl images | grep styrened
 ```
 
+### Nix Build Fails
+
+```bash
+# Check flake inputs are up to date
+nix flake update
+
+# Build with verbose output
+nix build .#oci -L
+
+# Check that all source files are git-tracked (Nix flakes require this)
+git add -A && nix build .#oci
+```
+
 ## Security
 
-- Images are scanned for vulnerabilities in CI (planned)
-- Base image: `python:3.11-slim` (official Python image)
-- All images are signed with cosign (planned)
-- SBOM generation with Syft (planned)
+- Images built from Nix store (reproducible, auditable)
+- No compiler toolchain in production image
+- Minimal closure (only runtime dependencies)
+- OCI-compliant labels for provenance
 
 ## Image Labels
 
 All images include OCI-compliant labels:
 - `org.opencontainers.image.version` - Semantic version
 - `org.opencontainers.image.revision` - Git commit SHA
-- `org.opencontainers.image.created` - Build timestamp
+- `org.opencontainers.image.title` - Image name
 - `org.opencontainers.image.source` - Repository URL
 - `org.opencontainers.image.licenses` - License (MIT)
 
 Query labels:
 ```bash
-docker inspect ghcr.io/styrene-lab/styrened:latest | jq '.[].Config.Labels'
+podman inspect ghcr.io/styrene-lab/styrened:latest | jq '.[].Config.Labels'
 ```

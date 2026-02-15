@@ -10,14 +10,13 @@ env:
   KUBECTL_VERSION: v1.28.0
   HELM_VERSION: v3.13.0
   REGISTRY: ghcr.io
-  IMAGE_NAME_PROD: styrene-lab/styrened
   IMAGE_NAME_TEST: styrene-lab/styrened-test
 
 jobs:
   smoke-tests:
     name: Fast PR Validation
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -25,20 +24,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Install just
-        uses: extractions/setup-just@v2
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
       - name: Build test image
-        run: just build-test
+        run: nix build .#oci-test
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
       - name: Install test dependencies
         run: |
@@ -64,7 +62,10 @@ jobs:
 
       - name: Load test image into kind
         run: |
-          kind load docker-image styrene-lab/styrened-test:test --name styrene-pr-test
+          VERSION=$(cat VERSION | tr -d '\n')
+          nix run .#oci-test.copyToDockerDaemon
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_TEST }}:${VERSION} styrened-test:latest
+          kind load docker-image styrened-test:latest --name styrene-pr-test
 
       - name: Verify image loaded
         run: |
@@ -79,7 +80,6 @@ jobs:
         run: |
           echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Duration**: ${{ job.duration }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Tier**: Smoke (fast validation)" >> $GITHUB_STEP_SUMMARY
 
       - name: Collect logs on failure
