@@ -4,12 +4,14 @@ This document describes the release and testing workflows for styrened.
 
 ## Overview
 
-The release pipeline is split into two separate workflows:
+CI/CD runs on **Argo Workflows** on the brutus K3s cluster, triggered by **Argo Events** GitHub webhooks. The pipeline is split into separate workflow templates:
 
-1. **Release Build** (`release.yml`) - Builds and publishes artifacts
-2. **Integration Tests** (`integration-tests.yml`) - K8s testing, run separately
+1. **Release Build** (`release-build.yaml`) - Builds and publishes artifacts on tag push
+2. **Edge Build** (`edge-build.yaml`) - Builds and pushes edge images on push to main
+3. **PR Validation** (`pr-validation.yaml`) - Smoke tests on pull requests
+4. **Nightly Tests** (`nightly-tests.yaml`) - Tiered test suite run via cron
 
-This separation ensures releases aren't blocked by test infrastructure issues and allows testing against different clusters on-demand.
+Argo Events maps GitHub webhook events (push, tag, pull_request) to workflow submissions via a sensor in the vanderlyn repo (`apps/argo-events/sensor-styrened.yaml`).
 
 ## Release Workflow
 
@@ -41,11 +43,12 @@ just release X.Y.W
 
 ### What the Release Workflow Does
 
-1. **Validate Release Tag** - Extracts version, detects prereleases (rc/alpha/beta)
-2. **Build Python Wheel** - Creates wheel and sdist, verifies version matches tag
-3. **Build OCI Image** - Builds linux/amd64 container via Nix (nix2container)
-4. **Generate Changelog** - Creates changelog from commits since last tag
-5. **Create GitHub Release** - Publishes release with all artifacts
+1. **Checkout** - Authenticated clone of private repo using GHCR token
+2. **Parse Version** - Extracts version from tag, detects prereleases (rc/alpha/beta/dev)
+3. **Build Python Wheel** - Creates wheel and sdist
+4. **Build OCI Image** - Builds linux/amd64 container via Nix (nix2container)
+5. **Push to GHCR** - Pushes with version + commit SHA tags (`latest` only for stable releases)
+6. **Create GitHub Release** - Generates changelog, publishes release with wheel and source tarball
 
 ### Release Artifacts
 
@@ -80,7 +83,7 @@ docker pull ghcr.io/styrene-lab/styrened:X.Y.Z
 
 ## Integration Testing
 
-Integration tests are run separately from releases to avoid coupling release availability to test infrastructure.
+Integration tests run on the brutus K3s cluster, either via nightly cron or manually.
 
 ### Test Tiers
 
@@ -93,13 +96,26 @@ Integration tests are run separately from releases to avoid coupling release ava
 
 ### Running Integration Tests
 
-#### Via GitHub Actions (kind cluster)
+#### Via Argo Workflows (brutus cluster)
 
-1. Go to Actions → Integration Tests → Run workflow
-2. Select:
-   - **image_tag**: Version to test (e.g., `0.3.4`, `latest`, `edge`)
-   - **test_tier**: Test scope (`smoke`, `integration`, `comprehensive`, `all`)
-   - **cluster**: `kind` (ephemeral CI cluster)
+```bash
+# Submit manually via kubectl
+kubectl create -n argo -f - <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: styrened-nightly-manual-
+spec:
+  workflowTemplateRef:
+    name: styrened-nightly-tests
+  arguments:
+    parameters:
+      - name: test-tier
+        value: "smoke or integration"
+EOF
+```
+
+Nightly tests run automatically at 2 AM UTC via `cron-nightly.yaml`.
 
 #### Locally Against brutus
 
@@ -108,16 +124,16 @@ Integration tests are run separately from releases to avoid coupling release ava
 export KUBECONFIG=~/.kube/config-brutus
 
 # Run smoke tests
-pytest tests/k8s/ -m smoke -v -n 4
+pytest tests/k8s/scenarios/ -m smoke -v -n 4
 
 # Run integration tests
-pytest tests/k8s/ -m "smoke or integration" -v -n 4
+pytest tests/k8s/scenarios/ -m "smoke or integration" -v -n 4
 
 # Run comprehensive tests
-pytest tests/k8s/ -m "smoke or integration or comprehensive" -v -n 4
+pytest tests/k8s/scenarios/ -m "smoke or integration or comprehensive" -v -n 4
 
 # Run all tests including slow
-pytest tests/k8s/ -v --run-slow -n 4
+pytest tests/k8s/scenarios/ -v --run-slow -n 4
 ```
 
 ### Test Markers
@@ -138,14 +154,14 @@ Tests are marked with pytest markers for selective execution:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `STYRENED_TEST_IMAGE` | Container image to test | `styrened-test:latest` |
-| `STYRENED_TEST_CLUSTER` | Target cluster name | `kind` |
+| `STYRENED_TEST_IMAGE_REPO` | Container image repository | `ghcr.io/styrene-lab/styrened-test` |
+| `STYRENED_TEST_IMAGE_TAG` | Container image tag | `dev` (cloud) / `local-amd64` (kind/k3d) |
 | `METRICS_ENABLED` | Collect periodic metrics | `true` |
 | `METRICS_INTERVAL` | Metrics snapshot interval (seconds) | `300` |
 
 ## Edge Builds
 
-The `edge` tag is automatically updated on every push to `main`:
+The `edge` tag is automatically updated on every push to `main` via the `edge-build.yaml` workflow template:
 
 ```bash
 docker pull ghcr.io/styrene-lab/styrened:edge
@@ -158,11 +174,11 @@ Use edge builds for:
 
 ## Nightly Builds
 
-Nightly builds run comprehensive tests and publish test images:
+Nightly builds run tiered test suites:
 
-- **Schedule**: 2 AM UTC daily
-- **Image**: `ghcr.io/styrene-lab/styrened-test:latest`
-- **Tests**: Smoke + Integration + Comprehensive tiers
+- **Schedule**: 2 AM UTC daily (via `cron-nightly.yaml` CronWorkflow)
+- **Image**: Uses `ghcr.io/styrene-lab/styrened-test:dev`
+- **Tests**: Smoke → Integration → Comprehensive (gated progression)
 
 ## Troubleshooting
 
@@ -170,7 +186,7 @@ Nightly builds run comprehensive tests and publish test images:
 
 1. **Version mismatch**: Ensure `pyproject.toml` and `src/styrened/__init__.py` match the tag
 2. **GHCR push denied**: Check package permissions at https://github.com/orgs/styrene-lab/packages/container/package/styrened/settings
-3. **Build fails**: Check Nix build logs in the workflow run
+3. **Build fails**: Check workflow logs in Argo UI at https://argo.vanderlyn.house
 
 ### Integration Tests Fail
 
@@ -190,15 +206,36 @@ Nightly builds run comprehensive tests and publish test images:
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/release.yml` | Release build and publish |
-| `.github/workflows/integration-tests.yml` | K8s integration testing |
-| `.github/workflows/edge-build.yml` | Edge builds from main |
-| `.github/workflows/nightly-build.yml` | Nightly comprehensive tests |
-| `.github/workflows/pr-validation.yml` | PR smoke tests |
+| `.argo/workflows/release-build.yaml` | Release build and publish |
+| `.argo/workflows/edge-build.yaml` | Edge builds from main |
+| `.argo/workflows/pr-validation.yaml` | PR smoke tests |
+| `.argo/workflows/nightly-tests.yaml` | Tiered nightly test suite |
+| `.argo/workflows/cron-nightly.yaml` | CronWorkflow scheduling nightly tests |
+
+## Infrastructure
+
+### Cluster Resources (brutus)
+
+| Resource | Namespace | Purpose |
+|----------|-----------|---------|
+| `ci-workflow-sa` ServiceAccount | `argo` | Workflow pod identity |
+| `ci-test-runner` ClusterRole | cluster | Namespace/pod/helm RBAC for test harness |
+| `ghcr-secret` Secret | `argo` | GHCR registry auth (Vault-synced) |
+| `ghcr-secret` Secret | `styrene-infra` | GHCR auth source for test namespace copies |
+| `operate-workflow-sa` ServiceAccount | `argo-events` | Sensor → Workflow submission |
+
+### Argo Events (vanderlyn repo)
+
+| File | Purpose |
+|------|---------|
+| `apps/argo-events/eventsource-github.yaml` | GitHub webhook receiver |
+| `apps/argo-events/sensor-styrened.yaml` | Event → Workflow mapping |
+| `apps/argo-events/eventbus.yaml` | JetStream message bus |
+| `apps/argo-events/sensor-rbac.yaml` | Sensor service account RBAC |
 
 ## Security Notes
 
 - The styrened repo is **private** within the styrene-lab org
 - Container images are published to GHCR with **internal** visibility
-- Integration tests against brutus are run **locally only** (no CI access to production clusters)
-- GitHub Actions use `GITHUB_TOKEN` with minimal permissions (`contents:write`, `packages:write`)
+- All git operations from cluster pods use token authentication via Vault-managed GHCR credentials
+- Workflow pods run as `ci-workflow-sa` with least-privilege RBAC scoped to test operations

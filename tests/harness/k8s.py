@@ -347,22 +347,30 @@ class K8sHarness(TestHarness):
         }
 
     def _get_image_values(self) -> list[str]:
-        """Get Helm --set values for image configuration based on cluster type."""
+        """Get Helm --set values for image configuration based on cluster type.
+
+        Environment variable overrides (for CI):
+          STYRENED_TEST_IMAGE_REPO - image repository (e.g. ghcr.io/styrene-lab/styrened-test)
+          STYRENED_TEST_IMAGE_TAG  - image tag (e.g. pr-7, dev, 0.4.0)
+        """
+        repo = os.environ.get("STYRENED_TEST_IMAGE_REPO")
+        tag = os.environ.get("STYRENED_TEST_IMAGE_TAG")
+
         if self.cluster_type in ("kind", "k3d"):
             return [
                 "--set",
-                "image.repository=styrened-test",
+                f"image.repository={repo or 'styrened-test'}",
                 "--set",
-                "image.tag=local-amd64",
+                f"image.tag={tag or 'local-amd64'}",
                 "--set",
                 "image.pullPolicy=Never",
             ]
         else:
             return [
                 "--set",
-                "image.repository=ghcr.io/styrene-lab/styrened-test",
+                f"image.repository={repo or 'ghcr.io/styrene-lab/styrened-test'}",
                 "--set",
-                "image.tag=dev",
+                f"image.tag={tag or 'dev'}",
                 "--set",
                 "image.pullPolicy=Always",
                 "--set",

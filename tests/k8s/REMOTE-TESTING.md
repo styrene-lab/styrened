@@ -412,22 +412,27 @@ helm upgrade --install styrene-test tests/k8s/helm/styrened-test \
 
 ### CI/CD Integration
 
-For GitHub Actions on self-hosted runners:
+For Argo Workflows on the brutus K3s cluster, GHCR auth is handled via Vault-synced secrets. The test harness automatically copies `ghcr-secret` from `styrene-infra` into each test namespace. See `.argo/workflows/` templates and [RELEASE-PROCESS.md](../../docs/RELEASE-PROCESS.md) for details.
 
-```yaml
-# .github/workflows/remote-test.yml
-- name: Create ImagePullSecret
-  run: |
-    kubectl create namespace styrene-test || true
-    kubectl create secret docker-registry ghcr-secret \
-      --docker-server=ghcr.io \
-      --docker-username=${{ github.actor }} \
-      --docker-password=${{ secrets.GITHUB_TOKEN }} \
-      -n styrene-test \
-      --dry-run=client -o yaml | kubectl apply -f -
+For manual CI runs:
 
-- name: Deploy and test
-  run: just test-k8s-remote
+```bash
+# Submit smoke tests via Argo Workflows
+kubectl create -n argo -f - <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: styrened-smoke-manual-
+spec:
+  workflowTemplateRef:
+    name: styrened-pr-validation
+  arguments:
+    parameters:
+      - name: commit-sha
+        value: "$(git rev-parse HEAD)"
+      - name: pr-number
+        value: "0"
+EOF
 ```
 
 ## Comparison: Local vs Remote Testing
@@ -471,4 +476,4 @@ kubectl describe pod styrene-test-0 -n styrene-test
 
 - [QUICK-START.md](QUICK-START.md) - Quick start guide for K8s testing
 - [README.md](README.md) - Complete K8s testing documentation
-- [DOCKER.md](../../DOCKER.md) - Docker build pipeline documentation
+- [CONTAINERS.md](../../CONTAINERS.md) - Container build pipeline documentation
