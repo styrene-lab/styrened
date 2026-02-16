@@ -384,5 +384,5 @@ When styrened is ready for production:
 
 - [ARGOCD-INTEGRATION-ASSESSMENT.md](../../ARGOCD-INTEGRATION-ASSESSMENT.md) - Full analysis
 - [REMOTE-TESTING.md](../../../tests/k8s/REMOTE-TESTING.md) - Remote cluster testing guide
-- [DOCKER.md](../../DOCKER.md) - Docker build pipeline
+- [CONTAINERS.md](../../CONTAINERS.md) - Container build pipeline
 - Vanderlyn ArgoCD skill: `/Users/cwilson/workspace/vanderlyn/.claude/skills/argocd-operations/`

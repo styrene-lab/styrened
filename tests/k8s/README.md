@@ -591,161 +591,130 @@ kubectl describe node <node_name>
 
 ### Overview
 
-Automated testing runs on every PR, nightly, and release. All workflows use composable justfile recipes for consistency between local development and CI environments.
-
-See [CONTAINERS.md](../../CONTAINERS.md) for complete build pipeline documentation.
+Automated testing runs on **Argo Workflows** on the brutus K3s cluster, triggered by **Argo Events** GitHub webhooks. Templates live in `.argo/workflows/`. See [CONTAINERS.md](../../CONTAINERS.md) for the complete build pipeline and [RELEASE-PROCESS.md](../../docs/RELEASE-PROCESS.md) for full workflow documentation.
 
 ### Workflows
 
-| Workflow | Trigger | Test Tier | Duration | Purpose | Build Target |
-|----------|---------|-----------|----------|---------|--------------|
-| **pr-validation.yml** | Pull requests | Smoke | ~10 min | Fast PR validation | `nix build .#oci-test` |
-| **edge-build.yml** | Push to main | N/A | ~15 min | Edge images for main | `nix build .#oci` |
-| **nightly-build.yml** | Daily 2 AM UTC | All tiers | ~60-90 min | Nightly builds + tests | `nix build .#oci` + `nix build .#oci-test` |
-| **release.yml** | Tag push (v*) | All tiers | ~15-30 min | Release validation | `nix build .#oci` |
-| **manual-test.yml** | Manual only | Configurable | Variable | On-demand testing | N/A |
+| Workflow | Trigger | Test Tier | Duration | Purpose |
+|----------|---------|-----------|----------|---------|
+| **pr-validation.yaml** | Pull requests | Smoke | ~5-7 min | Fast PR validation |
+| **edge-build.yaml** | Push to main | N/A | ~10 min | Edge images for main |
+| **nightly-tests.yaml** | Daily 2 AM UTC | Gated tiers | ~60-90 min | Nightly test suite |
+| **release-build.yaml** | Tag push (v*) | N/A | ~15-30 min | Release + publish |
 
 ### Quick Reference
 
-#### Triggering Manual Tests
+#### Submitting Manual Workflows
 
 ```bash
-# Run smoke tests
-gh workflow run manual-test.yml -f test_tier=smoke -f workers=4
+# Submit smoke tests manually
+kubectl create -n argo -f - <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: styrened-nightly-manual-
+spec:
+  workflowTemplateRef:
+    name: styrened-nightly-tests
+  arguments:
+    parameters:
+      - name: test-tier
+        value: "smoke"
+EOF
 
-# Run specific test
-gh workflow run manual-test.yml \
-  -f test_tier=smoke \
-  -f test_pattern=scenarios/test_edge_cases.py::test_network_partition
-
-# Run with slow tests
-gh workflow run manual-test.yml \
-  -f test_tier=comprehensive \
-  -f workers=2 \
-  -f run_slow_tests=true
+# Submit with integration tier
+kubectl create -n argo -f - <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: styrened-nightly-manual-
+spec:
+  workflowTemplateRef:
+    name: styrened-nightly-tests
+  arguments:
+    parameters:
+      - name: test-tier
+        value: "smoke or integration"
+EOF
 ```
 
 #### Viewing Workflow Results
 
 ```bash
-# List recent runs
-gh run list --workflow=pr-validation.yml
+# List recent workflows
+kubectl get workflows -n argo --sort-by=.metadata.creationTimestamp | grep styrened
 
-# Watch live
-gh run watch
+# Watch a running workflow
+kubectl get workflow <name> -n argo -w
 
-# View logs
-gh run view --log
+# View workflow logs
+kubectl logs -n argo -l workflows.argoproj.io/workflow=<name> --tail=100
 
-# Download artifacts
-gh run download <run-id>
+# View via Argo UI
+# https://argo.vanderlyn.house/workflows/argo/<name>
 ```
 
-#### Accessing Build Artifacts
+#### Accessing Test Results
 
-All workflows upload artifacts on completion:
+Test results are written to the workspace PVC during workflow execution:
 
-- **pr-validation.yml**: `pr-smoke-test-logs` (7 day retention)
-- **nightly-build.yml**: `nightly-{tier}-logs` (30 day retention)
-- **release.yml**: `release-test-logs`, `release-coverage-report` (90 day retention)
-- **manual-test.yml**: `manual-test-logs-{run-id}` (30 day retention)
-
-Download artifacts:
-
-```bash
-# List artifacts for a run
-gh run view <run-id>
-
-# Download all artifacts
-gh run download <run-id>
-
-# Download specific artifact
-gh run download <run-id> -n pr-smoke-test-logs
-```
+- `smoke-results.xml` — JUnit XML for smoke tests
+- `smoke-output.log` — Full test output
+- `integration-results.xml` — JUnit XML for integration tests
+- `integration-output.log` — Full test output
 
 ### CI Test Execution
 
 #### PR Validation (Smoke Tests Only)
 
-Runs on every pull request:
+Triggered on pull request events (opened/synchronize/reopened):
 
-```yaml
-# .github/workflows/pr-validation.yml
-- name: Build test image
-  run: nix build .#oci-test
+1. **Checkout** — Authenticated clone via GHCR token
+2. **Build test image** — `nix build .#oci-test` (validates build)
+3. **Smoke tests** — `pytest tests/k8s/scenarios/ -m smoke -v --tb=short`
+4. **Report status** — Posts GitHub commit status (success/failure)
 
-- name: Run smoke tests
-  run: pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope
-```
-
-Fast validation (~10 minutes) with parallel execution.
+Fast validation (~5-7 minutes).
 
 #### Edge Build (Main Branch)
 
-Runs on every push to main:
+Triggered on push to main:
 
-```yaml
-# .github/workflows/edge-build.yml
-- name: Build OCI image
-  run: nix build .#oci
-
-- name: Push edge image
-  run: |
-    nix run .#oci.copyToDockerDaemon
-    docker push ghcr.io/styrene-lab/styrened:edge
-```
+1. **Build OCI** — `nix build .#oci`
+2. **Push to GHCR** — Tags with `edge` + commit SHA
 
 Automatically publishes `ghcr.io/styrene-lab/styrened:edge` for bleeding-edge deployments.
 
-#### Nightly Build (All Tiers)
+#### Nightly Tests (All Tiers)
 
-Runs daily at 2 AM UTC:
+Triggered by CronWorkflow at 2 AM UTC:
 
-```yaml
-# .github/workflows/nightly-build.yml
-- name: Build images
-  run: |
-    nix build .#oci-test
-    nix build .#oci
+1. **Smoke tier** — `pytest tests/k8s/scenarios/ -m smoke` (10 min timeout)
+2. **Integration tier** — `pytest tests/k8s/scenarios/ -m integration` (30 min timeout, gated on smoke success)
+3. **Comprehensive tier** — `pytest tests/k8s/scenarios/ -m comprehensive` (60 min timeout, gated on integration success)
 
-# Smoke tier (~15 min)
-pytest tests/k8s/ -m smoke -v -n 8
+Gated progression: each tier only runs if the previous tier succeeds.
 
-# Integration tier (~40 min)
-pytest tests/k8s/ -m integration -v -n 8
+#### Release Build (Full Suite)
 
-# Comprehensive tier (~90 min)
-pytest tests/k8s/ -m comprehensive -v --run-slow -n 8
-```
+Triggered on tag push matching `v*`:
 
-Full coverage with comprehensive reporting.
-
-#### Release Workflow (Full Suite)
-
-Runs on tag push (v*):
-
-```yaml
-# .github/workflows/release.yml
-- name: Build OCI image
-  run: nix build .#oci
-
-- name: Push production image
-  run: |
-    nix run .#oci.copyToDockerDaemon
-    docker push ghcr.io/styrene-lab/styrened:${VERSION}
-    # 'latest' tag only for non-prereleases
-```
-
-Complete validation before release publication. Pushes to `ghcr.io/styrene-lab/styrened` with semantic versioning tags.
+1. **Parse version** — Extracts version from tag, detects prereleases
+2. **Build wheel** + **Build OCI** (parallel)
+3. **Push to GHCR** — Version + commit SHA tags (`latest` only for stable releases)
+4. **Create GitHub Release** — Changelog, wheel, and source tarball
 
 ### CI Environment
 
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| kind | v0.20.0 | Local Kubernetes cluster |
-| kubectl | v1.28.0 | Kubernetes CLI |
-| Helm | v3.13.0 | Package manager |
-| Python | 3.11 | Test runtime |
+| Component | Details |
+|-----------|---------|
+| Cluster | brutus K3s (amd64) |
+| Workflow engine | Argo Workflows |
+| Event trigger | Argo Events (GitHub webhooks) |
+| Container runtime | containerd (K3s default) |
+| Build tool | Nix (nix2container) |
+| Python | 3.11 (python:3.11-slim) |
+| GHCR auth | Vault-synced `ghcr-secret` |
 
 ### Debugging CI Failures
 
@@ -753,8 +722,8 @@ Complete validation before release publication. Pushes to `ghcr.io/styrene-lab/s
 
 **Build failures:**
 ```bash
-# Check build logs
-gh run view <run-id> --log | grep "Build"
+# Check workflow logs in Argo UI
+# https://argo.vanderlyn.house/workflows/argo/<workflow-name>
 
 # Test build locally (same command as CI)
 just build-test
@@ -765,33 +734,30 @@ nix build .#oci-test -L
 
 **Test timeouts:**
 ```bash
-# Check cluster state in logs
-gh run view <run-id> --log | grep "kubectl get pods"
+# Check workflow pod logs
+kubectl logs -n argo -l workflows.argoproj.io/workflow=<name> --tail=200
 
-# Download logs artifact
-gh run download <run-id> -n pr-smoke-test-logs
-
-# Check pod logs
-cat pr-smoke-test-logs/*_describe.txt
+# Check test namespace state
+kubectl get pods -n styrene-test-<hash>
 ```
 
-**Image load failures:**
+**Image pull failures:**
 ```bash
-# Verify image built successfully
-gh run view <run-id> --log | grep "Build and push image"
+# Verify ghcr-secret exists in styrene-infra
+kubectl get secret ghcr-secret -n styrene-infra
 
-# Check kind load step
-gh run view <run-id> --log | grep "Load test image"
+# Check VaultStaticSecret sync status
+kubectl get vaultstaticsecret -n styrene-infra
 ```
 
-#### Re-running Failed Jobs
+#### Re-running Failed Workflows
 
 ```bash
-# Re-run all jobs
-gh run rerun <run-id>
-
-# Re-run only failed jobs
-gh run rerun <run-id> --failed
+# Resubmit a failed workflow
+kubectl get workflow <failed-name> -n argo -o json | \
+  jq 'del(.metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .status)' | \
+  jq '.metadata.name = .metadata.generateName + "retry"' | \
+  kubectl create -f -
 ```
 
 ### Local CI Simulation
@@ -799,7 +765,7 @@ gh run rerun <run-id> --failed
 Replicate CI environment locally:
 
 ```bash
-# 1. Create kind cluster (same version as CI)
+# 1. Create kind cluster
 kind create cluster --name styrene-test
 
 # 2. Build test image (same command as CI)
@@ -825,7 +791,7 @@ pytest tests/k8s/ -m smoke -v --tb=short -n 4
 
 ### Performance Benchmarks
 
-Expected execution times in CI (GitHub Actions ubuntu-latest):
+Expected execution times on brutus K3s cluster:
 
 | Test Configuration | Sequential | 4 Workers | 8 Workers |
 |-------------------|------------|-----------|-----------|
@@ -834,7 +800,7 @@ Expected execution times in CI (GitHub Actions ubuntu-latest):
 | Comprehensive only | ~2 hrs | ~40 min | ~25 min |
 | Full suite | ~2.5 hrs | ~50 min | ~35 min |
 
-**Note**: CI times may vary based on runner availability and cluster startup time.
+**Note**: Times may vary based on cluster load and test distribution.
 
 ### Justfile Recipes Reference
 
@@ -874,7 +840,8 @@ just helm-template         # Render templates (dry-run)
 
 - **Remote Cluster Testing**: [REMOTE-TESTING.md](./REMOTE-TESTING.md)
 - **Container Build Pipeline**: [CONTAINERS.md](../../CONTAINERS.md)
-- **GitHub Actions Workflows**: [.github/workflows/](../../.github/workflows/)
+- **Release Process**: [RELEASE-PROCESS.md](../../docs/RELEASE-PROCESS.md)
+- **Argo Workflow Templates**: [.argo/workflows/](../../.argo/workflows/)
 - **Main Project README**: [README.md](../../README.md)
 - **K8s Testing Guide**: [TESTING-GUIDE.md](./TESTING-GUIDE.md)
 

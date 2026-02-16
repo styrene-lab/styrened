@@ -67,10 +67,10 @@ Implemented comprehensive metrics storage pipeline for long-running K8s tests (4
    - Environment variable support (`METRICS_INTERVAL`, `METRICS_ENABLED`)
    - Added `slow_extended` marker for 4-8+ hour tests
 
-2. **.github/workflows/nightly-build.yml** (+9 lines)
-   - Upload metrics artifacts after comprehensive tests
-   - 90-day retention for nightly runs
-   - Compression level 9 for minimal storage
+2. **.argo/workflows/nightly-tests.yaml** (updated)
+   - Metrics written to workspace PVC during test execution
+   - Available in `/workspace/results/` within workflow pods
+   - Collected alongside JUnit XML and test output logs
 
 3. **CLAUDE.md** (+57 lines)
    - Documented metrics collection workflow

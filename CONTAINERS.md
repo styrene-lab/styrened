@@ -121,47 +121,29 @@ Push flow: `nix build .#oci` → `nix run .#oci.copyToPodman` → `podman push`
 
 ## CI/CD Workflows
 
-### PR Validation (`.github/workflows/pr-validation.yml`)
-**Trigger**: Pull requests to main/develop
+CI/CD runs on **Argo Workflows** (brutus K3s cluster), triggered by **Argo Events** GitHub webhooks. Templates live in `.argo/workflows/`. See [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md) for full details.
 
-**Actions**:
-1. Install Nix, build test image (`nix build .#oci-test`)
-2. Load into kind cluster
-3. Run smoke tests
-4. Report results
+### PR Validation (`.argo/workflows/pr-validation.yaml`)
+**Trigger**: Pull requests (opened/synchronize/reopened)
 
-**Duration**: ~10-15 minutes
+**Steps**: Checkout → Nix build test image → Install kubectl/helm + run smoke tests → Report GitHub status
 
-### Edge Build (`.github/workflows/edge-build.yml`)
+**Duration**: ~5-7 minutes
+
+### Edge Build (`.argo/workflows/edge-build.yaml`)
 **Trigger**: Push to main branch
 
-**Actions**:
-1. Install Nix, build production image (`nix build .#oci`)
-2. Push to `ghcr.io/styrene-lab/styrened:edge`
+**Steps**: Checkout → Nix build OCI → Push to GHCR with `edge` + commit SHA tags
 
-**Duration**: ~10-15 minutes
+### Nightly Tests (`.argo/workflows/nightly-tests.yaml`)
+**Trigger**: CronWorkflow at 2 AM UTC (`cron-nightly.yaml`)
 
-### Nightly Build (`.github/workflows/nightly-build.yml`)
-**Trigger**: Scheduled (2 AM UTC daily) or manual
+**Steps**: Checkout → Smoke tests → Integration tests → Comprehensive tests (gated progression)
 
-**Actions**:
-1. Install Nix, build and push test + edge images
-2. Run comprehensive test suite (smoke, integration, comprehensive tiers)
-3. Generate test reports
+### Release Build (`.argo/workflows/release-build.yaml`)
+**Trigger**: Tag push matching `refs/tags/v*`
 
-**Duration**: ~30-90 minutes (depending on test tier)
-
-### Release (`.github/workflows/release.yml`)
-**Trigger**: Git tags matching `v*` (e.g., `v0.2.1`)
-
-**Actions**:
-1. Validate version tag
-2. Build Python wheel (uploaded as release artifact)
-3. Build production OCI image via Nix
-4. Push with semantic version tags + optional `latest`
-5. Create GitHub release with wheel + changelog
-
-**Duration**: ~15-30 minutes
+**Steps**: Checkout → Parse version → Build wheel + Build OCI (parallel) → Push to GHCR → Create GitHub Release with artifacts
 
 ## Multi-Architecture Strategy
 

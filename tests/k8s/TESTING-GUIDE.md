@@ -187,35 +187,27 @@ pytest tests/k8s/ -v -n auto -m "smoke or integration or comprehensive" --run-sl
 # Expected: ~30-40 minutes with 4-8 workers
 ```
 
-### CI/CD Workflows
+### CI/CD Workflows (Argo Workflows)
 
-**Pull Request validation:**
-```yaml
-# .github/workflows/pr-tests.yml
-- name: Run smoke tests
-  run: pytest tests/k8s/ -v -n auto -m smoke
-```
+CI/CD runs on **Argo Workflows** on the brutus K3s cluster, triggered by **Argo Events** GitHub webhooks. Templates live in `.argo/workflows/`.
 
-**Merge to main:**
-```yaml
-# .github/workflows/main-tests.yml
-- name: Run smoke + integration tests
-  run: pytest tests/k8s/ -v -n auto -m "smoke or integration"
-```
+**PR validation** (`pr-validation.yaml`):
+- Triggered on pull request events
+- Runs smoke tests with `pytest tests/k8s/scenarios/ -m smoke`
 
-**Nightly builds:**
-```yaml
-# .github/workflows/nightly.yml
-- name: Run full test suite
-  run: pytest tests/k8s/ -v -n auto --run-slow
-```
+**Edge build** (`edge-build.yaml`):
+- Triggered on push to main
+- Builds and pushes `ghcr.io/styrene-lab/styrened:edge`
 
-**Release builds:**
-```yaml
-# .github/workflows/release.yml
-- name: Run comprehensive validation
-  run: pytest tests/k8s/ -v -n auto -m "smoke or integration or comprehensive" --run-slow
-```
+**Nightly tests** (`nightly-tests.yaml`):
+- Triggered by CronWorkflow at 2 AM UTC
+- Gated progression: smoke → integration → comprehensive
+
+**Release build** (`release-build.yaml`):
+- Triggered on tag push matching `v*`
+- Full validation + wheel build + OCI push + GitHub Release
+
+See [RELEASE-PROCESS.md](../../docs/RELEASE-PROCESS.md) for details.
 
 ### Targeted Testing
 

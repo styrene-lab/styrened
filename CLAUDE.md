@@ -208,7 +208,7 @@ Overnight tests (4-8+ hours) automatically collect periodic metrics snapshots fo
 **Metrics Collection**:
 - Snapshots collected every 5 minutes (configurable via `METRICS_INTERVAL`)
 - Stored locally at `/tmp/styrene-test-metrics/{test_name}_{timestamp}/`
-- Uploaded to CI artifacts on completion
+- Written to workspace PVC during CI runs
 - Includes CPU, memory, pod status, and mesh state
 
 **File Structure**:
@@ -369,7 +369,7 @@ Templates live in `.argo/workflows/`. Argo Events maps GitHub events to workflow
 | `nightly-tests.yaml` | Referenced by cron | Tiered test suite (smoke → integration → comprehensive) |
 | `cron-nightly.yaml` | Daily 2 AM UTC | CronWorkflow that invokes `nightly-tests` |
 
-All workflows run as `ci-workflow-sa`, use GHCR credentials from a `ghcr-secret`, and share a persistent `nix-store-cache` PVC to avoid redundant Nix builds.
+All workflows run as `ci-workflow-sa` and use GHCR credentials from Vault-synced `ghcr-secret`. Test namespaces get a copy of `ghcr-secret` from the `styrene-infra` namespace (managed by vault-secrets-operator). The test harness image tag can be overridden via `STYRENED_TEST_IMAGE_TAG` and `STYRENED_TEST_IMAGE_REPO` env vars.
 
 ### Release Process
 
