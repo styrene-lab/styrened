@@ -7,7 +7,7 @@
 
 # Project paths
 project_root := justfile_directory()
-docker_dir := project_root / "tests/k8s/docker"
+container_dir := project_root / "container"
 helm_chart := project_root / "tests/k8s/helm/styrened-test"
 
 # Version info (lazy evaluation)
@@ -75,6 +75,26 @@ typecheck:
 # Run all validation checks (lint + typecheck + test)
 validate: lint typecheck test
 
+# ─── Documentation ──────────────────────────────────────────────────────────
+
+# Generate API documentation (output: docs/api/)
+docs:
+    @echo "Generating API documentation..."
+    @pip show pdoc >/dev/null 2>&1 || { echo "pdoc not installed. Run: pip install -e '.[docs]'"; exit 1; }
+    pdoc src/styrened -o docs/api --docformat google
+    @echo "Generated: docs/api/"
+
+# Serve API documentation locally (live reload)
+docs-serve:
+    @echo "Starting documentation server..."
+    @pip show pdoc >/dev/null 2>&1 || { echo "pdoc not installed. Run: pip install -e '.[docs]'"; exit 1; }
+    pdoc src/styrened --docformat google
+
+# Remove generated documentation
+docs-clean:
+    rm -rf docs/api/
+    @echo "Cleaned: docs/api/"
+
 # Check version synchronization across all sources
 check-versions:
     #!/usr/bin/env bash
@@ -92,87 +112,47 @@ check-versions:
         exit 1
     fi
 
-# ─── Container Build (Test Images) ──────────────────────────────────────────
+# ─── Container Build ───────────────────────────────────────────────────────
 
-# Build local test image (auto-detect architecture)
+# Build Python wheel (for PyPI / GitHub Release distribution)
+build-wheel:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    expected="dist/styrened-{{ version }}-py3-none-any.whl"
+    if [ -f "$expected" ]; then
+        echo "Wheel exists: $expected"
+    else
+        echo "Building wheel..."
+        rm -f dist/styrened-*.whl
+        python -m build --wheel
+    fi
+    ls -la dist/styrened-*.whl | tail -1
+
+# Build OCI production image (via nix2container)
 build:
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "local.tags={{ registry }}/{{ image_test }}:{{ version }}" \
-        --set "local.tags={{ registry }}/{{ image_test }}:{{ commit_sha }}" \
-        --load \
-        local
+    nix build .#oci
+    @echo "Built: $(readlink result)"
 
-# Build test image (quick validation, test stage only)
+# Build OCI test image (via nix2container)
 build-test:
-    cd {{ docker_dir }} && docker buildx bake \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --load \
-        test
+    nix build .#oci-test
+    @echo "Built: $(readlink result)"
 
-# Build multi-arch test image (amd64, arm64)
-build-multi:
-    cd {{ docker_dir }} && docker buildx bake \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "multi.tags={{ registry }}/{{ image_test }}:{{ version }}" \
-        --set "multi.tags={{ registry }}/{{ image_test }}:{{ commit_sha }}" \
-        multi
+# Load OCI image into local podman (via nix2container)
+load: build
+    nix run .#oci.copyToPodman
 
-# Build AMD64 image for x86_64 clusters (from any host)
-build-amd64:
-    docker buildx build \
-        --platform linux/amd64 \
-        -t {{ local_image_tag }} \
-        -f {{ docker_dir }}/Dockerfile \
-        --load \
-        {{ project_root }}
+# Load test image into local podman (via nix2container)
+load-test: build-test
+    nix run .#oci-test.copyToPodman
 
-# Validate test image works
-test-image:
-    docker run --rm {{ registry }}/{{ image_test }}:{{ version }} styrened --version
+# Validate production image
+test-image: load
+    podman run --rm {{ registry }}/{{ image_prod }}:{{ version }} styrened --version
 
-# ─── Container Build (Production Images) ────────────────────────────────────
-
-# Build production image (auto-detect architecture)
-build-prod:
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "*.target=app" \
-        --set "local.tags={{ registry }}/{{ image_prod }}:{{ version }}" \
-        --set "local.tags={{ registry }}/{{ image_prod }}:{{ commit_sha }}" \
-        --load \
-        local
-
-# Build multi-arch production image (amd64, arm64)
-build-prod-multi:
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "*.target=app" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ version }}" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ commit_sha }}" \
-        multi
-
-# Validate production image works
-test-image-prod:
-    docker run --rm {{ registry }}/{{ image_prod }}:{{ version }} styrened --version
+# Validate test image
+test-image-test: load-test
+    podman run --rm {{ registry }}/{{ image_test }}:{{ version }} styrened --version
 
 # ─── Registry Push ──────────────────────────────────────────────────────────
 
@@ -181,86 +161,38 @@ container-login:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        echo "$GITHUB_TOKEN" | docker login {{ registry }} -u "${GITHUB_ACTOR:-$(gh api user -q .login)}" --password-stdin
+        echo "$GITHUB_TOKEN" | podman login {{ registry }} -u "${GITHUB_ACTOR:-$(gh api user -q .login)}" --password-stdin
     else
         echo "GITHUB_TOKEN not set, attempting gh CLI auth..."
-        gh auth token | docker login {{ registry }} -u "$(gh api user -q .login)" --password-stdin
+        gh auth token | podman login {{ registry }} -u "$(gh api user -q .login)" --password-stdin
     fi
 
-# Backward compatibility alias
-alias docker-login := container-login
-
-# Push test image with version tags
-push-test: container-login
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "multi.tags={{ registry }}/{{ image_test }}:{{ version }}" \
-        --set "multi.tags={{ registry }}/{{ image_test }}:{{ commit_sha }}" \
-        --set "multi.output=type=image,push=true" \
-        multi
-
-# Push test image with 'latest' tag (nightly builds)
-push-test-nightly: container-login
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "multi.tags={{ registry }}/{{ image_test }}:latest" \
-        --set "multi.tags={{ registry }}/{{ image_test }}:{{ commit_sha }}" \
-        --set "multi.output=type=image,push=true" \
-        multi
-
-# Push production image with version tags
-push-prod: container-login
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "*.target=app" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ version }}" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ commit_sha }}" \
-        --set "multi.output=type=image,push=true" \
-        multi
+# Push production image with version and commit tags
+push-prod: container-login build
+    nix run .#oci.copyToPodman
+    podman push {{ registry }}/{{ image_prod }}:{{ version }}
+    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:{{ commit_sha }}
+    podman push {{ registry }}/{{ image_prod }}:{{ commit_sha }}
 
 # Push production image with 'latest' tag (stable releases only)
-push-prod-latest: container-login
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "*.target=app" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ version }}" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ commit_sha }}" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:latest" \
-        --set "multi.output=type=image,push=true" \
-        multi
+push-prod-latest: push-prod
+    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:latest
+    podman push {{ registry }}/{{ image_prod }}:latest
 
 # Push edge build (main branch)
-push-edge: container-login
-    cd {{ docker_dir }} && docker buildx bake \
-        --allow=fs.read={{ project_root }} \
-        --set "*.context={{ project_root }}" \
-        --set "*.args.VERSION={{ version }}" \
-        --set "*.args.COMMIT_SHA={{ commit_sha }}" \
-        --set "*.args.BUILD_DATE={{ build_date }}" \
-        --set "*.target=app" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:edge" \
-        --set "multi.tags={{ registry }}/{{ image_prod }}:{{ commit_sha }}" \
-        --set "multi.output=type=image,push=true" \
-        multi
+push-edge: container-login build
+    nix run .#oci.copyToPodman
+    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:edge
+    podman push {{ registry }}/{{ image_prod }}:edge
+    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:{{ commit_sha }}
+    podman push {{ registry }}/{{ image_prod }}:{{ commit_sha }}
 
-# Alias: push defaults to push-test
-alias push := push-test
+# Push test image with 'latest' tag (nightly builds)
+push-test-nightly: container-login build-test
+    nix run .#oci-test.copyToPodman
+    podman push {{ registry }}/{{ image_test }}:{{ version }}
+    podman tag {{ registry }}/{{ image_test }}:{{ version }} {{ registry }}/{{ image_test }}:latest
+    podman push {{ registry }}/{{ image_test }}:latest
 
 # ─── Kubernetes / Helm ──────────────────────────────────────────────────────
 
@@ -276,29 +208,34 @@ alias push := push-test
     else echo "unknown"
     fi
 
-# Load local image into k8s cluster (auto-detect kind/k3d/k3s)
-load-k8s-image: build-amd64
+# Load OCI test image into k8s cluster (auto-detect kind/k3d/k3s)
+load-k8s-image: build-test
     #!/usr/bin/env bash
     set -euo pipefail
+    # Load into local podman first (via nix2container)
+    nix run .#oci-test.copyToPodman
     cluster_type=$(just cluster-type)
     echo "Detected cluster type: $cluster_type"
     case "$cluster_type" in
         kind)
             ctx=$(kubectl config current-context)
-            kind load docker-image {{ local_image_tag }} --name "${ctx#kind-}"
+            podman save {{ registry }}/{{ image_test }}:{{ version }} | \
+                kind load image-archive /dev/stdin --name "${ctx#kind-}"
             ;;
         k3d)
             ctx=$(kubectl config current-context)
-            k3d image import {{ local_image_tag }} -c "${ctx#k3d-}"
+            podman save {{ registry }}/{{ image_test }}:{{ version }} -o /tmp/styrened-test.tar
+            k3d image import /tmp/styrened-test.tar -c "${ctx#k3d-}"
+            rm -f /tmp/styrened-test.tar
             ;;
         k3s-remote)
-            docker save {{ local_image_tag }} | gzip > /tmp/styrened-image.tar.gz
+            podman save {{ registry }}/{{ image_test }}:{{ version }} | gzip > /tmp/styrened-image.tar.gz
             scp /tmp/styrened-image.tar.gz {{ k3s_host }}:/tmp/
             ssh {{ k3s_host }} "sudo k3s ctr images import /tmp/styrened-image.tar.gz"
             rm -f /tmp/styrened-image.tar.gz
             ;;
         k3s-local)
-            docker save {{ local_image_tag }} | sudo k3s ctr images import -
+            podman save {{ registry }}/{{ image_test }}:{{ version }} | sudo k3s ctr images import -
             ;;
         *)
             echo "Unknown cluster type - please load image manually"
@@ -465,12 +402,12 @@ clean:
 
 # Remove local container images
 clean-images:
-    docker rmi {{ registry }}/{{ image_test }}:{{ version }} 2>/dev/null || true
-    docker rmi {{ registry }}/{{ image_test }}:{{ commit_sha }} 2>/dev/null || true
-    docker rmi {{ registry }}/{{ image_prod }}:{{ version }} 2>/dev/null || true
-    docker rmi {{ registry }}/{{ image_prod }}:{{ commit_sha }} 2>/dev/null || true
-    docker rmi {{ local_image_tag }} 2>/dev/null || true
-    docker rmi {{ image_test }}:test 2>/dev/null || true
+    podman rmi {{ registry }}/{{ image_test }}:{{ version }} 2>/dev/null || true
+    podman rmi {{ registry }}/{{ image_test }}:{{ commit_sha }} 2>/dev/null || true
+    podman rmi {{ registry }}/{{ image_prod }}:{{ version }} 2>/dev/null || true
+    podman rmi {{ registry }}/{{ image_prod }}:{{ commit_sha }} 2>/dev/null || true
+    podman rmi {{ local_image_tag }} 2>/dev/null || true
+    podman rmi {{ image_test }}:test 2>/dev/null || true
 
 # Remove all build artifacts and images
 clean-all: clean clean-images
@@ -553,3 +490,199 @@ identity:
 setup-hooks:
     git config core.hooksPath .githooks
     @echo "Git hooks configured to use .githooks/"
+
+# ─── Bare-Metal Testing ─────────────────────────────────────────────────────
+#
+# Hardware integration tests for physical devices.
+# Requires SSH access to registered devices (see tests/bare-metal/devices.yaml)
+# SSH config (~/.ssh/config) handles user/key selection.
+
+# Show status of all bare-metal devices
+bare-metal-status:
+    ./scripts/bare-metal-deploy.sh --status
+
+# Quick smoke tests on all bare-metal devices
+test-bare-metal-smoke:
+    @echo "Running bare-metal smoke tests..."
+    pytest tests/bare-metal/test_smoke.py -v
+
+# Deploy wheel to bare-metal devices and verify
+test-bare-metal-deploy:
+    @echo "Building wheel..."
+    python -m build --wheel
+    @echo "Running bare-metal deployment tests..."
+    pytest tests/bare-metal/test_deployment.py -v
+
+# Mesh integration tests (requires running daemons)
+test-bare-metal-mesh:
+    @echo "Running bare-metal mesh tests..."
+    pytest tests/bare-metal/test_mesh.py -v
+
+# Run all bare-metal tests (smoke + mesh)
+test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
+    @echo "All bare-metal tests complete"
+
+# Run bare-metal tests on specific device
+test-bare-metal-device device:
+    @echo "Running tests on {{ device }}..."
+    pytest tests/bare-metal/ -v -k "{{ device }}"
+
+# Start daemons on all bare-metal devices (reads from devices.yaml)
+bare-metal-start:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    devices=$(python3 -c "
+    import yaml
+    with open('tests/bare-metal/devices.yaml') as f:
+        data = yaml.safe_load(f)
+    for name, info in data.get('devices', {}).items():
+        print(f\"{name} {info['host']} {info.get('venv_path', '~/.local/styrene-venv')}\")
+    ")
+    while IFS=' ' read -r name host venv; do
+        printf "  %-14s " "$name:"
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "echo ok" &>/dev/null; then
+            ssh -o BatchMode=yes "$host" \
+                "systemctl --user start styrened 2>/dev/null || { source $venv/bin/activate && nohup styrened daemon > /tmp/styrened.log 2>&1 & }" 2>/dev/null
+            echo "started"
+        else
+            echo "unreachable"
+        fi
+    done <<< "$devices"
+
+# Stop daemons on all bare-metal devices (reads from devices.yaml)
+bare-metal-stop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    devices=$(python3 -c "
+    import yaml
+    with open('tests/bare-metal/devices.yaml') as f:
+        data = yaml.safe_load(f)
+    for name, info in data.get('devices', {}).items():
+        print(f\"{name} {info['host']}\")
+    ")
+    while IFS=' ' read -r name host; do
+        printf "  %-14s " "$name:"
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "echo ok" &>/dev/null; then
+            ssh -o BatchMode=yes "$host" \
+                "systemctl --user stop styrened 2>/dev/null || pkill -f 'styrened daemon' 2>/dev/null || true" 2>/dev/null
+            echo "stopped"
+        else
+            echo "unreachable"
+        fi
+    done <<< "$devices"
+
+# Deploy current wheel to all bare-metal devices (or specify DEVICE)
+bare-metal-deploy device="":
+    ./scripts/bare-metal-deploy.sh --build {{ device }}
+
+# ─── Cross-Platform Test Scenarios ──────────────────────────────────────────
+#
+# Unified test scenarios that run on either SSH (bare-metal) or K8s backend.
+# Uses the unified test harness (tests/harness/).
+
+# Run cross-platform scenarios on SSH backend (bare-metal devices)
+test-scenarios-ssh:
+    @echo "Running cross-platform scenarios on SSH backend..."
+    pytest tests/scenarios/ --backend=ssh -v
+
+# Run cross-platform scenarios on K8s backend
+test-scenarios-k8s namespace="styrene-test":
+    @echo "Running cross-platform scenarios on K8s backend..."
+    pytest tests/scenarios/ --backend=k8s --k8s-namespace={{ namespace }} -v
+
+# Run cross-platform scenarios on both backends
+test-scenarios-both namespace="styrene-test":
+    @echo "Running cross-platform scenarios on both backends..."
+    pytest tests/scenarios/ --backend=both --k8s-namespace={{ namespace }} -v
+
+# Run smoke-tier cross-platform tests (fast validation)
+test-scenarios-smoke backend="ssh":
+    @echo "Running smoke scenarios on {{ backend }} backend..."
+    pytest tests/scenarios/ --backend={{ backend }} -m smoke -v
+
+# Run integration-tier cross-platform tests
+test-scenarios-integration backend="ssh":
+    @echo "Running integration scenarios on {{ backend }} backend..."
+    pytest tests/scenarios/ --backend={{ backend }} -m integration -v
+
+# Run comprehensive cross-platform tests
+test-scenarios-comprehensive backend="ssh":
+    @echo "Running comprehensive scenarios on {{ backend }} backend..."
+    pytest tests/scenarios/ --backend={{ backend }} -m comprehensive -v
+
+# ─── Installation Testing ───────────────────────────────────────────────────
+#
+# Installation tests handle deployment/provisioning of styrened.
+# These are separate from connectivity/mesh tests which assume working installation.
+
+# Run installation smoke tests (validate existing installation)
+test-install-smoke:
+    @echo "Running installation smoke tests..."
+    pytest tests/scenarios/test_installation.py --backend=ssh -m smoke -v
+
+# Run full installation tests (install/upgrade cycles)
+test-install:
+    @echo "Running installation tests..."
+    pytest tests/scenarios/test_installation.py --backend=ssh -m installation -v
+
+# Run provisioning tests (install + systemd setup)
+test-provision:
+    @echo "Running provisioning tests..."
+    pytest tests/scenarios/test_installation.py --backend=ssh -m provisioning -v
+
+# Install from specific git tag on all devices
+test-install-tag tag:
+    @echo "Installing tag {{ tag }} on all devices..."
+    pytest tests/scenarios/test_installation.py::TestPipGitInstallation::test_install_from_tag \
+        --backend=ssh --install-tag={{ tag }} -v
+
+# Install from wheel on all devices
+test-install-wheel wheel_path="":
+    #!/usr/bin/env bash
+    if [[ -z "{{ wheel_path }}" ]]; then
+        wheel=$(ls -t dist/styrened-*.whl 2>/dev/null | head -1)
+        if [[ -z "$wheel" ]]; then
+            echo "No wheel found. Build with: just build-wheel"
+            exit 1
+        fi
+    else
+        wheel="{{ wheel_path }}"
+    fi
+    echo "Installing wheel: $wheel"
+    pytest tests/scenarios/test_installation.py::TestWheelInstallation::test_install_from_wheel \
+        --backend=ssh --wheel-path="$wheel" -v
+
+# Full provisioning workflow on all devices
+test-provision-all:
+    @echo "Provisioning all devices..."
+    pytest tests/scenarios/test_installation.py::TestFullProvisioning::test_provision_all_nodes \
+        --backend=ssh -v
+
+# ─── Test Matrix ────────────────────────────────────────────────────────────
+#
+# Structured test scenarios with expected parameters and results for analysis.
+
+# Run full test matrix (smoke + integration)
+test-matrix:
+    @echo "Running test matrix..."
+    pytest tests/scenarios/test_matrix.py --backend=ssh -v -s 2>&1 | tee test-results/matrix-$(date +%Y%m%d_%H%M%S).log
+
+# Run smoke test matrix only
+test-matrix-smoke:
+    @echo "Running smoke test matrix..."
+    pytest tests/scenarios/test_matrix.py --backend=ssh -m smoke -v -s
+
+# Run integration test matrix (requires running daemons)
+test-matrix-integration:
+    @echo "Running integration test matrix..."
+    pytest tests/scenarios/test_matrix.py --backend=ssh -m integration -v -s
+
+# Analyze test matrix results
+test-matrix-analyze:
+    @echo "Analyzing test matrix results..."
+    python scripts/analyze_matrix.py test-results/
+
+# List recent test matrix results
+test-matrix-list:
+    @echo "Recent test matrix results:"
+    @ls -lt test-results/matrix_*.json 2>/dev/null | head -10 || echo "  No results found"

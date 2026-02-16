@@ -43,7 +43,7 @@ just release X.Y.W
 
 1. **Validate Release Tag** - Extracts version, detects prereleases (rc/alpha/beta)
 2. **Build Python Wheel** - Creates wheel and sdist, verifies version matches tag
-3. **Build Multi-Arch Images** - Builds linux/amd64 and linux/arm64 containers
+3. **Build OCI Image** - Builds linux/amd64 container via Nix (nix2container)
 4. **Generate Changelog** - Creates changelog from commits since last tag
 5. **Create GitHub Release** - Publishes release with all artifacts
 
@@ -54,7 +54,6 @@ just release X.Y.W
 | Python wheel | GitHub Release: `styrened-X.Y.Z-py3-none-any.whl` |
 | Source tarball | GitHub Release: `styrened-X.Y.Z.tar.gz` |
 | Container (amd64) | `ghcr.io/styrene-lab/styrened:X.Y.Z` |
-| Container (arm64) | `ghcr.io/styrene-lab/styrened:X.Y.Z` |
 | Latest tag | `ghcr.io/styrene-lab/styrened:latest` (stable releases only) |
 
 ### Version Tagging Strategy
@@ -171,7 +170,7 @@ Nightly builds run comprehensive tests and publish test images:
 
 1. **Version mismatch**: Ensure `pyproject.toml` and `src/styrened/__init__.py` match the tag
 2. **GHCR push denied**: Check package permissions at https://github.com/orgs/styrene-lab/packages/container/package/styrened/settings
-3. **Build fails**: Check Docker build logs in the workflow run
+3. **Build fails**: Check Nix build logs in the workflow run
 
 ### Integration Tests Fail
 

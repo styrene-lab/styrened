@@ -55,12 +55,20 @@ class IPCMessageType(IntEnum):
     QUERY_IDENTITY = 0x11
     QUERY_STATUS = 0x12
     QUERY_CONFIG = 0x13
+    QUERY_CONVERSATIONS = 0x14
+    QUERY_MESSAGES = 0x15
+    QUERY_SEARCH_MESSAGES = 0x16
 
     # Command requests (0x20-0x2F)
     CMD_SEND = 0x20
     CMD_EXEC = 0x21
     CMD_ANNOUNCE = 0x22
     CMD_DEVICE_STATUS = 0x23
+    CMD_SEND_CHAT = 0x24
+    CMD_MARK_READ = 0x25
+    CMD_DELETE_CONVERSATION = 0x26
+    CMD_DELETE_MESSAGE = 0x27
+    CMD_RETRY_MESSAGE = 0x28
 
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30

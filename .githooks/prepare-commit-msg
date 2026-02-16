@@ -15,7 +15,7 @@ if [ -z "$COMMIT_SOURCE" ]; then
 # ─── Commit Checklist ───────────────────────────────────────────
 # Before committing, verify:
 #   [ ] Conventional commit format? (feat:/fix:/chore:/docs:/refactor:/test:)
-#   [ ] Tests pass locally? (make test-unit or make validate)
+#   [ ] Tests pass locally? (just test-unit or just validate)
 #   [ ] No secrets or credentials in staged files?
 #   [ ] Version sources synchronized? (pyproject.toml, __init__.py, VERSION)
 # ────────────────────────────────────────────────────────────────

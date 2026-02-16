@@ -47,26 +47,28 @@ The test suite auto-detects cloud clusters via `KUBECONFIG`. Supports:
 ### Local Build
 
 ```bash
-cd tests/k8s/docker
+# Build test image via Nix
+just build-test
 
-# Build image
-docker build -t styrened-test:latest -f Dockerfile ../../..
+# Load into local podman
+just load-test
 
 # For kind: Load image into cluster
-kind load docker-image styrened-test:latest --name styrened-test
+just load-k8s-image
 
-# For k3d: Import image
-k3d image import styrened-test:latest -c styrened-test
+# Or manually:
+podman save ghcr.io/styrene-lab/styrened-test:$(cat VERSION) | \
+    kind load image-archive /dev/stdin --name styrened-test
 ```
 
-### Multi-arch Build (for cloud)
+### Direct Nix Build
 
 ```bash
-# Build for AMD64 and ARM64
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t <your-registry>/styrened-test:latest \
-  -f Dockerfile ../../.. \
-  --push
+# Build test image directly
+nix build .#oci-test
+
+# Load into podman (via nix2container)
+nix run .#oci-test.copyToPodman
 ```
 
 ## Helm Chart Usage

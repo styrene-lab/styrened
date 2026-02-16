@@ -1,0 +1,285 @@
+# Release build: tag push → build wheel + OCI → push to GHCR → create GitHub release
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: styrened-release-build
+  namespace: argo
+spec:
+  arguments:
+    parameters:
+      - name: ref          # refs/tags/v0.4.0
+      - name: commit-sha
+      - name: repo
+        value: styrene-lab/styrened
+  entrypoint: pipeline
+  serviceAccountName: ci-workflow-sa
+
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 10Gi
+
+  volumes:
+    - name: nix-store
+      persistentVolumeClaim:
+        claimName: nix-store-cache
+    - name: ghcr-auth
+      secret:
+        secretName: ghcr-secret
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: checkout
+            template: git-checkout
+          - name: extract-version
+            template: parse-version
+            depends: "checkout"
+          - name: build-wheel
+            template: build-wheel
+            depends: "checkout"
+          - name: build-oci
+            template: nix-build-oci
+            depends: "checkout"
+          - name: push-oci
+            template: push-ghcr-release
+            depends: "build-oci && extract-version"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
+                - name: prerelease
+                  value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
+          - name: create-release
+            template: github-release
+            depends: "push-oci && build-wheel"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
+                - name: prerelease
+                  value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
+
+    - name: git-checkout
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            git clone https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            cd /workspace/src
+            git checkout {{workflow.parameters.commit-sha}}
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: parse-version
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            REF="{{workflow.parameters.ref}}"
+            VERSION="${REF#refs/tags/v}"
+            echo "$VERSION" > /workspace/version
+            # Detect prerelease
+            if echo "$VERSION" | grep -qE '(rc|alpha|beta|dev)'; then
+              echo "true" > /workspace/prerelease
+            else
+              echo "false" > /workspace/prerelease
+            fi
+            echo "Version: $VERSION, Prerelease: $(cat /workspace/prerelease)"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+      outputs:
+        parameters:
+          - name: version
+            valueFrom:
+              path: /workspace/version
+          - name: prerelease
+            valueFrom:
+              path: /workspace/prerelease
+
+    - name: build-wheel
+      container:
+        image: python:3.11-slim
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            pip install --quiet build
+            cd /workspace/src
+            python -m build --wheel --sdist -o /workspace/dist/
+            ls -la /workspace/dist/
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+
+    - name: nix-build-oci
+      container:
+        image: nixos/nix:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+            cd /workspace/src
+            nix build .#oci --no-link --print-out-paths > /workspace/oci-path
+            echo "Built: $(cat /workspace/oci-path)"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: nix-store
+            mountPath: /nix
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            cpu: "4"
+            memory: 4Gi
+
+    - name: push-ghcr-release
+      inputs:
+        parameters:
+          - name: version
+          - name: prerelease
+      container:
+        image: nixos/nix:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+
+            cd /workspace/src
+            VERSION="{{inputs.parameters.version}}"
+            PRERELEASE="{{inputs.parameters.prerelease}}"
+            SHORT_SHA=$(echo "{{workflow.parameters.commit-sha}}" | cut -c1-7)
+
+            # Auth
+            mkdir -p ~/.docker
+            GHCR_USER=$(cat /ghcr/username 2>/dev/null || echo "styrene-lab")
+            GHCR_TOKEN=$(cat /ghcr/password)
+            echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$(echo -n "${GHCR_USER}:${GHCR_TOKEN}" | base64)\"}}}" > ~/.docker/config.json
+
+            # Push version tag via nix2container
+            nix run .#oci.copyToRegistry
+
+            # Additional tags via skopeo
+            nix-env -iA nixpkgs.skopeo 2>/dev/null || true
+            skopeo copy --authfile ~/.docker/config.json \
+              docker://ghcr.io/styrene-lab/styrened:${VERSION} \
+              docker://ghcr.io/styrene-lab/styrened:${SHORT_SHA}
+
+            # Only tag latest for stable releases
+            if [ "$PRERELEASE" = "false" ]; then
+              skopeo copy --authfile ~/.docker/config.json \
+                docker://ghcr.io/styrene-lab/styrened:${VERSION} \
+                docker://ghcr.io/styrene-lab/styrened:latest
+              echo "Tagged: ${VERSION}, ${SHORT_SHA}, latest"
+            else
+              echo "Tagged: ${VERSION}, ${SHORT_SHA} (prerelease, no latest)"
+            fi
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: nix-store
+            mountPath: /nix
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+
+    - name: github-release
+      inputs:
+        parameters:
+          - name: version
+          - name: prerelease
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            apk add --no-cache curl jq tar gzip
+
+            VERSION="{{inputs.parameters.version}}"
+            PRERELEASE="{{inputs.parameters.prerelease}}"
+            GHCR_TOKEN=$(cat /ghcr/password)
+
+            cd /workspace/src
+
+            # Generate changelog from last tag
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              CHANGELOG=$(git log ${PREV_TAG}..HEAD --oneline --no-merges | sed 's/^/- /')
+            else
+              CHANGELOG="Initial release"
+            fi
+
+            # Create source archive
+            tar czf /workspace/dist/styrened-${VERSION}.tar.gz -C /workspace/src .
+
+            # Create release via GitHub API
+            RELEASE_DATA=$(jq -n \
+              --arg tag "v${VERSION}" \
+              --arg name "v${VERSION}" \
+              --arg body "## Changes\n\n${CHANGELOG}\n\n## Container Image\n\n\`\`\`bash\ndocker pull ghcr.io/styrene-lab/styrened:${VERSION}\n\`\`\`" \
+              --argjson prerelease "${PRERELEASE}" \
+              '{tag_name: $tag, name: $name, body: $body, prerelease: $prerelease}')
+
+            RELEASE_ID=$(curl -sf -X POST \
+              -H "Authorization: token ${GHCR_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/{{workflow.parameters.repo}}/releases" \
+              -d "$RELEASE_DATA" | jq -r '.id')
+
+            echo "Created release ID: ${RELEASE_ID}"
+
+            # Upload wheel artifact
+            for f in /workspace/dist/styrened-*.whl /workspace/dist/styrened-*.tar.gz; do
+              [ -f "$f" ] || continue
+              BASENAME=$(basename "$f")
+              echo "Uploading ${BASENAME}..."
+              curl -sf -X POST \
+                -H "Authorization: token ${GHCR_TOKEN}" \
+                -H "Content-Type: application/octet-stream" \
+                "https://uploads.github.com/repos/{{workflow.parameters.repo}}/releases/${RELEASE_ID}/assets?name=${BASENAME}" \
+                --data-binary "@${f}"
+            done
+            echo "Release v${VERSION} published"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi

@@ -5,6 +5,72 @@ All notable changes to styrened will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-03
+
+### Added
+
+#### LXMF Chat Backend (Phase 1)
+- ConversationService for full LXMF chat support with SQLite persistence
+- Message history storage with configurable retention (default 90 days)
+- Conversation list with unread counts and pagination
+- Read receipt protocol for delivery confirmations
+- IPC endpoints for chat operations (send, list, history, mark-read)
+- CLI commands: `chat send`, `chat list`, `chat history`
+
+#### Sideband/NomadNet Interoperability
+- Plain text message normalization for Sideband/NomadNet/MeshChat compatibility
+- Protocol-aware message routing (chat vs RPC vs read receipts)
+- Auto-reply now correctly filters non-chat protocols
+
+#### Terminal Service Security Hardening
+- Async identity verification with configurable retry (10 retries, 200ms delay)
+- Session hijacking prevention (link association guards)
+- Handoff timeout for sessions awaiting Link establishment (30s default)
+- Rate limiting: per-identity session limits, total session limits, request rate limiting
+- Command validation with shell and command whitelists
+- Signal whitelist with blocked dangerous signals (SIGKILL, SIGSTOP, SIGQUIT)
+- Idle session timeout with configurable duration (default 30 min)
+- Payload dimension validation (rows/cols bounds checking)
+
+#### RPC Security Hardening
+- Authorization framework with identity-based access control
+- Rate limiting (30 requests/minute per identity)
+- Replay protection with request_id tracking and expiry
+- Dangerous command restrictions (reboot, shutdown, factory_reset require explicit authorization)
+
+#### IPC Handler Security
+- Comprehensive input validation for all IPC message types
+- Graceful shutdown handling (rejects requests during shutdown)
+- Bounded message sizes and parameter validation
+- Safe error responses for partial daemon initialization
+
+### Changed
+- Terminal service `_handle_terminal_resize` and `_handle_terminal_signal` now take LXMF message objects
+- Identity verification moved from synchronous blocking to async with retries
+- Auto-reply service filters protocol field to avoid replying to RPC messages
+
+### Fixed
+- LocalInterface reconnection no longer spams duplicate destination registrations
+- Cross-node messaging identity resolution via NodeStore
+- Truncated destination hash handling in chat messages
+- Config loading now properly handles all edge cases
+- NodeStore validates hash formats before storage
+
+### Security
+- **Terminal Sessions**: Added comprehensive security controls (authorization, rate limiting, command validation, signal filtering, idle timeout)
+- **RPC Server**: Added authorization, rate limiting, and replay protection
+- **IPC Handlers**: Added input validation and shutdown safety checks
+- **LXMF Messages**: Plain text messages now safely normalized (prevents JSON injection)
+
+### Testing
+- Added 98 new unit tests for RPC server security (authorization, rate limiting, replay protection)
+- Added 19 tests for chat protocol
+- Added 20 tests for protocol registry
+- Added 27 tests for daemon lifecycle
+- Added 242 tests for read receipt protocol
+- Added 896 tests for conversation service
+- Total unit tests: 658 (up from ~400)
+
 ## [0.3.0] - 2026-02-01
 
 ### Added
@@ -25,13 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Terminal module structure (implementation in progress)
 
 #### Build System
-- Justfile with feature parity to Makefile plus enhancements
+- Justfile with comprehensive build automation
 - Parameterized recipes: `just helm-install-tag v0.2.5`, `just release 0.4.0`
 - Interactive version bump: `just bump-version`
 - Development helpers: `just run-debug`, `just devices`, `just status <dest>`
 - Git hooks: `.githooks/prepare-commit-msg` with commit checklist
 - ImagePullSecret support for GHCR on remote K8s clusters
-- Remote testing workflow: `make test-k8s-remote`
+- Remote testing workflow: `just test-k8s-remote`
 
 #### Testing
 - Unit test directory structure (`tests/unit/`) with 113 new unit tests
@@ -92,7 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `release.yml` - Full release pipeline
 - Helm chart for K8s testing (`tests/k8s/helm/styrened-test/`)
 - K8sTestHarness for automated deployment testing
-- Makefile with composable build targets
+- Justfile with composable build targets
 
 #### Wire Protocol v2
 - StyreneEnvelope format with 56 message types

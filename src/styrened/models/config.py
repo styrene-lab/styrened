@@ -200,19 +200,23 @@ class ReticulumConfig:
         # CLIENT: transport disabled, connects to shared instance
         return self.mode in (DeploymentMode.HUB, DeploymentMode.STANDALONE)
 
-    def resolve_operator_identity_path(self) -> Path:
-        """Get the operator identity path.
 
-        Returns:
-            Path to operator identity file.
-        """
-        if self.operator_identity_path:
-            return self.operator_identity_path
+@dataclass
+class IdentityConfig:
+    """Identity appearance configuration for ecosystem compatibility.
 
-        from platformdirs import user_config_dir
+    Controls how this node appears to other LXMF clients (Sideband, NomadNet, MeshChat).
+    These fields are included in announces and message metadata.
 
-        config_dir = Path(user_config_dir("styrene"))
-        return config_dir / "operator.key"
+    Attributes:
+        display_name: Human-readable name shown in chat clients.
+            Defaults to "Anonymous Styrene".
+        icon: Emoji or short string displayed as identity icon.
+            Defaults to 🔗. Common alternatives: 🖥️ (server), 📱 (mobile), 🏠 (home).
+    """
+
+    display_name: str = "Anonymous Styrene"
+    icon: str = "🔗"
 
 
 @dataclass
@@ -305,9 +309,109 @@ class IPCConfig:
     socket_mode: int = 0o660
 
 
+@dataclass
+class PropagationNodeConfig:
+    """Configuration for acting as an LXMF propagation node.
+
+    When enabled, this node will store and forward messages for other nodes
+    in the mesh, improving message delivery reliability.
+
+    Attributes:
+        enabled: Whether to enable propagation node mode.
+        name: Display name for propagation node announces.
+    """
+
+    enabled: bool = False
+    name: str | None = None
+
+
+@dataclass
+class LXMFConfig:
+    """LXMF messaging and propagation configuration.
+
+    Controls LXMF router behavior including propagation node settings,
+    peer management, and sync limits. These settings expose the underlying
+    LXMRouter configuration options for advanced mesh deployments.
+
+    Attributes:
+        propagation_node: Configuration for acting as a propagation node.
+        propagation_destination: Hex hash of preferred outbound propagation node.
+            If set, messages without a direct path will be sent via this node.
+        propagation_limit: Maximum message size for propagation in KB (default: 256).
+        sync_limit: Maximum sync size in KB (default: 10240).
+        delivery_limit: Maximum messages per transfer (default: 1000).
+        autopeer: Enable automatic peering with other propagation nodes.
+        autopeer_maxdepth: Maximum depth for automatic peering (default: 4).
+        max_peers: Maximum number of propagation peers (default: 20).
+        static_peers: List of static peer addresses (32-char hex hashes).
+        from_static_only: Only connect to static peers (ignore discovered peers).
+        propagation_cost: Stamp cost for propagation (default: 16).
+        propagation_cost_flexibility: Cost flexibility (default: 3).
+        peering_cost: Cost for peering (default: 18).
+        max_peering_cost: Maximum peering cost (default: 26).
+    """
+
+    # Propagation node mode (act as a propagation node)
+    propagation_node: PropagationNodeConfig = field(default_factory=PropagationNodeConfig)
+
+    # Outbound propagation (use a specific propagation node)
+    propagation_destination: str | None = None  # 32-char hex hash
+
+    # Sync limits
+    propagation_limit: int = 256  # KB per transfer
+    sync_limit: int = 10240  # KB total sync
+    delivery_limit: int = 1000  # messages per transfer
+
+    # Peer management
+    autopeer: bool = True
+    autopeer_maxdepth: int = 4
+    max_peers: int = 20
+    static_peers: list[str] = field(default_factory=list)
+    from_static_only: bool = False
+
+    # Cost settings (for propagation node mode)
+    propagation_cost: int = 16
+    propagation_cost_flexibility: int = 3
+    peering_cost: int = 18
+    max_peering_cost: int = 26
+
+
 # -----------------------------------------------------------------------------
 # Core configuration root
 # -----------------------------------------------------------------------------
+
+
+@dataclass
+class TerminalConfig:
+    """Terminal session configuration.
+
+    Controls remote terminal access to this node via the Styrene terminal protocol.
+    Terminal sessions use a two-plane architecture:
+    - LXMF control plane for session establishment/teardown
+    - RNS Link data plane for I/O streaming
+
+    Attributes:
+        enabled: Whether to enable terminal service.
+        authorized_identities: Set of identity hashes allowed to connect.
+            If empty and allow_unauthenticated=False, all connections rejected.
+        allow_unauthenticated: Allow connections from any identity.
+            WARNING: This grants remote shell access - use with caution.
+        default_shell: Shell to spawn for sessions (default: user's shell).
+        session_idle_timeout: Seconds of inactivity before session close (0=disabled).
+        max_sessions_per_identity: Maximum concurrent sessions per identity.
+        max_total_sessions: Maximum total concurrent sessions.
+        rate_limit_requests: Maximum session requests per minute per identity.
+    """
+
+    enabled: bool = False
+    authorized_identities: set[str] = field(default_factory=set)
+    allow_unauthenticated: bool = False
+    default_shell: str | None = None
+    allowed_shells: set[str] = field(default_factory=set)  # Empty = use defaults
+    session_idle_timeout: int = 3600  # 1 hour default
+    max_sessions_per_identity: int = 3
+    max_total_sessions: int = 10
+    rate_limit_requests: int = 10  # requests per minute per identity
 
 
 @dataclass
@@ -319,16 +423,22 @@ class CoreConfig:
 
     Attributes:
         reticulum: Reticulum integration settings.
+        identity: Identity appearance configuration.
         rpc: RPC server configuration.
         discovery: Device discovery configuration.
         chat: Chat and messaging configuration.
         api: HTTP API configuration.
         ipc: IPC control socket configuration.
+        lxmf: LXMF messaging and propagation configuration.
+        terminal: Terminal session configuration.
     """
 
     reticulum: ReticulumConfig = field(default_factory=ReticulumConfig)
+    identity: IdentityConfig = field(default_factory=IdentityConfig)
     rpc: RPCConfig = field(default_factory=RPCConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
     api: APIConfig = field(default_factory=APIConfig)
     ipc: IPCConfig = field(default_factory=IPCConfig)
+    lxmf: LXMFConfig = field(default_factory=LXMFConfig)
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)

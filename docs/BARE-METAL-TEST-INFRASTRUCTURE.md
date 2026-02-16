@@ -285,7 +285,7 @@ def wheel_path():
     dist = Path(__file__).parents[2] / "dist"
     wheels = list(dist.glob("styrened-*.whl"))
     if not wheels:
-        pytest.skip("No wheel found - run 'make build' first")
+        pytest.skip("No wheel found - run 'python -m build --wheel' first")
     return max(wheels, key=lambda p: p.stat().st_mtime)
 
 
@@ -581,24 +581,35 @@ if __name__ == "__main__":
     main()
 ```
 
-## Makefile Integration
+## Justfile Integration
 
-Add to `Makefile`:
+Bare-metal testing recipes are defined in the project `justfile`:
 
-```makefile
-# Bare-metal testing
-.PHONY: test-bare-metal test-bare-metal-smoke test-bare-metal-deploy
+```bash
+# Show device status
+just bare-metal-status
 
-test-bare-metal-smoke:
-	pytest tests/bare-metal/test_smoke.py -v
+# Run smoke tests
+just test-bare-metal-smoke
 
-test-bare-metal-deploy: build
-	pytest tests/bare-metal/test_deployment.py -v
+# Deploy wheel and verify
+just test-bare-metal-deploy
 
-test-bare-metal-mesh:
-	pytest tests/bare-metal/test_mesh_integration.py -v
+# Run mesh integration tests
+just test-bare-metal-mesh
 
-test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
+# Run all bare-metal tests
+just test-bare-metal
+
+# Test specific device
+just test-bare-metal-device styrene-node
+
+# Start/stop daemons on all devices
+just bare-metal-start
+just bare-metal-stop
+
+# Deploy current wheel to all devices
+just bare-metal-deploy
 ```
 
 ## Usage Examples
@@ -607,16 +618,16 @@ test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
 
 ```bash
 # Build wheel
-make build
+python -m build --wheel
 
 # Quick smoke test (30 seconds)
-make test-bare-metal-smoke
+just test-bare-metal-smoke
 
 # Full deployment test (2-3 minutes)
-make test-bare-metal-deploy
+just test-bare-metal-deploy
 
 # Mesh integration test (3-5 minutes)
-make test-bare-metal-mesh
+just test-bare-metal-mesh
 ```
 
 ### Single Device Testing
@@ -711,8 +722,8 @@ To add a new device to the test infrastructure:
        - auto_interface
        - systemd_user
    ```
-4. **Run smoke tests**: `pytest tests/bare-metal/test_smoke.py -k new-device -v`
-5. **Run full validation**: `make test-bare-metal`
+4. **Run smoke tests**: `just test-bare-metal-device new-device`
+5. **Run full validation**: `just test-bare-metal`
 6. **Update documentation** with results
 
 ### NixOS Device Configuration

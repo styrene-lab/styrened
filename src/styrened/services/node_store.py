@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 # Validation pattern for 32-character hex hashes (RNS identity/destination hashes)
 _HEX_HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{32}$")
 
+# Validation pattern for truncated hex hashes (used in prefix matching)
+_HEX_PREFIX_PATTERN = re.compile(r"^[a-fA-F0-9]+$")
+
+# Minimum prefix length for hash lookups to avoid ambiguous matches
+# 8 hex chars = 32 bits = 4 billion possible values, reasonable collision resistance
+MIN_PREFIX_LENGTH = 8
+
 
 def _is_valid_hash(h: str | None) -> bool:
     """Validate a 32-character hex hash.
@@ -58,6 +65,24 @@ def _is_valid_hash(h: str | None) -> bool:
         True if valid 32-char hex string, False otherwise.
     """
     return h is not None and bool(_HEX_HASH_PATTERN.match(h))
+
+
+def _is_valid_hash_prefix(h: str | None) -> bool:
+    """Validate a hex hash prefix for prefix matching.
+
+    Ensures the prefix is valid hex and meets minimum length requirements.
+
+    Args:
+        h: Hash prefix string to validate.
+
+    Returns:
+        True if valid hex prefix of sufficient length, False otherwise.
+    """
+    if h is None:
+        return False
+    if len(h) < MIN_PREFIX_LENGTH:
+        return False
+    return bool(_HEX_PREFIX_PATTERN.match(h))
 
 
 # Global lock for thread-safe database operations
@@ -319,19 +344,52 @@ class NodeStore:
         (from `styrene_node:operator` announces). For LXMF destinations,
         use get_identity_for_lxmf_destination() instead.
 
+        Supports both exact match and prefix match for truncated hashes
+        (common when users copy partial hashes from CLI output).
+        Prefix matching requires minimum 8 characters to avoid ambiguity.
+
         Thread-safe: read operations allow concurrent access.
 
         Args:
-            destination_hash: Hex-encoded operator destination hash.
+            destination_hash: Hex-encoded operator destination hash (full or truncated).
 
         Returns:
             Identity hash if found, None otherwise.
+            Returns None if prefix is ambiguous (matches multiple nodes).
         """
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT identity_hash FROM nodes WHERE destination_hash = ?",
-                (destination_hash,),
-            ).fetchone()
+            # First try exact match (only if valid 32-char hex)
+            row = None
+            if _is_valid_hash(destination_hash):
+                row = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE destination_hash = ?",
+                    (destination_hash,),
+                ).fetchone()
+
+            # If not found, try prefix match for truncated hashes
+            if not row and len(destination_hash) < 32:
+                # Validate prefix before using in query
+                if not _is_valid_hash_prefix(destination_hash):
+                    logger.debug(
+                        f"[HASH] NodeStore lookup: operator_dest={destination_hash[:16]}... "
+                        f"-> INVALID (too short or not hex)"
+                    )
+                    return None
+
+                # Check for ambiguous matches
+                rows = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE destination_hash LIKE ?",
+                    (destination_hash + "%",),
+                ).fetchall()
+
+                if len(rows) > 1:
+                    logger.warning(
+                        f"[HASH] NodeStore lookup: operator_dest={destination_hash[:16]}... "
+                        f"-> AMBIGUOUS ({len(rows)} matches, need longer prefix)"
+                    )
+                    return None
+                elif len(rows) == 1:
+                    row = rows[0]
 
             if row:
                 identity_hash: str = row["identity_hash"]
@@ -347,6 +405,27 @@ class NodeStore:
                 )
                 return None
 
+    def get_node_by_lxmf_destination(self, lxmf_destination_hash: str) -> MeshDevice | None:
+        """Get a node by its LXMF destination hash.
+
+        Thread-safe: read operations allow concurrent access.
+
+        Args:
+            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash.
+
+        Returns:
+            MeshDevice if found, None otherwise.
+        """
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM nodes WHERE lxmf_destination_hash = ?",
+                (lxmf_destination_hash,),
+            ).fetchone()
+
+            if row:
+                return self._row_to_device(row)
+            return None
+
     def get_identity_for_lxmf_destination(self, lxmf_destination_hash: str) -> str | None:
         """Get identity hash for an LXMF destination hash.
 
@@ -356,19 +435,51 @@ class NodeStore:
         - The LXMF destination is different from the operator destination,
           but both share the same identity_hash
 
+        Supports both exact match and prefix match for truncated hashes.
+        Prefix matching requires minimum 8 characters to avoid ambiguity.
+
         Thread-safe: read operations allow concurrent access.
 
         Args:
-            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash.
+            lxmf_destination_hash: Hex-encoded LXMF delivery destination hash (full or truncated).
 
         Returns:
             Identity hash if found, None otherwise.
+            Returns None if prefix is ambiguous (matches multiple nodes).
         """
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash = ?",
-                (lxmf_destination_hash,),
-            ).fetchone()
+            # First try exact match (only if valid 32-char hex)
+            row = None
+            if _is_valid_hash(lxmf_destination_hash):
+                row = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash = ?",
+                    (lxmf_destination_hash,),
+                ).fetchone()
+
+            # If not found, try prefix match for truncated hashes
+            if not row and len(lxmf_destination_hash) < 32:
+                # Validate prefix before using in query
+                if not _is_valid_hash_prefix(lxmf_destination_hash):
+                    logger.debug(
+                        f"[HASH] NodeStore lookup: lxmf_dest={lxmf_destination_hash[:16]}... "
+                        f"-> INVALID (too short or not hex)"
+                    )
+                    return None
+
+                # Check for ambiguous matches
+                rows = conn.execute(
+                    "SELECT identity_hash FROM nodes WHERE lxmf_destination_hash LIKE ?",
+                    (lxmf_destination_hash + "%",),
+                ).fetchall()
+
+                if len(rows) > 1:
+                    logger.warning(
+                        f"[HASH] NodeStore lookup: lxmf_dest={lxmf_destination_hash[:16]}... "
+                        f"-> AMBIGUOUS ({len(rows)} matches, need longer prefix)"
+                    )
+                    return None
+                elif len(rows) == 1:
+                    row = rows[0]
 
             if row:
                 identity_hash: str = row["identity_hash"]

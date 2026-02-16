@@ -15,13 +15,23 @@ The RPC server handles:
 - REBOOT (0x41): Schedules system reboot
 - CONFIG_UPDATE (0x42): Updates local configuration
 
+Security:
+    By default, all RPC commands except PING and STATUS_REQUEST require
+    authorization via the `authorized_identities` parameter. Dangerous
+    commands (EXEC, REBOOT, CONFIG_UPDATE) are disabled by default and
+    must be explicitly enabled via `enable_dangerous_commands=True`.
+
 Usage:
     from styrened.rpc import RPCServer
     from styrened.protocols.styrene import StyreneProtocol
 
-    # Initialize with StyreneProtocol
+    # Initialize with StyreneProtocol and authorization
     styrene_protocol = StyreneProtocol(router, identity, db_engine)
-    server = RPCServer(styrene_protocol)
+    server = RPCServer(
+        styrene_protocol,
+        authorized_identities={"abc123...", "def456..."},
+        enable_dangerous_commands=True,  # Required for EXEC, REBOOT, CONFIG_UPDATE
+    )
 
     # Start server
     server.start()
@@ -37,6 +47,7 @@ import socket
 import subprocess
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from styrened.models.styrene_wire import (
@@ -89,6 +100,31 @@ DEFAULT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
     }
 )
 
+# Rate limiting defaults
+DEFAULT_RPC_RATE_LIMIT = 30  # requests per minute per identity
+RATE_LIMIT_WINDOW_SECONDS = 60
+
+# Replay protection
+MAX_RECENT_REQUEST_IDS = 1000  # Track this many recent request_ids
+REQUEST_ID_EXPIRY_SECONDS = 300  # Request IDs older than this are expired
+
+# Commands that are considered "dangerous" and require explicit enablement
+DANGEROUS_RPC_COMMANDS: frozenset[StyreneMessageType] = frozenset(
+    {
+        StyreneMessageType.EXEC,
+        StyreneMessageType.REBOOT,
+        StyreneMessageType.CONFIG_UPDATE,
+    }
+)
+
+# Commands that don't require authorization (safe read-only commands)
+PUBLIC_RPC_COMMANDS: frozenset[StyreneMessageType] = frozenset(
+    {
+        StyreneMessageType.PING,
+        StyreneMessageType.STATUS_REQUEST,
+    }
+)
+
 
 # Error codes for RPC errors
 class RPCErrorCode:
@@ -110,9 +146,17 @@ class RPCServer:
     Listens for incoming RPC messages via StyreneProtocol and dispatches them to
     appropriate handlers. Responses are sent back using the Styrene wire format.
 
+    Security:
+        - `authorized_identities`: Set of identity hashes allowed to execute RPC commands.
+          If empty/None, authorization is disabled (DANGEROUS - only for development).
+        - `enable_dangerous_commands`: Must be True to enable EXEC, REBOOT, CONFIG_UPDATE.
+          Defaults to False for security.
+        - `rate_limit`: Maximum requests per minute per identity.
+
     Attributes:
         styrene_protocol: StyreneProtocol instance for sending responses.
         allowed_commands: Set of commands allowed for exec (security).
+        authorized_identities: Set of identity hashes allowed to execute RPC.
         _running: Whether the server is running.
     """
 
@@ -120,6 +164,10 @@ class RPCServer:
         self,
         styrene_protocol: "StyreneProtocol",
         allowed_commands: set[str] | None = None,
+        authorized_identities: set[str] | None = None,
+        authorized_identities_file: Path | None = None,
+        enable_dangerous_commands: bool = False,
+        rate_limit: int = DEFAULT_RPC_RATE_LIMIT,
     ) -> None:
         """Initialize RPC server.
 
@@ -127,11 +175,55 @@ class RPCServer:
             styrene_protocol: StyreneProtocol instance for transport.
             allowed_commands: Set of allowed commands for exec.
                             Defaults to DEFAULT_ALLOWED_COMMANDS.
+            authorized_identities: Set of identity hashes allowed to execute
+                            non-public RPC commands. If None/empty, authorization
+                            is disabled (DANGEROUS).
+            authorized_identities_file: Path to file containing authorized identities
+                            (one per line, # comments allowed).
+            enable_dangerous_commands: If True, enable EXEC, REBOOT, CONFIG_UPDATE.
+                            Defaults to False for security.
+            rate_limit: Maximum requests per minute per identity.
         """
         self._protocol = styrene_protocol
         self.allowed_commands = allowed_commands or set(DEFAULT_ALLOWED_COMMANDS)
         self._running = False
         self._handlers: dict[StyreneMessageType, Callable[[str, StyreneEnvelope], None]] = {}
+
+        # Authorization
+        self._authorized_identities: set[str] = authorized_identities or set()
+        self._authorized_identities_file = authorized_identities_file
+        if authorized_identities_file:
+            self._load_authorized_identities()
+
+        self._enable_dangerous_commands = enable_dangerous_commands
+
+        # Rate limiting
+        self._rate_limit = rate_limit
+        self._request_timestamps: dict[str, list[float]] = {}
+
+        # Replay protection - track recent request_ids with timestamps
+        self._recent_request_ids: dict[bytes, float] = {}
+
+        # Log security configuration
+        if not self._authorized_identities:
+            logger.warning(
+                "[SECURITY] RPC server initialized WITHOUT authorization - "
+                "all identities can execute public RPC commands"
+            )
+        else:
+            logger.info(
+                f"[SECURITY] RPC server initialized with {len(self._authorized_identities)} "
+                f"authorized identities"
+            )
+
+        if enable_dangerous_commands:
+            logger.warning(
+                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE) are ENABLED"
+            )
+        else:
+            logger.info(
+                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE) are DISABLED"
+            )
 
         # Register default handlers
         self._register_default_handlers()
@@ -140,6 +232,36 @@ class RPCServer:
         self._register_with_protocol()
 
         logger.debug("RPCServer initialized with StyreneProtocol")
+
+    def _load_authorized_identities(self) -> None:
+        """Load authorized identities from file.
+
+        File format: one identity hash per line, # comments allowed.
+        """
+        if not self._authorized_identities_file:
+            return
+
+        if not self._authorized_identities_file.exists():
+            logger.warning(
+                f"Authorized identities file not found: {self._authorized_identities_file}"
+            )
+            return
+
+        try:
+            with open(self._authorized_identities_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        # Take first whitespace-separated token
+                        identity = line.split()[0]
+                        self._authorized_identities.add(identity)
+
+            logger.info(
+                f"Loaded {len(self._authorized_identities)} authorized RPC identities "
+                f"from {self._authorized_identities_file}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to load authorized identities: {e}")
 
     def _register_with_protocol(self) -> None:
         """Register RPC message handlers with StyreneProtocol."""
@@ -175,27 +297,175 @@ class RPCServer:
         if not self._running:
             return
 
+        source_hash = message.source_hash
+        msg_type = envelope.message_type
+
         # Check if we have a handler for this message type
-        handler = self._handlers.get(envelope.message_type)
+        handler = self._handlers.get(msg_type)
         if handler is None:
-            logger.debug(f"No RPC handler for message type: {envelope.message_type.name}")
+            logger.debug(f"No RPC handler for message type: {msg_type.name}")
             return
 
-        logger.info(f"Received RPC {envelope.message_type.name} from {message.source_hash[:16]}...")
+        # Security checks
+        # 1. Check if dangerous commands are enabled
+        if msg_type in DANGEROUS_RPC_COMMANDS and not self._enable_dangerous_commands:
+            logger.warning(
+                f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                f"dangerous commands disabled"
+            )
+            if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                await self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_NOT_ALLOWED,
+                    "Command not enabled on this node",
+                )
+            return
+
+        # 2. Check authorization for non-public commands
+        if msg_type not in PUBLIC_RPC_COMMANDS:
+            if not self._is_authorized(source_hash):
+                logger.warning(
+                    f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                    f"not authorized"
+                )
+                if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                    await self._send_error(
+                        source_hash,
+                        envelope.request_id,
+                        RPCErrorCode.COMMAND_NOT_ALLOWED,
+                        "Not authorized",
+                    )
+                return
+
+        # 3. Check rate limit
+        rate_limit_result = self._check_rate_limit(source_hash)
+        if rate_limit_result is not None:
+            logger.warning(
+                f"[SECURITY] Rate limited {msg_type.name} from {source_hash[:16]}... - "
+                f"{rate_limit_result}"
+            )
+            if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                await self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    rate_limit_result,
+                )
+            return
+
+        # 4. Check replay protection (for non-public commands with request_id)
+        if msg_type not in PUBLIC_RPC_COMMANDS and envelope.request_id:
+            if self._is_replay(envelope.request_id):
+                logger.warning(
+                    f"[SECURITY] Rejected replay of {msg_type.name} from {source_hash[:16]}... - "
+                    f"request_id already seen"
+                )
+                # Don't send error response for replays (avoid amplification)
+                return
+
+        logger.info(f"Received RPC {msg_type.name} from {source_hash[:16]}...")
 
         # Dispatch to handler (handlers use asyncio.create_task internally)
         try:
-            handler(message.source_hash, envelope)
+            handler(source_hash, envelope)
         except Exception as e:
             logger.error(f"Error handling RPC request: {e}")
             # Send error response if we have a request_id
             if envelope.request_id and envelope.request_id != NO_CORRELATION:
                 await self._send_error(
-                    message.source_hash,
+                    source_hash,
                     envelope.request_id,
                     RPCErrorCode.UNKNOWN,
                     "Internal server error",  # Sanitized message
                 )
+
+    def _is_authorized(self, source_hash: str) -> bool:
+        """Check if an identity is authorized for RPC commands.
+
+        Args:
+            source_hash: Source identity hash to check.
+
+        Returns:
+            True if authorized, False otherwise.
+        """
+        # If no authorized identities configured, allow all (with warning logged at init)
+        if not self._authorized_identities:
+            return True
+
+        return source_hash in self._authorized_identities
+
+    def _check_rate_limit(self, source_hash: str) -> str | None:
+        """Check rate limit for an identity.
+
+        Args:
+            source_hash: Source identity hash.
+
+        Returns:
+            None if allowed, error message string if rate limited.
+        """
+        current_time = time.time()
+        cutoff = current_time - RATE_LIMIT_WINDOW_SECONDS
+
+        # Clean up old timestamps
+        if source_hash in self._request_timestamps:
+            self._request_timestamps[source_hash] = [
+                ts for ts in self._request_timestamps[source_hash] if ts > cutoff
+            ]
+            if not self._request_timestamps[source_hash]:
+                del self._request_timestamps[source_hash]
+
+        # Check limit
+        timestamps = self._request_timestamps.get(source_hash, [])
+        if len(timestamps) >= self._rate_limit:
+            return f"Rate limit exceeded ({self._rate_limit} requests/minute)"
+
+        # Record this request
+        if source_hash not in self._request_timestamps:
+            self._request_timestamps[source_hash] = []
+        self._request_timestamps[source_hash].append(current_time)
+
+        return None
+
+    def _is_replay(self, request_id: bytes) -> bool:
+        """Check if a request_id has been seen recently (replay detection).
+
+        Also records the request_id if not a replay.
+
+        Args:
+            request_id: The request ID to check.
+
+        Returns:
+            True if this is a replay (request_id seen before), False otherwise.
+        """
+        current_time = time.time()
+        cutoff = current_time - REQUEST_ID_EXPIRY_SECONDS
+
+        # Clean up expired request_ids periodically (when dict gets large)
+        if len(self._recent_request_ids) > MAX_RECENT_REQUEST_IDS:
+            # Remove expired entries
+            expired = [rid for rid, ts in self._recent_request_ids.items() if ts < cutoff]
+            for rid in expired:
+                del self._recent_request_ids[rid]
+
+            # If still too large, remove oldest entries
+            if len(self._recent_request_ids) > MAX_RECENT_REQUEST_IDS:
+                sorted_items = sorted(self._recent_request_ids.items(), key=lambda x: x[1])
+                # Remove oldest 10%
+                to_remove = len(sorted_items) // 10
+                for rid, _ in sorted_items[:to_remove]:
+                    del self._recent_request_ids[rid]
+
+        # Check if we've seen this request_id
+        if request_id in self._recent_request_ids:
+            # Check if it's expired
+            if self._recent_request_ids[request_id] >= cutoff:
+                return True  # Replay detected
+            # Entry expired, will be replaced
+
+        # Record this request_id
+        self._recent_request_ids[request_id] = current_time
+        return False
 
     def register_handler(
         self,

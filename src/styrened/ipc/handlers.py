@@ -11,12 +11,34 @@ Usage:
 """
 
 import logging
+import re
+import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+# Constants for input validation
+MAX_CHAT_CONTENT_LENGTH = 65536  # 64KB - reasonable limit for chat messages
+MAX_TITLE_LENGTH = 256  # Max title length
+MAX_MESSAGE_LIMIT = 1000  # Max messages per query
+HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{16,32}$")  # 16-32 hex chars (truncated or full)
+LXMF_HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")  # 64 hex chars for LXMF message hash
+VALID_DELIVERY_METHODS = {"auto", "direct", "propagated"}
+
+try:
+    import LXMF
+
+    LXMF_AVAILABLE = True
+except ImportError:
+    LXMF_AVAILABLE = False
 
 from styrened.ipc.messages import (
+    CmdDeleteConversationRequest,
+    CmdDeleteMessageRequest,
     CmdDeviceStatusRequest,
     CmdExecRequest,
+    CmdMarkReadRequest,
+    CmdRetryMessageRequest,
+    CmdSendChatRequest,
     CmdSendRequest,
     DaemonStatus,
     DeviceInfo,
@@ -26,7 +48,10 @@ from styrened.ipc.messages import (
     IPCRequest,
     IPCResponse,
     PongResponse,
+    QueryConversationsRequest,
     QueryDevicesRequest,
+    QueryMessagesRequest,
+    QuerySearchMessagesRequest,
     RemoteStatusInfo,
     ResultResponse,
 )
@@ -328,7 +353,8 @@ class IPCHandlers:
                     max_wait=req.timeout,
                 )
             else:
-                success = lxmf_service.send_message(req.destination, payload)
+                result = lxmf_service.send_message(req.destination, payload)
+                success = result is not None
 
             return ResultResponse(data={"sent": success})
 
@@ -452,3 +478,583 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error querying device status: {e}")
             return ErrorResponse.internal_error(f"Failed to query device status: {e}")
+
+    # -------------------------------------------------------------------------
+    # Conversation handlers
+    # -------------------------------------------------------------------------
+
+    def _check_conversation_service(self) -> ErrorResponse | None:
+        """Check if conversation service is available.
+
+        Returns:
+            ErrorResponse if service is not available, None otherwise.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not self.daemon._conversation_service:
+            return ErrorResponse.internal_error("Conversation service not initialized")
+        return None
+
+    async def handle_query_conversations(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_CONVERSATIONS request.
+
+        Args:
+            request: QueryConversationsRequest instance.
+
+        Returns:
+            ResultResponse with list of conversations.
+        """
+        req = (
+            request
+            if isinstance(request, QueryConversationsRequest)
+            else QueryConversationsRequest()
+        )
+        _ = req  # Currently unused but available for future filtering
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            conversations = self.daemon._conversation_service.list_conversations()
+            conv_list = [c.to_dict() for c in conversations]
+
+            return ResultResponse(data={"conversations": conv_list})
+
+        except Exception as e:
+            logger.exception(f"Error querying conversations: {e}")
+            return ErrorResponse.internal_error(f"Failed to query conversations: {e}")
+
+    async def handle_query_messages(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_MESSAGES request.
+
+        Args:
+            request: QueryMessagesRequest instance.
+
+        Returns:
+            ResultResponse with message history.
+        """
+        req = request if isinstance(request, QueryMessagesRequest) else QueryMessagesRequest()
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        # Validate peer_hash format
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
+        # Validate and bound limit parameter
+        limit = min(max(1, req.limit), MAX_MESSAGE_LIMIT) if req.limit else MAX_MESSAGE_LIMIT
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            messages = self.daemon._conversation_service.get_messages(
+                peer_hash=req.peer_hash,
+                limit=limit,
+                before_timestamp=req.before_timestamp,
+                status_filter=req.status_filter,
+            )
+            msg_list = [m.to_dict() for m in messages]
+
+            return ResultResponse(data={"messages": msg_list})
+
+        except Exception as e:
+            logger.exception(f"Error querying messages: {e}")
+            return ErrorResponse.internal_error(f"Failed to query messages: {e}")
+
+    async def handle_query_search_messages(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_SEARCH_MESSAGES request.
+
+        Searches messages using full-text search.
+
+        Args:
+            request: QuerySearchMessagesRequest instance.
+
+        Returns:
+            ResultResponse with matching messages.
+        """
+        req = (
+            request
+            if isinstance(request, QuerySearchMessagesRequest)
+            else QuerySearchMessagesRequest()
+        )
+
+        if not req.query or len(req.query.strip()) < 2:
+            return ErrorResponse.invalid_request("Query must be at least 2 characters")
+
+        # Validate and bound limit parameter
+        limit = min(max(1, req.limit), MAX_MESSAGE_LIMIT) if req.limit else MAX_MESSAGE_LIMIT
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            messages = self.daemon._conversation_service.search_messages(
+                query=req.query,
+                peer_hash=req.peer_hash,
+                limit=limit,
+            )
+            msg_list = [m.to_dict() for m in messages]
+
+            return ResultResponse(
+                data={
+                    "messages": msg_list,
+                    "count": len(msg_list),
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error searching messages: {e}")
+            return ErrorResponse.internal_error(f"Failed to search messages: {e}")
+
+    async def handle_cmd_send_chat(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SEND_CHAT request.
+
+        Sends a chat message and persists it via ConversationService.
+        Registers delivery callbacks to track message status.
+
+        Args:
+            request: CmdSendChatRequest instance.
+
+        Returns:
+            ResultResponse with message ID and delivery method.
+        """
+        from styrened.services.lxmf_service import get_lxmf_service
+
+        req = request if isinstance(request, CmdSendChatRequest) else CmdSendChatRequest()
+
+        # Validate required fields (handle None, empty string, and wrong types)
+        if not req.peer_hash or not isinstance(req.peer_hash, str):
+            return ErrorResponse.invalid_request("peer_hash is required and must be a string")
+        if not req.content or not isinstance(req.content, str):
+            return ErrorResponse.invalid_request("content is required and must be a string")
+
+        # Validate peer_hash format (16-32 hex chars)
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
+        # Validate content size limits
+        if len(req.content) > MAX_CHAT_CONTENT_LENGTH:
+            return ErrorResponse.invalid_request(
+                f"content exceeds maximum length of {MAX_CHAT_CONTENT_LENGTH} bytes"
+            )
+
+        # Validate title length if provided
+        if req.title and len(req.title) > MAX_TITLE_LENGTH:
+            return ErrorResponse.invalid_request(
+                f"title exceeds maximum length of {MAX_TITLE_LENGTH} characters"
+            )
+
+        # Validate reply_to_hash format if provided (64 hex chars for LXMF message hash)
+        if req.reply_to_hash:
+            if not isinstance(req.reply_to_hash, str) or not LXMF_HASH_PATTERN.match(
+                req.reply_to_hash
+            ):
+                return ErrorResponse.invalid_request(
+                    "reply_to_hash must be a 64-character hex string"
+                )
+
+        # Validate and extract delivery method
+        delivery_method = req.delivery_method if req.delivery_method else "auto"
+        if delivery_method not in VALID_DELIVERY_METHODS:
+            return ErrorResponse.invalid_request(
+                f"delivery_method must be one of: {', '.join(sorted(VALID_DELIVERY_METHODS))}"
+            )
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service:
+                return ErrorResponse.internal_error("LXMF service not initialized")
+
+            # Build message fields
+            fields: dict[str, object] = {"protocol": "chat"}
+            if req.title:
+                fields["title"] = req.title
+
+            # Build LXMF payload
+            payload: dict[str, object] = {
+                "type": "chat",
+                "protocol": "chat",
+                "content": req.content,
+            }
+            if req.title:
+                payload["title"] = req.title
+
+            # Get conversation service reference for callbacks
+            conversation_service = self.daemon._conversation_service
+
+            # Step 1: Save message FIRST (avoids race with fast delivery callbacks)
+            msg_id = conversation_service.save_outgoing_message(
+                destination_hash=req.peer_hash,
+                content=req.content,
+                title=req.title,
+                fields=fields,
+                reply_to_hash=req.reply_to_hash,
+                # Don't pass lxmf_hash yet - we register tracking after send
+            )
+
+            # Step 2: Create thread-safe tracking registration and callbacks
+            # We use a closure to capture the message_id and handle the race condition
+            # where callbacks might fire before we can register tracking.
+            # IMPORTANT: Use a separate lock for tracking_registered state to avoid
+            # deadlock - conversation_service methods acquire their own internal lock.
+            tracking_lock = threading.Lock()
+            tracking_registered: dict[str, bytes | None] = {"hash": None}
+
+            def register_and_callback_delivery(lxmf_message: Any) -> None:
+                """Handle successful delivery with race-safe tracking."""
+                try:
+                    # Check if service is still running (could be shutting down)
+                    if not conversation_service._initialized:
+                        logger.debug(
+                            f"Delivery callback for msg {msg_id} ignored - service shutdown"
+                        )
+                        return
+
+                    msg_hash = lxmf_message.hash
+                    needs_registration = False
+                    with tracking_lock:
+                        # Check if tracking wasn't registered yet (race condition)
+                        if tracking_registered["hash"] is None:
+                            tracking_registered["hash"] = msg_hash
+                            needs_registration = True
+                    # Register OUTSIDE the lock to avoid deadlock
+                    if needs_registration:
+                        conversation_service.register_delivery_tracking(msg_id, msg_hash)
+                    conversation_service.on_delivery_callback(msg_hash)
+                    logger.debug(f"Chat message {msg_id} delivered: {msg_hash.hex()[:16]}...")
+                except Exception as e:
+                    logger.warning(f"Error in delivery callback: {e}")
+
+            def register_and_callback_failed(lxmf_message: Any) -> None:
+                """Handle delivery failure with race-safe tracking."""
+                try:
+                    # Check if service is still running (could be shutting down)
+                    if not conversation_service._initialized:
+                        logger.debug(f"Failed callback for msg {msg_id} ignored - service shutdown")
+                        return
+
+                    msg_hash = lxmf_message.hash
+                    needs_registration = False
+                    with tracking_lock:
+                        # Check if tracking wasn't registered yet (race condition)
+                        if tracking_registered["hash"] is None:
+                            tracking_registered["hash"] = msg_hash
+                            needs_registration = True
+                    # Register OUTSIDE the lock to avoid deadlock
+                    if needs_registration:
+                        conversation_service.register_delivery_tracking(msg_id, msg_hash)
+                    conversation_service.on_failed_callback(msg_hash)
+                    logger.warning(
+                        f"Chat message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"Error in failed callback: {e}")
+
+            # Step 3: Build LXMF fields for ecosystem interoperability
+            # FIELD_RENDERER tells clients how to render the message content
+            lxmf_fields: dict[int, Any] = {}
+            if LXMF_AVAILABLE:
+                lxmf_fields[LXMF.FIELD_RENDERER] = LXMF.RENDERER_PLAIN
+
+                # Add threading info if this is a reply (FIELD_THREAD = 0x08)
+                if req.reply_to_hash:
+                    lxmf_fields[LXMF.FIELD_THREAD] = {
+                        "reply_to": req.reply_to_hash,
+                    }
+
+            # Step 4: Send via LXMF with race-safe callbacks
+            result = lxmf_service.send_message(
+                req.peer_hash,
+                payload,
+                on_delivery=register_and_callback_delivery,
+                on_failed=register_and_callback_failed,
+                delivery_method=delivery_method,
+                lxmf_fields=lxmf_fields if lxmf_fields else None,
+            )
+
+            if result is None:
+                # Send failed - mark message as failed
+                conversation_service.update_message_status(msg_id, "failed")
+                return ErrorResponse.internal_error(
+                    f"Failed to send message to {req.peer_hash[:16]}... "
+                    "(no path or identity not known)"
+                )
+
+            # Extract hash, method, and actual destination hash from result
+            lxmf_hash: bytes = result["hash"]
+            delivery_method_used: str = result.get("method", delivery_method)
+            actual_dest_hash: str = result.get("destination_hash", req.peer_hash)
+
+            # Step 5: Update destination_hash to the full resolved hash
+            # This normalizes truncated peer_hash inputs to full 32-char hashes
+            if actual_dest_hash != req.peer_hash:
+                conversation_service.update_destination_hash(msg_id, actual_dest_hash)
+
+            # Step 6: Register delivery tracking (if not already done by callback race)
+            # Use the tracking_lock to safely check/update state.
+            needs_registration = False
+            with tracking_lock:
+                if tracking_registered["hash"] is None:
+                    tracking_registered["hash"] = lxmf_hash
+                    needs_registration = True
+            if needs_registration:
+                conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
+
+            # Step 7: Mark as sent (handed off to network)
+            conversation_service.mark_sent(msg_id)
+
+            return ResultResponse(
+                data={
+                    "message_id": msg_id,
+                    "sent": True,
+                    "lxmf_hash": lxmf_hash.hex(),
+                    "delivery_method": delivery_method_used,
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error sending chat message: {e}")
+            return ErrorResponse.internal_error(f"Failed to send chat message: {e}")
+
+    async def handle_cmd_mark_read(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_MARK_READ request.
+
+        Marks all messages in a conversation as read.
+
+        Args:
+            request: CmdMarkReadRequest instance.
+
+        Returns:
+            ResultResponse with count of messages marked read.
+        """
+        req = request if isinstance(request, CmdMarkReadRequest) else CmdMarkReadRequest()
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        # Validate peer_hash format
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            count = self.daemon._conversation_service.mark_read(req.peer_hash)
+
+            # Send read receipts to peer for ecosystem compatibility
+            # This is fire-and-forget; don't fail the mark_read if receipts fail
+            try:
+                await self.daemon.send_read_receipts(req.peer_hash)
+            except Exception as receipt_err:
+                logger.warning(f"Failed to send read receipts: {receipt_err}")
+
+            return ResultResponse(data={"marked_read": count})
+
+        except Exception as e:
+            logger.exception(f"Error marking messages as read: {e}")
+            return ErrorResponse.internal_error(f"Failed to mark messages as read: {e}")
+
+    async def handle_cmd_delete_conversation(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_DELETE_CONVERSATION request.
+
+        Deletes all messages in a conversation.
+
+        Args:
+            request: CmdDeleteConversationRequest instance.
+
+        Returns:
+            ResultResponse with count of messages deleted.
+        """
+        req = (
+            request
+            if isinstance(request, CmdDeleteConversationRequest)
+            else CmdDeleteConversationRequest()
+        )
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        # Validate peer_hash format
+        if not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                f"peer_hash must be 16-32 hex characters, got {len(req.peer_hash)} chars"
+            )
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            count = self.daemon._conversation_service.delete_conversation(req.peer_hash)
+
+            return ResultResponse(data={"deleted": count})
+
+        except Exception as e:
+            logger.exception(f"Error deleting conversation: {e}")
+            return ErrorResponse.internal_error(f"Failed to delete conversation: {e}")
+
+    async def handle_cmd_delete_message(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_DELETE_MESSAGE request.
+
+        Deletes a specific message.
+
+        Args:
+            request: CmdDeleteMessageRequest instance.
+
+        Returns:
+            ResultResponse with deletion status.
+        """
+        req = request if isinstance(request, CmdDeleteMessageRequest) else CmdDeleteMessageRequest()
+
+        if not isinstance(req.message_id, int) or req.message_id <= 0:
+            return ErrorResponse.invalid_request("message_id must be a positive integer")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            deleted = self.daemon._conversation_service.delete_message(req.message_id)
+
+            if not deleted:
+                return ErrorResponse.not_found(f"Message {req.message_id} not found")
+
+            return ResultResponse(data={"deleted": True})
+
+        except Exception as e:
+            logger.exception(f"Error deleting message: {e}")
+            return ErrorResponse.internal_error(f"Failed to delete message: {e}")
+
+    async def handle_cmd_retry_message(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_RETRY_MESSAGE request.
+
+        Retries sending a failed message.
+
+        Args:
+            request: CmdRetryMessageRequest instance.
+
+        Returns:
+            ResultResponse with new LXMF hash if successful.
+        """
+        req = request if isinstance(request, CmdRetryMessageRequest) else CmdRetryMessageRequest()
+
+        if not isinstance(req.message_id, int) or req.message_id <= 0:
+            return ErrorResponse.invalid_request("message_id must be a positive integer")
+
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service:
+                return ErrorResponse.internal_error("LXMF service not initialized")
+
+            conversation_service = self.daemon._conversation_service
+
+            # Get message details and reset to PENDING
+            retry_data = conversation_service.prepare_retry(req.message_id)
+            if retry_data is None:
+                return ErrorResponse.not_found(
+                    f"Message {req.message_id} not found or not in FAILED state"
+                )
+
+            dest_hash, content, fields = retry_data
+
+            # Build LXMF payload
+            payload: dict[str, object] = {
+                "type": "chat",
+                "protocol": "chat",
+                "content": content,
+            }
+            if fields.get("title"):
+                payload["title"] = fields["title"]
+
+            # Create delivery callbacks
+            msg_id = req.message_id
+
+            def on_delivery(lxmf_message: Any) -> None:
+                """Handle successful delivery."""
+                try:
+                    msg_hash = lxmf_message.hash
+                    conversation_service.on_delivery_callback(msg_hash)
+                    logger.debug(f"Retried message {msg_id} delivered: {msg_hash.hex()[:16]}...")
+                except Exception as e:
+                    logger.warning(f"Error in delivery callback: {e}")
+
+            def on_failed(lxmf_message: Any) -> None:
+                """Handle delivery failure."""
+                try:
+                    msg_hash = lxmf_message.hash
+                    conversation_service.on_failed_callback(msg_hash)
+                    logger.warning(
+                        f"Retried message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"Error in failed callback: {e}")
+
+            # Send via LXMF
+            result = lxmf_service.send_message(
+                dest_hash,
+                payload,
+                on_delivery=on_delivery,
+                on_failed=on_failed,
+            )
+
+            if result is None:
+                # Send failed again - mark as failed
+                conversation_service.update_message_status(msg_id, "failed")
+                return ErrorResponse.internal_error(
+                    f"Failed to retry message to {dest_hash[:16]}... "
+                    "(no path or identity not known)"
+                )
+
+            # Extract hash and method from result
+            lxmf_hash = result["hash"]
+            delivery_method_used = result.get("method", "direct")
+
+            # Register delivery tracking and mark as sent
+            conversation_service.register_delivery_tracking(msg_id, lxmf_hash)
+            conversation_service.mark_sent(msg_id)
+
+            return ResultResponse(
+                data={
+                    "message_id": msg_id,
+                    "retried": True,
+                    "lxmf_hash": lxmf_hash.hex(),
+                    "delivery_method": delivery_method_used,
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error retrying message: {e}")
+            return ErrorResponse.internal_error(f"Failed to retry message: {e}")
