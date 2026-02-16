@@ -67,7 +67,7 @@ spec:
             set -euo pipefail
             git clone --depth 50 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
             cd /workspace/src
-            git fetch --depth 1 origin {{workflow.parameters.commit-sha}}
+            git fetch origin pull/{{workflow.parameters.pr-number}}/head
             git checkout {{workflow.parameters.commit-sha}}
         volumeMounts:
           - name: workspace
