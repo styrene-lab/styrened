@@ -24,9 +24,6 @@ spec:
             storage: 5Gi
 
   volumes:
-    - name: nix-store
-      persistentVolumeClaim:
-        claimName: nix-store-cache
     - name: ghcr-auth
       secret:
         secretName: ghcr-secret
@@ -91,8 +88,6 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: nix-store
-            mountPath: /nix
         resources:
           requests:
             cpu: "1"
@@ -143,8 +138,6 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: nix-store
-            mountPath: /nix
           - name: ghcr-auth
             mountPath: /ghcr
             readOnly: true
