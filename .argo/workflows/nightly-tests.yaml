@@ -100,11 +100,20 @@ spec:
         args:
           - |
             set -euo pipefail
+
+            # Install kubectl + helm (required by test harness)
+            apt-get update -qq && apt-get install -qq -y curl >/dev/null 2>&1
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            install kubectl /usr/local/bin/kubectl && rm kubectl
+            curl -sL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null 2>&1
+
             pip install --quiet pytest pytest-asyncio pytest-xdist kubernetes pyyaml msgpack-python
             cd /workspace/src
+            mkdir -p /workspace/results
+
             MARKER="{{inputs.parameters.marker}}"
             echo "Running ${MARKER} tests..."
-            pytest tests/k8s/ -m "${MARKER}" -v --tb=short -n 4 --dist loadscope \
+            pytest tests/k8s/scenarios/ -m "${MARKER}" -v --tb=short -n 4 --dist loadscope \
               --junitxml=/workspace/results/${MARKER}-results.xml \
               2>&1 | tee /workspace/results/${MARKER}-output.log
             echo "exit_code=$?" > /workspace/results/${MARKER}-status
