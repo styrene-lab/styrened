@@ -142,7 +142,12 @@ class CoreLifecycle:
         """
         # Try to ensure operator identity exists
         try:
-            ensure_operator_identity()
+            # Pass only the explicit config override (None if not set).
+            # _resolve_identity_path handles the full resolution chain:
+            # config override -> /etc/styrene/identity -> ~/.styrene/operator.key
+            ensure_operator_identity(
+                config_path=self.config.reticulum.operator_identity_path
+            )
             logger.info(f"Operator identity ready (mode: {self.config.reticulum.mode.value})")
         except Exception as e:
             logger.error(f"Failed to load operator identity: {e}")

@@ -200,20 +200,6 @@ class ReticulumConfig:
         # CLIENT: transport disabled, connects to shared instance
         return self.mode in (DeploymentMode.HUB, DeploymentMode.STANDALONE)
 
-    def resolve_operator_identity_path(self) -> Path:
-        """Get the operator identity path.
-
-        Returns:
-            Path to operator identity file.
-        """
-        if self.operator_identity_path:
-            return self.operator_identity_path
-
-        from platformdirs import user_config_dir
-
-        config_dir = Path(user_config_dir("styrene"))
-        return config_dir / "operator.key"
-
 
 @dataclass
 class IdentityConfig:

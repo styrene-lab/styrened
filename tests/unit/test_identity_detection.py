@@ -8,12 +8,18 @@ import pytest
 from styrened.services.reticulum import (
     KNOWN_LXMF_IDENTITY_PATHS,
     LXMF_SYMLINK_TARGETS,
+    SYSTEM_IDENTITY_PATH,
     detect_existing_lxmf_identity,
     ensure_operator_identity,
     get_identity_sharing_status,
+    get_operator_identity,
     share_identity_with_apps,
     unshare_identity_from_apps,
 )
+
+# Patch SYSTEM_IDENTITY_PATH to a non-existent path in all tests to avoid
+# interference from /etc/styrene/identity on the host machine.
+_NO_SYSTEM_IDENTITY = Path("/nonexistent/styrene/identity")
 
 
 class TestKnownIdentityPaths:
@@ -142,6 +148,7 @@ class TestEnsureOperatorIdentityWithDetection:
 
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             result = ensure_operator_identity()
@@ -163,6 +170,7 @@ class TestEnsureOperatorIdentityWithDetection:
 
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
@@ -188,6 +196,7 @@ class TestEnsureOperatorIdentityWithDetection:
 
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
@@ -207,6 +216,7 @@ class TestEnsureOperatorIdentityWithDetection:
 
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
@@ -233,6 +243,7 @@ class TestEnsureOperatorIdentityWithDetection:
 
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
@@ -305,6 +316,7 @@ class TestGetIdentitySharingStatus:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             status = get_identity_sharing_status()
@@ -319,7 +331,10 @@ class TestShareIdentityWithApps:
     def test_raises_if_styrened_identity_missing(self, tmp_path):
         """Should raise FileNotFoundError if styrened identity doesn't exist."""
         styrened_identity = tmp_path / "nonexistent" / "operator.key"
-        with patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity):
+        with (
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+        ):
             with pytest.raises(FileNotFoundError):
                 share_identity_with_apps()
 
@@ -334,6 +349,7 @@ class TestShareIdentityWithApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"])
@@ -355,6 +371,7 @@ class TestShareIdentityWithApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"], force=False)
@@ -377,6 +394,7 @@ class TestShareIdentityWithApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"], force=True, backup=True)
@@ -402,6 +420,7 @@ class TestShareIdentityWithApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"])
@@ -415,7 +434,10 @@ class TestShareIdentityWithApps:
         styrened_identity.parent.mkdir(parents=True)
         styrened_identity.write_bytes(b"x" * 64)
 
-        with patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity):
+        with (
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+        ):
             results = share_identity_with_apps(apps=["unknownapp"])
             assert len(results) == 1
             assert results[0].success is False
@@ -438,6 +460,7 @@ class TestUnshareIdentityFromApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
@@ -462,6 +485,7 @@ class TestUnshareIdentityFromApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"], restore_backup=True)
@@ -491,6 +515,7 @@ class TestUnshareIdentityFromApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
@@ -511,6 +536,7 @@ class TestUnshareIdentityFromApps:
         fake_targets = {"testapp": app_identity}
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
             patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
@@ -519,3 +545,238 @@ class TestUnshareIdentityFromApps:
             assert "Not a symlink" in results[0].message
             # File should be unchanged
             assert app_identity.read_bytes() == b"regular" * 10
+
+    def test_removes_broken_symlink_to_deleted_identity(self, tmp_path):
+        """Should remove symlink even if the target identity was deleted."""
+        # Create identity, symlink to it, then delete the identity
+        styrened_identity = tmp_path / "styrene" / "operator.key"
+        styrened_identity.parent.mkdir(parents=True)
+        styrened_identity.write_bytes(b"x" * 64)
+
+        app_identity = tmp_path / "app" / "identity"
+        app_identity.parent.mkdir(parents=True)
+        app_identity.symlink_to(styrened_identity)
+
+        # Now delete the identity — symlink becomes broken
+        styrened_identity.unlink()
+
+        fake_targets = {"testapp": app_identity}
+        with (
+            patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+        ):
+            results = unshare_identity_from_apps(apps=["testapp"])
+            assert len(results) == 1
+            assert results[0].success is True
+            assert not app_identity.is_symlink()
+
+
+class TestSystemIdentityPath:
+    """Tests for OS-level identity path resolution (/etc/styrene/identity)."""
+
+    @pytest.fixture
+    def mock_rns(self):
+        """Mock RNS module."""
+        mock = MagicMock()
+        mock_identity = MagicMock()
+        mock_identity.hash.hex.return_value = "b" * 32
+        mock.Identity.return_value = mock_identity
+        mock.Identity.from_file.return_value = mock_identity
+        return mock
+
+    def test_system_path_takes_priority_over_user_path(self, tmp_path, mock_rns):
+        """Should load from system path when both system and user paths exist."""
+        system_identity = tmp_path / "etc" / "styrene" / "identity"
+        system_identity.parent.mkdir(parents=True)
+        system_identity.write_bytes(b"s" * 64)
+
+        user_identity = tmp_path / "user" / "operator.key"
+        user_identity.parent.mkdir(parents=True)
+        user_identity.write_bytes(b"u" * 64)
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", user_identity),
+        ):
+            result = ensure_operator_identity()
+            assert result == "b" * 32
+            mock_rns.Identity.from_file.assert_called_once_with(str(system_identity))
+
+    def test_falls_back_to_user_path_when_no_system(self, tmp_path, mock_rns):
+        """Should fall back to user path when system path doesn't exist."""
+        user_identity = tmp_path / "user" / "operator.key"
+        user_identity.parent.mkdir(parents=True)
+        user_identity.write_bytes(b"u" * 64)
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", user_identity),
+        ):
+            result = ensure_operator_identity()
+            assert result == "b" * 32
+            mock_rns.Identity.from_file.assert_called_once_with(str(user_identity))
+
+    def test_config_path_overrides_system_path(self, tmp_path, mock_rns):
+        """Config override should take priority over system path."""
+        config_identity = tmp_path / "config" / "custom.key"
+        config_identity.parent.mkdir(parents=True)
+        config_identity.write_bytes(b"c" * 64)
+
+        system_identity = tmp_path / "etc" / "styrene" / "identity"
+        system_identity.parent.mkdir(parents=True)
+        system_identity.write_bytes(b"s" * 64)
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+        ):
+            result = ensure_operator_identity(config_path=config_identity)
+            assert result == "b" * 32
+            mock_rns.Identity.from_file.assert_called_once_with(str(config_identity))
+
+
+class TestGetOperatorIdentity:
+    """Tests for get_operator_identity() including fallback behavior."""
+
+    @pytest.fixture
+    def mock_rns(self):
+        """Mock RNS module."""
+        mock = MagicMock()
+        mock_identity = MagicMock()
+        mock_identity.hash.hex.return_value = "c" * 32
+        mock.Identity.from_file.return_value = mock_identity
+        return mock
+
+    def test_returns_hash_from_system_identity(self, tmp_path, mock_rns):
+        """Should return identity hash when system identity exists and RNS works."""
+        system_identity = tmp_path / "etc" / "styrene" / "identity"
+        system_identity.parent.mkdir(parents=True)
+        system_identity.write_bytes(b"s" * 64)
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+        ):
+            result = get_operator_identity()
+            assert result == "c" * 32
+            mock_rns.Identity.from_file.assert_called_once_with(str(system_identity))
+
+    def test_returns_none_when_rns_unavailable(self, tmp_path):
+        """Should return None when RNS library is not available."""
+        system_identity = tmp_path / "etc" / "styrene" / "identity"
+        system_identity.parent.mkdir(parents=True)
+        system_identity.write_bytes(b"s" * 64)
+
+        with (
+            patch("styrened.services.reticulum.RNS", None),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+        ):
+            result = get_operator_identity()
+            assert result is None
+
+    def test_returns_none_when_from_file_returns_none(self, tmp_path, mock_rns):
+        """Should return None when RNS can't parse the identity file."""
+        system_identity = tmp_path / "etc" / "styrene" / "identity"
+        system_identity.parent.mkdir(parents=True)
+        system_identity.write_bytes(b"bad" * 5)
+
+        mock_rns.Identity.from_file.return_value = None
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+        ):
+            result = get_operator_identity()
+            assert result is None
+
+    def test_returns_none_when_no_identity_exists(self):
+        """Should return None when no identity file exists anywhere."""
+        with (
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+        ):
+            result = get_operator_identity()
+            assert result is None
+
+    def test_returns_none_when_from_file_raises(self, tmp_path, mock_rns):
+        """Should return None when RNS.Identity.from_file raises an exception."""
+        system_identity = tmp_path / "etc" / "styrene" / "identity"
+        system_identity.parent.mkdir(parents=True)
+        system_identity.write_bytes(b"s" * 64)
+
+        mock_rns.Identity.from_file.side_effect = Exception("corrupt key")
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+        ):
+            result = get_operator_identity()
+            assert result is None
+
+
+class TestLifecycleIdentityWiring:
+    """Tests that CoreLifecycle wires config override to ensure_operator_identity."""
+
+    def _patch_lifecycle(self):
+        """Patch lifecycle dependencies to isolate identity wiring.
+
+        Mocks ensure_operator_identity, get_rns_service, and
+        get_operator_identity_object so the test only exercises the
+        config_path plumbing without touching real singletons.
+        """
+        from contextlib import ExitStack
+
+        stack = ExitStack()
+        mock_ensure = stack.enter_context(
+            patch(
+                "styrened.services.lifecycle.ensure_operator_identity",
+                return_value="a" * 32,
+            )
+        )
+        mock_rns_svc = MagicMock()
+        mock_rns_svc.initialize.return_value = True
+        mock_rns_svc.create_operator_destination.return_value = None
+        stack.enter_context(
+            patch("styrened.services.lifecycle.get_rns_service", return_value=mock_rns_svc)
+        )
+        stack.enter_context(
+            patch("styrened.services.lifecycle.get_operator_identity_object", return_value=None)
+        )
+        return stack, mock_ensure
+
+    def test_lifecycle_passes_config_override(self, tmp_path):
+        """Config operator_identity_path should reach ensure_operator_identity as config_path."""
+        from styrened.models.config import CoreConfig, ReticulumConfig
+        from styrened.services.lifecycle import CoreLifecycle
+
+        custom_path = tmp_path / "custom" / "identity"
+        config = CoreConfig(
+            reticulum=ReticulumConfig(operator_identity_path=custom_path),
+        )
+
+        stack, mock_ensure = self._patch_lifecycle()
+        with stack:
+            lifecycle = CoreLifecycle(config)
+            lifecycle._initialize_reticulum()
+            mock_ensure.assert_called_once_with(config_path=custom_path)
+
+    def test_lifecycle_passes_none_when_no_override(self):
+        """No config override should pass None, letting _resolve_identity_path decide."""
+        from styrened.models.config import CoreConfig
+        from styrened.services.lifecycle import CoreLifecycle
+
+        config = CoreConfig()  # No operator_identity_path set
+
+        stack, mock_ensure = self._patch_lifecycle()
+        with stack:
+            lifecycle = CoreLifecycle(config)
+            lifecycle._initialize_reticulum()
+            mock_ensure.assert_called_once_with(config_path=None)

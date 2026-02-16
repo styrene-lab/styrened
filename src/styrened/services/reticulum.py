@@ -96,6 +96,7 @@ else:
 logger = logging.getLogger(__name__)
 
 # Operator identity storage
+SYSTEM_IDENTITY_PATH = Path("/etc/styrene/identity")
 OPERATOR_IDENTITY_PATH = Path.home() / ".styrene" / "operator.key"
 
 # Known LXMF application identity paths (in priority order)
@@ -393,6 +394,12 @@ def get_identity_sharing_status() -> dict[str, dict[str, Any]]:
     """
     status: dict[str, dict[str, Any]] = {}
 
+    # Build known paths once (not per-app)
+    known_paths: set[Path] = {SYSTEM_IDENTITY_PATH, OPERATOR_IDENTITY_PATH}
+    active = _resolve_identity_path()
+    if active:
+        known_paths.add(active.resolve())
+
     for app, path in LXMF_SYMLINK_TARGETS.items():
         app_status: dict[str, Any] = {
             "path": path,
@@ -404,9 +411,11 @@ def get_identity_sharing_status() -> dict[str, dict[str, Any]]:
 
         if path.is_symlink():
             try:
-                target = path.resolve()
-                app_status["symlink_target"] = target
-                app_status["points_to_styrened"] = target == OPERATOR_IDENTITY_PATH.resolve()
+                raw_target = path.readlink()
+                if not raw_target.is_absolute():
+                    raw_target = (path.parent / raw_target).resolve()
+                app_status["symlink_target"] = raw_target
+                app_status["points_to_styrened"] = raw_target in known_paths
             except OSError:
                 pass  # Broken symlink
 
@@ -439,9 +448,10 @@ def share_identity_with_apps(
     Raises:
         FileNotFoundError: If styrened's identity doesn't exist yet.
     """
-    if not OPERATOR_IDENTITY_PATH.exists():
+    active_identity = _resolve_identity_path()
+    if not active_identity:
         raise FileNotFoundError(
-            f"Styrened identity not found at {OPERATOR_IDENTITY_PATH}. "
+            "Styrened identity not found at any known path. "
             "Run 'styrened identity --create' first."
         )
 
@@ -465,7 +475,7 @@ def share_identity_with_apps(
         # Check if already correctly symlinked
         if path.is_symlink():
             try:
-                if path.resolve() == OPERATOR_IDENTITY_PATH.resolve():
+                if path.resolve() == active_identity.resolve():
                     results.append(
                         SymlinkResult(
                             app=app,
@@ -552,14 +562,14 @@ def share_identity_with_apps(
 
         # Create symlink
         try:
-            path.symlink_to(OPERATOR_IDENTITY_PATH)
-            logger.info(f"Created symlink: {path} -> {OPERATOR_IDENTITY_PATH}")
+            path.symlink_to(active_identity)
+            logger.info(f"Created symlink: {path} -> {active_identity}")
             results.append(
                 SymlinkResult(
                     app=app,
                     path=path,
                     success=True,
-                    message=f"Symlinked to {OPERATOR_IDENTITY_PATH}",
+                    message=f"Symlinked to {active_identity}",
                     was_existing=path_exists,
                     backed_up_to=backed_up_to,
                 )
@@ -595,6 +605,12 @@ def unshare_identity_from_apps(
     """
     target_apps = apps if apps else list(LXMF_SYMLINK_TARGETS.keys())
     results: list[SymlinkResult] = []
+
+    # Build known paths once (not per-app)
+    known_paths: set[Path] = {SYSTEM_IDENTITY_PATH, OPERATOR_IDENTITY_PATH}
+    active = _resolve_identity_path()
+    if active:
+        known_paths.add(active.resolve())
 
     for app in target_apps:
         if app not in LXMF_SYMLINK_TARGETS:
@@ -633,9 +649,14 @@ def unshare_identity_from_apps(
                 )
             continue
 
-        # Verify it points to styrened before removing
+        # Verify it points to a known styrene identity path before removing.
+        # Use readlink (not resolve) so this works even if the target was deleted.
         try:
-            if path.resolve() != OPERATOR_IDENTITY_PATH.resolve():
+            raw_target = path.readlink()
+            # Normalize to absolute for comparison
+            if not raw_target.is_absolute():
+                raw_target = (path.parent / raw_target).resolve()
+            if raw_target not in known_paths:
                 results.append(
                     SymlinkResult(
                         app=app,
@@ -648,7 +669,7 @@ def unshare_identity_from_apps(
                 )
                 continue
         except OSError:
-            pass  # Broken symlink, remove it anyway
+            pass  # Can't read symlink target, remove it anyway
 
         # Remove the symlink
         try:
@@ -699,18 +720,48 @@ def unshare_identity_from_apps(
     return results
 
 
-def ensure_operator_identity(use_existing: bool = True) -> str:
+def _resolve_identity_path(config_path: Path | None = None) -> Path | None:
+    """Find the first existing identity file in priority order.
+
+    Resolution order:
+    1. Config override (explicit operator_identity_path)
+    2. /etc/styrene/identity (OS-level, generated at NixOS activation)
+    3. ~/.styrene/operator.key (user-level, legacy default)
+
+    Args:
+        config_path: Explicit path from config override, or None.
+
+    Returns:
+        Path to existing identity file, or None if no identity exists yet.
+    """
+    candidates: list[Path] = []
+    if config_path:
+        candidates.append(config_path)
+    candidates.append(SYSTEM_IDENTITY_PATH)
+    candidates.append(OPERATOR_IDENTITY_PATH)
+
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def ensure_operator_identity(
+    use_existing: bool = True, config_path: Path | None = None
+) -> str:
     """Ensure operator has a Reticulum identity.
 
-    If no styrened identity exists, checks for existing LXMF identities from
-    other applications (NomadNet, Sideband, MeshChat) and copies them if found.
-    This allows users to maintain a single identity across all LXMF applications.
-
-    The identity is stored in ~/.styrene/operator.key.
+    Checks for an existing identity in priority order:
+    1. Config override (explicit operator_identity_path)
+    2. /etc/styrene/identity (OS-level, generated at NixOS activation)
+    3. ~/.styrene/operator.key (user-level)
+    4. Detect from LXMF apps (NomadNet, Sideband, MeshChat)
+    5. Generate new at user-level path
 
     Args:
         use_existing: If True (default), detect and copy existing LXMF identities
                       from other applications. Set to False to always create new.
+        config_path: Explicit identity path from config override.
 
     Returns:
         Hex-encoded identity hash (destination address) - 32 hex characters (16 bytes).
@@ -722,19 +773,20 @@ def ensure_operator_identity(use_existing: bool = True) -> str:
     if not RNS:
         raise ImportError("RNS library not available. Install with: pip install rns")
 
-    if OPERATOR_IDENTITY_PATH.exists():
-        # Load existing styrened identity
-        identity = RNS.Identity.from_file(str(OPERATOR_IDENTITY_PATH))
+    # Check for existing identity (config override -> system -> user)
+    existing_path = _resolve_identity_path(config_path)
+    if existing_path:
+        identity = RNS.Identity.from_file(str(existing_path))
         if identity is None:
-            # RNS.Identity.from_file returns None on failure (doesn't raise)
             raise ValueError(
-                f"Failed to load operator identity from {OPERATOR_IDENTITY_PATH}. "
+                f"Failed to load operator identity from {existing_path}. "
                 "The identity file may be corrupt. Delete it to regenerate: "
-                f"rm {OPERATOR_IDENTITY_PATH}"
+                f"rm {existing_path}"
             )
+        logger.info(f"Loaded operator identity from {existing_path}")
         return str(identity.hash.hex())
 
-    # No styrened identity exists - check for existing LXMF identities
+    # No identity found at any standard path - check LXMF apps
     if use_existing:
         existing = detect_existing_lxmf_identity()
         if existing:
@@ -774,40 +826,47 @@ def ensure_operator_identity(use_existing: bool = True) -> str:
 def get_operator_identity_object() -> Any:
     """Get the operator identity as RNS.Identity object.
 
+    Checks system path (/etc/styrene/identity) before user path.
+
     Returns:
         RNS.Identity object, or None if not initialized or RNS not available.
     """
-    if not RNS or not OPERATOR_IDENTITY_PATH.exists():
+    if not RNS:
         return None
 
-    return RNS.Identity.from_file(str(OPERATOR_IDENTITY_PATH))
+    identity_path = _resolve_identity_path()
+    if not identity_path:
+        return None
+
+    return RNS.Identity.from_file(str(identity_path))
 
 
 def get_operator_identity() -> str | None:
     """Get the operator identity hash if it exists.
 
+    Checks system path (/etc/styrene/identity) before user path.
+
     Returns:
-        Hex-encoded identity hash (32 hex characters), or None if not initialized.
+        Hex-encoded identity hash (32 hex characters), or None if identity
+        file doesn't exist or RNS is unavailable to compute the hash.
     """
-    if not OPERATOR_IDENTITY_PATH.exists():
+    identity_path = _resolve_identity_path()
+    if not identity_path:
         return None
 
     if not RNS:
-        # Fallback: read raw bytes if RNS not available
-        identity_bytes = OPERATOR_IDENTITY_PATH.read_bytes()
-        return identity_bytes.hex()
+        logger.warning("RNS library not available, cannot compute identity hash")
+        return None
 
     try:
-        identity = RNS.Identity.from_file(str(OPERATOR_IDENTITY_PATH))
+        identity = RNS.Identity.from_file(str(identity_path))
         if identity is None:
-            # Fallback: read raw bytes if RNS can't parse
-            identity_bytes = OPERATOR_IDENTITY_PATH.read_bytes()
-            return identity_bytes.hex()
+            logger.warning(f"RNS could not parse identity file: {identity_path}")
+            return None
         return str(identity.hash.hex())
-    except Exception:
-        # Fallback: read raw bytes if RNS can't parse
-        identity_bytes = OPERATOR_IDENTITY_PATH.read_bytes()
-        return identity_bytes.hex()
+    except Exception as e:
+        logger.warning(f"Failed to load identity from {identity_path}: {e}")
+        return None
 
 
 # Device Discovery via RNS Announces
