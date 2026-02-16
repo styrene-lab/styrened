@@ -54,10 +54,6 @@ spec:
           - name: smoke-tests
             template: run-smoke-tests
             depends: "build-test"
-            arguments:
-              parameters:
-                - name: test-image-tag
-                  value: "{{tasks.build-test.outputs.parameters.image-tag}}"
 
     - name: git-checkout
       container:
@@ -99,36 +95,12 @@ spec:
             echo "sandbox = false" >> /etc/nix/nix.conf
 
             cd /workspace/src
-            SHORT_SHA=$(echo "{{workflow.parameters.commit-sha}}" | cut -c1-7)
-
             echo "Building test OCI image..."
             nix build .#oci-test --no-link --print-out-paths > /workspace/oci-test-path
-
-            # Configure GHCR auth
-            mkdir -p ~/.docker
-            GHCR_USER=$(cat /ghcr/username 2>/dev/null || echo "styrene-lab")
-            GHCR_TOKEN=$(cat /ghcr/password)
-            echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$(echo -n "${GHCR_USER}:${GHCR_TOKEN}" | base64)\"}}}" > ~/.docker/config.json
-
-            # Push test image to GHCR with PR-specific tag
-            echo "Pushing test image as pr-{{workflow.parameters.pr-number}}..."
-            nix run .#oci-test.copyToRegistry
-
-            # Tag with short SHA and PR identifier via skopeo
-            nix-env -iA nixpkgs.skopeo
-            VERSION=$(nix eval --raw .#oci-test.imageTag)
-            skopeo copy --authfile ~/.docker/config.json \
-              docker://ghcr.io/styrene-lab/styrened-test:${VERSION} \
-              docker://ghcr.io/styrene-lab/styrened-test:pr-{{workflow.parameters.pr-number}}
-
-            echo "pr-{{workflow.parameters.pr-number}}" > /workspace/image-tag
-            echo "Build and push complete: pr-{{workflow.parameters.pr-number}}"
+            echo "Build complete: $(cat /workspace/oci-test-path)"
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: ghcr-auth
-            mountPath: /ghcr
-            readOnly: true
         resources:
           requests:
             cpu: "1"
@@ -136,46 +108,44 @@ spec:
           limits:
             cpu: "4"
             memory: 4Gi
-      outputs:
-        parameters:
-          - name: image-tag
-            valueFrom:
-              path: /workspace/image-tag
 
     - name: run-smoke-tests
-      inputs:
-        parameters:
-          - name: test-image-tag
       container:
         image: python:3.11-slim
         command: [sh, -c]
         args:
           - |
+            exec > >(tee /workspace/results/smoke-full.log) 2>&1
             set -euo pipefail
+            mkdir -p /workspace/results
 
             # Install kubectl
+            echo "=== Installing kubectl ==="
             apt-get update -qq && apt-get install -qq -y curl >/dev/null 2>&1
             curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
             install kubectl /usr/local/bin/kubectl && rm kubectl
 
             # Install helm
+            echo "=== Installing helm ==="
             curl -sL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null 2>&1
 
             # Install Python test dependencies
+            echo "=== Installing Python dependencies ==="
             pip install --quiet pytest pytest-asyncio pytest-xdist kubernetes pyyaml msgpack-python
 
             # Verify tools
+            echo "=== Tool versions ==="
             kubectl version --client --short 2>/dev/null || kubectl version --client
             helm version --short
+            python3 --version
 
             cd /workspace/src
-            mkdir -p /workspace/results
 
-            # Run smoke tests with the CI-built test image
-            export STYRENED_TEST_IMAGE_REPO="ghcr.io/styrene-lab/styrened-test"
-            export STYRENED_TEST_IMAGE_TAG="{{inputs.parameters.test-image-tag}}"
-            echo "Using test image: ${STYRENED_TEST_IMAGE_REPO}:${STYRENED_TEST_IMAGE_TAG}"
+            # Use existing dev tag from GHCR for smoke tests
+            export STYRENED_TEST_IMAGE_TAG="dev"
+            echo "Using test image: ghcr.io/styrene-lab/styrened-test:${STYRENED_TEST_IMAGE_TAG}"
 
+            echo "=== Running smoke tests ==="
             pytest tests/k8s/scenarios/ -m smoke -v --tb=short \
               --junitxml=/workspace/results/smoke-results.xml \
               2>&1 | tee /workspace/results/smoke-output.log
@@ -189,6 +159,7 @@ spec:
           limits:
             cpu: "2"
             memory: 1Gi
+      activeDeadlineSeconds: 600
 
     - name: github-status
       inputs:
