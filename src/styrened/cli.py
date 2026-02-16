@@ -939,7 +939,7 @@ def cmd_identity(args: argparse.Namespace) -> int:
         Exit code.
     """
     from styrened.services.reticulum import (
-        OPERATOR_IDENTITY_PATH,
+        _resolve_identity_path,
         ensure_operator_identity,
         get_operator_identity,
     )
@@ -959,19 +959,21 @@ def cmd_identity(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    active_path = _resolve_identity_path()
+
     if args.json:
         import json
 
         output = {
             "identity_hash": identity_hash,
-            "identity_path": str(OPERATOR_IDENTITY_PATH),
-            "exists": OPERATOR_IDENTITY_PATH.exists(),
+            "identity_path": str(active_path) if active_path else None,
+            "exists": active_path is not None,
         }
         print(json.dumps(output, indent=2))
     else:
         print("Operator Identity:")
         print(f"  Hash: {identity_hash}")
-        print(f"  Path: {OPERATOR_IDENTITY_PATH}")
+        print(f"  Path: {active_path or 'not found'}")
 
     return 0
 
@@ -986,12 +988,13 @@ def cmd_identity_status(args: argparse.Namespace) -> int:
         Exit code.
     """
     from styrened.services.reticulum import (
-        OPERATOR_IDENTITY_PATH,
+        _resolve_identity_path,
         get_identity_sharing_status,
         get_operator_identity,
     )
 
     identity_hash = get_operator_identity()
+    active_path = _resolve_identity_path()
 
     if args.json:
         import json
@@ -1001,8 +1004,8 @@ def cmd_identity_status(args: argparse.Namespace) -> int:
         output = {
             "styrened": {
                 "identity_hash": identity_hash,
-                "identity_path": str(OPERATOR_IDENTITY_PATH),
-                "exists": OPERATOR_IDENTITY_PATH.exists(),
+                "identity_path": str(active_path) if active_path else None,
+                "exists": active_path is not None,
             },
             "apps": {
                 app: {
@@ -1022,7 +1025,7 @@ def cmd_identity_status(args: argparse.Namespace) -> int:
         print("Styrened Identity:")
         if identity_hash:
             print(f"  Hash: {identity_hash}")
-            print(f"  Path: {OPERATOR_IDENTITY_PATH}")
+            print(f"  Path: {active_path or 'not found'}")
         else:
             print("  Not created yet (use 'styrened identity --create')")
         print()
