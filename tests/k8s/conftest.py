@@ -5,7 +5,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -171,6 +171,9 @@ def long_running_daemon(k8s_cluster: K8sTestHarness, worker_id: str):
         worker_num = worker_id.replace("gw", "")
         namespace = f"styrene-daemon-w{worker_num}-{session_id}"
 
+    # Derive run ID from current time
+    run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+
     # Create namespace with labels for tracking
     subprocess.run(
         [
@@ -179,7 +182,10 @@ def long_running_daemon(k8s_cluster: K8sTestHarness, worker_id: str):
             "namespace",
             namespace,
             "--labels",
-            f"styrened-test=true,created-by=pytest,worker={worker_id},scope=session",
+            (
+                f"styrened-test=true,created-by=pytest,worker={worker_id},scope=session,"
+                f"styrene.io/test-tier=session,styrene.io/test-run={run_id}"
+            ),
         ],
         check=True,
         capture_output=True,
@@ -255,6 +261,15 @@ def test_namespace(k8s_cluster: K8sTestHarness, request) -> str:
         check=True,
         capture_output=True,
     )
+    # Derive test tier from pytest markers
+    tier = "unknown"
+    for marker_name in ("smoke", "integration", "comprehensive"):
+        if request.node.get_closest_marker(marker_name):
+            tier = marker_name
+            break
+
+    run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+
     # Add labels for tracking (separate command for compatibility)
     subprocess.run(
         [
@@ -266,6 +281,8 @@ def test_namespace(k8s_cluster: K8sTestHarness, request) -> str:
             "created-by=pytest",
             f"worker={worker_id}",
             "scope=function",
+            f"styrene.io/test-tier={tier}",
+            f"styrene.io/test-run={run_id}",
         ],
         check=True,
         capture_output=True,
@@ -416,6 +433,18 @@ async def metrics_collector(k8s_cluster: K8sTestHarness, request) -> MetricsColl
     # Automatic cleanup on test completion
     if collector and hasattr(collector, "stop"):
         collector.stop()
+
+        # Log Grafana links if observability is available
+        from .observability import generate_grafana_links, is_observability_available
+
+        if is_observability_available() and collector.start_time:
+            links = generate_grafana_links(
+                namespace=collector.namespace,
+                start_time=collector.start_time,
+                end_time=time.time(),
+            )
+            print(f"\n[observability] Grafana logs:      {links['logs']}")
+            print(f"[observability] Grafana resources:  {links['pod_resources']}")
 
 
 @pytest.fixture(scope="session", autouse=True)

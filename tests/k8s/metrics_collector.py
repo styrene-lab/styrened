@@ -68,6 +68,7 @@ class MetricsCollector:
             output_dir: Base directory for metrics storage (default: /tmp/styrene-test-metrics)
         """
         self.harness = harness
+        self.namespace = harness.namespace
         self.run_id = run_id
         self.test_name = test_name
         self.snapshot_interval = snapshot_interval
@@ -142,6 +143,9 @@ class MetricsCollector:
 
         # Write summary
         self._write_summary()
+
+        # Collect observability data if stack is available
+        self._collect_observability_data()
 
         logger.info(
             f"Stopped metrics collection "
@@ -395,6 +399,60 @@ class MetricsCollector:
 
         except Exception as e:
             logger.error(f"Failed to write summary: {e}")
+
+    def _collect_observability_data(self) -> None:
+        """Collect VictoriaLogs/VictoriaMetrics data and Grafana links.
+
+        No-op when the observability stack is not available (kind/k3d).
+        Writes vlogs.jsonl, vmetrics.json, and grafana_links.json to run_dir.
+        """
+        from .observability import (
+            collect_test_logs,
+            collect_test_metrics,
+            generate_grafana_links,
+            is_observability_available,
+        )
+
+        if not is_observability_available():
+            return
+
+        start = self.metadata.start_time
+        end = self.metadata.end_time
+        ns = self.namespace
+
+        # Collect logs from VictoriaLogs
+        try:
+            logs = collect_test_logs(namespace=ns, start_time=start, end_time=end)
+            if logs:
+                vlogs_file = self.run_dir / "vlogs.jsonl"
+                with open(vlogs_file, "w") as f:
+                    for entry in logs:
+                        f.write(json.dumps(entry) + "\n")
+                logger.info(f"Wrote {len(logs)} log entries to {vlogs_file}")
+        except Exception as e:
+            logger.warning(f"Failed to collect VictoriaLogs data: {e}")
+
+        # Collect metrics from VictoriaMetrics
+        try:
+            metrics = collect_test_metrics(namespace=ns, start_time=start, end_time=end)
+            if metrics:
+                vmetrics_file = self.run_dir / "vmetrics.json"
+                with open(vmetrics_file, "w") as f:
+                    json.dump(metrics, f, indent=2)
+                logger.info(f"Wrote metrics for {len(metrics)} series to {vmetrics_file}")
+        except Exception as e:
+            logger.warning(f"Failed to collect VictoriaMetrics data: {e}")
+
+        # Generate and write Grafana links
+        try:
+            links = generate_grafana_links(namespace=ns, start_time=start, end_time=end)
+            links_file = self.run_dir / "grafana_links.json"
+            with open(links_file, "w") as f:
+                json.dump(links, f, indent=2)
+            logger.info(f"Grafana logs:      {links['logs']}")
+            logger.info(f"Grafana resources:  {links['pod_resources']}")
+        except Exception as e:
+            logger.warning(f"Failed to generate Grafana links: {e}")
 
     def _load_all_snapshots(self) -> list[TestSnapshot]:
         """Load all snapshots from disk.
