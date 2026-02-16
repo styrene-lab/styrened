@@ -99,7 +99,7 @@ spec:
         command: [sh, -c]
         args:
           - |
-            set -euo pipefail
+            set -eu
 
             # Install kubectl + helm (required by test harness)
             apt-get update -qq && apt-get install -qq -y curl >/dev/null 2>&1

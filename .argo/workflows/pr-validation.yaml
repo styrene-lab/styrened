@@ -115,13 +115,14 @@ spec:
         command: [sh, -c]
         args:
           - |
-            exec > >(tee /workspace/results/smoke-full.log) 2>&1
-            set -euo pipefail
+            set -eu
             mkdir -p /workspace/results
+
+            # Install curl
+            apt-get update -qq && apt-get install -qq -y curl >/dev/null 2>&1
 
             # Install kubectl
             echo "=== Installing kubectl ==="
-            apt-get update -qq && apt-get install -qq -y curl >/dev/null 2>&1
             curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
             install kubectl /usr/local/bin/kubectl && rm kubectl
 
