@@ -275,5 +275,5 @@ helm install styrene-test ./styrened-test --set image.pullPolicy=Never
 ## Next Steps
 
 - **Run Test Scenarios**: See `tests/k8s/README.md` for pytest usage
-- **CI Integration**: See `.github/workflows/k8s-tests.yml` example
+- **CI Integration**: See `.argo/workflows/` and [RELEASE-PROCESS.md](../../docs/RELEASE-PROCESS.md)
 - **Advanced Configs**: Create custom `values.yaml` for specific scenarios

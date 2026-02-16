@@ -6,15 +6,15 @@ Comprehensive metrics storage pipeline for overnight/long-running K8s tests (4-8
 
 **Problem**: Current tests only validate pass/fail. No trending data, no memory leak detection, no performance degradation tracking.
 
-**Solution**: Collect periodic snapshots (every 5 min) of pod metrics (CPU, memory, latency) during long-running tests, store as JSON artifacts in GitHub, provide analysis tools for leak detection and trend analysis.
+**Solution**: Collect periodic snapshots (every 5 min) of pod metrics (CPU, memory, latency) during long-running tests, store as JSON files on the workspace PVC, provide analysis tools for leak detection and trend analysis.
 
 ## Architecture
 
 ```
-Test → MetricsCollector → JSON Files → /tmp/metrics/ → GitHub Artifact → Analysis Scripts
+Test → MetricsCollector → JSON Files → /tmp/metrics/ → Workspace PVC → Analysis Scripts
  ↓         ↓                   ↓              ↓              ↓               ↓
-pods   dataclass          time-series     local        (90-day        trend reports
-       snapshots          every 5min      storage      retention)     leak detection
+pods   dataclass          time-series     local        CI workflow     trend reports
+       snapshots          every 5min      storage      results dir    leak detection
 ```
 
 ### Storage Strategy
@@ -25,8 +25,8 @@ pods   dataclass          time-series     local        (90-day        trend repo
 - Structure: One file per snapshot + metadata + summary
 
 **After test run**:
-- Primary: GitHub Actions artifacts (already in use)
-- Retention: 90 days for nightly/release, 7 days for PRs
+- CI: Written to workspace PVC (`/workspace/results/`) during Argo Workflow execution
+- Local: Remains in `/tmp/styrene-test-metrics/` for local analysis
 - Size: ~200 KB compressed per 8-hour test
 
 ## File Structure
@@ -196,13 +196,12 @@ async def test_8_hour_stability(
 
 ## CI Integration
 
-Nightly builds automatically:
-1. Run comprehensive tests (including overnight tests if scheduled)
-2. Collect metrics in `/tmp/styrene-test-metrics/`
-3. Upload to GitHub Actions artifacts with 90-day retention
-4. Metrics available for download via `gh` CLI
+Nightly builds on Argo Workflows automatically:
+1. Run tiered tests (smoke → integration → comprehensive) via `nightly-tests.yaml`
+2. Collect metrics in `/tmp/styrene-test-metrics/` on the workspace PVC
+3. Results written alongside JUnit XML to `/workspace/results/`
 
-See `.github/workflows/nightly-build.yml` for implementation.
+See `.argo/workflows/nightly-tests.yaml` and [RELEASE-PROCESS.md](../../docs/RELEASE-PROCESS.md) for implementation.
 
 ## Test Verification
 

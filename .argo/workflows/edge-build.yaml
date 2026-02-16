@@ -24,9 +24,6 @@ spec:
             storage: 5Gi
 
   volumes:
-    - name: nix-store
-      persistentVolumeClaim:
-        claimName: nix-store-cache
     - name: ghcr-auth
       secret:
         secretName: ghcr-secret
@@ -51,14 +48,19 @@ spec:
         args:
           - |
             set -euo pipefail
-            git clone --depth 1 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            TOKEN=$(cat /ghcr/password)
+            git clone --depth 1 \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
             cd /workspace/src
-            git fetch --depth 1 origin {{workflow.parameters.commit-sha}}
-            git checkout {{workflow.parameters.commit-sha}}
+            git checkout {{workflow.parameters.commit-sha}} 2>/dev/null || true
             echo "Checked out $(git rev-parse --short HEAD)"
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -67,7 +69,10 @@ spec:
     - name: nix-build-oci
       container:
         image: nixos/nix:latest
-        command: [sh, -c]
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
         args:
           - |
             set -euo pipefail
@@ -83,8 +88,6 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: nix-store
-            mountPath: /nix
         resources:
           requests:
             cpu: "1"
@@ -96,7 +99,10 @@ spec:
     - name: push-ghcr
       container:
         image: nixos/nix:latest
-        command: [sh, -c]
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
         args:
           - |
             set -euo pipefail
@@ -132,8 +138,6 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: nix-store
-            mountPath: /nix
           - name: ghcr-auth
             mountPath: /ghcr
             readOnly: true

@@ -30,9 +30,6 @@ spec:
             storage: 5Gi
 
   volumes:
-    - name: nix-store
-      persistentVolumeClaim:
-        claimName: nix-store-cache
     - name: ghcr-auth
       secret:
         secretName: ghcr-secret
@@ -65,13 +62,19 @@ spec:
         args:
           - |
             set -euo pipefail
-            git clone --depth 50 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            TOKEN=$(cat /ghcr/password)
+            git clone --depth 50 \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
             cd /workspace/src
-            git fetch --depth 1 origin {{workflow.parameters.commit-sha}}
+            git fetch origin pull/{{workflow.parameters.pr-number}}/head
             git checkout {{workflow.parameters.commit-sha}}
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -80,7 +83,10 @@ spec:
     - name: nix-build-test
       container:
         image: nixos/nix:latest
-        command: [sh, -c]
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
         args:
           - |
             set -euo pipefail
@@ -91,16 +97,10 @@ spec:
             cd /workspace/src
             echo "Building test OCI image..."
             nix build .#oci-test --no-link --print-out-paths > /workspace/oci-test-path
-
-            echo "Loading test image into containerd..."
-            nix run .#oci-test.copyToRegistry -- --dest-tls-verify=false \
-              --dest docker://localhost:5000/styrened-test:ci 2>/dev/null || true
-            echo "Build complete"
+            echo "Build complete: $(cat /workspace/oci-test-path)"
         volumeMounts:
           - name: workspace
             mountPath: /workspace
-          - name: nix-store
-            mountPath: /nix
         resources:
           requests:
             cpu: "1"
@@ -115,10 +115,39 @@ spec:
         command: [sh, -c]
         args:
           - |
-            set -euo pipefail
-            pip install --quiet pytest pytest-asyncio pytest-xdist kubernetes pyyaml
+            set -eu
+            mkdir -p /workspace/results
+
+            # Install curl
+            apt-get update -qq && apt-get install -qq -y curl >/dev/null 2>&1
+
+            # Install kubectl
+            echo "=== Installing kubectl ==="
+            curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            install kubectl /usr/local/bin/kubectl && rm kubectl
+
+            # Install helm
+            echo "=== Installing helm ==="
+            curl -sL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null 2>&1
+
+            # Install Python test dependencies
+            echo "=== Installing Python dependencies ==="
+            pip install --quiet pytest pytest-asyncio pytest-xdist kubernetes pyyaml msgpack-python
+
+            # Verify tools
+            echo "=== Tool versions ==="
+            kubectl version --client --short 2>/dev/null || kubectl version --client
+            helm version --short
+            python3 --version
+
             cd /workspace/src
-            pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope \
+
+            # Use existing dev tag from GHCR for smoke tests
+            export STYRENED_TEST_IMAGE_TAG="dev"
+            echo "Using test image: ghcr.io/styrene-lab/styrened-test:${STYRENED_TEST_IMAGE_TAG}"
+
+            echo "=== Running smoke tests ==="
+            pytest tests/k8s/scenarios/ -m smoke -v --tb=short \
               --junitxml=/workspace/results/smoke-results.xml \
               2>&1 | tee /workspace/results/smoke-output.log
         volumeMounts:
@@ -131,6 +160,7 @@ spec:
           limits:
             cpu: "2"
             memory: 1Gi
+      activeDeadlineSeconds: 600
 
     - name: github-status
       inputs:
