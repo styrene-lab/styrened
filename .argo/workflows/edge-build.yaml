@@ -51,14 +51,19 @@ spec:
         args:
           - |
             set -euo pipefail
-            git clone --depth 1 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            TOKEN=$(cat /ghcr/password)
+            git clone --depth 1 \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
             cd /workspace/src
-            git fetch --depth 1 origin {{workflow.parameters.commit-sha}}
-            git checkout {{workflow.parameters.commit-sha}}
+            git checkout {{workflow.parameters.commit-sha}} 2>/dev/null || true
             echo "Checked out $(git rev-parse --short HEAD)"
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
         resources:
           requests:
             cpu: 100m

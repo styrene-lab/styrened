@@ -25,6 +25,11 @@ spec:
           requests:
             storage: 5Gi
 
+  volumes:
+    - name: ghcr-auth
+      secret:
+        secretName: ghcr-secret
+
   templates:
     - name: pipeline
       dag:
@@ -68,10 +73,16 @@ spec:
         args:
           - |
             set -euo pipefail
-            git clone --depth 1 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            TOKEN=$(cat /ghcr/password)
+            git clone --depth 1 \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
         resources:
           requests:
             cpu: 100m

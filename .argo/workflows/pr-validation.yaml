@@ -65,13 +65,19 @@ spec:
         args:
           - |
             set -euo pipefail
-            git clone --depth 50 https://github.com/{{workflow.parameters.repo}}.git /workspace/src
+            TOKEN=$(cat /ghcr/password)
+            git clone --depth 50 \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
             cd /workspace/src
             git fetch origin pull/{{workflow.parameters.pr-number}}/head
             git checkout {{workflow.parameters.commit-sha}}
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
         resources:
           requests:
             cpu: 100m
