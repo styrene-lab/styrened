@@ -373,7 +373,7 @@ kubectl --kubeconfig ~/.kube/config-brutus top pods -n styrened
 When styrened is ready for production:
 
 1. **Stabilize** - Resolve all critical issues
-2. **Test** - Run full test suite (`make test-k8s-remote`)
+2. **Test** - Run full test suite (`just test-k8s-remote`)
 3. **Document** - Update production deployment docs
 4. **Tag** - Create release tag (`v1.0.0`)
 5. **Deploy** - Follow deployment steps above

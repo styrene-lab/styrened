@@ -142,7 +142,12 @@ class CoreLifecycle:
         """
         # Try to ensure operator identity exists
         try:
-            ensure_operator_identity()
+            # Pass only the explicit config override (None if not set).
+            # _resolve_identity_path handles the full resolution chain:
+            # config override -> /etc/styrene/identity -> ~/.styrene/operator.key
+            ensure_operator_identity(
+                config_path=self.config.reticulum.operator_identity_path
+            )
             logger.info(f"Operator identity ready (mode: {self.config.reticulum.mode.value})")
         except Exception as e:
             logger.error(f"Failed to load operator identity: {e}")
@@ -242,7 +247,17 @@ class CoreLifecycle:
                 return False
 
             lxmf_service = get_lxmf_service()
-            if lxmf_service.initialize(identity):
+            # Pass LXMF config if available in CoreConfig
+            lxmf_config = getattr(self.config, "lxmf", None)
+            # Pass display_name from identity config for proper LXMF announce format
+            # This enables ecosystem clients (Sideband, NomadNet, MeshChat) to display
+            # the configured name instead of showing "Unknown"
+            display_name = None
+            if hasattr(self.config, "identity") and self.config.identity:
+                display_name = self.config.identity.display_name
+            if lxmf_service.initialize(
+                identity, lxmf_config=lxmf_config, display_name=display_name
+            ):
                 logger.info("LXMF service initialized")
                 return True
             else:

@@ -54,7 +54,7 @@ kubectl get nodes
 
 ```bash
 # Create secret, deploy from GHCR, run smoke tests
-make test-k8s-remote
+just test-k8s-remote
 ```
 
 This will:
@@ -68,16 +68,16 @@ If you prefer to run steps individually:
 
 ```bash
 # 1. Create ImagePullSecret for GHCR
-make create-ghcr-secret
+just create-ghcr-secret
 
 # 2. Deploy using GHCR images
-make helm-install-ghcr
+just helm-install-ghcr
 
 # 3. Run tests
-make test-k8s-run
+just test-k8s-run
 
 # 4. Cleanup
-make helm-uninstall
+just helm-uninstall
 ```
 
 ## ImagePullSecret Management
@@ -86,7 +86,7 @@ make helm-uninstall
 
 ```bash
 # Create secret in styrene-test namespace
-make create-ghcr-secret
+just create-ghcr-secret
 ```
 
 This creates a secret named `ghcr-secret` using your GitHub credentials from:
@@ -104,7 +104,7 @@ export GITHUB_EMAIL=you@email.com  # Override email
 
 ```bash
 # Check if secret exists and looks valid
-make verify-ghcr-secret
+just verify-ghcr-secret
 ```
 
 Output:
@@ -118,7 +118,7 @@ Secret details:
 
 ```bash
 # Remove secret from namespace
-make delete-ghcr-secret
+just delete-ghcr-secret
 ```
 
 ## Deployment Options
@@ -126,8 +126,8 @@ make delete-ghcr-secret
 ### Option 1: Latest Nightly Test Image
 
 ```bash
-make create-ghcr-secret
-make helm-install-ghcr
+just create-ghcr-secret
+just helm-install-ghcr
 ```
 
 Uses `ghcr.io/styrene-lab/styrened-test:latest` (from nightly builds).
@@ -135,7 +135,7 @@ Uses `ghcr.io/styrene-lab/styrened-test:latest` (from nightly builds).
 ### Option 2: Specific Version
 
 ```bash
-make create-ghcr-secret
+just create-ghcr-secret
 
 # Deploy specific version
 helm upgrade --install styrene-test tests/k8s/helm/styrened-test \
@@ -149,7 +149,7 @@ helm upgrade --install styrene-test tests/k8s/helm/styrened-test \
 ### Option 3: Production Image
 
 ```bash
-make create-ghcr-secret
+just create-ghcr-secret
 
 # Deploy production image
 helm upgrade --install styrene-test tests/k8s/helm/styrened-test \
@@ -184,7 +184,7 @@ kubectl config use-context k3s-brutus
 kubectl get nodes
 
 # 3. Run remote test workflow
-make test-k8s-remote
+just test-k8s-remote
 
 # 4. Monitor pods
 kubectl get pods -n styrene-test -w
@@ -193,7 +193,7 @@ kubectl get pods -n styrene-test -w
 kubectl logs -l app.kubernetes.io/instance=styrene-test -n styrene-test
 
 # 6. Cleanup
-make helm-uninstall
+just helm-uninstall
 ```
 
 ### K3d Local Cluster
@@ -203,10 +203,10 @@ make helm-uninstall
 k3d cluster create brutus-test
 
 # Run tests with GHCR images
-make test-k8s-remote
+just test-k8s-remote
 
 # Cleanup
-make helm-uninstall
+just helm-uninstall
 k3d cluster delete brutus-test
 ```
 
@@ -223,7 +223,7 @@ kubectl get pods -n styrene-test
 
 **Check secret exists:**
 ```bash
-make verify-ghcr-secret
+just verify-ghcr-secret
 ```
 
 **Check pod events:**
@@ -232,19 +232,19 @@ kubectl describe pod styrene-test-0 -n styrene-test | grep -A 10 Events
 ```
 
 **Common causes:**
-1. Secret doesn't exist → Run `make create-ghcr-secret`
+1. Secret doesn't exist → Run `just create-ghcr-secret`
 2. Wrong secret name → Verify `imagePullSecrets[0].name=ghcr-secret`
-3. Token expired → Run `gh auth refresh && make create-ghcr-secret`
+3. Token expired → Run `gh auth refresh && just create-ghcr-secret`
 4. Wrong registry → Should be `ghcr.io/styrene-lab/...`
 
 **Fix:**
 ```bash
 # Recreate secret
-make delete-ghcr-secret
-make create-ghcr-secret
+just delete-ghcr-secret
+just create-ghcr-secret
 
 # Redeploy
-make helm-install-ghcr
+just helm-install-ghcr
 ```
 
 ### Authentication Failed
@@ -263,7 +263,7 @@ gh auth status
 **Refresh authentication:**
 ```bash
 gh auth refresh -h github.com -s read:packages,write:packages
-make create-ghcr-secret
+just create-ghcr-secret
 ```
 
 ### Secret Not Found
@@ -275,7 +275,7 @@ Error from server (NotFound): secrets "ghcr-secret" not found
 
 **Solution:**
 ```bash
-make create-ghcr-secret
+just create-ghcr-secret
 ```
 
 ### Wrong Namespace
@@ -335,8 +335,8 @@ The ImagePullSecret contains your GitHub token. Handle it securely:
 gh auth refresh -h github.com -s read:packages
 
 # Recreate secret with new token
-make delete-ghcr-secret
-make create-ghcr-secret
+just delete-ghcr-secret
+just create-ghcr-secret
 ```
 
 ### Scope Limitation
@@ -427,7 +427,7 @@ For GitHub Actions on self-hosted runners:
       --dry-run=client -o yaml | kubectl apply -f -
 
 - name: Deploy and test
-  run: make test-k8s-remote
+  run: just test-k8s-remote
 ```
 
 ## Comparison: Local vs Remote Testing
@@ -445,21 +445,21 @@ For GitHub Actions on self-hosted runners:
 
 ```bash
 # Setup and test
-make test-k8s-remote           # Full workflow (create secret, deploy, test)
+just test-k8s-remote           # Full workflow (create secret, deploy, test)
 
 # Secret management
-make create-ghcr-secret        # Create ImagePullSecret
-make verify-ghcr-secret        # Verify secret exists
-make delete-ghcr-secret        # Delete secret
+just create-ghcr-secret        # Create ImagePullSecret
+just verify-ghcr-secret        # Verify secret exists
+just delete-ghcr-secret        # Delete secret
 
 # Deployment
-make helm-install-ghcr         # Deploy using GHCR images
-make helm-install              # Deploy using local images
-make helm-uninstall            # Remove deployment
+just helm-install-ghcr         # Deploy using GHCR images
+just helm-install              # Deploy using local images
+just helm-uninstall            # Remove deployment
 
 # Testing
-make test-k8s-run              # Run tests (assumes deployed)
-make test-k8s-local            # Full local workflow (build, load, test)
+just test-k8s-run              # Run tests (assumes deployed)
+just test-k8s-local            # Full local workflow (build, load, test)
 
 # Status
 kubectl get pods -n styrene-test

@@ -724,6 +724,7 @@ def create_terminal_accept(
     link_destination: str,
     session_id: bytes | None = None,
     request_id: bytes | None = None,
+    identity_hash: str | None = None,
 ) -> StyreneEnvelope:
     """Create a TERMINAL_ACCEPT response envelope.
 
@@ -734,6 +735,7 @@ def create_terminal_accept(
         link_destination: RNS destination hash (hex) for data Link
         session_id: Session identifier (defaults to request_id if not provided)
         request_id: Correlation ID from the TERMINAL_REQUEST
+        identity_hash: RNS identity hash (hex) that owns the destination
 
     Returns:
         StyreneEnvelope configured as TERMINAL_ACCEPT
@@ -745,6 +747,8 @@ def create_terminal_accept(
     }
     if effective_session_id is not None:
         payload["session_id"] = effective_session_id.hex()
+    if identity_hash is not None:
+        payload["identity_hash"] = identity_hash
 
     return StyreneEnvelope(
         version=STYRENE_VERSION,

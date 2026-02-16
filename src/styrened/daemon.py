@@ -32,15 +32,21 @@ from typing import TYPE_CHECKING, Any
 
 import RNS  # type: ignore
 
-if TYPE_CHECKING:
+try:
     import LXMF
 
+    LXMF_AVAILABLE = True
+except ImportError:
+    LXMF_AVAILABLE = False
+
+if TYPE_CHECKING:
     from styrened.models.mesh_device import MeshDevice
 
 from styrened.models.config import CoreConfig
 from styrened.services.auto_reply import AutoReplyHandler
 from styrened.services.config import get_default_core_config, load_core_config
 from styrened.services.lifecycle import CoreLifecycle
+from styrened.services.node_store import get_node_store
 from styrened.services.reticulum import discover_devices, start_discovery
 
 logger = logging.getLogger(__name__)
@@ -69,8 +75,13 @@ class StyreneDaemon:
         self._rpc_client: Any = None  # Exposed for IPC handlers
         self._control_server: Any = None  # IPC control socket server
         self._lxmf_service: Any = None  # Cached for IPC handlers
+        self._conversation_service: Any = None  # Chat backend for IPC handlers
+        self._read_receipt_protocol: Any = None  # Read receipt protocol handler
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
+        self._node_store: Any = None  # NodeStore for device persistence
+        self._terminal_service: Any = None  # Terminal session service
+        self._styrene_protocol: Any = None  # Styrene protocol for RPC/terminal
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -87,11 +98,17 @@ class StyreneDaemon:
         # Start RPC server for incoming requests
         self._start_rpc_server()
 
+        # Initialize conversation service for chat backend
+        self._init_conversation_service()
+
         # Start auto-reply handler for chat messages
         self._start_auto_reply()
 
-        # Start device discovery
-        start_discovery(callback=self._on_device_discovered)
+        # Start device discovery with NodeStore for persistence
+        # This ensures discovered devices are persisted and their identity_hash
+        # mappings are available for identity resolution when sending messages
+        self._node_store = get_node_store()
+        start_discovery(callback=self._on_device_discovered, node_store=self._node_store)
 
         # Start HTTP API if enabled
         if self.config.api.enabled:
@@ -100,6 +117,10 @@ class StyreneDaemon:
         # Start IPC control server if enabled
         if self.config.ipc.enabled:
             await self._start_control_server()
+
+        # Start terminal service if enabled
+        if self.config.terminal.enabled:
+            self._start_terminal_service()
 
         self._running = True
         logger.info("Styrene daemon running")
@@ -174,6 +195,473 @@ class StyreneDaemon:
             except Exception as e:
                 logger.warning(f"[RECONNECT] Failed to re-announce: {e}")
 
+    def _init_conversation_service(self) -> None:
+        """Initialize the conversation service for chat backend.
+
+        Creates the ConversationService which manages conversations,
+        message history, and delivery tracking for the chat protocol.
+        """
+        if not self.config.chat.enabled:
+            logger.info("Chat disabled, conversation service not started")
+            return
+
+        try:
+            from styrened.models.messages import init_db
+            from styrened.services.conversation_service import ConversationService
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service.is_initialized:
+                logger.warning("LXMF not initialized, conversation service not started")
+                return
+
+            # Get local LXMF destination hash for determining message direction
+            # This must be the LXMF delivery destination hash, NOT the identity hash,
+            # because LXMF messages use destination hashes for source/dest identification
+            if not lxmf_service.delivery_destination:
+                logger.warning("No LXMF delivery destination, conversation service not started")
+                return
+            local_lxmf_dest_hash = lxmf_service.delivery_destination.hexhash
+            logger.debug(
+                f"Using local LXMF dest hash for conversations: {local_lxmf_dest_hash[:16]}..."
+            )
+
+            # Initialize database
+            db_engine = init_db()
+
+            # Use the shared node_store (initialized in start() before discovery)
+            # This ensures devices discovered via announces are available for
+            # conversation service display name lookups
+            if self._node_store is None:
+                self._node_store = get_node_store()
+
+            # Create conversation service
+            self._conversation_service = ConversationService(
+                db_engine=db_engine,
+                local_identity_hash=local_lxmf_dest_hash,  # Actually LXMF dest hash
+                node_store=self._node_store,
+            )
+            self._conversation_service.initialize()
+
+            # Register callback for incoming chat messages
+            lxmf_service.register_callback(
+                self._handle_chat_message_for_conversation,
+                raw_mode=True,
+            )
+
+            # Initialize read receipt protocol for ecosystem compatibility
+            self._init_read_receipt_protocol(lxmf_service)
+
+            logger.info("Conversation service initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize conversation service: {e}")
+
+    def _init_read_receipt_protocol(self, lxmf_service: Any) -> None:
+        """Initialize the read receipt protocol handler.
+
+        Creates and registers the ReadReceiptProtocol for handling incoming
+        read receipts and sending outgoing receipts when messages are marked read.
+
+        Args:
+            lxmf_service: Initialized LXMFService instance.
+        """
+        if not self._conversation_service:
+            logger.warning("Conversation service not available, skipping read receipt protocol")
+            return
+
+        try:
+            from styrened.protocols.read_receipt import ReadReceiptProtocol
+
+            self._read_receipt_protocol = ReadReceiptProtocol(
+                conversation_service=self._conversation_service,
+                lxmf_service=lxmf_service,
+            )
+
+            # Register callback for incoming read receipt messages
+            lxmf_service.register_callback(
+                self._handle_read_receipt_message,
+                raw_mode=True,
+            )
+
+            logger.info("Read receipt protocol initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize read receipt protocol: {e}")
+
+    def _handle_read_receipt_message(self, lxmf_message: "LXMF.LXMessage") -> None:
+        """Handle incoming LXMF message that might be a read receipt.
+
+        Routes read receipt protocol messages to the ReadReceiptProtocol handler.
+
+        Args:
+            lxmf_message: Raw LXMF message from the library.
+        """
+        if not self._read_receipt_protocol:
+            return
+
+        try:
+            # Check if this is a read receipt protocol message
+            fields = lxmf_message.fields or {}
+            protocol = fields.get("protocol", "")
+            if protocol != "read_receipt":
+                # Not a read receipt, skip
+                return
+
+            # Create an LXMFMessage wrapper for the protocol handler
+            from styrened.protocols.base import LXMFMessage
+
+            wrapped_message = LXMFMessage(
+                source_hash=lxmf_message.source_hash.hex(),
+                destination_hash=lxmf_message.destination_hash.hex()
+                if hasattr(lxmf_message, "destination_hash")
+                else "",
+                content=lxmf_message.content.decode("utf-8")
+                if isinstance(lxmf_message.content, bytes)
+                else (lxmf_message.content or ""),
+                fields=fields,
+                timestamp=float(lxmf_message.timestamp)
+                if hasattr(lxmf_message, "timestamp") and lxmf_message.timestamp is not None
+                else 0.0,
+            )
+
+            # Handle asynchronously
+            asyncio.create_task(self._read_receipt_protocol.handle_message(wrapped_message))
+
+            logger.debug(f"Routed read receipt from {wrapped_message.source_hash[:16]}...")
+
+        except Exception as e:
+            logger.warning(f"Failed to handle read receipt message: {e}")
+
+    async def send_read_receipts(self, peer_hash: str) -> bool:
+        """Send read receipts for messages we've read from a peer.
+
+        Called when marking a conversation as read. Collects message hashes
+        that haven't had receipts sent yet and sends a batched read receipt.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+
+        Returns:
+            True if receipts were sent (or none needed), False on error.
+        """
+        if not self._read_receipt_protocol or not self._conversation_service:
+            return False
+
+        try:
+            # Get hashes of messages we've read but haven't sent receipts for
+            hashes = self._conversation_service.get_unread_hashes_for_receipt(peer_hash)
+
+            if not hashes:
+                logger.debug(f"No pending read receipts for {peer_hash[:16]}...")
+                return True
+
+            # Send the read receipt
+            success: bool = self._read_receipt_protocol.send_read_receipt(peer_hash, hashes)
+
+            if success:
+                # Mark these messages as having receipts sent
+                self._conversation_service.mark_receipts_sent(hashes)
+                logger.info(f"Sent read receipts for {len(hashes)} messages to {peer_hash[:16]}...")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to send read receipts: {e}")
+            return False
+
+    def _handle_chat_message_for_conversation(self, lxmf_message: "LXMF.LXMessage") -> None:
+        """Handle incoming LXMF message for conversation service.
+
+        Saves chat messages to the conversation service for history tracking,
+        and broadcasts an event to connected IPC clients.
+
+        Args:
+            lxmf_message: Raw LXMF message from the library.
+        """
+        if not self._conversation_service:
+            return
+
+        try:
+            # Check if this is a chat protocol message
+            # Sideband/NomadNet/MeshChat send messages WITHOUT a protocol field
+            # We treat missing/empty protocol as "chat" for ecosystem compatibility
+            fields = lxmf_message.fields or {}
+            protocol = fields.get("protocol", "")
+
+            # Skip non-chat protocols (styrene RPC, read receipts, etc.)
+            # But treat empty protocol as chat (Sideband compatibility)
+            if protocol and protocol != "chat":
+                # Explicit non-chat protocol, skip
+                return
+
+            # Check for StyreneProtocol custom fields (binary protocol, not chat)
+            # FIELD_CUSTOM_TYPE = 0xFB
+            if fields.get(0xFB) or fields.get("custom_type"):
+                return
+
+            # Extract message data
+            source_hash = lxmf_message.source_hash.hex()
+            content = (
+                lxmf_message.content.decode("utf-8")
+                if isinstance(lxmf_message.content, bytes)
+                else (lxmf_message.content or "")
+            )
+            timestamp = lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else None
+
+            # Extract title from native LXMF field or fields dict (for ecosystem compatibility)
+            title: str | None = None
+            if hasattr(lxmf_message, "title") and lxmf_message.title:
+                title = str(lxmf_message.title)
+            elif fields.get("title"):
+                title = str(fields["title"])
+
+            # Extract security metadata from LXMF message
+            # These attributes may or may not exist depending on LXMF version
+            signature_valid: bool | None = None
+            transport_encrypted: bool | None = None
+            if hasattr(lxmf_message, "signature_validated"):
+                signature_valid = lxmf_message.signature_validated
+            if hasattr(lxmf_message, "transport_encrypted"):
+                transport_encrypted = lxmf_message.transport_encrypted
+
+            # Store security metadata in fields dict for persistence
+            # The conversation service will store these in the fields JSON
+            fields["signature_valid"] = signature_valid
+            fields["transport_encrypted"] = transport_encrypted
+
+            # Extract threading information (LXMF FIELD_THREAD = 0x08)
+            # Supports dict format {thread_id, reply_to} or list format [thread_id, reply_to]
+            thread_id: str | None = None
+            reply_to_hash: str | None = None
+            thread_field = fields.get(LXMF.FIELD_THREAD) if LXMF_AVAILABLE else fields.get(0x08)
+            if thread_field:
+                if isinstance(thread_field, dict):
+                    # Dict format: {"thread_id": "...", "reply_to": "..."}
+                    thread_id = thread_field.get("thread_id") or thread_field.get("t")
+                    reply_to_hash = thread_field.get("reply_to") or thread_field.get("r")
+                elif isinstance(thread_field, (list, tuple)) and len(thread_field) >= 2:
+                    # List format: [thread_id, reply_to]
+                    thread_id = str(thread_field[0]) if thread_field[0] else None
+                    reply_to_hash = str(thread_field[1]) if thread_field[1] else None
+                # Convert bytes to hex string if needed
+                if isinstance(thread_id, bytes):
+                    thread_id = thread_id.hex()
+                if isinstance(reply_to_hash, bytes):
+                    reply_to_hash = reply_to_hash.hex()
+
+            # Extract attachment information from LXMF fields
+            # FIELD_IMAGE = 0x06, FIELD_AUDIO = 0x07, FIELD_FILE_ATTACHMENTS = 0x05
+            has_attachment = False
+            attachment_type: str | None = None
+            attachment_name: str | None = None
+            attachment_size: int | None = None
+            attachment_mime: str | None = None
+
+            # Check for image (FIELD_IMAGE = 0x06)
+            image_field = fields.get(LXMF.FIELD_IMAGE) if LXMF_AVAILABLE else fields.get(0x06)
+            if image_field:
+                has_attachment = True
+                attachment_type = "image"
+                if isinstance(image_field, tuple) and len(image_field) >= 2:
+                    # Format: (mime_type, data)
+                    attachment_mime = str(image_field[0]) if image_field[0] else None
+                    attachment_size = (
+                        len(image_field[1]) if isinstance(image_field[1], bytes) else None
+                    )
+                elif isinstance(image_field, bytes):
+                    attachment_size = len(image_field)
+
+            # Check for audio (FIELD_AUDIO = 0x07)
+            if not has_attachment:
+                audio_field = fields.get(LXMF.FIELD_AUDIO) if LXMF_AVAILABLE else fields.get(0x07)
+                if audio_field:
+                    has_attachment = True
+                    attachment_type = "audio"
+                    if isinstance(audio_field, tuple) and len(audio_field) >= 2:
+                        # Format: (codec_mode, data) or (mime_type, data)
+                        # The first element may be an integer codec mode or a mime string
+                        first_elem = audio_field[0]
+                        if isinstance(first_elem, int):
+                            # Codec mode - map to mime type if needed
+                            attachment_mime = f"audio/codec2;mode={first_elem}"
+                        elif first_elem:
+                            attachment_mime = str(first_elem)
+                        attachment_size = (
+                            len(audio_field[1]) if isinstance(audio_field[1], bytes) else None
+                        )
+                    elif isinstance(audio_field, bytes):
+                        attachment_size = len(audio_field)
+
+            # Check for file attachments (FIELD_FILE_ATTACHMENTS = 0x05)
+            if not has_attachment:
+                file_field = (
+                    fields.get(LXMF.FIELD_FILE_ATTACHMENTS) if LXMF_AVAILABLE else fields.get(0x05)
+                )
+                if file_field:
+                    has_attachment = True
+                    attachment_type = "file"
+                    if isinstance(file_field, list) and len(file_field) > 0:
+                        first_file = file_field[0]
+                        if isinstance(first_file, tuple) and len(first_file) >= 2:
+                            # Format: (filename, data) or (filename, data, mime_type)
+                            attachment_name = str(first_file[0]) if first_file[0] else None
+                            attachment_size = (
+                                len(first_file[1]) if isinstance(first_file[1], bytes) else None
+                            )
+                            if len(first_file) >= 3 and first_file[2]:
+                                attachment_mime = str(first_file[2])
+
+            # Save to conversation service
+            msg_id = self._conversation_service.save_incoming_message(
+                source_hash=source_hash,
+                content=content,
+                timestamp=timestamp,
+                title=title,
+                fields=fields,
+                thread_id=thread_id,
+                reply_to_hash=reply_to_hash,
+                has_attachment=has_attachment,
+                attachment_type=attachment_type,
+                attachment_name=attachment_name,
+                attachment_size=attachment_size,
+                attachment_mime=attachment_mime,
+            )
+
+            logger.debug(f"Saved incoming chat message from {source_hash[:16]}...")
+
+            # Broadcast event to connected IPC clients
+            self._broadcast_chat_event(
+                msg_id=msg_id,
+                peer_hash=source_hash,
+                content=content,
+                timestamp=timestamp or 0.0,
+                is_outgoing=False,
+                fields=fields,
+                signature_valid=signature_valid,
+                transport_encrypted=transport_encrypted,
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to save chat message to conversation service: {e}")
+
+    def _broadcast_chat_event(
+        self,
+        msg_id: int,
+        peer_hash: str,
+        content: str,
+        timestamp: float,
+        is_outgoing: bool,
+        fields: dict[str, object] | None = None,
+        signature_valid: bool | None = None,
+        transport_encrypted: bool | None = None,
+        status: str | None = None,
+        delivery_method: str | None = None,
+    ) -> None:
+        """Broadcast a chat message event to connected IPC clients.
+
+        Args:
+            msg_id: Database message ID
+            peer_hash: LXMF hash of the peer
+            content: Message content
+            timestamp: Message timestamp
+            is_outgoing: Whether this is an outgoing message
+            fields: Optional LXMF fields
+            signature_valid: Whether LXMF signature was validated (incoming only)
+            transport_encrypted: Whether transport encryption was used (incoming only)
+            status: Message status (pending, sent, delivered, failed, received)
+            delivery_method: How message was delivered (direct, propagated, or None)
+        """
+        if not self._control_server:
+            return
+
+        try:
+            import asyncio
+
+            from styrened.ipc.protocol import IPCMessageType
+
+            # Determine default status based on direction
+            if status is None:
+                status = "received" if not is_outgoing else "pending"
+
+            event_payload = {
+                "event_type": "new",
+                "message_id": msg_id,
+                "peer_hash": peer_hash,
+                "content": content,
+                "timestamp": timestamp,
+                "is_outgoing": is_outgoing,
+                "status": status,
+                "delivery_method": delivery_method,
+                "signature_valid": signature_valid,
+                "transport_encrypted": transport_encrypted,
+                "fields": fields or {},
+            }
+
+            # Schedule the async broadcast on the event loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._control_server.broadcast_event(
+                        IPCMessageType.EVENT_MESSAGE, event_payload
+                    )
+                )
+            except RuntimeError:
+                # No running loop - skip broadcast
+                logger.debug("No event loop for chat event broadcast")
+
+        except Exception as e:
+            logger.warning(f"Failed to broadcast chat event: {e}")
+
+    def _broadcast_delivery_status_event(
+        self,
+        msg_id: int,
+        peer_hash: str,
+        status: str,
+        delivery_method: str | None = None,
+    ) -> None:
+        """Broadcast delivery status change to IPC clients.
+
+        This is used to notify connected clients when a message's delivery
+        status changes (e.g., from pending to sent, or sent to delivered).
+
+        Args:
+            msg_id: Database message ID
+            peer_hash: LXMF hash of the peer
+            status: New message status (sent, delivered, failed)
+            delivery_method: How message was delivered (direct, propagated, or None)
+        """
+        if not self._control_server:
+            return
+
+        try:
+            import asyncio
+
+            from styrened.ipc.protocol import IPCMessageType
+
+            event_payload = {
+                "event_type": "status_changed",
+                "message_id": msg_id,
+                "peer_hash": peer_hash,
+                "status": status,
+                "delivery_method": delivery_method,
+            }
+
+            # Schedule the async broadcast on the event loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._control_server.broadcast_event(
+                        IPCMessageType.EVENT_MESSAGE, event_payload
+                    )
+                )
+            except RuntimeError:
+                # No running loop - skip broadcast
+                logger.debug("No event loop for delivery status event broadcast")
+
+        except Exception as e:
+            logger.warning(f"Failed to broadcast delivery status event: {e}")
+
     def _start_rpc_server(self) -> None:
         """Start the RPC server for handling incoming requests."""
         # Check if RPC is enabled in config
@@ -200,7 +688,7 @@ class StyreneDaemon:
             db_engine = init_db()
 
             # Create StyreneProtocol instance for RPC transport
-            styrene_protocol = StyreneProtocol(
+            self._styrene_protocol = StyreneProtocol(
                 router=lxmf_service.router,
                 identity=lxmf_service._identity,
                 db_engine=db_engine,
@@ -209,16 +697,16 @@ class StyreneDaemon:
             # Register StyreneProtocol as a callback handler for LXMF messages
             # so it can dispatch incoming Styrene messages to RPC handlers
             lxmf_service.register_callback(
-                self._handle_styrene_message_dispatch(styrene_protocol),
+                self._handle_styrene_message_dispatch(self._styrene_protocol),
                 raw_mode=True,
             )
 
-            self._rpc_server = RPCServer(styrene_protocol)
+            self._rpc_server = RPCServer(self._styrene_protocol)
 
             # Create RPC client for outgoing requests (used by IPC handlers)
             from styrened.rpc import RPCClient
 
-            self._rpc_client = RPCClient(styrene_protocol)
+            self._rpc_client = RPCClient(self._styrene_protocol)
             logger.debug("RPC client created for IPC handlers")
 
             # Configure based on deployment mode
@@ -338,6 +826,75 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to start auto-reply: {e}")
 
+    def _start_terminal_service(self) -> None:
+        """Start the terminal session service.
+
+        The terminal service enables remote shell access via the Styrene
+        terminal protocol. It uses:
+        - LXMF control plane for session establishment/teardown
+        - RNS Link data plane for I/O streaming
+        """
+        try:
+            from styrened.services.rns_service import get_rns_service
+            from styrened.terminal.service import TerminalService
+
+            rns_service = get_rns_service()
+            if not rns_service.is_initialized:
+                logger.warning("RNS not initialized, terminal service not started")
+                return
+
+            if not self._styrene_protocol:
+                logger.warning("Styrene protocol not available, terminal service not started")
+                return
+
+            # Build kwargs for terminal service
+            terminal_kwargs: dict[str, Any] = {
+                "rns_service": rns_service,
+                "styrene_protocol": self._styrene_protocol,
+                "authorized_identities": self.config.terminal.authorized_identities,
+                "allow_unauthenticated": self.config.terminal.allow_unauthenticated,
+                "session_idle_timeout": self.config.terminal.session_idle_timeout,
+                "max_sessions_per_identity": self.config.terminal.max_sessions_per_identity,
+                "max_total_sessions": self.config.terminal.max_total_sessions,
+            }
+
+            # Only pass default_shell if configured
+            if self.config.terminal.default_shell:
+                terminal_kwargs["default_shell"] = self.config.terminal.default_shell
+
+            # Only pass allowed_shells if configured (otherwise use defaults)
+            if self.config.terminal.allowed_shells:
+                terminal_kwargs["allowed_shells"] = self.config.terminal.allowed_shells
+
+            # Create terminal service with config
+            self._terminal_service = TerminalService(**terminal_kwargs)
+
+            # Start the service (registers handlers, creates destination)
+            self._terminal_service.start()
+
+            logger.info(
+                f"[METRICS] terminal_service_started "
+                f"authorized_identities={len(self.config.terminal.authorized_identities)} "
+                f"allow_unauthenticated={self.config.terminal.allow_unauthenticated} "
+                f"max_sessions={self.config.terminal.max_total_sessions}"
+            )
+
+        except ImportError as e:
+            logger.warning(f"Terminal service not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start terminal service: {e}")
+
+    def _stop_terminal_service(self) -> None:
+        """Stop the terminal session service gracefully."""
+        if self._terminal_service:
+            try:
+                self._terminal_service.stop()
+                logger.info("[METRICS] terminal_service_stopped")
+            except Exception as e:
+                logger.error(f"Error stopping terminal service: {e}")
+            finally:
+                self._terminal_service = None
+
     async def _start_api(self) -> None:
         """Start HTTP API server."""
         try:
@@ -409,6 +966,12 @@ class StyreneDaemon:
 
             caps_str = ",".join(capabilities) if capabilities else "node"
 
+            # Use display_name from config, fall back to hostname
+            display_name = self.config.identity.display_name or hostname
+            # Include icon in display_name if configured
+            if self.config.identity.icon:
+                display_name = f"{self.config.identity.icon} {display_name}"
+
             # Include LXMF delivery destination in announce
             lxmf_dest = ""
             try:
@@ -420,9 +983,10 @@ class StyreneDaemon:
             except Exception as e:
                 logger.warning(f"Could not get LXMF destination for announce: {e}")
 
-            app_data = f"styrene:{hostname}:{version}:{caps_str}:{lxmf_dest}".encode()
+            # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}
+            app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}".encode()
             self._operator_destination.announce(app_data=app_data)
-            logger.info(f"Announced as Styrene node: {hostname}")
+            logger.info(f"Announced as Styrene node: {display_name}")
 
             # Also announce LXMF delivery destination
             try:
@@ -476,6 +1040,12 @@ class StyreneDaemon:
 
                     caps_str = ",".join(capabilities) if capabilities else "node"
 
+                    # Use display_name from config, fall back to hostname
+                    display_name = self.config.identity.display_name or hostname
+                    # Include icon in display_name if configured
+                    if self.config.identity.icon:
+                        display_name = f"{self.config.identity.icon} {display_name}"
+
                     # Include LXMF delivery destination in announce
                     lxmf_dest = ""
                     try:
@@ -494,9 +1064,10 @@ class StyreneDaemon:
                             f"Could not get LXMF destination for re-announce: {e}", exc_info=True
                         )
 
-                    app_data = f"styrene:{hostname}:{version}:{caps_str}:{lxmf_dest}".encode()
+                    # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}
+                    app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}".encode()
                     destination.announce(app_data=app_data)
-                    logger.info(f"Re-announced as Styrene node: {hostname}")
+                    logger.info(f"Re-announced as Styrene node: {display_name}")
 
                     # Also re-announce LXMF delivery destination so clients can send to us
                     try:
@@ -528,15 +1099,28 @@ class StyreneDaemon:
             if self._auto_reply_handler:
                 self._auto_reply_handler.cleanup_stale_cooldowns()
 
+            # Cleanup stale delivery trackers to prevent memory leaks
+            # (for messages where LXMF callbacks never fired)
+            if self._conversation_service:
+                self._conversation_service.cleanup_stale_deliveries()
+
     async def stop(self) -> None:
         """Stop the daemon services."""
         logger.info("Stopping Styrene daemon...")
         self._running = False
 
+        # Stop terminal service (closes all sessions)
+        self._stop_terminal_service()
+
         # Stop IPC control server
         if self._control_server:
             await self._control_server.stop()
             self._control_server = None
+
+        # Shutdown conversation service
+        if self._conversation_service:
+            self._conversation_service.shutdown()
+            self._conversation_service = None
 
         # Stop RPC server
         if self._rpc_server:

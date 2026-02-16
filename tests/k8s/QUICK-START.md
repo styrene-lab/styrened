@@ -164,8 +164,8 @@ kubectl cluster-info
 **Option A: Build locally (recommended for development)**
 
 ```bash
-# Build test image using Makefile
-make build-test
+# Build test image
+just build-test
 
 # Load into kind
 kind load docker-image styrene-lab/styrened-test:test --name styrene-test
@@ -178,7 +178,7 @@ k3d image import styrene-lab/styrened-test:test -c styrene-test
 
 ```bash
 # Pull latest nightly test image
-docker pull ghcr.io/styrene-lab/styrened-test:latest
+podman pull ghcr.io/styrene-lab/styrened-test:latest
 
 # Load into kind
 kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-test
@@ -187,28 +187,33 @@ kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-t
 k3d image import ghcr.io/styrene-lab/styrened-test:latest -c styrene-test
 ```
 
-**Option C: Build directly (if Makefile unavailable)**
+**Option C: Build directly (manual nix command)**
 
 ```bash
-# Build for AMD64 (if on ARM Mac)
-docker build --platform linux/amd64 -t styrened-test:latest -f tests/k8s/docker/Dockerfile .
+# Build test OCI image via Nix
+nix build .#oci-test
+
+# Load into podman (via nix2container)
+nix run .#oci-test.copyToPodman
 
 # Load into cluster
-kind load docker-image styrened-test:latest --name styrene-test
+VERSION=$(cat VERSION | tr -d '\n')
+podman save ghcr.io/styrene-lab/styrened-test:${VERSION} | \
+    kind load image-archive /dev/stdin --name styrene-test
 ```
 
 **Option D: Use GHCR images on remote cluster (recommended for brutus/cloud)**
 
 ```bash
 # One command: create secret, deploy from GHCR, run tests
-make test-k8s-remote
+just test-k8s-remote
 ```
 
 This is ideal for:
 - Remote k3s clusters (like brutus)
 - Cloud Kubernetes (GKE, EKS, AKS)
 - Testing CI-built images without rebuilding
-- ARM64 clusters (native multi-arch images)
+- ARM64 clusters (when multi-arch images are available)
 
 See [REMOTE-TESTING.md](REMOTE-TESTING.md) for complete guide.
 

@@ -277,8 +277,8 @@ class TestMessageHandling:
 
         callback.assert_called_once_with(mock_message)
 
-    def test_invalid_json_skips_parsed_callbacks(self, service):
-        """Non-JSON content should skip parsed callbacks."""
+    def test_plain_text_normalized_to_chat_payload(self, service):
+        """Non-JSON content should be normalized to chat payload for Sideband compatibility."""
         parsed_callback = MagicMock()
         raw_callback = MagicMock()
 
@@ -287,14 +287,22 @@ class TestMessageHandling:
 
         mock_message = MagicMock()
         mock_message.source_hash.hex.return_value = "abc123"
-        mock_message.content = b"not valid json"
+        mock_message.content = b"Hello from Sideband"
+        mock_message.fields = {}
+        mock_message.title = None
 
         service._handle_lxmf_message(mock_message)
 
         # Raw callback should still be called
         raw_callback.assert_called_once_with(mock_message)
-        # Parsed callback should not be called
-        parsed_callback.assert_not_called()
+        # Parsed callback should be called with normalized payload
+        parsed_callback.assert_called_once()
+        call_args = parsed_callback.call_args
+        assert call_args[0][0] == "abc123"  # source_hash
+        payload = call_args[0][1]
+        assert payload["type"] == "chat"
+        assert payload["content"] == "Hello from Sideband"
+        assert payload["protocol"] == ""  # Empty for plain text
 
     def test_callback_exception_does_not_stop_others(self, service):
         """Exception in one callback should not prevent others."""
@@ -365,7 +373,7 @@ class TestMockLXMFService:
 
     def test_mock_service_tracks_sent_messages(self):
         """MockLXMFService should track sent messages."""
-        from styrened.services.lxmf_service import MockLXMFService
+        from styrened.services.lxmf_service import DeliveryMethod, MockLXMFService
 
         service = MockLXMFService()
 
@@ -373,8 +381,9 @@ class TestMockLXMFService:
         service.send_message("dest2", {"type": "test2"})
 
         assert len(service.sent_messages) == 2
-        assert service.sent_messages[0] == ("dest1", {"type": "test1"})
-        assert service.sent_messages[1] == ("dest2", {"type": "test2"})
+        # Now includes delivery method as third element
+        assert service.sent_messages[0] == ("dest1", {"type": "test1"}, DeliveryMethod.DIRECT)
+        assert service.sent_messages[1] == ("dest2", {"type": "test2"}, DeliveryMethod.DIRECT)
 
     def test_mock_service_can_simulate_failure(self):
         """MockLXMFService can simulate send failures."""
@@ -385,7 +394,7 @@ class TestMockLXMFService:
 
         result = service.send_message("dest", {"type": "test"})
 
-        assert result is False
+        assert result is None
         assert len(service.sent_messages) == 0
 
     def test_mock_service_can_simulate_receive(self):

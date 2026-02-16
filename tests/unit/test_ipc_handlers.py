@@ -330,3 +330,185 @@ class TestIPCHandlersQueryConfig:
         assert "config" in response.data
         assert "reticulum" in response.data["config"]
         assert "rpc" in response.data["config"]
+
+
+class TestIPCHandlersChatValidation:
+    """Tests for chat command validation."""
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_send_chat_requires_peer_hash(self):
+        """CMD_SEND_CHAT should require peer_hash."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdSendChatRequest
+
+        request = CmdSendChatRequest(peer_hash="", content="hello")
+
+        response = await handlers.handle_cmd_send_chat(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "peer_hash is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_send_chat_requires_content(self):
+        """CMD_SEND_CHAT should require content."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdSendChatRequest
+
+        request = CmdSendChatRequest(peer_hash="a" * 32, content="")
+
+        response = await handlers.handle_cmd_send_chat(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "content is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_send_chat_rejects_none_peer_hash(self):
+        """CMD_SEND_CHAT should reject None peer_hash."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdSendChatRequest
+
+        request = CmdSendChatRequest(peer_hash=None, content="hello")
+
+        response = await handlers.handle_cmd_send_chat(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "peer_hash is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_send_chat_rejects_none_content(self):
+        """CMD_SEND_CHAT should reject None content."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdSendChatRequest
+
+        request = CmdSendChatRequest(peer_hash="a" * 32, content=None)
+
+        response = await handlers.handle_cmd_send_chat(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "content is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_query_messages_requires_peer_hash(self):
+        """QUERY_MESSAGES should require peer_hash."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import QueryMessagesRequest
+
+        request = QueryMessagesRequest(peer_hash="")
+
+        response = await handlers.handle_query_messages(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "peer_hash is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_mark_read_requires_peer_hash(self):
+        """CMD_MARK_READ should require peer_hash."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdMarkReadRequest
+
+        request = CmdMarkReadRequest(peer_hash="")
+
+        response = await handlers.handle_cmd_mark_read(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "peer_hash is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_delete_conversation_requires_peer_hash(self):
+        """CMD_DELETE_CONVERSATION should require peer_hash."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdDeleteConversationRequest
+
+        request = CmdDeleteConversationRequest(peer_hash="")
+
+        response = await handlers.handle_cmd_delete_conversation(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "peer_hash is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_delete_message_requires_message_id(self):
+        """CMD_DELETE_MESSAGE should require message_id."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdDeleteMessageRequest
+
+        request = CmdDeleteMessageRequest(message_id=0)
+
+        response = await handlers.handle_cmd_delete_message(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "message_id must be a positive integer" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_retry_message_requires_message_id(self):
+        """CMD_RETRY_MESSAGE should require message_id."""
+        daemon = MockDaemon()
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdRetryMessageRequest
+
+        request = CmdRetryMessageRequest(message_id=0)
+
+        response = await handlers.handle_cmd_retry_message(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "message_id must be a positive integer" in response.message
+
+
+class TestIPCHandlersChatNullChecks:
+    """Tests for chat handlers null checks."""
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_send_chat_returns_error_when_daemon_none(self):
+        """CMD_SEND_CHAT should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import CmdSendChatRequest
+
+        request = CmdSendChatRequest(peer_hash="a" * 32, content="hello")
+
+        response = await handlers.handle_cmd_send_chat(request)
+
+        assert isinstance(response, ErrorResponse)
+
+    @pytest.mark.asyncio
+    async def test_handle_query_conversations_returns_error_when_daemon_none(self):
+        """QUERY_CONVERSATIONS should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryConversationsRequest
+
+        request = QueryConversationsRequest()
+
+        response = await handlers.handle_query_conversations(request)
+
+        assert isinstance(response, ErrorResponse)
+
+    @pytest.mark.asyncio
+    async def test_handle_query_messages_returns_error_when_daemon_none(self):
+        """QUERY_MESSAGES should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryMessagesRequest
+
+        request = QueryMessagesRequest(peer_hash="a" * 32)
+
+        response = await handlers.handle_query_messages(request)
+
+        assert isinstance(response, ErrorResponse)

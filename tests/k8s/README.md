@@ -37,14 +37,15 @@ For testing with GHCR images on remote clusters (brutus k3s, cloud K8s), you'll 
 
 ```bash
 # One-command setup: create secret, deploy, test
-make test-k8s-remote
+just test-k8s-remote
 ```
 
 See [REMOTE-TESTING.md](REMOTE-TESTING.md) for complete guide.
 
 ### Required Tools
 
-- Container runtime (Docker, Podman, or similar)
+- Nix (for building OCI images)
+- Container runtime (Podman recommended, or Docker) for loading/pushing
 - Helm 3.x
 - kubectl
 - pytest
@@ -53,19 +54,19 @@ See [REMOTE-TESTING.md](REMOTE-TESTING.md) for complete guide.
 
 ### 1. Build Test Image
 
-**Using Makefile (recommended):**
+**Using justfile (recommended):**
 ```bash
 # Build test image locally
-make build-test
+just build-test
 
 # Verify the build
-make test-image
+just test-image
 ```
 
-**Using Docker directly:**
+**Using nix directly:**
 ```bash
-cd tests/k8s
-docker build -t styrened-test:latest -f docker/Dockerfile ../..
+nix build .#oci-test
+nix run .#oci-test.copyToPodman
 ```
 
 **Image naming:**
@@ -77,7 +78,7 @@ docker build -t styrened-test:latest -f docker/Dockerfile ../..
 
 **kind:**
 ```bash
-# If built with Makefile
+# If built with justfile
 kind load docker-image styrene-lab/styrened-test:test --name styrene-test
 
 # If built with Docker directly
@@ -86,7 +87,7 @@ kind load docker-image styrened-test:latest --name styrene-test
 
 **k3d:**
 ```bash
-# If built with Makefile
+# If built with justfile
 k3d image import styrene-lab/styrened-test:test -c styrene-test
 
 # If built with Docker directly
@@ -98,14 +99,14 @@ k3d image import styrened-test:latest -c styrene-test
 For local clusters (kind/k3d):
 ```bash
 # Pull test image from registry
-docker pull ghcr.io/styrene-lab/styrened-test:latest
+podman pull ghcr.io/styrene-lab/styrened-test:latest
 kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-test
 ```
 
 For remote clusters (e.g., brutus k3s):
 ```bash
 # Create ImagePullSecret and deploy directly from GHCR
-make test-k8s-remote
+just test-k8s-remote
 ```
 
 See [REMOTE-TESTING.md](REMOTE-TESTING.md) for complete remote cluster testing guide.
@@ -311,9 +312,8 @@ tests/k8s/
 │       ├── star.json          # Hub + clients
 │       ├── mesh.json          # Full mesh
 │       └── linear.json        # Linear chain
-├── docker/
-│   ├── Dockerfile             # Multi-stage build
-│   └── entrypoint.sh          # Container startup logic
+├── (container build via Nix — see nix/oci.nix)
+│   └── container/entrypoint.sh # Container startup logic (wrapped by Nix)
 ├── helm/
 │   └── styrened-test/         # Helm chart for test deployments
 ├── harness.py                 # K8sTestHarness orchestration class
@@ -591,18 +591,18 @@ kubectl describe node <node_name>
 
 ### Overview
 
-Automated testing runs on every PR, nightly, and release. All workflows use composable Makefile commands for consistency between local development and CI environments.
+Automated testing runs on every PR, nightly, and release. All workflows use composable justfile recipes for consistency between local development and CI environments.
 
-See [DOCKER.md](../../DOCKER.md) for complete build pipeline documentation.
+See [CONTAINERS.md](../../CONTAINERS.md) for complete build pipeline documentation.
 
 ### Workflows
 
 | Workflow | Trigger | Test Tier | Duration | Purpose | Build Target |
 |----------|---------|-----------|----------|---------|--------------|
-| **pr-validation.yml** | Pull requests | Smoke | ~10 min | Fast PR validation | `make build-test` |
-| **edge-build.yml** | Push to main | N/A | ~15 min | Edge images for main | `make push-edge` |
-| **nightly-build.yml** | Daily 2 AM UTC | All tiers | ~60-90 min | Nightly builds + tests | `make push-test-nightly` + `make push-edge` |
-| **release.yml** | Tag push (v*) | All tiers | ~90-120 min | Release validation | `make push-prod-latest` |
+| **pr-validation.yml** | Pull requests | Smoke | ~10 min | Fast PR validation | `nix build .#oci-test` |
+| **edge-build.yml** | Push to main | N/A | ~15 min | Edge images for main | `nix build .#oci` |
+| **nightly-build.yml** | Daily 2 AM UTC | All tiers | ~60-90 min | Nightly builds + tests | `nix build .#oci` + `nix build .#oci-test` |
+| **release.yml** | Tag push (v*) | All tiers | ~15-30 min | Release validation | `nix build .#oci` |
 | **manual-test.yml** | Manual only | Configurable | Variable | On-demand testing | N/A |
 
 ### Quick Reference
@@ -671,14 +671,14 @@ Runs on every pull request:
 
 ```yaml
 # .github/workflows/pr-validation.yml
-- name: Build test image with Makefile
-  run: make build-test
+- name: Build test image
+  run: nix build .#oci-test
 
 - name: Run smoke tests
   run: pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope
 ```
 
-Fast validation (~10 minutes) with parallel execution. Uses `make build-test` for consistency.
+Fast validation (~10 minutes) with parallel execution.
 
 #### Edge Build (Main Branch)
 
@@ -686,8 +686,13 @@ Runs on every push to main:
 
 ```yaml
 # .github/workflows/edge-build.yml
-- name: Build and push edge image
-  run: make push-edge
+- name: Build OCI image
+  run: nix build .#oci
+
+- name: Push edge image
+  run: |
+    nix run .#oci.copyToDockerDaemon
+    docker push ghcr.io/styrene-lab/styrened:edge
 ```
 
 Automatically publishes `ghcr.io/styrene-lab/styrened:edge` for bleeding-edge deployments.
@@ -698,11 +703,10 @@ Runs daily at 2 AM UTC:
 
 ```yaml
 # .github/workflows/nightly-build.yml
-- name: Build and push test images
-  run: make push-test-nightly
-
-- name: Build and push edge image
-  run: make push-edge
+- name: Build images
+  run: |
+    nix build .#oci-test
+    nix build .#oci
 
 # Smoke tier (~15 min)
 pytest tests/k8s/ -m smoke -v -n 8
@@ -714,7 +718,7 @@ pytest tests/k8s/ -m integration -v -n 8
 pytest tests/k8s/ -m comprehensive -v --run-slow -n 8
 ```
 
-Full coverage with multi-arch builds (amd64 + arm64) and comprehensive reporting.
+Full coverage with comprehensive reporting.
 
 #### Release Workflow (Full Suite)
 
@@ -722,19 +726,14 @@ Runs on tag push (v*):
 
 ```yaml
 # .github/workflows/release.yml
-- name: Build and push production image
-  run: |
-    if [[ "$IS_PRERELEASE" == "false" ]]; then
-      make push-prod-latest  # Includes 'latest' tag
-    else
-      make push-prod         # Version + commit tags only
-    fi
+- name: Build OCI image
+  run: nix build .#oci
 
-- name: Run full test suite
+- name: Push production image
   run: |
-    pytest tests/k8s/ -v --tb=short --run-slow \
-      --cov=src --cov-report=xml --cov-report=html \
-      -n 8 --dist loadscope
+    nix run .#oci.copyToDockerDaemon
+    docker push ghcr.io/styrene-lab/styrened:${VERSION}
+    # 'latest' tag only for non-prereleases
 ```
 
 Complete validation before release publication. Pushes to `ghcr.io/styrene-lab/styrened` with semantic versioning tags.
@@ -758,10 +757,10 @@ Complete validation before release publication. Pushes to `ghcr.io/styrene-lab/s
 gh run view <run-id> --log | grep "Build"
 
 # Test build locally (same command as CI)
-make build-test
+just build-test
 
-# Or with Docker directly
-docker build -t styrened-test:latest -f tests/k8s/docker/Dockerfile .
+# Or with nix directly
+nix build .#oci-test -L
 ```
 
 **Test timeouts:**
@@ -804,10 +803,10 @@ Replicate CI environment locally:
 kind create cluster --name styrene-test
 
 # 2. Build test image (same command as CI)
-make build-test
+just build-test
 
 # 3. Load into kind
-kind load docker-image styrene-lab/styrened-test:test --name styrene-test
+just load-k8s-image
 
 # 4. Run smoke tests (same command as CI)
 pytest tests/k8s/ -m smoke -v --tb=short -n 4 --dist loadscope
@@ -819,7 +818,7 @@ kind delete cluster --name styrene-test
 **Alternative (using GHCR images):**
 ```bash
 # Skip build, use nightly test images
-docker pull ghcr.io/styrene-lab/styrened-test:latest
+podman pull ghcr.io/styrene-lab/styrened-test:latest
 kind load docker-image ghcr.io/styrene-lab/styrened-test:latest --name styrene-test
 pytest tests/k8s/ -m smoke -v --tb=short -n 4
 ```
@@ -837,44 +836,44 @@ Expected execution times in CI (GitHub Actions ubuntu-latest):
 
 **Note**: CI times may vary based on runner availability and cluster startup time.
 
-### Makefile Targets Reference
+### Justfile Recipes Reference
 
 **Image Building:**
 ```bash
-make build-amd64           # Build AMD64 image for x86_64 clusters
-make load-k8s-image        # Load image into cluster (auto-detect kind/k3d/k3s)
+just build-test            # Build OCI test image (nix build .#oci-test)
+just load-k8s-image        # Load image into cluster (auto-detect kind/k3d/k3s)
 ```
 
 **Local Testing Workflow:**
 ```bash
-make test-k8s-local        # Build, load, run smoke tests (local images)
-make test-k8s-deploy       # Build, load, deploy to cluster
-make test-k8s-run          # Run tests (assumes already deployed)
+just test-k8s-local        # Build, load, run smoke tests (local images)
+just test-k8s-deploy       # Build, load, deploy to cluster
+just test-k8s-run          # Run tests (assumes already deployed)
 ```
 
 **Remote Testing Workflow (GHCR):**
 ```bash
-make test-k8s-remote       # Full remote workflow (create secret, deploy from GHCR, test)
-make create-ghcr-secret    # Create ImagePullSecret for GHCR
-make verify-ghcr-secret    # Verify secret exists
-make delete-ghcr-secret    # Delete ImagePullSecret
-make helm-install-ghcr     # Deploy using GHCR images
+just test-k8s-remote       # Full remote workflow (create secret, deploy from GHCR, test)
+just create-ghcr-secret    # Create ImagePullSecret for GHCR
+just verify-ghcr-secret    # Verify secret exists
+just delete-ghcr-secret    # Delete ImagePullSecret
+just helm-install-ghcr     # Deploy using GHCR images
 ```
 
 **Helm Operations:**
 ```bash
-make helm-install          # Deploy with local images
-make helm-install-ghcr     # Deploy with GHCR images
-make helm-uninstall        # Remove deployment
-make helm-status           # Show deployment status
-make helm-logs             # Show pod logs
-make helm-template         # Render templates (dry-run)
+just helm-install          # Deploy with local images
+just helm-install-ghcr     # Deploy with GHCR images
+just helm-uninstall        # Remove deployment
+just helm-status           # Show deployment status
+just helm-logs             # Show pod logs
+just helm-template         # Render templates (dry-run)
 ```
 
 ### Additional Resources
 
 - **Remote Cluster Testing**: [REMOTE-TESTING.md](./REMOTE-TESTING.md)
-- **Docker Build Pipeline**: [DOCKER.md](../../DOCKER.md)
+- **Container Build Pipeline**: [CONTAINERS.md](../../CONTAINERS.md)
 - **GitHub Actions Workflows**: [.github/workflows/](../../.github/workflows/)
 - **Main Project README**: [README.md](../../README.md)
 - **K8s Testing Guide**: [TESTING-GUIDE.md](./TESTING-GUIDE.md)
@@ -893,7 +892,7 @@ make helm-template         # Render templates (dry-run)
 
 1. **Write test** in `scenarios/test_*.py`
 2. **Add fixture config** if needed (new deployment mode)
-3. **Build image**: `make build-test`
+3. **Build image**: `just build-test`
 4. **Load image**: `kind load docker-image styrene-lab/styrened-test:test --name <cluster>`
 5. **Run test**: `pytest tests/k8s/scenarios/test_*.py::test_name -v`
 6. **Debug**: Collect logs via `harness.collect_logs(pods, output_dir=...)`
@@ -902,7 +901,7 @@ make helm-template         # Render templates (dry-run)
 **Quick iteration loop:**
 ```bash
 # Make code changes, then:
-make build-test && \
+just build-test && \
   kind load docker-image styrene-lab/styrened-test:test --name styrene-test && \
   pytest tests/k8s/ -m smoke -v -n auto
 ```
@@ -913,14 +912,17 @@ make build-test && \
 - **Headless Service**: Direct pod-to-pod communication (no load balancing)
 - **NetworkPolicy**: Controlled pod isolation for partition tests
 - **ConfigMaps**: Config/RNS config injection per deployment
-- **Multi-stage Dockerfile**: Fast rebuilds via layer caching
+- **nix2container**: Reproducible OCI builds with smart layer splitting
 - **Namespace Isolation**: Clean slate per test, parallel execution safe
 - **Helm Templating**: Parameterized deployments, easy config variations
 
 ## References
 
 - Helm chart: `helm/styrened-test/`
-- Docker image: `docker/Dockerfile`
+- OCI image config: `../../nix/oci.nix`
+- Nix package: `../../nix/package.nix`
+- Nix dependencies: `../../nix/deps.nix`
+- Entrypoint: `../../container/entrypoint.sh`
 - Test harness: `harness.py`
 - Pytest config: `conftest.py`
 - Setup guide: `README-setup.md` (detailed cluster setup)

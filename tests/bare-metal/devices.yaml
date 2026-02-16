@@ -1,0 +1,71 @@
+# Bare-metal test device registry
+# Devices must be SSH-accessible from the test runner via hostname
+# SSH config should handle user/key selection (see ~/.ssh/config)
+
+devices:
+  styrene-node:
+    # ASUS Q502LA - Primary x86_64 test node
+    host: styrene-node.vanderlyn.local
+    hardware: ASUS Q502LA
+    cpu: Intel Core i5-4210U
+    arch: x86_64
+    os: NixOS 24.11
+    venv_path: ~/.local/styrene-venv
+    config_path: ~/.config/styrene
+    identity_hash: 698f2232d4ddab456ca11f38c8bb8a90
+    capabilities:
+      - tcp_server
+      - auto_interface
+      - systemd_user
+
+  t100ta:
+    # ASUS T100TA - Low-power x86_64 (Atom) test node
+    host: t100ta.vanderlyn.local
+    hardware: ASUS T100TA
+    cpu: Intel Atom Z3740
+    arch: x86_64
+    os: NixOS 24.11
+    venv_path: ~/.local/styrene-venv
+    config_path: ~/.config/styrene
+    identity_hash: 8b9527306ab83fd8788f6ca73083869f
+    capabilities:
+      - tcp_server
+      - auto_interface
+      - systemd_user
+
+  minigmk:
+    # GMKtec mini PC - Intel N150 test node
+    host: minigmk.vanderlyn.local
+    hardware: GMKtec Mini PC
+    cpu: Intel N150
+    arch: x86_64
+    os: Debian 13
+    venv_path: ~/.local/styrene-venv
+    config_path: ~/.config/styrene
+    identity_hash: 15ce1311291473da67ba0e62d4f302bd
+    capabilities:
+      - tcp_server
+      - auto_interface
+      - systemd_user
+
+  mobilepi:
+    # Raspberry Pi 4 Model B Rev 1.5 - First aarch64 test node
+    host: mobilepi.vanderlyn.local
+    hardware: Raspberry Pi 4 Model B Rev 1.5
+    cpu: Cortex-A72
+    arch: aarch64
+    os: Debian 12
+    venv_path: ~/.local/styrene-venv
+    config_path: ~/.config/styrene
+    capabilities:
+      - tcp_server
+      - auto_interface
+      - systemd_user
+
+# Device groups for targeted test runs
+groups:
+  all: [styrene-node, t100ta, minigmk, mobilepi]
+  nixos: [styrene-node, t100ta]
+  debian: [minigmk, mobilepi]
+  x86_64: [styrene-node, t100ta, minigmk]
+  aarch64: [mobilepi]

@@ -31,6 +31,7 @@ env/
 .coverage
 htmlcov/
 .tox/
+test-results/
 
 # Generated docs
 docs/api/

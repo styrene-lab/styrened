@@ -75,12 +75,12 @@ nix run github:styrene-lab/styrened
 
 ### Containers / Kubernetes
 
-Multi-architecture OCI container images are published to GitHub Container Registry:
+OCI container images are published to GitHub Container Registry (built via nix2container):
 
 ```bash
-# Production image (app stage only)
+# Production image
 docker pull ghcr.io/styrene-lab/styrened:latest
-docker pull ghcr.io/styrene-lab/styrened:0.2.1
+docker pull ghcr.io/styrene-lab/styrened:0.4.0
 
 # Edge builds (main branch)
 docker pull ghcr.io/styrene-lab/styrened:edge
@@ -89,7 +89,7 @@ docker pull ghcr.io/styrene-lab/styrened:edge
 docker pull ghcr.io/styrene-lab/styrened-test:latest
 ```
 
-**Supported platforms**: `linux/amd64`, `linux/arm64`
+**Supported platforms**: `linux/amd64`
 
 **Run container:**
 ```bash
@@ -113,18 +113,18 @@ See [tests/k8s/helm/styrened-test](tests/k8s/helm/styrened-test) for Kubernetes 
 For local builds and development:
 
 ```bash
-# Build production image
-make build-prod
+# Build production OCI image (via Nix)
+just build
 
-# Build test image (includes test dependencies)
-make build-test
+# Build test OCI image
+just build-test
 
 # Show version information
-make version
+just version
 ```
 
 See [CONTAINERS.md](CONTAINERS.md) for complete build pipeline documentation, including:
-- Multi-architecture builds (amd64, arm64)
+- Nix OCI build pipeline (nix2container)
 - Pushing to GitHub Container Registry
 - CI/CD integration
 - Troubleshooting
@@ -304,10 +304,10 @@ The API reference is built from source using [pdoc](https://pdoc.dev) and update
 pip install -e ".[docs]"
 
 # Generate static docs to docs/api/
-make docs
+just docs
 
 # Serve with live reload for development
-make docs-serve
+just docs-serve
 ```
 
 ### Related Documentation

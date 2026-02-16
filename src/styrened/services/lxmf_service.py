@@ -41,7 +41,10 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from styrened.models.config import LXMFConfig
 
 import platformdirs
 
@@ -54,6 +57,23 @@ except ImportError:
     LXMF_AVAILABLE = False
 
 from styrened.services.rns_service import get_rns_service
+
+
+class DeliveryMethod:
+    """LXMF delivery method constants."""
+
+    DIRECT = "direct"
+    PROPAGATED = "propagated"
+    AUTO = "auto"
+
+
+class SendMessageResult(TypedDict):
+    """Result of send_message operation."""
+
+    hash: bytes
+    method: str  # DeliveryMethod.DIRECT or DeliveryMethod.PROPAGATED
+    destination_hash: str  # Full 32-char hex LXMF destination hash
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -114,7 +134,12 @@ class LXMFService:
         """Alias for delivery_destination (backward compatibility)."""
         return self._delivery_destination
 
-    def initialize(self, identity: "RNS.Identity") -> bool:
+    def initialize(
+        self,
+        identity: "RNS.Identity",
+        lxmf_config: "LXMFConfig | None" = None,
+        display_name: str | None = None,
+    ) -> bool:
         """Initialize LXMF router instance.
 
         This creates the LXMF router instance which handles message
@@ -122,6 +147,11 @@ class LXMFService:
 
         Args:
             identity: RNS.Identity to use for the router.
+            lxmf_config: Optional LXMFConfig with propagation and peer settings.
+            display_name: Display name for LXMF announces. When set, the delivery
+                         destination will include this name in announces using the
+                         standard LXMF msgpack format [name, stamp_cost]. This enables
+                         proper display in ecosystem clients (Sideband, NomadNet, MeshChat).
 
         Returns:
             True if initialization succeeded, False otherwise.
@@ -149,15 +179,87 @@ class LXMFService:
 
             logger.info(f"Initializing LXMF with storage: {lxmf_storage}")
 
+            # Build router kwargs from config
+            router_kwargs: dict[str, Any] = {
+                "identity": identity,
+                "storagepath": str(lxmf_storage),
+            }
+
+            # Apply config if provided
+            if lxmf_config is not None:
+                # Peer management
+                router_kwargs["autopeer"] = lxmf_config.autopeer
+                router_kwargs["autopeer_maxdepth"] = lxmf_config.autopeer_maxdepth
+                router_kwargs["max_peers"] = lxmf_config.max_peers
+                router_kwargs["from_static_only"] = lxmf_config.from_static_only
+
+                # Sync limits
+                router_kwargs["propagation_limit"] = lxmf_config.propagation_limit
+                router_kwargs["sync_limit"] = lxmf_config.sync_limit
+                router_kwargs["delivery_limit"] = lxmf_config.delivery_limit
+
+                # Static peers
+                if lxmf_config.static_peers:
+                    router_kwargs["static_peers"] = [
+                        bytes.fromhex(p) for p in lxmf_config.static_peers
+                    ]
+
+                # Propagation node mode cost settings
+                if lxmf_config.propagation_node.enabled:
+                    router_kwargs["propagation_cost"] = lxmf_config.propagation_cost
+                    router_kwargs["propagation_cost_flexibility"] = (
+                        lxmf_config.propagation_cost_flexibility
+                    )
+                    router_kwargs["peering_cost"] = lxmf_config.peering_cost
+                    router_kwargs["max_peering_cost"] = lxmf_config.max_peering_cost
+                    if lxmf_config.propagation_node.name:
+                        router_kwargs["name"] = lxmf_config.propagation_node.name
+
+                logger.info(
+                    f"LXMF config: autopeer={lxmf_config.autopeer}, "
+                    f"max_peers={lxmf_config.max_peers}, "
+                    f"propagation_node={lxmf_config.propagation_node.enabled}"
+                )
+
             # Create LXMF router
-            self._router = LXMF.LXMRouter(
-                identity=identity,
-                storagepath=str(lxmf_storage),
-            )
+            # TODO(upstream): LXMRouter.process_deferred_stamps() throws TypeError when
+            # RNS.Transport.identity is None. Triggered by propagated delivery which spawns
+            # a background thread calling get_outbound_propagation_cost() -> request_path().
+            # The root cause is that LXMF's get_outbound_propagation_cost() doesn't check
+            # if Transport.identity is initialized before calling Transport.request_path().
+            # Error: TypeError: unsupported operand type(s) for +: 'NoneType' and 'bytes'
+            # at RNS/Transport.py:2556. We cannot catch this - it's in LXMF's internal thread.
+            # The daemon continues running but errors pollute logs. This needs an upstream
+            # fix in LXMF to guard against None identity. See: https://github.com/markqvist/LXMF
+            self._router = LXMF.LXMRouter(**router_kwargs)
+
+            # Set outbound propagation node if configured
+            if lxmf_config is not None and lxmf_config.propagation_destination:
+                try:
+                    dest_bytes = bytes.fromhex(lxmf_config.propagation_destination)
+                    self._router.set_outbound_propagation_node(dest_bytes)
+                    logger.info(
+                        f"Set outbound propagation node: "
+                        f"{lxmf_config.propagation_destination[:16]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to set propagation destination: {e}")
+
+            # Enable propagation node mode if configured
+            if lxmf_config is not None and lxmf_config.propagation_node.enabled:
+                self._router.enable_propagation()
+                logger.info("Enabled propagation node mode")
 
             # Register our identity for receiving messages - this creates the actual
             # delivery destination that will receive incoming LXMF messages
-            self._delivery_destination = self._router.register_delivery_identity(identity)
+            # Pass display_name to register_delivery_identity for proper LXMF announce format
+            self._delivery_destination = self._router.register_delivery_identity(
+                identity, display_name=display_name
+            )
+
+            # Log the display_name setting for debugging ecosystem compatibility
+            if display_name:
+                logger.info(f"LXMF delivery destination display_name set to: {display_name}")
 
             # Register message received callback
             self._router.register_delivery_callback(self._handle_lxmf_message)
@@ -199,7 +301,15 @@ class LXMFService:
         RNS.Transport.request_path(destination_hash)
         return False
 
-    def send_message(self, destination_hash: str, payload: dict[str, object]) -> bool:
+    def send_message(
+        self,
+        destination_hash: str,
+        payload: dict[str, object],
+        on_delivery: "Callable[[LXMF.LXMessage], None] | None" = None,
+        on_failed: "Callable[[LXMF.LXMessage], None] | None" = None,
+        delivery_method: str = DeliveryMethod.AUTO,
+        lxmf_fields: dict[int, Any] | None = None,
+    ) -> "SendMessageResult | None":
         """Send LXMF message to destination.
 
         This method handles the complexity of looking up the correct identity
@@ -216,13 +326,24 @@ class LXMFService:
                             - LXMF destination hash (from announce app_data)
                             - Identity hash (direct identity lookup)
             payload: JSON-serializable message payload.
+            on_delivery: Optional callback invoked when message is delivered.
+            on_failed: Optional callback invoked when delivery fails.
+            delivery_method: Delivery method to use. One of:
+                            - DeliveryMethod.DIRECT: Direct delivery only
+                            - DeliveryMethod.PROPAGATED: Store-and-forward via propagation nodes
+                            - DeliveryMethod.AUTO: Try direct first, fall back to propagated
+            lxmf_fields: Optional dict of LXMF fields (integer keys like FIELD_RENDERER,
+                        FIELD_THREAD) to include in the message. These are standard LXMF
+                        fields that enable ecosystem interoperability.
 
         Returns:
-            True if message was queued for delivery, False otherwise.
+            SendMessageResult dict with 'hash' (bytes) and 'method' (str) if queued
+            successfully, None otherwise. The hash can be used to correlate delivery
+            callbacks.
         """
         if not self.is_initialized or self._router is None or self._identity is None:
             logger.warning("Cannot send message: LXMF not initialized")
-            return False
+            return None
 
         try:
             dest_identity = self._resolve_identity(destination_hash)
@@ -233,7 +354,7 @@ class LXMFService:
                     "Destination must announce before receiving messages. "
                     "Check that the target node has announced its LXMF destination."
                 )
-                return False
+                return None
 
             # Create outbound LXMF delivery destination
             dest_destination = RNS.Destination(
@@ -250,13 +371,18 @@ class LXMFService:
                 f"(from identity {dest_identity.hash.hex()[:16]}...)"
             )
 
-            # Validate path exists before attempting to send
-            if not self._ensure_path(dest_destination.hash):
+            # Check path availability (used for delivery method selection)
+            # Note: We no longer block here - propagated delivery can work without direct path
+            has_direct_path = self._ensure_path(dest_destination.hash)
+
+            # For explicit direct delivery without a path, warn but don't block
+            # (the LXMF library will handle the failure)
+            if delivery_method == DeliveryMethod.DIRECT and not has_direct_path:
                 logger.warning(
-                    f"No path to {dest_destination.hash.hex()[:16]}..., message not sent. "
-                    "Use send_with_retry() to wait for path discovery."
+                    f"No direct path to {dest_destination.hash.hex()[:16]}... "
+                    "Direct delivery requested but may fail. "
+                    "Consider using 'auto' or 'propagated' delivery method."
                 )
-                return False
 
             # Create our source destination for signing
             source_destination = RNS.Destination(
@@ -270,25 +396,97 @@ class LXMFService:
             # Serialize payload to JSON
             content = json.dumps(payload).encode("utf-8")
 
-            # Create LXMF message with proper destination objects
+            # Build LXMF fields dict for ecosystem interoperability
+            # Start with provided fields or empty dict
+            fields: dict[int, Any] = lxmf_fields.copy() if lxmf_fields else {}
+
+            # Default to plain text renderer if not specified (FIELD_RENDERER = 0x0F)
+            # This helps ecosystem clients (Sideband, NomadNet, MeshChat) render correctly
+            if LXMF.FIELD_RENDERER not in fields:
+                fields[LXMF.FIELD_RENDERER] = LXMF.RENDERER_PLAIN
+
+            # Create LXMF message with proper destination objects and fields
             message = LXMF.LXMessage(
                 destination=dest_destination,
                 source=source_destination,
                 content=content,
+                fields=fields if fields else None,
             )
 
-            # Send via router
+            # Set native LXMF title for ecosystem compatibility (MeshChat/Sideband)
+            if isinstance(payload, dict) and payload.get("title"):
+                message.title = str(payload["title"])
+                logger.debug(f"[LXMF] Set native title: {message.title[:50]}...")
+
+            # Determine and set delivery method
+            # LXMF constants: DIRECT = 2, PROPAGATED = 3
+            method_used = DeliveryMethod.DIRECT  # Default
+
+            if delivery_method == DeliveryMethod.PROPAGATED:
+                # Force propagated delivery
+                message.desired_method = LXMF.LXMessage.PROPAGATED
+                method_used = DeliveryMethod.PROPAGATED
+                logger.debug(
+                    f"[DELIVERY] Using propagated delivery for {dest_destination.hash.hex()[:16]}..."
+                )
+            elif delivery_method == DeliveryMethod.DIRECT:
+                # Force direct delivery
+                message.desired_method = LXMF.LXMessage.DIRECT
+                method_used = DeliveryMethod.DIRECT
+                logger.debug(
+                    f"[DELIVERY] Using direct delivery for {dest_destination.hash.hex()[:16]}..."
+                )
+            else:
+                # AUTO mode: try direct if path exists, otherwise propagated
+                if has_direct_path:
+                    message.desired_method = LXMF.LXMessage.DIRECT
+                    method_used = DeliveryMethod.DIRECT
+                    logger.debug(
+                        f"[DELIVERY] Auto mode: using direct delivery (path exists) for "
+                        f"{dest_destination.hash.hex()[:16]}..."
+                    )
+                else:
+                    message.desired_method = LXMF.LXMessage.PROPAGATED
+                    method_used = DeliveryMethod.PROPAGATED
+                    logger.debug(
+                        f"[DELIVERY] Auto mode: using propagated delivery (no direct path) for "
+                        f"{dest_destination.hash.hex()[:16]}..."
+                    )
+
+            # Register delivery callbacks if provided
+            if on_delivery is not None:
+                message.register_delivery_callback(on_delivery)
+            if on_failed is not None:
+                message.register_failed_callback(on_failed)
+
+            # Send via router - this computes the message hash
             self._router.handle_outbound(message)
 
-            logger.info(
-                f"[HASH] Sent LXMF message to {dest_destination.hash.hex()[:16]}... "
-                f"(type={payload.get('type')}, protocol={payload.get('protocol')})"
+            # Get the message hash after sending (LXMF computes it during handle_outbound)
+            message_hash: bytes = message.hash if message.hash else b""
+
+            if message_hash:
+                logger.info(
+                    f"[HASH] Sent LXMF message to {dest_destination.hash.hex()[:16]}... "
+                    f"(type={payload.get('type')}, protocol={payload.get('protocol')}, "
+                    f"method={method_used}, msg_hash={message_hash.hex()[:16]}...)"
+                )
+            else:
+                logger.info(
+                    f"[HASH] Queued LXMF message to {dest_destination.hash.hex()[:16]}... "
+                    f"(type={payload.get('type')}, protocol={payload.get('protocol')}, "
+                    f"method={method_used})"
+                )
+
+            return SendMessageResult(
+                hash=message_hash,
+                method=method_used,
+                destination_hash=dest_destination.hash.hex(),
             )
-            return True
 
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
-            return False
+            return None
 
     def _resolve_identity(self, destination_hash: str) -> "RNS.Identity | None":
         """Resolve a destination hash to an RNS Identity.
@@ -332,6 +530,10 @@ class LXMFService:
                     f"[HASH] Strategy 2 success: operator_dest lookup -> "
                     f"identity_hash={identity_hash[:16]}..."
                 )
+            else:
+                logger.debug(
+                    f"[HASH] Strategy 2 failed: no identity for dest {destination_hash[:16]}..."
+                )
 
             # Strategy 3: Try LXMF destination hash
             if not identity_hash:
@@ -340,6 +542,10 @@ class LXMFService:
                     logger.debug(
                         f"[HASH] Strategy 3 success: lxmf_dest lookup -> "
                         f"identity_hash={identity_hash[:16]}..."
+                    )
+                else:
+                    logger.debug(
+                        f"[HASH] Strategy 3 failed: no identity for lxmf_dest {destination_hash[:16]}..."
                     )
 
         except Exception as e:
@@ -357,10 +563,22 @@ class LXMFService:
                 )
                 return dest_identity
             else:
-                logger.warning(
+                # RNS cache doesn't have it - try to load from persistent storage
+                # RNS stores identity files in ~/.reticulum/storage/identities/
+                logger.debug(
                     f"[HASH] NodeStore had identity_hash={identity_hash[:16]}... "
-                    f"but RNS.Identity.recall() failed. Identity may not be in RNS cache."
+                    f"but RNS cache empty. Trying persistent storage..."
                 )
+                dest_identity = self._load_identity_from_storage(identity_hash)
+                if dest_identity:
+                    logger.info(f"[HASH] Identity loaded from storage: {identity_hash[:16]}...")
+                    return dest_identity
+                else:
+                    logger.warning(
+                        f"[HASH] NodeStore had identity_hash={identity_hash[:16]}... "
+                        f"but identity not in RNS cache or storage. "
+                        f"Target node must re-announce."
+                    )
 
         # Strategy 4: Maybe destination_hash IS the identity hash
         dest_identity = RNS.Identity.recall(dest_bytes, from_identity_hash=True)
@@ -375,6 +593,51 @@ class LXMFService:
             f"[HASH] All strategies failed for {destination_hash[:16]}... - identity not found"
         )
         return None
+
+    def _load_identity_from_storage(self, identity_hash: str) -> "RNS.Identity | None":
+        """Attempt to load an identity from RNS persistent storage.
+
+        RNS stores known identities in ~/.reticulum/storage/identities/.
+        This method tries to load an identity file and re-register it with RNS.
+
+        Args:
+            identity_hash: Hex-encoded identity hash string.
+
+        Returns:
+            RNS.Identity if found and loaded, None otherwise.
+        """
+        try:
+            # RNS stores identities in storage/identities/<hash> under the config path
+            # The path is typically ~/.reticulum/storage/identities/
+            rns_config_path = (
+                RNS.Reticulum.configdir if RNS.Reticulum.configdir else Path.home() / ".reticulum"
+            )
+            identity_storage_path = Path(rns_config_path) / "storage" / "identities" / identity_hash
+
+            if not identity_storage_path.exists():
+                logger.debug(f"[HASH] Identity file not found: {identity_storage_path}")
+                return None
+
+            # Load the identity from file
+            identity = RNS.Identity.from_file(str(identity_storage_path))
+            if identity:
+                # Verify the hash matches
+                if identity.hash.hex() == identity_hash:
+                    logger.debug(f"[HASH] Loaded identity from storage: {identity_hash[:16]}...")
+                    return identity
+                else:
+                    logger.warning(
+                        f"[HASH] Identity file hash mismatch: expected {identity_hash[:16]}..., "
+                        f"got {identity.hash.hex()[:16]}..."
+                    )
+                    return None
+            else:
+                logger.debug(f"[HASH] Failed to load identity from {identity_storage_path}")
+                return None
+
+        except Exception as e:
+            logger.debug(f"[HASH] Error loading identity from storage: {e}")
+            return None
 
     def send_with_retry(
         self,
@@ -530,6 +793,70 @@ class LXMFService:
         # The next announce or message send will need to re-register the destination
         logger.info("[RECONNECT] LXMF reconnection handling complete")
 
+    def _normalize_message_payload(self, message: "LXMF.LXMessage") -> dict[str, Any] | None:
+        """Normalize LXMF message content into a payload dict.
+
+        Handles both JSON payloads (from styrened/internal protocols) and plain
+        text messages (from Sideband, NomadNet, MeshChat, and other LXMF clients).
+
+        For plain text messages, creates a normalized payload:
+            {"type": "chat", "content": "<text>", "protocol": ""}
+
+        For JSON messages, returns the parsed dict as-is.
+
+        Args:
+            message: LXMF.LXMessage instance.
+
+        Returns:
+            Normalized payload dict, or None if content cannot be decoded.
+        """
+        if not message.content:
+            return None
+
+        try:
+            content = message.content.decode("utf-8")
+        except UnicodeDecodeError as e:
+            logger.debug(f"LXMF message content is not UTF-8: {e}")
+            return None
+
+        # Try JSON first (styrened internal protocol)
+        try:
+            payload = json.loads(content)
+            if isinstance(payload, dict):
+                return payload
+            # JSON but not a dict (e.g., plain string in JSON quotes)
+            # Fall through to plain text handling
+        except json.JSONDecodeError:
+            pass
+
+        # Plain text message (Sideband/NomadNet/MeshChat compatibility)
+        # Normalize to a payload dict for consistent callback handling
+        fields = message.fields or {}
+        protocol = fields.get("protocol", "")
+
+        # Extract title if present (LXMF standard field)
+        title = None
+        if hasattr(message, "title") and message.title:
+            title = str(message.title)
+        elif fields.get("title"):
+            title = str(fields["title"])
+
+        payload = {
+            "type": "chat",
+            "content": content,
+            "protocol": protocol,  # May be empty for Sideband
+        }
+
+        if title:
+            payload["title"] = title
+
+        logger.debug(
+            f"Normalized plain text LXMF message: {len(content)} chars, "
+            f"protocol={protocol or 'none'}"
+        )
+
+        return payload
+
     def _handle_lxmf_message(self, message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message.
 
@@ -546,16 +873,16 @@ class LXMFService:
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
 
-        # Try to parse JSON content for non-raw callbacks
-        payload = None
-        try:
-            content = message.content.decode("utf-8")
-            payload = json.loads(content)
+        # Normalize message content for non-raw callbacks
+        # Handles both JSON payloads (styrened) and plain text (Sideband/NomadNet)
+        payload = self._normalize_message_payload(message)
+
+        if payload:
+            msg_type = payload.get("type", "chat")
+            msg_protocol = payload.get("protocol", "")
             logger.info(
-                f"LXMF received from {source_hash[:16]}...: type={payload.get('type')}, protocol={payload.get('protocol')}"
+                f"LXMF received from {source_hash[:16]}...: type={msg_type}, protocol={msg_protocol or 'plain'}"
             )
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.debug(f"LXMF message from {source_hash[:16]}... is not JSON: {e}")
 
         # Dispatch to all callbacks
         for callback, raw_mode in self._message_callbacks:
@@ -588,7 +915,7 @@ class LXMFService:
                 self._router = None
 
             self._identity = None
-            self._message_callback = None
+            self._message_callbacks.clear()
             self._initialized = False
             logger.info("LXMF shutdown complete")
 
@@ -596,7 +923,7 @@ class LXMFService:
             logger.error(f"Error during LXMF shutdown: {e}")
             self._router = None
             self._identity = None
-            self._message_callback = None
+            self._message_callbacks.clear()
             self._initialized = False
 
 
@@ -624,32 +951,63 @@ class MockLXMFService:
     without requiring actual LXMF/RNS dependencies.
 
     Attributes:
-        sent_messages: List of (destination, payload) tuples for sent messages.
-        send_should_fail: If True, send_message will return False.
+        sent_messages: List of (destination, payload, method) tuples for sent messages.
+        send_should_fail: If True, send_message will return None.
         _callback: Registered message callback function.
     """
 
     def __init__(self) -> None:
         """Initialize mock LXMF service."""
-        self.sent_messages: list[tuple[str, dict[str, Any]]] = []
+        self.sent_messages: list[tuple[str, dict[str, Any], str]] = []
         self.send_should_fail = False
         self._callback: Callable[[str, dict[str, Any]], None] | None = None
 
-    def send_message(self, destination: str, payload: dict[str, Any]) -> bool:
+    def send_message(
+        self,
+        destination: str,
+        payload: dict[str, Any],
+        on_delivery: Callable[[Any], None] | None = None,
+        on_failed: Callable[[Any], None] | None = None,
+        delivery_method: str = DeliveryMethod.AUTO,
+    ) -> SendMessageResult | None:
         """Mock send message.
 
         Args:
             destination: Destination hash.
             payload: Message payload.
+            on_delivery: Optional callback invoked when message is delivered.
+            on_failed: Optional callback invoked when delivery fails.
+            delivery_method: Delivery method (direct, propagated, or auto).
 
         Returns:
-            False if send_should_fail is True, otherwise True.
+            None if send_should_fail is True, otherwise SendMessageResult.
         """
         if self.send_should_fail:
-            return False
+            return None
 
-        self.sent_messages.append((destination, payload))
-        return True
+        # Simulate method selection: auto defaults to direct in mock
+        method_used = (
+            DeliveryMethod.DIRECT if delivery_method == DeliveryMethod.AUTO else delivery_method
+        )
+        self.sent_messages.append((destination, payload, method_used))
+
+        # Generate a mock hash and simulate full destination hash
+        mock_hash = bytes.fromhex("a" * 32)
+        # If destination is truncated, simulate resolving to full 32-char hex hash.
+        # Validate input is hex before padding to avoid creating invalid hashes.
+        if len(destination) == 32 and all(c in "0123456789abcdefABCDEF" for c in destination):
+            full_destination = destination
+        elif all(c in "0123456789abcdefABCDEF" for c in destination):
+            # Valid hex prefix - pad with zeros
+            full_destination = destination + "0" * (32 - len(destination))
+        else:
+            # Invalid input - use a deterministic mock hash
+            full_destination = "0" * 32
+        return SendMessageResult(
+            hash=mock_hash,
+            method=method_used,
+            destination_hash=full_destination,
+        )
 
     def register_callback(self, callback: Callable[[str, dict[str, Any]], None]) -> None:
         """Register message callback.

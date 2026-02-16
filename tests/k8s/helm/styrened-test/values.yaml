@@ -1,7 +1,7 @@
 # Default values for styrened-test Helm chart
 #
 # Override patterns:
-#   Local testing (make test-k8s-local):
+#   Local testing (just test-k8s-local):
 #     Uses defaults below - image pre-loaded via `k3s ctr images import`
 #
 #   CI/CD (GHCR):
@@ -18,14 +18,14 @@
 replicaCount: 3
 
 # Container image configuration
-# Defaults are for local testing with pre-loaded images (make build-amd64 && make load-k8s-image)
+# Defaults are for local testing with pre-loaded images (just build-test && just load-k8s-image)
 image:
   repository: styrened-test
   tag: "local-amd64"
   pullPolicy: Never
 
 # Image pull secrets for private registries (e.g., GHCR)
-# For GHCR images: create secret with `make create-ghcr-secret`
+# For GHCR images: create secret with `just create-ghcr-secret`
 imagePullSecrets: []
 # - name: ghcr-secret
 

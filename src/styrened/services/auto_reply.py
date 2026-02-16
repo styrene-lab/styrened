@@ -88,6 +88,9 @@ class AutoReplyHandler:
         This is registered as a callback with the LXMF router. It checks
         if auto-reply is enabled and sends a response if appropriate.
 
+        Only replies to chat messages - skips RPC, read receipts, and other
+        non-chat protocols to avoid unnecessary inter-daemon traffic.
+
         Args:
             message: Incoming LXMF message.
         """
@@ -98,6 +101,21 @@ class AutoReplyHandler:
             return
 
         try:
+            # Check if this is a chat message (or plain text from Sideband/NomadNet)
+            # Skip non-chat protocols to prevent auto-reply loops with other daemons
+            fields = message.fields or {}
+            protocol = fields.get("protocol", "")
+
+            # Skip explicit non-chat protocols
+            if protocol and protocol != "chat":
+                logger.debug(f"Skipping auto-reply for non-chat protocol: {protocol}")
+                return
+
+            # Skip StyreneProtocol messages (binary RPC, FIELD_CUSTOM_TYPE = 0xFB)
+            if fields.get(0xFB) or fields.get("custom_type"):
+                logger.debug("Skipping auto-reply for Styrene RPC message")
+                return
+
             # Keep as bytes for memory efficiency
             source_hash_bytes: bytes = message.source_hash
 
@@ -106,12 +124,9 @@ class AutoReplyHandler:
                 return
 
             # Check if path to sender exists before attempting reply
-            if self.skip_reply_on_no_path and not RNS.Transport.has_path(
-                source_hash_bytes
-            ):
+            if self.skip_reply_on_no_path and not RNS.Transport.has_path(source_hash_bytes):
                 logger.warning(
-                    f"No path to sender {source_hash_bytes.hex()[:16]}..., "
-                    "skipping auto-reply"
+                    f"No path to sender {source_hash_bytes.hex()[:16]}..., skipping auto-reply"
                 )
                 return
 
@@ -119,8 +134,7 @@ class AutoReplyHandler:
             if logger.isEnabledFor(logging.INFO):
                 content = message.content.decode("utf-8") if message.content else ""
                 logger.info(
-                    f"Received message from {source_hash_bytes.hex()[:16]}...: "
-                    f"{content[:50]}..."
+                    f"Received message from {source_hash_bytes.hex()[:16]}...: {content[:50]}..."
                 )
 
             # Send auto-reply
@@ -154,8 +168,7 @@ class AutoReplyHandler:
 
             if dest_identity is None:
                 logger.warning(
-                    f"Cannot reply to {destination_hash.hex()[:16]}...: "
-                    "identity not known"
+                    f"Cannot reply to {destination_hash.hex()[:16]}...: identity not known"
                 )
                 return
 
@@ -180,12 +193,16 @@ class AutoReplyHandler:
                 "delivery",
             )
 
-            # Create and send the reply
+            # Create and send the reply with LXMF fields for ecosystem interoperability
+            # FIELD_RENDERER tells clients how to render the message content
             reply = LXMF.LXMessage(
                 destination=dest_destination,
                 source=source_destination,
                 content=reply_content.encode("utf-8"),
-                fields={"protocol": "chat"},
+                fields={
+                    "protocol": "chat",
+                    LXMF.FIELD_RENDERER: LXMF.RENDERER_PLAIN,
+                },
             )
 
             self._router.handle_outbound(reply)
@@ -260,6 +277,10 @@ class AutoReplyHandler:
         Returns:
             Formatted string like "2d 5h 30m" or "45m 12s".
         """
+        # Guard against negative values (e.g., NTP sync issues causing future start_time)
+        if seconds < 0:
+            return "0s"
+
         days, remainder = divmod(int(seconds), 86400)
         hours, remainder = divmod(remainder, 3600)
         minutes, secs = divmod(remainder, 60)
