@@ -72,7 +72,10 @@ spec:
     - name: nix-build-oci
       container:
         image: nixos/nix:latest
-        command: [sh, -c]
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
         args:
           - |
             set -euo pipefail
@@ -101,7 +104,10 @@ spec:
     - name: push-ghcr
       container:
         image: nixos/nix:latest
-        command: [sh, -c]
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
         args:
           - |
             set -euo pipefail
