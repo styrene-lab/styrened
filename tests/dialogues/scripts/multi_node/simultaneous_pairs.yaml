@@ -1,0 +1,44 @@
+name: simultaneous_pairs
+description: >-
+  Interleaved pair exchanges — alternates A<->B and A<->C traffic
+  to stress concurrent routing paths.
+node_roles: [A, B, C]
+setup_delay: 5.0
+inter_turn_delay: 2.0
+
+turns:
+  - sender: A
+    receiver: B
+    content: "simul|turn=1|pair=AB|direction=A->B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: A
+    receiver: C
+    content: "simul|turn=2|pair=AC|direction=A->C"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: B
+    receiver: A
+    content: "simul|turn=3|pair=AB|direction=B->A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: C
+    receiver: A
+    content: "simul|turn=4|pair=AC|direction=C->A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: B
+    receiver: C
+    content: "simul|turn=5|pair=BC|direction=B->C"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: C
+    receiver: B
+    content: "simul|turn=6|pair=BC|direction=C->B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

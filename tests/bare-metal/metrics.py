@@ -72,14 +72,17 @@ class BareMetalMetricsCollector:
         harness: SSHHarness,
         output_dir: Path | None = None,
         devices: list[str] | None = None,
+        device_count_interval: int = 10,
     ):
         self.harness = harness
         self.devices = devices or list(harness.registry.keys())
         self.output_dir = output_dir or Path("test-results/bare-metal/metrics")
+        self.device_count_interval = device_count_interval
         self._snapshots: list[FleetSnapshot] = []
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._start_time: float = 0
+        self._snapshot_index: int = 0
 
     def start(self, interval: float = 60.0) -> None:
         """Start periodic metric collection in background thread."""
@@ -133,6 +136,7 @@ class BareMetalMetricsCollector:
         """Collect one fleet-wide snapshot."""
         now = datetime.now(timezone.utc)
         elapsed = time.time() - self._start_time
+        collect_devices = (self._snapshot_index % self.device_count_interval) == 0
 
         fleet = FleetSnapshot(
             timestamp=now.isoformat(),
@@ -140,16 +144,31 @@ class BareMetalMetricsCollector:
         )
 
         for device_name in self.devices:
-            device_snap = self._collect_device(device_name, now)
+            device_snap = self._collect_device(
+                device_name, now, collect_device_count=collect_devices,
+            )
             fleet.devices.append(device_snap)
             fleet.total_rss_kb += device_snap.rss_kb
             fleet.total_discovered_peers += device_snap.discovered_peers
 
         self._snapshots.append(fleet)
+        self._snapshot_index += 1
         return fleet
 
-    def _collect_device(self, device: str, now: datetime) -> DeviceSnapshot:
-        """Collect metrics from a single device."""
+    def _collect_device(
+        self,
+        device: str,
+        now: datetime,
+        collect_device_count: bool = True,
+    ) -> DeviceSnapshot:
+        """Collect metrics from a single device.
+
+        Args:
+            device: Device name.
+            now: Current timestamp.
+            collect_device_count: If False, skip ``styrened devices --json``
+                (expensive) and leave discovered_peers at 0.
+        """
         snap = DeviceSnapshot(device=device, timestamp=now.isoformat())
 
         # Process metrics (RSS and CPU)
@@ -164,8 +183,8 @@ class BareMetalMetricsCollector:
         except Exception:
             pass
 
-        # Device count (discovered peers)
-        if snap.daemon_running:
+        # Device count (discovered peers) — only on selected snapshots
+        if snap.daemon_running and collect_device_count:
             try:
                 result = self.harness.run_styrened(device, "devices --json", timeout=15)
                 if result.success and result.stdout.strip():

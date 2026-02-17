@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.dialogues.models import (
     DialogueScript,
@@ -16,6 +17,7 @@ from tests.dialogues.models import (
     MultiNodeDialogueTurn,
     TurnDirection,
     load_dialogue_scripts,
+    load_multi_node_dialogue_scripts,
 )
 
 
@@ -153,8 +155,6 @@ class TestLoadDialogueScripts:
 
     def test_load_preserves_order(self, tmp_path):
         """Scripts should be sorted by filename."""
-        import yaml
-
         for name in ["c_third.yaml", "a_first.yaml", "b_second.yaml"]:
             data = {"name": name.replace(".yaml", ""), "turns": []}
             with open(tmp_path / name, "w") as f:
@@ -195,3 +195,80 @@ class TestMultiNodeDialogueScript:
         assert len(script.turns) == 2
         assert script.turns[0].sender == "A"
         assert script.turns[1].receiver == "C"
+
+
+class TestLoadMultiNodeDialogueScripts:
+    """Tests for load_multi_node_dialogue_scripts function."""
+
+    def test_loads_multi_node_yamls(self, tmp_path):
+        """Should load YAML files with node_roles key."""
+        data = {
+            "name": "triangle",
+            "node_roles": ["A", "B", "C"],
+            "turns": [
+                {"sender": "A", "receiver": "B", "content": "hello"},
+            ],
+        }
+        with open(tmp_path / "triangle.yaml", "w") as f:
+            yaml.dump(data, f)
+
+        scripts = load_multi_node_dialogue_scripts(tmp_path)
+        assert len(scripts) == 1
+        assert scripts[0].name == "triangle"
+        assert scripts[0].node_roles == ["A", "B", "C"]
+
+    def test_ignores_two_node_yamls(self, tmp_path):
+        """Should skip YAML files without node_roles key."""
+        two_node = {
+            "name": "ping_pong",
+            "turns": [
+                {"direction": "a_to_b", "content": "ping"},
+            ],
+        }
+        multi_node = {
+            "name": "triangle",
+            "node_roles": ["A", "B", "C"],
+            "turns": [
+                {"sender": "A", "receiver": "B", "content": "hello"},
+            ],
+        }
+        with open(tmp_path / "ping_pong.yaml", "w") as f:
+            yaml.dump(two_node, f)
+        with open(tmp_path / "triangle.yaml", "w") as f:
+            yaml.dump(multi_node, f)
+
+        scripts = load_multi_node_dialogue_scripts(tmp_path)
+        assert len(scripts) == 1
+        assert scripts[0].name == "triangle"
+
+    def test_sorted_output(self, tmp_path):
+        """Scripts should be sorted by filename."""
+        for name in ["c_script.yaml", "a_script.yaml", "b_script.yaml"]:
+            data = {
+                "name": name.replace(".yaml", ""),
+                "node_roles": ["A", "B"],
+                "turns": [],
+            }
+            with open(tmp_path / name, "w") as f:
+                yaml.dump(data, f)
+
+        scripts = load_multi_node_dialogue_scripts(tmp_path)
+        assert [s.name for s in scripts] == ["a_script", "b_script", "c_script"]
+
+    def test_load_from_scripts_directory(self):
+        """Should load multi-node YAML files from the actual scripts directory."""
+        scripts_dir = Path(__file__).parent.parent / "dialogues" / "scripts" / "multi_node"
+        if not scripts_dir.exists():
+            pytest.skip("Multi-node scripts directory not found")
+
+        scripts = load_multi_node_dialogue_scripts(scripts_dir)
+        assert len(scripts) == 3
+        names = {s.name for s in scripts}
+        assert "triangle_round_robin" in names
+        assert "relay_chain" in names
+        assert "simultaneous_pairs" in names
+
+    def test_empty_directory(self, tmp_path):
+        """Should return empty list for directory with no YAML files."""
+        scripts = load_multi_node_dialogue_scripts(tmp_path)
+        assert scripts == []
