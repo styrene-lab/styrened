@@ -19,6 +19,7 @@ from tests.dialogues.models import (
 from tests.dialogues.primitives import (
     HealthCheckResult,
     _extract_content,
+    collect_version_info,
     ensure_daemons_healthy,
     execute_dialogue,
     execute_multi_node_dialogue,
@@ -909,7 +910,8 @@ class TestOvernightSummary:
         assert summary.cycle_success_rates[1] == 0.5
 
     def test_to_dict(self):
-        """to_dict should produce JSON-serializable output with new fields."""
+        """to_dict should produce JSON-serializable output with all fields."""
+        vi = {"styrened_versions": {"n1": "0.4.0"}, "test_sha": "abc1234", "test_branch": "main"}
         summary = OvernightSummary(
             total_dialogues=1,
             total_turns=2,
@@ -930,12 +932,14 @@ class TestOvernightSummary:
             ],
             duration_seconds=10.0,
             cycle_success_rates=[1.0, 0.8],
+            version_info=vi,
         )
 
         d = summary.to_dict()
         assert d["total_dialogues"] == 1
         assert d["total_turns"] == 2
         assert d["cycle_success_rates"] == [1.0, 0.8]
+        assert d["version_info"] == vi
         # Check dialogue-level temporal fields
         assert d["dialogues"][0]["cycle_index"] == 1
         assert d["dialogues"][0]["started_at"] == 1000.0
@@ -944,6 +948,18 @@ class TestOvernightSummary:
         assert d["dialogues"][0]["turns"][0]["started_at"] == 1000.0
         # Ensure it's JSON-serializable
         json.dumps(d)
+
+    def test_from_dialogue_results_with_version_info(self):
+        """version_info kwarg should pass through to the summary."""
+        vi = {"styrened_versions": {"n1": "0.4.0"}, "test_sha": "abc", "test_branch": "main"}
+        summary = OvernightSummary.from_dialogue_results([], 0.0, version_info=vi)
+        assert summary.version_info == vi
+
+    def test_to_dict_version_info_empty_by_default(self):
+        """version_info should default to empty dict in to_dict output."""
+        summary = OvernightSummary.from_dialogue_results([], 0.0)
+        d = summary.to_dict()
+        assert d["version_info"] == {}
 
     def test_empty_results(self):
         """Should handle empty result list."""
@@ -954,3 +970,50 @@ class TestOvernightSummary:
         assert summary.avg_send_latency == 0.0
         assert summary.avg_verification_latency == 0.0
         assert summary.cycle_success_rates == []
+
+
+class TestCollectVersionInfo:
+    """Tests for collect_version_info."""
+
+    def test_collects_versions_from_nodes(self):
+        """Should call get_version on each node and return dict."""
+        harness = MagicMock()
+        harness.get_version.side_effect = lambda node: {"n1": "0.4.0", "n2": "0.3.9"}[node]
+
+        result = collect_version_info(harness, ["n1", "n2"])
+
+        assert result["styrened_versions"] == {"n1": "0.4.0", "n2": "0.3.9"}
+        assert harness.get_version.call_count == 2
+
+    def test_handles_none_version(self):
+        """Should include None for nodes where get_version returns None."""
+        harness = MagicMock()
+        harness.get_version.return_value = None
+
+        result = collect_version_info(harness, ["n1"])
+
+        assert result["styrened_versions"] == {"n1": None}
+
+    def test_git_info_populated(self):
+        """Should populate test_sha and test_branch from git."""
+        harness = MagicMock()
+        harness.get_version.return_value = "0.4.0"
+
+        result = collect_version_info(harness, ["n1"])
+
+        # We're in a git repo, so these should be non-empty strings
+        assert isinstance(result["test_sha"], str)
+        assert isinstance(result["test_branch"], str)
+        assert len(result["test_sha"]) > 0
+        assert len(result["test_branch"]) > 0
+
+    def test_dict_structure(self):
+        """Should return dict with expected top-level keys."""
+        harness = MagicMock()
+        harness.get_version.return_value = "0.4.0"
+
+        result = collect_version_info(harness, ["n1"])
+
+        assert "styrened_versions" in result
+        assert "test_sha" in result
+        assert "test_branch" in result

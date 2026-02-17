@@ -18,6 +18,7 @@ import pytest
 
 from tests.dialogues.models import load_dialogue_scripts, load_multi_node_dialogue_scripts
 from tests.dialogues.primitives import (
+    collect_version_info,
     ensure_daemons_healthy,
     execute_dialogue,
     execute_multi_node_dialogue,
@@ -201,6 +202,10 @@ class TestOvernightDialogues:
         )
         collector.start(interval=60)
 
+        # Collect version info before the loop
+        version_info = collect_version_info(harness, [node_a, node_b])
+        logger.info("Version info: %s", version_info)
+
         # Run dialogues in a loop
         duration_seconds = self.DURATION_HOURS * 3600
         start_time = time.time()
@@ -260,7 +265,9 @@ class TestOvernightDialogues:
 
             # Build overnight summary
             elapsed = time.time() - start_time
-            summary = OvernightSummary.from_dialogue_results(all_results, elapsed)
+            summary = OvernightSummary.from_dialogue_results(
+                all_results, elapsed, version_info=version_info,
+            )
 
             # Write summary
             summary_file = RESULTS_DIR / "overnight_summary.json"
@@ -330,6 +337,10 @@ class TestOvernightMultiNodeDialogues:
 
         if not multi_scripts and not two_node_scripts:
             pytest.skip("No dialogue scripts found")
+
+        # Collect version info before the loop
+        version_info = collect_version_info(harness, all_nodes)
+        logger.info("Version info: %s", version_info)
 
         # Build 2-node pair configurations for rotation
         pairs = [
@@ -440,7 +451,9 @@ class TestOvernightMultiNodeDialogues:
             metrics_summary = collector.stop()
 
             elapsed = time.time() - start_time
-            summary = OvernightSummary.from_dialogue_results(all_results, elapsed)
+            summary = OvernightSummary.from_dialogue_results(
+                all_results, elapsed, version_info=version_info,
+            )
 
             summary_file = results_dir / "overnight_summary.json"
             with open(summary_file, "w") as f:
