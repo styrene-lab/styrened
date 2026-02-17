@@ -29,8 +29,10 @@ from styrened.ipc.messages import (
     IPCRequest,
     PingRequest,
     QueryConfigRequest,
+    QueryConversationsRequest,
     QueryDevicesRequest,
     QueryIdentityRequest,
+    QueryMessagesRequest,
     QueryStatusRequest,
     RemoteStatusInfo,
 )
@@ -310,6 +312,42 @@ class ControlClient:
         """
         data = await self._request(QueryConfigRequest())
         return cast(dict[str, Any], data.get("config", {}))
+
+    async def query_conversations(self) -> list[dict[str, Any]]:
+        """Query list of conversations.
+
+        Returns:
+            List of conversation dicts with peer_hash, unread_count, etc.
+        """
+        data = await self._request(QueryConversationsRequest())
+        return cast(list[dict[str, Any]], data.get("conversations", []))
+
+    async def query_messages(
+        self,
+        peer_hash: str,
+        limit: int = 50,
+        before_timestamp: float | None = None,
+        status_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query message history for a conversation.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+            limit: Maximum number of messages to return.
+            before_timestamp: Only return messages before this timestamp.
+            status_filter: Filter by message status.
+
+        Returns:
+            List of message dicts.
+        """
+        request = QueryMessagesRequest(
+            peer_hash=peer_hash,
+            limit=limit,
+            before_timestamp=before_timestamp,
+            status_filter=status_filter,
+        )
+        data = await self._request(request)
+        return cast(list[dict[str, Any]], data.get("messages", []))
 
     # -------------------------------------------------------------------------
     # Command methods

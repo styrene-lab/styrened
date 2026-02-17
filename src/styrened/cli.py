@@ -8,6 +8,8 @@ Provides subcommands for:
 - exec: Execute a command on a remote node
 - announce: Trigger an announce
 - identity: Show local operator identity
+- conversations: List conversations
+- messages: List messages for a conversation
 
 Usage:
     styrened                      # Run daemon (default)
@@ -18,6 +20,8 @@ Usage:
     styrened exec <dest> <cmd>    # Execute command on remote
     styrened announce             # Trigger local announce
     styrened identity             # Show local identity info
+    styrened conversations        # List conversations
+    styrened messages <peer>      # List messages with peer
 """
 
 import argparse
@@ -1383,6 +1387,124 @@ async def _cmd_shell_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
 
 
+# -----------------------------------------------------------------------------
+# Subcommand: conversations
+# -----------------------------------------------------------------------------
+
+
+def cmd_conversations(args: argparse.Namespace) -> int:
+    """List conversations.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    return asyncio.run(_cmd_conversations_async(args))
+
+
+async def _cmd_conversations_async(args: argparse.Namespace) -> int:
+    """Async implementation of conversations command."""
+    client = await _try_ipc_client()
+    if not client:
+        print("Daemon not running (conversations require a running daemon)", file=sys.stderr)
+        return 1
+
+    try:
+        conversations = await client.query_conversations()
+        await client.disconnect()
+
+        if not conversations:
+            print("No conversations")
+            return 0
+
+        if args.json:
+            import json
+
+            print(json.dumps(conversations, indent=2))
+        else:
+            print(f"\n{len(conversations)} conversation(s):\n")
+            for conv in conversations:
+                peer = conv.get("peer_hash", "unknown")
+                unread = conv.get("unread_count", 0)
+                count = conv.get("message_count", 0)
+                preview = conv.get("last_message_preview", "")
+                unread_str = f" ({unread} unread)" if unread else ""
+                preview_str = f" - {preview[:60]}..." if len(preview) > 60 else f" - {preview}" if preview else ""
+                print(f"  {peer[:16]}...{unread_str} [{count} msgs]{preview_str}")
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Failed to query conversations: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: messages
+# -----------------------------------------------------------------------------
+
+
+def cmd_messages(args: argparse.Namespace) -> int:
+    """List messages for a conversation.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    return asyncio.run(_cmd_messages_async(args))
+
+
+async def _cmd_messages_async(args: argparse.Namespace) -> int:
+    """Async implementation of messages command."""
+    client = await _try_ipc_client()
+    if not client:
+        print("Daemon not running (messages require a running daemon)", file=sys.stderr)
+        return 1
+
+    try:
+        messages = await client.query_messages(
+            peer_hash=args.peer_hash,
+            limit=args.limit,
+            status_filter=args.status,
+        )
+        await client.disconnect()
+
+        if not messages:
+            print("No messages")
+            return 0
+
+        if args.json:
+            import json
+
+            print(json.dumps(messages, indent=2))
+        else:
+            print(f"\n{len(messages)} message(s) with {args.peer_hash[:16]}...:\n")
+            for msg in messages:
+                direction = "->" if msg.get("is_outgoing") else "<-"
+                status = msg.get("status", "")
+                content = msg.get("content", "")
+                content_str = content[:80] + "..." if len(content) > 80 else content
+                print(f"  {direction} [{status}] {content_str}")
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Failed to query messages: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_version(args: argparse.Namespace) -> int:
     """Show version information.
 
@@ -1558,6 +1680,27 @@ def create_parser() -> argparse.ArgumentParser:
     )
     identity_unshare_parser.add_argument("--json", action="store_true", help="Output as JSON")
     identity_unshare_parser.set_defaults(func=cmd_identity_unshare)
+
+    # conversations
+    conversations_parser = subparsers.add_parser(
+        "conversations", help="List conversations (requires running daemon)"
+    )
+    conversations_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    conversations_parser.set_defaults(func=cmd_conversations)
+
+    # messages
+    messages_parser = subparsers.add_parser(
+        "messages", help="List messages for a conversation (requires running daemon)"
+    )
+    messages_parser.add_argument("peer_hash", help="LXMF destination hash of the peer")
+    messages_parser.add_argument(
+        "-n", "--limit", type=int, default=50, help="Maximum messages to return (default: 50)"
+    )
+    messages_parser.add_argument(
+        "--status", default=None, help="Filter by message status (e.g., delivered, failed)"
+    )
+    messages_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    messages_parser.set_defaults(func=cmd_messages)
 
     # version
     version_parser = subparsers.add_parser("version", help="Show version information")
