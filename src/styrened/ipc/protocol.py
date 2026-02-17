@@ -39,8 +39,8 @@ TYPE_SIZE = 1  # uint8
 REQUEST_ID_SIZE = 16  # 16 random bytes
 HEADER_SIZE = TYPE_SIZE + REQUEST_ID_SIZE  # 17 bytes (length not included)
 
-# Maximum payload size (1MB)
-MAX_PAYLOAD_SIZE = 1024 * 1024
+# Maximum payload size (4MB — nodes on public networks accumulate large device stores)
+MAX_PAYLOAD_SIZE = 4 * 1024 * 1024
 
 
 class IPCMessageType(IntEnum):
