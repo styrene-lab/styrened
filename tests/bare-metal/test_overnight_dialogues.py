@@ -1,0 +1,228 @@
+"""Overnight dialogue tests for bare-metal styrened instances.
+
+Exercises multi-turn conversation flows between physical devices using
+the dialogue framework. Requires at least 2 devices with daemons running
+and identity_hash configured.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from tests.dialogues.models import load_dialogue_scripts
+from tests.dialogues.primitives import execute_dialogue, resolve_lxmf_hashes
+from tests.dialogues.results import OvernightSummary
+from tests.harness.ssh import SSHHarness
+
+# Import metrics collector (bare-metal dir is on sys.path via conftest)
+sys.path.insert(0, str(Path(__file__).parent))
+from metrics import BareMetalMetricsCollector  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+# Scripts directory
+SCRIPTS_DIR = Path(__file__).parent.parent / "dialogues" / "scripts"
+
+# Output directory for test results
+RESULTS_DIR = Path("test-results/bare-metal/overnight-dialogues")
+
+
+@pytest.fixture(scope="module")
+def dialogue_pair(harness: SSHHarness):
+    """Fixture providing a pair of devices for dialogue testing.
+
+    Selects the first two devices with identity_hash configured.
+    Ensures daemons are running on both.
+
+    Returns:
+        Tuple of (node_a, node_b, identity_a, identity_b).
+    """
+    devices_with_id = [
+        name for name, config in harness.registry.items()
+        if config.identity_hash
+    ]
+    if len(devices_with_id) < 2:
+        pytest.skip("Need at least 2 devices with identity_hash for dialogue tests")
+
+    node_a = devices_with_id[0]
+    node_b = devices_with_id[1]
+
+    # Ensure daemons are running
+    for node in [node_a, node_b]:
+        if not harness.is_daemon_running(node):
+            result = harness.start_daemon(node)
+            assert result.success, f"Failed to start daemon on {node}: {result.stderr}"
+            assert harness.wait_for_daemon(node, timeout=30), f"{node} daemon not responsive"
+
+    identity_a = harness.registry[node_a].identity_hash
+    identity_b = harness.registry[node_b].identity_hash
+
+    return node_a, node_b, identity_a, identity_b
+
+
+@pytest.fixture(scope="module")
+def lxmf_hashes(harness: SSHHarness, dialogue_pair):
+    """Fixture resolving LXMF destination hashes for the dialogue pair.
+
+    Returns:
+        Tuple of (b_hash_as_seen_by_a, a_hash_as_seen_by_b).
+    """
+    node_a, node_b, _, _ = dialogue_pair
+    return resolve_lxmf_hashes(harness, node_a, node_b, wait=20)
+
+
+@pytest.mark.smoke
+@pytest.mark.dialogue
+class TestDialogueSmoke:
+    """Quick dialogue validation — runs each script once."""
+
+    def test_dialogue_smoke(self, harness, dialogue_pair, lxmf_hashes):
+        """Run each dialogue script once and assert >= 50% turn success rate.
+
+        This is a quick validation (~5-10 min) before committing to an
+        overnight run.
+        """
+        node_a, node_b, identity_a, identity_b = dialogue_pair
+        b_lxmf, a_lxmf = lxmf_hashes
+
+        scripts = load_dialogue_scripts(SCRIPTS_DIR)
+        assert len(scripts) > 0, f"No dialogue scripts found in {SCRIPTS_DIR}"
+
+        for script in scripts:
+            result = execute_dialogue(
+                harness=harness,
+                script=script,
+                node_a=node_a,
+                node_b=node_b,
+                identity_a=identity_a,
+                identity_b=identity_b,
+                lxmf_a=a_lxmf,
+                lxmf_b=b_lxmf,
+            )
+
+            total = len(result.turns)
+            success_rate = result.turns_succeeded / total if total > 0 else 0.0
+
+            logger.info(
+                "Smoke: %s — %d/%d turns (%.0f%%)",
+                script.name, result.turns_succeeded, total, success_rate * 100,
+            )
+
+            assert success_rate >= 0.5, (
+                f"Script '{script.name}' success rate {success_rate:.0%} < 50%: "
+                f"{result.turns_succeeded}/{total} turns passed"
+            )
+
+
+@pytest.mark.slow_extended
+@pytest.mark.dialogue
+class TestOvernightDialogues:
+    """8-hour overnight dialogue test with metrics collection."""
+
+    DURATION_HOURS = 8
+    MIN_SUCCESS_RATE = 0.90
+    MAX_MEMORY_GROWTH_KB_PER_HOUR = 10240  # 10 MB/hour
+
+    def test_overnight_2node_dialogues(self, harness, dialogue_pair, lxmf_hashes):
+        """Loop through all dialogue scripts for 8 hours.
+
+        Success criteria:
+        - >= 90% turn success rate overall
+        - Memory growth < 10 MB/hour per device
+        """
+        node_a, node_b, identity_a, identity_b = dialogue_pair
+        b_lxmf, a_lxmf = lxmf_hashes
+
+        scripts = load_dialogue_scripts(SCRIPTS_DIR)
+        assert len(scripts) > 0, f"No dialogue scripts found in {SCRIPTS_DIR}"
+
+        # Setup metrics collection
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        collector = BareMetalMetricsCollector(
+            harness=harness,
+            output_dir=RESULTS_DIR / "metrics",
+            devices=[node_a, node_b],
+        )
+        collector.start(interval=60)
+
+        # Run dialogues in a loop
+        duration_seconds = self.DURATION_HOURS * 3600
+        start_time = time.time()
+        all_results = []
+        cycle = 0
+
+        try:
+            while time.time() - start_time < duration_seconds:
+                cycle += 1
+                logger.info("=== Dialogue cycle %d (elapsed: %.0fm) ===",
+                            cycle, (time.time() - start_time) / 60)
+
+                for script in scripts:
+                    if time.time() - start_time >= duration_seconds:
+                        break
+
+                    result = execute_dialogue(
+                        harness=harness,
+                        script=script,
+                        node_a=node_a,
+                        node_b=node_b,
+                        identity_a=identity_a,
+                        identity_b=identity_b,
+                        lxmf_a=a_lxmf,
+                        lxmf_b=b_lxmf,
+                    )
+                    all_results.append(result)
+
+                    logger.info(
+                        "Cycle %d: %s — %d/%d turns",
+                        cycle, script.name,
+                        result.turns_succeeded, len(result.turns),
+                    )
+
+                # Brief pause between cycles
+                time.sleep(10)
+
+        finally:
+            # Stop metrics and get summary
+            metrics_summary = collector.stop()
+
+            # Build overnight summary
+            elapsed = time.time() - start_time
+            summary = OvernightSummary.from_dialogue_results(all_results, elapsed)
+
+            # Write summary
+            summary_file = RESULTS_DIR / "overnight_summary.json"
+            with open(summary_file, "w") as f:
+                json.dump(summary.to_dict(), f, indent=2)
+
+            logger.info(
+                "Overnight test complete: %d dialogues, %d/%d turns (%.1f%%), %.1f hours",
+                summary.total_dialogues,
+                summary.turns_succeeded,
+                summary.total_turns,
+                (summary.turns_succeeded / summary.total_turns * 100)
+                if summary.total_turns > 0 else 0,
+                elapsed / 3600,
+            )
+
+        # Assertions
+        if summary.total_turns > 0:
+            overall_rate = summary.turns_succeeded / summary.total_turns
+            assert overall_rate >= self.MIN_SUCCESS_RATE, (
+                f"Overall success rate {overall_rate:.1%} < {self.MIN_SUCCESS_RATE:.0%}: "
+                f"{summary.turns_succeeded}/{summary.total_turns} turns"
+            )
+
+        # Memory growth assertion
+        for device, stats in metrics_summary.devices.items():
+            growth_rate = stats.get("rss_growth_rate_kb_per_hour", 0)
+            assert growth_rate < self.MAX_MEMORY_GROWTH_KB_PER_HOUR, (
+                f"{device} memory growth {growth_rate:.0f} KB/hour "
+                f"> {self.MAX_MEMORY_GROWTH_KB_PER_HOUR} KB/hour limit"
+            )

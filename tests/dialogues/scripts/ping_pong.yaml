@@ -1,0 +1,15 @@
+name: ping_pong
+description: Basic bidirectional delivery — A sends ping, B responds pong.
+setup_delay: 5.0
+inter_turn_delay: 3.0
+
+turns:
+  - direction: a_to_b
+    content: "ping-pong|turn=1|direction=a_to_b"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "ping-pong|turn=2|direction=b_to_a"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

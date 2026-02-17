@@ -1,0 +1,35 @@
+name: alternating_conversation
+description: Sustained back-and-forth conversation with 6 alternating turns.
+setup_delay: 5.0
+inter_turn_delay: 2.0
+
+turns:
+  - direction: a_to_b
+    content: "alt-conv|turn=1|from=A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "alt-conv|turn=2|from=B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "alt-conv|turn=3|from=A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "alt-conv|turn=4|from=B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "alt-conv|turn=5|from=A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "alt-conv|turn=6|from=B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

@@ -1,0 +1,25 @@
+name: status_handshake
+description: Multi-turn alternating protocol exchange simulating a status handshake.
+setup_delay: 5.0
+inter_turn_delay: 2.0
+
+turns:
+  - direction: a_to_b
+    content: "status-handshake|turn=1|type=request"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "status-handshake|turn=2|type=ack"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "status-handshake|turn=3|type=data"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "status-handshake|turn=4|type=complete"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
