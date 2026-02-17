@@ -1,0 +1,32 @@
+name: relay_chain
+description: >-
+  Chain relay — messages forwarded A->B->C then reversed C->B->A.
+  Tests sequential multi-hop delivery patterns.
+node_roles: [A, B, C]
+setup_delay: 5.0
+inter_turn_delay: 3.0
+
+turns:
+  - sender: A
+    receiver: B
+    content: "relay|turn=1|path=A->B|direction=forward"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: B
+    receiver: C
+    content: "relay|turn=2|path=B->C|direction=forward"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: C
+    receiver: B
+    content: "relay|turn=3|path=C->B|direction=reverse"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: B
+    receiver: A
+    content: "relay|turn=4|path=B->A|direction=reverse"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

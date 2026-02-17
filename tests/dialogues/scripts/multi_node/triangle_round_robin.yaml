@@ -1,0 +1,44 @@
+name: triangle_round_robin
+description: >-
+  Full triangle coverage — 6 turns covering all 6 directional paths
+  between 3 nodes (A->B, B->C, C->A, B->A, C->B, A->C).
+node_roles: [A, B, C]
+setup_delay: 5.0
+inter_turn_delay: 3.0
+
+turns:
+  - sender: A
+    receiver: B
+    content: "triangle|turn=1|path=A->B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: B
+    receiver: C
+    content: "triangle|turn=2|path=B->C"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: C
+    receiver: A
+    content: "triangle|turn=3|path=C->A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: B
+    receiver: A
+    content: "triangle|turn=4|path=B->A"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: C
+    receiver: B
+    content: "triangle|turn=5|path=C->B"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - sender: A
+    receiver: C
+    content: "triangle|turn=6|path=A->C"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

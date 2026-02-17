@@ -144,3 +144,24 @@ class MultiNodeDialogueScript:
             setup_delay=data.get("setup_delay", 5.0),
             inter_turn_delay=data.get("inter_turn_delay", 2.0),
         )
+
+
+def load_multi_node_dialogue_scripts(directory: Path) -> list[MultiNodeDialogueScript]:
+    """Load multi-node dialogue scripts from a directory.
+
+    Only loads YAML files that contain a ``node_roles`` key, distinguishing
+    them from 2-node scripts.
+
+    Args:
+        directory: Path to directory containing YAML script files.
+
+    Returns:
+        List of MultiNodeDialogueScript instances, sorted by filename.
+    """
+    scripts = []
+    for yaml_file in sorted(directory.glob("*.yaml")):
+        with open(yaml_file) as f:
+            data = yaml.safe_load(f)
+        if data and "node_roles" in data:
+            scripts.append(MultiNodeDialogueScript.from_yaml(data))
+    return scripts

@@ -18,6 +18,7 @@ class TurnResult:
     verification_duration: float
     retry_count: int = 0
     error: str | None = None
+    started_at: float = 0.0
 
 
 @dataclass
@@ -30,6 +31,9 @@ class DialogueResult:
     total_duration: float
     turns_succeeded: int
     turns_failed: int
+    cycle_index: int = 0
+    started_at: float = 0.0
+    completed_at: float = 0.0
 
 
 @dataclass
@@ -45,6 +49,7 @@ class OvernightSummary:
     avg_verification_latency: float
     dialogues: list[DialogueResult] = field(default_factory=list)
     duration_seconds: float = 0.0
+    cycle_success_rates: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -57,6 +62,7 @@ class OvernightSummary:
             "avg_send_latency": self.avg_send_latency,
             "avg_verification_latency": self.avg_verification_latency,
             "duration_seconds": self.duration_seconds,
+            "cycle_success_rates": self.cycle_success_rates,
             "dialogues": [
                 {
                     "script_name": d.script_name,
@@ -64,6 +70,9 @@ class OvernightSummary:
                     "total_duration": d.total_duration,
                     "turns_succeeded": d.turns_succeeded,
                     "turns_failed": d.turns_failed,
+                    "cycle_index": d.cycle_index,
+                    "started_at": d.started_at,
+                    "completed_at": d.completed_at,
                     "turns": [
                         {
                             "turn_index": t.turn_index,
@@ -74,6 +83,7 @@ class OvernightSummary:
                             "verification_duration": t.verification_duration,
                             "retry_count": t.retry_count,
                             "error": t.error,
+                            "started_at": t.started_at,
                         }
                         for t in d.turns
                     ],
@@ -124,6 +134,19 @@ class OvernightSummary:
             else 0.0
         )
 
+        # Compute per-cycle success rates
+        cycles: dict[int, list[bool]] = {}
+        for dr in results:
+            cycles.setdefault(dr.cycle_index, [])
+            for tr in dr.turns:
+                cycles[dr.cycle_index].append(tr.success)
+
+        cycle_success_rates = []
+        for idx in sorted(cycles):
+            outcomes = cycles[idx]
+            if outcomes:
+                cycle_success_rates.append(sum(outcomes) / len(outcomes))
+
         return cls(
             total_dialogues=len(results),
             total_turns=total_turns,
@@ -134,4 +157,5 @@ class OvernightSummary:
             avg_verification_latency=avg_verify,
             dialogues=results,
             duration_seconds=duration_seconds,
+            cycle_success_rates=cycle_success_rates,
         )
