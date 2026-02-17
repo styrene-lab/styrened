@@ -264,6 +264,24 @@ class HubConnection:
             self._connected = True
             self._waiting_since = None  # Reset waiting timer
 
+            # Store hub as a node in the node store for topology visualization
+            try:
+                from styrened.models.mesh_device import DeviceType, MeshDevice
+                from styrened.services.node_store import get_node_store
+
+                hub_device = MeshDevice(
+                    destination_hash=hub_address,
+                    identity_hash=hub_address,  # Use same hash as identity placeholder
+                    name="Styrene Hub",
+                    device_type=DeviceType.HUB,
+                    last_announce=int(time.time()),
+                    announce_count=1,
+                )
+                get_node_store().save_node(hub_device)
+                logger.info(f"Stored hub as node: {hub_address[:16]}...")
+            except Exception as e:
+                logger.warning(f"Failed to store hub as node: {e}")
+
             hops = RNS.Transport.hops_to(hub_hash)
             logger.info(f"Connected to hub at {hub_address[:16]}... ({hops} hops)")
             return True

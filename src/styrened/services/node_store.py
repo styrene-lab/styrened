@@ -166,6 +166,24 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_lxmf_destination_hash ON nodes(lxmf_destination_hash)
     """)
 
+    # Paths table for Reticulum path snapshots
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS paths (
+            destination_hash TEXT PRIMARY KEY,
+            next_hop TEXT,
+            hops INTEGER NOT NULL,
+            interface_type TEXT,
+            interface_name TEXT,
+            bitrate INTEGER,
+            expires INTEGER,
+            updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_paths_next_hop ON paths(next_hop)
+    """)
+
     conn.commit()
     logger.debug(f"Initialized node store at {db_path}")
     return conn
@@ -578,6 +596,133 @@ class NodeStore:
         with _db_lock:
             with self._connection() as conn:
                 cursor = conn.execute("DELETE FROM nodes")
+                conn.commit()
+                return int(cursor.rowcount)
+
+    def save_path(
+        self,
+        destination_hash: str,
+        next_hop: str | None,
+        hops: int,
+        interface_type: str | None = None,
+        interface_name: str | None = None,
+        bitrate: int | None = None,
+        expires: int | None = None,
+    ) -> None:
+        """Save or update a path entry.
+
+        Thread-safe: uses lock for concurrent access.
+
+        Args:
+            destination_hash: Hex-encoded destination hash.
+            next_hop: Hex-encoded next hop hash (None for direct links).
+            hops: Number of hops to destination.
+            interface_type: RNS interface type name (e.g., 'RNodeInterface').
+            interface_name: Interface instance name.
+            bitrate: Interface bitrate in bits/sec.
+            expires: Unix timestamp when path expires.
+        """
+        if not _is_valid_hash(destination_hash):
+            logger.warning(f"Invalid path destination_hash rejected: {destination_hash!r}")
+            return
+        if next_hop is not None and not _is_valid_hash(next_hop):
+            logger.warning(f"Invalid path next_hop rejected: {next_hop!r}")
+            return
+
+        with _db_lock:
+            with self._connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO paths (
+                        destination_hash, next_hop, hops, interface_type,
+                        interface_name, bitrate, expires, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                    ON CONFLICT(destination_hash) DO UPDATE SET
+                        next_hop = excluded.next_hop,
+                        hops = excluded.hops,
+                        interface_type = excluded.interface_type,
+                        interface_name = excluded.interface_name,
+                        bitrate = excluded.bitrate,
+                        expires = excluded.expires,
+                        updated_at = strftime('%s', 'now')
+                    """,
+                    (
+                        destination_hash,
+                        next_hop,
+                        hops,
+                        interface_type,
+                        interface_name,
+                        bitrate,
+                        expires,
+                    ),
+                )
+                conn.commit()
+                logger.debug(f"Saved path to {destination_hash[:16]}... ({hops} hops)")
+
+    def get_all_paths(self) -> list[dict]:
+        """Get all path entries.
+
+        Thread-safe: read operations allow concurrent access.
+
+        Returns:
+            List of path dictionaries.
+        """
+        with self._connection() as conn:
+            rows = conn.execute("SELECT * FROM paths ORDER BY hops ASC").fetchall()
+            return [dict(row) for row in rows]
+
+    def get_path(self, destination_hash: str) -> dict | None:
+        """Get a single path entry.
+
+        Thread-safe: read operations allow concurrent access.
+
+        Args:
+            destination_hash: Hex-encoded destination hash.
+
+        Returns:
+            Path dictionary if found, None otherwise.
+        """
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM paths WHERE destination_hash = ?",
+                (destination_hash,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def prune_expired_paths(self) -> int:
+        """Delete expired path entries.
+
+        Thread-safe: uses lock for concurrent access.
+
+        Returns:
+            Number of paths deleted.
+        """
+        import time
+
+        with _db_lock:
+            with self._connection() as conn:
+                now = int(time.time())
+                cursor = conn.execute(
+                    "DELETE FROM paths WHERE expires IS NOT NULL AND expires < ?",
+                    (now,),
+                )
+                conn.commit()
+                deleted = int(cursor.rowcount)
+                if deleted > 0:
+                    logger.debug(f"Pruned {deleted} expired paths")
+                return deleted
+
+    def clear_all_paths(self) -> int:
+        """Clear all path entries.
+
+        Thread-safe: uses lock for concurrent access.
+
+        Returns:
+            Number of paths deleted.
+        """
+        with _db_lock:
+            with self._connection() as conn:
+                cursor = conn.execute("DELETE FROM paths")
                 conn.commit()
                 return int(cursor.rowcount)
 

@@ -27,6 +27,7 @@ class DeviceType(Enum):
     RNODE = "rnode"  # RNode hardware device
     GENERIC = "generic"  # Generic Reticulum announce
     UNKNOWN = "unknown"  # Unable to determine type
+    HUB = "hub"  # Hub/transport node
 
 
 class NodeStatus(Enum):

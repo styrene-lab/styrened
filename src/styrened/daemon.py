@@ -47,6 +47,7 @@ from styrened.services.auto_reply import AutoReplyHandler
 from styrened.services.config import get_default_core_config, load_core_config
 from styrened.services.lifecycle import CoreLifecycle
 from styrened.services.node_store import get_node_store
+from styrened.services.path_snapshot import PathSnapshotService
 from styrened.services.reticulum import discover_devices, start_discovery
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ class StyreneDaemon:
         self._auto_reply_handler: AutoReplyHandler | None = None
         self._operator_destination: RNS.Destination | None = None
         self._node_store: Any = None  # NodeStore for device persistence
+        self._path_snapshot: PathSnapshotService | None = None
         self._terminal_service: Any = None  # Terminal session service
         self._styrene_protocol: Any = None  # Styrene protocol for RPC/terminal
 
@@ -109,6 +111,10 @@ class StyreneDaemon:
         # mappings are available for identity resolution when sending messages
         self._node_store = get_node_store()
         start_discovery(callback=self._on_device_discovered, node_store=self._node_store)
+
+        # Start path table snapshot service for topology edge data
+        self._path_snapshot = PathSnapshotService(self._node_store)
+        self._path_snapshot.start()
 
         # Start HTTP API if enabled
         if self.config.api.enabled:
@@ -1121,6 +1127,11 @@ class StyreneDaemon:
         if self._conversation_service:
             self._conversation_service.shutdown()
             self._conversation_service = None
+
+        # Stop path snapshot service
+        if self._path_snapshot:
+            self._path_snapshot.stop()
+            self._path_snapshot = None
 
         # Stop RPC server
         if self._rpc_server:
