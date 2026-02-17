@@ -1,0 +1,311 @@
+/* Styrene Mesh Explorer — CRT terminal aesthetic */
+
+:root {
+    --crt-bg: #0a0a0a;
+    --crt-off-black: #0d0d0d;
+    --crt-green-bright: #39ff14;
+    --crt-green-medium: #22cc00;
+    --crt-green-dim: #1a8c00;
+    --crt-green-dark: #0e4400;
+    --crt-green-darker: rgba(57, 255, 20, 0.06);
+    --crt-glow-dim: rgba(57, 255, 20, 0.15);
+    --color-amber: #ffa94d;
+    --color-amber-dim: #cc7a00;
+    --color-red: #ff6b6b;
+    --color-red-dim: #994040;
+    --color-teal: #4dd0e1;
+    --font-terminal: 'VT323', 'Share Tech Mono', monospace;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--crt-bg);
+    color: var(--crt-green-medium);
+    font-family: var(--font-terminal);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--crt-green-dark);
+    background: var(--crt-off-black);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.title {
+    font-size: 1.3rem;
+    font-weight: 400;
+    color: var(--crt-green-bright);
+    letter-spacing: 0.15em;
+    text-shadow: 0 0 10px var(--crt-glow-dim);
+    white-space: nowrap;
+}
+
+.stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 1rem;
+}
+
+.stat {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.stat-label {
+    color: var(--crt-green-dim);
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+}
+
+.stat-value {
+    color: var(--crt-green-bright);
+}
+
+.stat-active { color: var(--crt-green-bright); }
+.stat-stale { color: var(--color-amber); }
+.stat-lost { color: var(--color-red-dim); }
+
+/* Controls */
+.controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.search-input,
+.filter-select {
+    background: var(--crt-off-black);
+    border: 1px solid var(--crt-green-dark);
+    color: var(--crt-green-bright);
+    font-family: var(--font-terminal);
+    font-size: 0.9rem;
+    padding: 0.3rem 0.5rem;
+    letter-spacing: 0.05em;
+}
+
+.search-input {
+    width: 160px;
+}
+
+.search-input:focus,
+.filter-select:focus {
+    outline: none;
+    border-color: var(--crt-green-medium);
+    box-shadow: 0 0 6px var(--crt-glow-dim);
+}
+
+.search-input::placeholder {
+    color: var(--crt-green-dark);
+}
+
+.filter-select {
+    cursor: pointer;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--crt-green-dim);
+    letter-spacing: 0.1em;
+}
+
+.toggle-label input {
+    accent-color: var(--crt-green-medium);
+}
+
+/* Status badge */
+.status-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--crt-green-dark);
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-amber);
+}
+
+.status-badge.connected .status-dot {
+    background: var(--crt-green-bright);
+    box-shadow: 0 0 6px var(--crt-green-bright);
+}
+
+.status-badge.error .status-dot {
+    background: var(--color-red);
+}
+
+.status-text {
+    color: var(--crt-green-dim);
+}
+
+/* Main layout */
+.main {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+}
+
+.graph-container {
+    flex: 1;
+    background: var(--crt-bg);
+}
+
+/* Detail panel */
+.detail-panel {
+    width: 320px;
+    background: var(--crt-off-black);
+    border-left: 1px solid var(--crt-green-dark);
+    padding: 1rem;
+    overflow-y: auto;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.detail-panel.hidden {
+    display: none;
+}
+
+.panel-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    color: var(--crt-green-dim);
+    font-size: 1.5rem;
+    cursor: pointer;
+    font-family: var(--font-terminal);
+}
+
+.panel-close:hover {
+    color: var(--crt-green-bright);
+}
+
+.panel-title {
+    font-size: 1.1rem;
+    font-weight: 400;
+    color: var(--crt-green-bright);
+    letter-spacing: 0.1em;
+    margin-bottom: 1rem;
+    padding-right: 2rem;
+    word-break: break-all;
+}
+
+.panel-body .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--crt-green-darker);
+    font-size: 0.95rem;
+}
+
+.detail-row .label {
+    color: var(--crt-green-dim);
+    letter-spacing: 0.1em;
+}
+
+.detail-row .value {
+    color: var(--crt-green-bright);
+    text-align: right;
+    word-break: break-all;
+    max-width: 60%;
+}
+
+.detail-hash {
+    font-size: 0.8rem;
+    color: var(--crt-green-dim);
+    word-break: break-all;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: var(--crt-green-darker);
+    border: 1px solid var(--crt-green-dark);
+}
+
+/* vis-network tooltip */
+div.vis-tooltip {
+    font-family: var(--font-terminal) !important;
+    font-size: 14px !important;
+    background: var(--crt-off-black) !important;
+    color: var(--crt-green-bright) !important;
+    border: 1px solid var(--crt-green-dark) !important;
+    border-radius: 0 !important;
+    padding: 8px 12px !important;
+    box-shadow: 0 0 10px var(--crt-glow-dim) !important;
+    white-space: pre-line;
+    max-width: 300px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--crt-off-black);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--crt-green-dark);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--crt-green-dim);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .controls {
+        flex-wrap: wrap;
+    }
+
+    .detail-panel {
+        width: 100%;
+        max-height: 40vh;
+        border-left: none;
+        border-top: 1px solid var(--crt-green-dark);
+    }
+}

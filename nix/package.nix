@@ -19,6 +19,8 @@ python.pkgs.buildPythonApplication {
     platformdirs
     sqlalchemy
     msgpack
+    fastapi
+    uvicorn
   ];
 
   # Tests run separately via `make test` / `just test`

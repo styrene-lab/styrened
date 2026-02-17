@@ -23,6 +23,8 @@ let
     python.pkgs.platformdirs
     python.pkgs.sqlalchemy
     python.pkgs.msgpack
+    python.pkgs.fastapi
+    python.pkgs.uvicorn
   ];
 in
 {

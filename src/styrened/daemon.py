@@ -144,6 +144,18 @@ class StyreneDaemon:
             f"Discovered: {device.name} ({device.device_type.value}) - {device.status.value}"
         )
 
+        # Broadcast to web UI SSE clients
+        if self._api_server is not None:
+            try:
+                from styrened.web.events import SSEBroadcaster
+
+                app = getattr(self, "_web_app", None)
+                if app is not None:
+                    broadcaster: SSEBroadcaster = app.state.broadcaster
+                    broadcaster.broadcast_device_event(device)
+            except Exception:
+                pass
+
     def _init_operator_destination(self) -> None:
         """Initialize and cache the operator destination.
 
@@ -905,9 +917,10 @@ class StyreneDaemon:
         """Start HTTP API server."""
         try:
             # Import here to avoid dependency when API not enabled
-            from styrene.api import create_app
+            from styrened.web import create_app
 
-            fastapi_app = create_app(self.config)
+            fastapi_app = create_app(self)
+            self._web_app = fastapi_app
 
             # Import uvicorn for serving
             import uvicorn  # type: ignore[import-not-found]

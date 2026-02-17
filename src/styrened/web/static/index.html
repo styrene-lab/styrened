@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Styrene Mesh Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <h1 class="title">STYRENE MESH EXPLORER</h1>
+            <div class="stats" id="stats">
+                <span class="stat"><span class="stat-label">NODES</span> <span class="stat-value" id="node-count">--</span></span>
+                <span class="stat"><span class="stat-label">ACTIVE</span> <span class="stat-value stat-active" id="active-count">--</span></span>
+                <span class="stat"><span class="stat-label">STALE</span> <span class="stat-value stat-stale" id="stale-count">--</span></span>
+                <span class="stat"><span class="stat-label">LOST</span> <span class="stat-value stat-lost" id="lost-count">--</span></span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="controls">
+                <input type="text" id="search" class="search-input" placeholder="SEARCH NODES...">
+                <select id="filter-type" class="filter-select">
+                    <option value="all">ALL TYPES</option>
+                    <option value="styrene_node">STYRENE</option>
+                    <option value="hub">HUB</option>
+                    <option value="rnode">RNODE</option>
+                    <option value="generic">GENERIC</option>
+                    <option value="unknown">UNKNOWN</option>
+                </select>
+                <select id="filter-status" class="filter-select">
+                    <option value="all">ALL STATUS</option>
+                    <option value="active">ACTIVE</option>
+                    <option value="stale">STALE</option>
+                    <option value="lost">LOST</option>
+                </select>
+                <label class="toggle-label">
+                    <input type="checkbox" id="show-unnamed">
+                    <span class="toggle-text">UNNAMED</span>
+                </label>
+            </div>
+            <div class="status-badge" id="daemon-status">
+                <span class="status-dot"></span>
+                <span class="status-text">CONNECTING</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="main">
+        <div id="graph" class="graph-container"></div>
+        <aside id="detail-panel" class="detail-panel hidden">
+            <button class="panel-close" id="panel-close">&times;</button>
+            <h2 class="panel-title" id="panel-title">--</h2>
+            <div class="panel-body" id="panel-body"></div>
+        </aside>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
