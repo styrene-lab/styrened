@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -784,3 +785,55 @@ def execute_multi_node_dialogue(
     )
 
     return dialogue_result
+
+
+# ---------------------------------------------------------------------------
+# Version collection
+# ---------------------------------------------------------------------------
+
+
+def collect_version_info(
+    harness: TestHarness,
+    nodes: list[str],
+) -> dict[str, Any]:
+    """Collect styrened version from each node and local git metadata.
+
+    Args:
+        harness: Test harness instance.
+        nodes: List of node names to query.
+
+    Returns:
+        Dict with ``styrened_versions``, ``test_sha``, and ``test_branch``.
+    """
+    styrened_versions: dict[str, str | None] = {}
+    for node in nodes:
+        styrened_versions[node] = harness.get_version(node)
+
+    # Local git info for the test repo
+    test_sha = ""
+    test_branch = ""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            test_sha = result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            test_branch = result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    return {
+        "styrened_versions": styrened_versions,
+        "test_sha": test_sha,
+        "test_branch": test_branch,
+    }

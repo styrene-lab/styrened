@@ -50,10 +50,12 @@ class OvernightSummary:
     dialogues: list[DialogueResult] = field(default_factory=list)
     duration_seconds: float = 0.0
     cycle_success_rates: list[float] = field(default_factory=list)
+    version_info: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
+            "version_info": self.version_info,
             "total_dialogues": self.total_dialogues,
             "total_turns": self.total_turns,
             "turns_succeeded": self.turns_succeeded,
@@ -97,12 +99,14 @@ class OvernightSummary:
         cls,
         results: list[DialogueResult],
         duration_seconds: float,
+        version_info: dict[str, Any] | None = None,
     ) -> OvernightSummary:
         """Build summary from a list of dialogue results.
 
         Args:
             results: List of completed DialogueResult instances.
             duration_seconds: Total elapsed time.
+            version_info: Optional version metadata for the test run.
 
         Returns:
             OvernightSummary with aggregated metrics.
@@ -158,4 +162,5 @@ class OvernightSummary:
             dialogues=results,
             duration_seconds=duration_seconds,
             cycle_success_rates=cycle_success_rates,
+            version_info=version_info or {},
         )
