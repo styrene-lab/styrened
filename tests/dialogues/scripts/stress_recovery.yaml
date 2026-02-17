@@ -1,0 +1,35 @@
+name: stress_recovery
+description: Rapid-fire messages with short inter-turn delays to stress delivery pipeline.
+setup_delay: 3.0
+inter_turn_delay: 0.5
+
+turns:
+  - direction: a_to_b
+    content: "stress|turn=1|rapid=true"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "stress|turn=2|rapid=true"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "stress|turn=3|rapid=true"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "stress|turn=4|rapid=true"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "stress|turn=5|rapid=true"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: b_to_a
+    content: "stress|turn=6|rapid=true"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

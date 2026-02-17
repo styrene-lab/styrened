@@ -1,0 +1,30 @@
+name: burst_delivery
+description: Sequential delivery under load — 5 messages all A to B.
+setup_delay: 5.0
+inter_turn_delay: 1.0
+
+turns:
+  - direction: a_to_b
+    content: "burst|turn=1|seq=001"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "burst|turn=2|seq=002"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "burst|turn=3|seq=003"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "burst|turn=4|seq=004"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0
+
+  - direction: a_to_b
+    content: "burst|turn=5|seq=005"
+    delivery_timeout: 120.0
+    verification_timeout: 60.0

@@ -84,6 +84,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Skip deployment tests (use existing installation)",
     )
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Run slow/extended tests (overnight, load tests)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -92,6 +98,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "deployment: Wheel deployment tests")
     config.addinivalue_line("markers", "mesh: Mesh network integration tests")
     config.addinivalue_line("markers", "rpc: RPC communication tests")
+    config.addinivalue_line("markers", "slow: Tests requiring --run-slow flag")
+    config.addinivalue_line("markers", "slow_extended: Long-running tests (4-8+ hours)")
+    config.addinivalue_line("markers", "dialogue: Dialogue conversation tests")
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -105,7 +114,16 @@ def pytest_runtest_makereport(item, call):
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Filter parametrized tests to a single device when --device is set."""
+    """Filter tests based on markers and CLI options."""
+    # Skip slow/slow_extended tests unless --run-slow is passed
+    run_slow = config.getoption("--run-slow", default=False)
+    if not run_slow:
+        skip_slow = pytest.mark.skip(reason="Need --run-slow option to run")
+        for item in items:
+            if "slow" in item.keywords or "slow_extended" in item.keywords:
+                item.add_marker(skip_slow)
+
+    # Filter parametrized tests to a single device when --device is set
     device_filter = config.getoption("--device")
     if not device_filter:
         return
