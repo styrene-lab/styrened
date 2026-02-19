@@ -353,6 +353,28 @@ def init_db(db_path: str | None = None) -> Engine:
         except Exception:
             pass  # Column already exists
 
+    # Create contacts table if it doesn't exist
+    # Import here to ensure the model is registered with Base before create_all
+    from styrened.models.contacts import Contact  # noqa: F401
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS contacts ("
+                    "peer_hash VARCHAR(32) PRIMARY KEY, "
+                    "alias VARCHAR(100) NOT NULL, "
+                    "notes VARCHAR(500), "
+                    "created_at REAL NOT NULL, "
+                    "updated_at REAL NOT NULL"
+                    ")"
+                )
+            )
+            conn.commit()
+            logger.debug("Contacts table initialized")
+    except Exception:
+        pass  # Table already exists or was created by create_all
+
     # Create FTS5 virtual table for full-text search
     # This enables searching message content and titles efficiently
     with engine.connect() as conn:

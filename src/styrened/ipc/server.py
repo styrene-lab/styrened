@@ -94,6 +94,7 @@ class ClientConnection:
         self.reader = reader
         self.writer = writer
         self.subscriptions: set[str] = set()
+        self.message_peer_filter: set[str] = set()  # Empty = all peers
         self._closed = False
 
     @property
@@ -263,6 +264,10 @@ class ControlServer:
             IPCMessageType.CMD_DELETE_CONVERSATION: self._handlers.handle_cmd_delete_conversation,
             IPCMessageType.CMD_DELETE_MESSAGE: self._handlers.handle_cmd_delete_message,
             IPCMessageType.CMD_RETRY_MESSAGE: self._handlers.handle_cmd_retry_message,
+            IPCMessageType.QUERY_CONTACTS: self._handlers.handle_query_contacts,
+            IPCMessageType.QUERY_RESOLVE_NAME: self._handlers.handle_query_resolve_name,
+            IPCMessageType.CMD_SET_CONTACT: self._handlers.handle_cmd_set_contact,
+            IPCMessageType.CMD_REMOVE_CONTACT: self._handlers.handle_cmd_remove_contact,
         }
 
     async def _handle_client(
@@ -296,6 +301,9 @@ class ControlServer:
     async def _client_loop(self, client: ClientConnection) -> None:
         """Process requests from a client until disconnection.
 
+        Subscription requests (SUB_MESSAGES, SUB_DEVICES, UNSUB) are handled
+        inline since they need the client reference for per-connection state.
+
         Args:
             client: ClientConnection to process.
         """
@@ -308,9 +316,43 @@ class ControlServer:
                 await client.send_response(generate_request_id(), error)
                 continue
 
+            # Handle subscription requests inline (need client reference)
+            if msg_type == IPCMessageType.SUB_MESSAGES:
+                client.subscriptions.add("messages")
+                peer_hashes = payload.get("peer_hashes", [])
+                client.message_peer_filter = set(peer_hashes) if peer_hashes else set()
+                from styrened.ipc.messages import ResultResponse
+
+                response = ResultResponse(data={"subscribed": True})
+                await client.send_response(request_id, response)
+                continue
+
+            if msg_type == IPCMessageType.SUB_DEVICES:
+                client.subscriptions.add("devices")
+                from styrened.ipc.messages import ResultResponse
+
+                response = ResultResponse(data={"subscribed": True})
+                await client.send_response(request_id, response)
+                continue
+
+            if msg_type == IPCMessageType.UNSUB:
+                sub_type = payload.get("subscription_type", "")
+                if sub_type:
+                    client.subscriptions.discard(sub_type)
+                    if sub_type == "messages":
+                        client.message_peer_filter.clear()
+                else:
+                    client.subscriptions.clear()
+                    client.message_peer_filter.clear()
+                from styrened.ipc.messages import ResultResponse
+
+                response = ResultResponse(data={"unsubscribed": True})
+                await client.send_response(request_id, response)
+                continue
+
             # Dispatch to handler
-            response = await self._dispatch(msg_type, payload)
-            await client.send_response(request_id, response)
+            dispatch_response = await self._dispatch(msg_type, payload)
+            await client.send_response(request_id, dispatch_response)
 
     async def _dispatch(
         self,
@@ -342,7 +384,10 @@ class ControlServer:
         event_type: IPCMessageType,
         payload: dict[str, Any],
     ) -> None:
-        """Broadcast an event to all connected clients.
+        """Broadcast an event to subscribed clients.
+
+        Filters by subscription type and applies message_peer_filter
+        for EVENT_MESSAGE events.
 
         Args:
             event_type: Event message type.
@@ -352,8 +397,30 @@ class ControlServer:
         closed = {c for c in self._clients if c.closed}
         self._clients -= closed
 
-        # Broadcast to remaining clients
+        # Determine subscription key from event type
+        if event_type == IPCMessageType.EVENT_MESSAGE:
+            sub_key = "messages"
+        elif event_type == IPCMessageType.EVENT_DEVICE:
+            sub_key = "devices"
+        else:
+            sub_key = ""
+
+        # Broadcast to subscribed clients
         for client in self._clients:
+            # Skip if not subscribed (unless no subscriptions configured at all,
+            # which means legacy behavior — send to all)
+            if sub_key and client.subscriptions and sub_key not in client.subscriptions:
+                continue
+
+            # Apply peer filter for message events
+            if (
+                event_type == IPCMessageType.EVENT_MESSAGE
+                and client.message_peer_filter
+            ):
+                peer_hash = payload.get("peer_hash", "")
+                if peer_hash not in client.message_peer_filter:
+                    continue
+
             await client.send_event(event_type, payload)
 
     @property

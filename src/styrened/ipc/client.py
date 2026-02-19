@@ -13,14 +13,22 @@ Usage:
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, cast
 
 from styrened.ipc.messages import (
     CmdAnnounceRequest,
+    CmdDeleteConversationRequest,
+    CmdDeleteMessageRequest,
     CmdDeviceStatusRequest,
     CmdExecRequest,
+    CmdMarkReadRequest,
+    CmdRemoveContactRequest,
+    CmdRetryMessageRequest,
+    CmdSendChatRequest,
     CmdSendRequest,
+    CmdSetContactRequest,
     DaemonStatus,
     DeviceInfo,
     ErrorResponse,
@@ -29,18 +37,25 @@ from styrened.ipc.messages import (
     IPCRequest,
     PingRequest,
     QueryConfigRequest,
+    QueryContactsRequest,
     QueryConversationsRequest,
     QueryDevicesRequest,
     QueryIdentityRequest,
     QueryMessagesRequest,
+    QueryResolveNameRequest,
+    QuerySearchMessagesRequest,
     QueryStatusRequest,
     RemoteStatusInfo,
+    SubDevicesRequest,
+    SubMessagesRequest,
+    UnsubRequest,
 )
 from styrened.ipc.protocol import (
     FrameDecodeError,
     IPCError,
     IPCMessageType,
     generate_request_id,
+    is_event_type,
     read_frame,
     write_frame,
 )
@@ -100,6 +115,10 @@ class ControlClient:
         self._connected = False
         self._pending: dict[bytes, asyncio.Future] = {}
         self._receive_task: asyncio.Task | None = None
+
+        # Event dispatch infrastructure
+        self._event_callbacks: dict[IPCMessageType, list[Callable]] = {}
+        self._event_queue: asyncio.Queue[tuple[IPCMessageType, dict]] = asyncio.Queue()
 
     async def __aenter__(self) -> "ControlClient":
         """Async context manager entry."""
@@ -173,10 +192,15 @@ class ControlClient:
         logger.debug("Disconnected from daemon")
 
     async def _receive_loop(self) -> None:
-        """Background task to receive responses."""
+        """Background task to receive responses and events."""
         while self._connected and self._reader:
             try:
                 msg_type, request_id, payload = await read_frame(self._reader)
+
+                # Check if this is a server-pushed event
+                if is_event_type(msg_type):
+                    await self._dispatch_event(msg_type, payload)
+                    continue
 
                 # Find pending request
                 future = self._pending.pop(request_id, None)
@@ -196,6 +220,85 @@ class ControlClient:
             except Exception as e:
                 logger.warning(f"Receive error: {e}")
                 self._connected = False
+                break
+
+    async def _dispatch_event(
+        self, event_type: IPCMessageType, payload: dict[str, Any]
+    ) -> None:
+        """Dispatch a server-pushed event to callbacks and queue."""
+        # Queue for iter_events consumers
+        try:
+            self._event_queue.put_nowait((event_type, payload))
+        except asyncio.QueueFull:
+            logger.warning("Event queue full, dropping event")
+
+        # Invoke registered callbacks
+        callbacks = self._event_callbacks.get(event_type, [])
+        for cb in list(callbacks):
+            try:
+                result = cb(event_type, payload)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning(f"Event callback error: {e}")
+
+    def on_event(
+        self,
+        event_type: IPCMessageType,
+        callback: Callable,
+    ) -> None:
+        """Register a callback for a specific event type.
+
+        Callbacks receive (event_type, payload_dict) arguments.
+
+        Args:
+            event_type: Event type to listen for.
+            callback: Callable to invoke (sync or async).
+        """
+        if event_type not in self._event_callbacks:
+            self._event_callbacks[event_type] = []
+        if callback not in self._event_callbacks[event_type]:
+            self._event_callbacks[event_type].append(callback)
+
+    def remove_event_handler(
+        self,
+        event_type: IPCMessageType,
+        callback: Callable,
+    ) -> None:
+        """Unregister an event callback.
+
+        Args:
+            event_type: Event type the callback was registered for.
+            callback: Callback to remove.
+        """
+        callbacks = self._event_callbacks.get(event_type, [])
+        try:
+            callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    async def iter_events(
+        self, event_type: IPCMessageType | None = None
+    ) -> AsyncIterator[tuple[IPCMessageType, dict]]:
+        """Async iterator over incoming events.
+
+        Args:
+            event_type: Optional filter for specific event type.
+                None means all events.
+
+        Yields:
+            Tuples of (event_type, payload_dict).
+        """
+        while self._connected:
+            try:
+                evt_type, payload = await asyncio.wait_for(
+                    self._event_queue.get(), timeout=1.0
+                )
+                if event_type is None or evt_type == event_type:
+                    yield evt_type, payload
+            except TimeoutError:
+                continue
+            except asyncio.CancelledError:
                 break
 
     async def _request(
@@ -439,6 +542,221 @@ class ControlClient:
         )
         data = await self._request(request, timeout=timeout + 5)
         return RemoteStatusInfo.from_dict(data)
+
+    # -------------------------------------------------------------------------
+    # Chat methods
+    # -------------------------------------------------------------------------
+
+    async def send_chat(
+        self,
+        peer_hash: str,
+        content: str,
+        title: str | None = None,
+        delivery_method: str = "auto",
+        reply_to_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a chat message to a peer.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+            content: Message content.
+            title: Optional message title.
+            delivery_method: "auto", "direct", or "propagated".
+            reply_to_hash: LXMF hash of message being replied to.
+
+        Returns:
+            Dict with message_id and status.
+        """
+        request = CmdSendChatRequest(
+            peer_hash=peer_hash,
+            content=content,
+            title=title,
+            delivery_method=delivery_method,
+            reply_to_hash=reply_to_hash,
+        )
+        return await self._request(request)
+
+    async def mark_read(self, peer_hash: str) -> int:
+        """Mark all messages in a conversation as read.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+
+        Returns:
+            Number of messages marked as read.
+        """
+        data = await self._request(CmdMarkReadRequest(peer_hash=peer_hash))
+        return cast(int, data.get("marked_count", 0))
+
+    async def search_messages(
+        self,
+        query: str,
+        peer_hash: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Search messages by content.
+
+        Args:
+            query: Search query string.
+            peer_hash: Optional peer hash to limit search scope.
+            limit: Maximum results to return.
+
+        Returns:
+            List of matching message dicts.
+        """
+        request = QuerySearchMessagesRequest(
+            query=query,
+            peer_hash=peer_hash,
+            limit=limit,
+        )
+        data = await self._request(request)
+        return cast(list[dict[str, Any]], data.get("messages", []))
+
+    async def delete_conversation(self, peer_hash: str) -> int:
+        """Delete all messages in a conversation.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+
+        Returns:
+            Number of messages deleted.
+        """
+        data = await self._request(
+            CmdDeleteConversationRequest(peer_hash=peer_hash)
+        )
+        return cast(int, data.get("deleted_count", 0))
+
+    async def delete_message(self, message_id: int) -> bool:
+        """Delete a specific message.
+
+        Args:
+            message_id: Database message ID.
+
+        Returns:
+            True if message was deleted.
+        """
+        data = await self._request(CmdDeleteMessageRequest(message_id=message_id))
+        return cast(bool, data.get("deleted", False))
+
+    async def retry_message(self, message_id: int) -> dict[str, Any]:
+        """Retry sending a failed message.
+
+        Args:
+            message_id: Database message ID of the failed message.
+
+        Returns:
+            Dict with retry status.
+        """
+        return await self._request(CmdRetryMessageRequest(message_id=message_id))
+
+    # -------------------------------------------------------------------------
+    # Subscription methods
+    # -------------------------------------------------------------------------
+
+    async def subscribe_messages(
+        self, peer_hashes: list[str] | None = None
+    ) -> bool:
+        """Subscribe to message events.
+
+        Args:
+            peer_hashes: Optional list of peer hashes to filter.
+                Empty list or None means all messages.
+
+        Returns:
+            True if subscribed successfully.
+        """
+        request = SubMessagesRequest(peer_hashes=peer_hashes or [])
+        data = await self._request(request)
+        return cast(bool, data.get("subscribed", False))
+
+    async def subscribe_devices(self) -> bool:
+        """Subscribe to device events.
+
+        Returns:
+            True if subscribed successfully.
+        """
+        data = await self._request(SubDevicesRequest())
+        return cast(bool, data.get("subscribed", False))
+
+    async def unsubscribe(self, subscription_type: str = "") -> bool:
+        """Unsubscribe from events.
+
+        Args:
+            subscription_type: Type to unsubscribe from ("messages", "devices").
+                Empty string unsubscribes from all.
+
+        Returns:
+            True if unsubscribed successfully.
+        """
+        data = await self._request(UnsubRequest(subscription_type=subscription_type))
+        return cast(bool, data.get("unsubscribed", False))
+
+    # -------------------------------------------------------------------------
+    # Contact methods
+    # -------------------------------------------------------------------------
+
+    async def set_contact(
+        self,
+        peer_hash: str,
+        alias: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Set or update a contact alias.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+            alias: Display name alias.
+            notes: Optional notes.
+
+        Returns:
+            Contact info dict.
+        """
+        request = CmdSetContactRequest(
+            peer_hash=peer_hash,
+            alias=alias,
+            notes=notes,
+        )
+        return await self._request(request)
+
+    async def remove_contact(self, peer_hash: str) -> bool:
+        """Remove a contact alias.
+
+        Args:
+            peer_hash: LXMF destination hash of the peer.
+
+        Returns:
+            True if contact was removed.
+        """
+        data = await self._request(CmdRemoveContactRequest(peer_hash=peer_hash))
+        return cast(bool, data.get("removed", False))
+
+    async def query_contacts(self) -> list[dict[str, Any]]:
+        """Query list of contacts.
+
+        Returns:
+            List of contact info dicts.
+        """
+        data = await self._request(QueryContactsRequest())
+        return cast(list[dict[str, Any]], data.get("contacts", []))
+
+    async def resolve_name(
+        self,
+        name: str,
+        prefix_match: bool = True,
+    ) -> str | None:
+        """Resolve a name to a peer hash.
+
+        Args:
+            name: Name to resolve.
+            prefix_match: Whether to try prefix matching.
+
+        Returns:
+            Peer hash or None if not resolved.
+        """
+        data = await self._request(
+            QueryResolveNameRequest(name=name, prefix_match=prefix_match)
+        )
+        return cast(str | None, data.get("peer_hash"))
 
 
 async def get_daemon_client() -> ControlClient | None:

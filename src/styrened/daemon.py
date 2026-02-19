@@ -84,6 +84,9 @@ class StyreneDaemon:
         self._path_snapshot: PathSnapshotService | None = None
         self._terminal_service: Any = None  # Terminal session service
         self._styrene_protocol: Any = None  # Styrene protocol for RPC/terminal
+        self._contact_service: Any = None  # Contact address book service
+        self._notification_service: Any = None  # Notification dispatch service
+        self._callback_backend: Any = None  # For TUI/GUI callback registration
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -123,6 +126,9 @@ class StyreneDaemon:
         # Start IPC control server if enabled
         if self.config.ipc.enabled:
             await self._start_control_server()
+
+        # Initialize notification service (after control server for IPC backend)
+        self._init_notification_service()
 
         # Start terminal service if enabled
         if self.config.terminal.enabled:
@@ -253,11 +259,20 @@ class StyreneDaemon:
             if self._node_store is None:
                 self._node_store = get_node_store()
 
+            # Create contact service (shares db_engine and node_store)
+            from styrened.services.contacts import ContactService
+
+            self._contact_service = ContactService(
+                db_engine=db_engine,
+                node_store=self._node_store,
+            )
+
             # Create conversation service
             self._conversation_service = ConversationService(
                 db_engine=db_engine,
                 local_identity_hash=local_lxmf_dest_hash,  # Actually LXMF dest hash
                 node_store=self._node_store,
+                contact_service=self._contact_service,
             )
             self._conversation_service.initialize()
 
@@ -578,6 +593,9 @@ class StyreneDaemon:
     ) -> None:
         """Broadcast a chat message event to connected IPC clients.
 
+        Dispatches through NotificationService when available, which fans out
+        to all backends (IPC, SSE, callbacks). Falls back to direct broadcast.
+
         Args:
             msg_id: Database message ID
             peer_hash: LXMF hash of the peer
@@ -590,17 +608,46 @@ class StyreneDaemon:
             status: Message status (pending, sent, delivered, failed, received)
             delivery_method: How message was delivered (direct, propagated, or None)
         """
+        # Determine default status based on direction
+        if status is None:
+            status = "received" if not is_outgoing else "pending"
+
+        # Dispatch through notification service if available
+        if self._notification_service is not None:
+            try:
+                from styrened.services.notifications import NotificationEvent
+
+                event = NotificationEvent(
+                    event_type="new_message",
+                    peer_hash=peer_hash,
+                    message_id=msg_id,
+                    content=content,
+                    timestamp=timestamp,
+                    status=status,
+                    is_outgoing=is_outgoing,
+                    metadata={
+                        "delivery_method": delivery_method,
+                        "signature_valid": signature_valid,
+                        "transport_encrypted": transport_encrypted,
+                        "fields": fields or {},
+                    },
+                )
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._notification_service.notify(event))
+                except RuntimeError:
+                    logger.debug("No event loop for notification dispatch")
+                return
+            except Exception as e:
+                logger.warning(f"Notification dispatch failed, falling back: {e}")
+
+        # Fallback: direct IPC broadcast
         if not self._control_server:
             return
 
         try:
-            import asyncio
-
             from styrened.ipc.protocol import IPCMessageType
-
-            # Determine default status based on direction
-            if status is None:
-                status = "received" if not is_outgoing else "pending"
 
             event_payload = {
                 "event_type": "new",
@@ -616,7 +663,6 @@ class StyreneDaemon:
                 "fields": fields or {},
             }
 
-            # Schedule the async broadcast on the event loop
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(
@@ -625,7 +671,6 @@ class StyreneDaemon:
                     )
                 )
             except RuntimeError:
-                # No running loop - skip broadcast
                 logger.debug("No event loop for chat event broadcast")
 
         except Exception as e:
@@ -640,8 +685,7 @@ class StyreneDaemon:
     ) -> None:
         """Broadcast delivery status change to IPC clients.
 
-        This is used to notify connected clients when a message's delivery
-        status changes (e.g., from pending to sent, or sent to delivered).
+        Dispatches through NotificationService when available.
 
         Args:
             msg_id: Database message ID
@@ -649,12 +693,34 @@ class StyreneDaemon:
             status: New message status (sent, delivered, failed)
             delivery_method: How message was delivered (direct, propagated, or None)
         """
+        # Dispatch through notification service if available
+        if self._notification_service is not None:
+            try:
+                from styrened.services.notifications import NotificationEvent
+
+                event = NotificationEvent(
+                    event_type="delivery_status",
+                    peer_hash=peer_hash,
+                    message_id=msg_id,
+                    status=status,
+                    is_outgoing=True,
+                    metadata={"delivery_method": delivery_method},
+                )
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._notification_service.notify(event))
+                except RuntimeError:
+                    logger.debug("No event loop for notification dispatch")
+                return
+            except Exception as e:
+                logger.warning(f"Notification dispatch failed, falling back: {e}")
+
+        # Fallback: direct IPC broadcast
         if not self._control_server:
             return
 
         try:
-            import asyncio
-
             from styrened.ipc.protocol import IPCMessageType
 
             event_payload = {
@@ -665,7 +731,6 @@ class StyreneDaemon:
                 "delivery_method": delivery_method,
             }
 
-            # Schedule the async broadcast on the event loop
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(
@@ -674,7 +739,6 @@ class StyreneDaemon:
                     )
                 )
             except RuntimeError:
-                # No running loop - skip broadcast
                 logger.debug("No event loop for delivery status event broadcast")
 
         except Exception as e:
@@ -962,6 +1026,81 @@ class StyreneDaemon:
 
         except Exception as e:
             logger.error(f"Failed to start IPC control server: {e}")
+
+    def _init_notification_service(self) -> None:
+        """Initialize the notification service with appropriate backends.
+
+        Creates NotificationService and registers:
+        - IPCEventBackend if control server is running
+        - CallbackBackend always (for TUI/GUI embedding)
+        - SSE backend if web API is running
+        """
+        try:
+            from styrened.services.notifications import (
+                CallbackBackend,
+                IPCEventBackend,
+                NotificationService,
+            )
+
+            self._notification_service = NotificationService(
+                config=self.config.notifications
+            )
+
+            # Always add callback backend for TUI/GUI embedding
+            self._callback_backend = CallbackBackend()
+            self._notification_service.add_backend(self._callback_backend)
+
+            # Add IPC event backend if control server is running
+            if self._control_server is not None:
+                ipc_backend = IPCEventBackend(self._control_server)
+                self._notification_service.add_backend(ipc_backend)
+
+            # Add SSE backend if web API is running
+            if self._api_server is not None:
+                app = getattr(self, "_web_app", None)
+                if app is not None:
+                    try:
+                        from styrened.services.notifications import (
+                            NotificationBackend,
+                        )
+                        from styrened.services.notifications import (
+                            NotificationEvent as _NotificationEvent,
+                        )
+                        from styrened.web.events import SSEBroadcaster
+
+                        broadcaster: SSEBroadcaster = app.state.broadcaster
+
+                        class SSENotificationBackend(NotificationBackend):
+                            """Inline backend bridging to SSE broadcaster."""
+
+                            def __init__(self, sse_broadcaster: SSEBroadcaster) -> None:
+                                self._broadcaster = sse_broadcaster
+
+                            async def dispatch(
+                                self, event: _NotificationEvent
+                            ) -> bool:
+                                self._broadcaster.broadcast_message_event(
+                                    {
+                                        "event_type": event.event_type,
+                                        "message_id": event.message_id,
+                                        "peer_hash": event.peer_hash,
+                                        "content": event.content,
+                                        "timestamp": event.timestamp,
+                                        "status": event.status,
+                                        "is_outgoing": event.is_outgoing,
+                                    }
+                                )
+                                return True
+
+                        sse_backend = SSENotificationBackend(broadcaster)
+                        self._notification_service.add_backend(sse_backend)
+                    except Exception:
+                        pass  # Web module not available
+
+            logger.info("Notification service initialized")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize notification service: {e}")
 
     def _announce(self) -> None:
         """Trigger an announce of the local operator destination.
