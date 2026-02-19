@@ -202,21 +202,48 @@ class ReticulumConfig:
 
 
 @dataclass
+class YubiKeyConfig:
+    """YubiKey-backed identity derivation configuration.
+
+    Used when identity.provider is "yubikey". The FIDO2 hmac-secret extension
+    derives deterministic key material from a hardware token, making the
+    operator's mesh identity portable across machines.
+
+    Attributes:
+        credential_id: Base64-encoded FIDO2 credential ID from setup.
+        rp_id: Relying party ID used during credential creation.
+        require_touch: Whether to require physical touch for each derivation.
+    """
+
+    credential_id: str = ""
+    rp_id: str = "styrene.mesh"
+    require_touch: bool = False
+
+
+@dataclass
 class IdentityConfig:
-    """Identity appearance configuration for ecosystem compatibility.
+    """Identity appearance and provider configuration.
 
     Controls how this node appears to other LXMF clients (Sideband, NomadNet, MeshChat).
     These fields are included in announces and message metadata.
+
+    The provider field selects how the operator identity is sourced:
+    - "file" (default): Read from disk (existing behavior)
+    - "yubikey": Derive from YubiKey FIDO2 hmac-secret PRF
 
     Attributes:
         display_name: Human-readable name shown in chat clients.
             Defaults to "Anonymous Styrene".
         icon: Emoji or short string displayed as identity icon.
             Defaults to 🔗. Common alternatives: 🖥️ (server), 📱 (mobile), 🏠 (home).
+        provider: Identity provider type ("file" or "yubikey").
+        yubikey: YubiKey-specific configuration (used when provider is "yubikey").
     """
 
     display_name: str = "Anonymous Styrene"
     icon: str = "🔗"
+    provider: str = "file"
+    yubikey: YubiKeyConfig = field(default_factory=YubiKeyConfig)
 
 
 @dataclass
@@ -285,6 +312,24 @@ class ChatConfig:
     )
     auto_reply_cooldown: int = 300  # 5 minutes between replies to same sender
     persist_messages: bool = True
+
+
+@dataclass
+class NotificationsConfig:
+    """Notification delivery configuration.
+
+    Controls how and when notifications are dispatched for incoming
+    messages, delivery status changes, and other events.
+
+    Attributes:
+        enabled: Whether notifications are enabled globally.
+        quiet_hours_start: Hour (0-23) when quiet hours begin (None = disabled).
+        quiet_hours_end: Hour (0-23) when quiet hours end (None = disabled).
+    """
+
+    enabled: bool = True
+    quiet_hours_start: int | None = None
+    quiet_hours_end: int | None = None
 
 
 @dataclass
@@ -429,6 +474,7 @@ class CoreConfig:
         chat: Chat and messaging configuration.
         api: HTTP API configuration.
         ipc: IPC control socket configuration.
+        notifications: Notification delivery configuration.
         lxmf: LXMF messaging and propagation configuration.
         terminal: Terminal session configuration.
     """
@@ -440,5 +486,6 @@ class CoreConfig:
     chat: ChatConfig = field(default_factory=ChatConfig)
     api: APIConfig = field(default_factory=APIConfig)
     ipc: IPCConfig = field(default_factory=IPCConfig)
+    notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     lxmf: LXMFConfig = field(default_factory=LXMFConfig)
     terminal: TerminalConfig = field(default_factory=TerminalConfig)

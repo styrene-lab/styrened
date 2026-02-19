@@ -49,6 +49,17 @@ class SSEBroadcaster:
         for q in dead:
             self._clients.discard(q)
 
+    def broadcast_message_event(self, event_dict: dict) -> None:
+        """Queue a message event for broadcast (called from sync context)."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self.broadcast("message-event", event_dict))
+            else:
+                loop.run_until_complete(self.broadcast("message-event", event_dict))
+        except RuntimeError:
+            pass  # No event loop available
+
     def broadcast_device_event(self, device: MeshDevice) -> None:
         """Queue a device event for broadcast (called from sync context)."""
         data = {

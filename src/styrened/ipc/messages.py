@@ -328,6 +328,100 @@ class CmdRetryMessageRequest(IPCRequest):
 
 
 # -----------------------------------------------------------------------------
+# Contact requests
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class QueryContactsRequest(IPCRequest):
+    """Request list of contacts."""
+
+    MSG_TYPE = IPCMessageType.QUERY_CONTACTS
+
+
+@dataclass
+class QueryResolveNameRequest(IPCRequest):
+    """Resolve a name to a peer hash."""
+
+    MSG_TYPE = IPCMessageType.QUERY_RESOLVE_NAME
+    name: str = ""
+    prefix_match: bool = True
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"name": self.name, "prefix_match": self.prefix_match}
+
+
+@dataclass
+class CmdSetContactRequest(IPCRequest):
+    """Set or update a contact alias."""
+
+    MSG_TYPE = IPCMessageType.CMD_SET_CONTACT
+    peer_hash: str = ""
+    alias: str = ""
+    notes: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "peer_hash": self.peer_hash,
+            "alias": self.alias,
+        }
+        if self.notes is not None:
+            payload["notes"] = self.notes
+        return payload
+
+
+@dataclass
+class CmdRemoveContactRequest(IPCRequest):
+    """Remove a contact alias."""
+
+    MSG_TYPE = IPCMessageType.CMD_REMOVE_CONTACT
+    peer_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"peer_hash": self.peer_hash}
+
+
+# -----------------------------------------------------------------------------
+# Subscription requests
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class SubMessagesRequest(IPCRequest):
+    """Subscribe to message events."""
+
+    MSG_TYPE = IPCMessageType.SUB_MESSAGES
+    peer_hashes: list[str] = field(default_factory=list)
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.peer_hashes:
+            payload["peer_hashes"] = self.peer_hashes
+        return payload
+
+
+@dataclass
+class SubDevicesRequest(IPCRequest):
+    """Subscribe to device events."""
+
+    MSG_TYPE = IPCMessageType.SUB_DEVICES
+
+
+@dataclass
+class UnsubRequest(IPCRequest):
+    """Unsubscribe from events."""
+
+    MSG_TYPE = IPCMessageType.UNSUB
+    subscription_type: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.subscription_type:
+            payload["subscription_type"] = self.subscription_type
+        return payload
+
+
+# -----------------------------------------------------------------------------
 # Responses
 # -----------------------------------------------------------------------------
 
@@ -739,5 +833,26 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdDeleteMessageRequest(message_id=payload.get("message_id", 0))
     elif msg_type == IPCMessageType.CMD_RETRY_MESSAGE:
         return CmdRetryMessageRequest(message_id=payload.get("message_id", 0))
+    elif msg_type == IPCMessageType.QUERY_CONTACTS:
+        return QueryContactsRequest()
+    elif msg_type == IPCMessageType.QUERY_RESOLVE_NAME:
+        return QueryResolveNameRequest(
+            name=payload.get("name", ""),
+            prefix_match=payload.get("prefix_match", True),
+        )
+    elif msg_type == IPCMessageType.CMD_SET_CONTACT:
+        return CmdSetContactRequest(
+            peer_hash=payload.get("peer_hash", ""),
+            alias=payload.get("alias", ""),
+            notes=payload.get("notes"),
+        )
+    elif msg_type == IPCMessageType.CMD_REMOVE_CONTACT:
+        return CmdRemoveContactRequest(peer_hash=payload.get("peer_hash", ""))
+    elif msg_type == IPCMessageType.SUB_MESSAGES:
+        return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))
+    elif msg_type == IPCMessageType.SUB_DEVICES:
+        return SubDevicesRequest()
+    elif msg_type == IPCMessageType.UNSUB:
+        return UnsubRequest(subscription_type=payload.get("subscription_type", ""))
     else:
         raise ValueError(f"Unknown request type: {msg_type}")

@@ -982,6 +982,142 @@ def cmd_identity(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_identity_yubikey_setup(args: argparse.Namespace) -> int:
+    """Create a FIDO2 credential on a YubiKey for identity derivation.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    try:
+        from styrened.services.yubikey import require_fido2, setup_credential
+
+        require_fido2()
+    except ImportError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    rp_id = args.rp_id
+
+    if not args.json:
+        print(f"Creating FIDO2 credential on YubiKey (rp_id: {rp_id})...")
+        print("You may be prompted for your YubiKey PIN and/or touch.")
+        print()
+
+    try:
+        credential_id = setup_credential(rp_id=rp_id)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        import json
+
+        output = {
+            "credential_id": credential_id,
+            "rp_id": rp_id,
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print("Credential created successfully.")
+        print()
+        print("Add the following to your styrened config:")
+        print()
+        print("identity:")
+        print('  provider: "yubikey"')
+        print("  yubikey:")
+        print(f'    credential_id: "{credential_id}"')
+        print(f'    rp_id: "{rp_id}"')
+        print("    require_touch: false")
+
+    return 0
+
+
+def cmd_identity_yubikey_derive(args: argparse.Namespace) -> int:
+    """Derive identity from YubiKey and display the hash for verification.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    try:
+        from styrened.services.yubikey import derive_identity_bytes, require_fido2
+
+        require_fido2()
+    except ImportError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    # Read config for defaults
+    from styrened.services.config import load_core_config
+
+    try:
+        config = load_core_config()
+    except Exception:
+        config = None
+
+    credential_id = args.credential_id
+    rp_id = args.rp_id
+
+    # Fall back to config values
+    if not credential_id and config and config.identity.provider == "yubikey":
+        credential_id = config.identity.yubikey.credential_id
+        if not rp_id:
+            rp_id = config.identity.yubikey.rp_id
+
+    if not credential_id:
+        print("Error: No credential_id specified and none found in config.", file=sys.stderr)
+        print("Run 'styrened identity-yubikey-setup' first.", file=sys.stderr)
+        return 1
+
+    rp_id = rp_id or "styrene.mesh"
+
+    if not args.json:
+        print(f"Deriving identity from YubiKey (rp_id: {rp_id})...")
+
+    try:
+        identity_bytes = derive_identity_bytes(
+            credential_id_b64=credential_id,
+            rp_id=rp_id,
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    # Compute identity hash using RNS
+    try:
+        import RNS
+
+        identity = RNS.Identity.from_bytes(identity_bytes)
+        if identity is None:
+            print("Error: RNS could not load derived identity bytes", file=sys.stderr)
+            return 1
+        identity_hash = identity.hash.hex()
+    except ImportError:
+        print("Error: RNS library not available. Install with: pip install rns", file=sys.stderr)
+        return 1
+
+    if args.json:
+        import json
+
+        output = {
+            "identity_hash": identity_hash,
+            "rp_id": rp_id,
+            "provider": "yubikey",
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"\nIdentity Hash: {identity_hash}")
+        print("Provider:      yubikey")
+        print(f"RP ID:         {rp_id}")
+
+    return 0
+
+
 def cmd_identity_status(args: argparse.Namespace) -> int:
     """Show identity sharing status with other LXMF applications.
 
@@ -1680,6 +1816,37 @@ def create_parser() -> argparse.ArgumentParser:
     )
     identity_unshare_parser.add_argument("--json", action="store_true", help="Output as JSON")
     identity_unshare_parser.set_defaults(func=cmd_identity_unshare)
+
+    # identity-yubikey-setup
+    yk_setup_parser = subparsers.add_parser(
+        "identity-yubikey-setup",
+        help="Create a FIDO2 credential on YubiKey for identity derivation",
+    )
+    yk_setup_parser.add_argument(
+        "--rp-id",
+        default="styrene.mesh",
+        help="Relying party ID (default: styrene.mesh)",
+    )
+    yk_setup_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    yk_setup_parser.set_defaults(func=cmd_identity_yubikey_setup)
+
+    # identity-yubikey-derive
+    yk_derive_parser = subparsers.add_parser(
+        "identity-yubikey-derive",
+        help="Derive identity from YubiKey and display hash for verification",
+    )
+    yk_derive_parser.add_argument(
+        "--credential-id",
+        default=None,
+        help="Base64-encoded credential ID (reads from config if omitted)",
+    )
+    yk_derive_parser.add_argument(
+        "--rp-id",
+        default=None,
+        help="Relying party ID (reads from config if omitted)",
+    )
+    yk_derive_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    yk_derive_parser.set_defaults(func=cmd_identity_yubikey_derive)
 
     # conversations
     conversations_parser = subparsers.add_parser(

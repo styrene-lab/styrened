@@ -653,3 +653,112 @@ lxmf:
         assert config.lxmf.propagation_cost_flexibility == 4
         assert config.lxmf.peering_cost == 22
         assert config.lxmf.max_peering_cost == 30
+
+
+class TestYubiKeyConfigParsing:
+    """Tests for YubiKey identity provider configuration parsing."""
+
+    def test_provider_defaults_to_file(self) -> None:
+        """Identity provider should default to 'file' when not specified."""
+        yaml_content = """
+identity:
+  display_name: "Test Node"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.provider == "file"
+
+    def test_provider_set_to_yubikey(self) -> None:
+        """Identity provider can be set to 'yubikey'."""
+        yaml_content = """
+identity:
+  provider: "yubikey"
+  display_name: "Secure Operator"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.provider == "yubikey"
+        assert config.identity.display_name == "Secure Operator"
+
+    def test_yubikey_section_parsed(self) -> None:
+        """YubiKey section should be parsed with all fields."""
+        yaml_content = """
+identity:
+  provider: "yubikey"
+  yubikey:
+    credential_id: "SGVsbG8gV29ybGQ="
+    rp_id: "custom.mesh"
+    require_touch: true
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.provider == "yubikey"
+        assert config.identity.yubikey.credential_id == "SGVsbG8gV29ybGQ="
+        assert config.identity.yubikey.rp_id == "custom.mesh"
+        assert config.identity.yubikey.require_touch is True
+
+    def test_yubikey_section_defaults(self) -> None:
+        """YubiKey section should have sensible defaults."""
+        yaml_content = """
+identity:
+  provider: "yubikey"
+  yubikey:
+    credential_id: "dGVzdA=="
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.yubikey.rp_id == "styrene.mesh"
+        assert config.identity.yubikey.require_touch is False
+
+    def test_unknown_provider_warns_and_falls_back(self) -> None:
+        """Unknown provider should warn and fall back to 'file'."""
+        yaml_content = """
+identity:
+  provider: "smartcard"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.provider == "file"
+
+    def test_no_identity_section_preserves_defaults(self) -> None:
+        """Missing identity section should preserve all defaults."""
+        yaml_content = """
+reticulum:
+  mode: standalone
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.provider == "file"
+        assert config.identity.yubikey.credential_id == ""
+        assert config.identity.yubikey.rp_id == "styrene.mesh"
+
+    def test_provider_case_insensitive(self) -> None:
+        """Provider field should be case-insensitive."""
+        yaml_content = """
+identity:
+  provider: "YubiKey"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.identity.provider == "yubikey"
