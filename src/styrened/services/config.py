@@ -14,7 +14,9 @@ from styrened.models.config import (
     ConfigLoadError,
     CoreConfig,
     DeploymentMode,
+    NotificationsConfig,
     PropagationNodeConfig,
+    YubiKeyConfig,
 )
 
 
@@ -263,13 +265,46 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         if "port" in api:
             config.api.port = int(api["port"])
 
-    # Parse identity section (ecosystem appearance)
+    # Parse identity section (ecosystem appearance + provider)
     if "identity" in data and isinstance(data["identity"], dict):
         ident = data["identity"]
         if "display_name" in ident and ident["display_name"]:
             config.identity.display_name = str(ident["display_name"])
         if "icon" in ident and ident["icon"]:
             config.identity.icon = str(ident["icon"])
+        if "provider" in ident and ident["provider"]:
+            provider = str(ident["provider"]).lower()
+            if provider in ("file", "yubikey"):
+                config.identity.provider = provider
+            else:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Unknown identity provider '{provider}', falling back to 'file'"
+                )
+        if "yubikey" in ident and isinstance(ident["yubikey"], dict):
+            yk = ident["yubikey"]
+            config.identity.yubikey = YubiKeyConfig(
+                credential_id=str(yk.get("credential_id", "")),
+                rp_id=str(yk.get("rp_id", "styrene.mesh")),
+                require_touch=_parse_bool(yk.get("require_touch", False)),
+            )
+
+    # Parse notifications section
+    if "notifications" in data and isinstance(data["notifications"], dict):
+        notif = data["notifications"]
+        notif_config = NotificationsConfig()
+        if "enabled" in notif:
+            notif_config.enabled = _parse_bool(notif["enabled"])
+        if "quiet_hours_start" in notif and notif["quiet_hours_start"] is not None:
+            val = int(notif["quiet_hours_start"])
+            if 0 <= val <= 23:
+                notif_config.quiet_hours_start = val
+        if "quiet_hours_end" in notif and notif["quiet_hours_end"] is not None:
+            val = int(notif["quiet_hours_end"])
+            if 0 <= val <= 23:
+                notif_config.quiet_hours_end = val
+        config.notifications = notif_config
 
     # Parse lxmf section
     if "lxmf" in data and isinstance(data["lxmf"], dict):

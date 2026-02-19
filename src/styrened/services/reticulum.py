@@ -747,11 +747,14 @@ def _resolve_identity_path(config_path: Path | None = None) -> Path | None:
 
 
 def ensure_operator_identity(
-    use_existing: bool = True, config_path: Path | None = None
+    use_existing: bool = True,
+    config_path: Path | None = None,
+    identity_config: Any = None,
 ) -> str:
     """Ensure operator has a Reticulum identity.
 
     Checks for an existing identity in priority order:
+    0. YubiKey derivation (if identity_config.provider == "yubikey")
     1. Config override (explicit operator_identity_path)
     2. /etc/styrene/identity (OS-level, generated at NixOS activation)
     3. ~/.styrene/operator.key (user-level)
@@ -762,6 +765,7 @@ def ensure_operator_identity(
         use_existing: If True (default), detect and copy existing LXMF identities
                       from other applications. Set to False to always create new.
         config_path: Explicit identity path from config override.
+        identity_config: Optional IdentityConfig with provider and yubikey settings.
 
     Returns:
         Hex-encoded identity hash (destination address) - 32 hex characters (16 bytes).
@@ -772,6 +776,22 @@ def ensure_operator_identity(
     """
     if not RNS:
         raise ImportError("RNS library not available. Install with: pip install rns")
+
+    # YubiKey provider: derive identity from hardware token
+    if identity_config and getattr(identity_config, "provider", "file") == "yubikey":
+        from styrened.services.yubikey import derive_identity_bytes
+
+        yk_config = identity_config.yubikey
+        identity_bytes = derive_identity_bytes(
+            credential_id_b64=yk_config.credential_id,
+            rp_id=yk_config.rp_id,
+            require_touch=yk_config.require_touch,
+        )
+        identity = RNS.Identity.from_bytes(identity_bytes)
+        if identity is None:
+            raise ValueError("Failed to create RNS identity from YubiKey-derived bytes")
+        logger.info(f"Loaded operator identity from YubiKey (rp_id={yk_config.rp_id})")
+        return str(identity.hash.hex())
 
     # Check for existing identity (config override -> system -> user)
     existing_path = _resolve_identity_path(config_path)

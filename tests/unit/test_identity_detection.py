@@ -253,6 +253,110 @@ class TestEnsureOperatorIdentityWithDetection:
             mock_rns.Identity.assert_called_with(create_keys=True)
 
 
+class TestEnsureOperatorIdentityYubiKey:
+    """Tests for ensure_operator_identity() with YubiKey provider."""
+
+    @pytest.fixture
+    def mock_rns(self):
+        """Mock RNS module."""
+        mock = MagicMock()
+        mock_identity = MagicMock()
+        mock_identity.hash.hex.return_value = "y" * 32
+        mock.Identity.from_bytes.return_value = mock_identity
+        return mock
+
+    def test_yubikey_provider_calls_derive(self, mock_rns):
+        """Should call derive_identity_bytes when provider is 'yubikey'."""
+        from styrened.models.config import IdentityConfig, YubiKeyConfig
+
+        identity_config = IdentityConfig(
+            provider="yubikey",
+            yubikey=YubiKeyConfig(
+                credential_id="dGVzdA==",
+                rp_id="test.mesh",
+                require_touch=False,
+            ),
+        )
+
+        fake_bytes = b"\xaa" * 32 + b"\xbb" * 32
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch(
+                "styrened.services.yubikey.derive_identity_bytes",
+                return_value=fake_bytes,
+            ) as mock_derive,
+        ):
+            result = ensure_operator_identity(identity_config=identity_config)
+
+            mock_derive.assert_called_once_with(
+                credential_id_b64="dGVzdA==",
+                rp_id="test.mesh",
+                require_touch=False,
+            )
+            mock_rns.Identity.from_bytes.assert_called_once_with(fake_bytes)
+            assert result == "y" * 32
+
+    def test_yubikey_provider_raises_on_invalid_identity(self, mock_rns):
+        """Should raise ValueError when RNS.Identity.from_bytes returns None."""
+        from styrened.models.config import IdentityConfig, YubiKeyConfig
+
+        identity_config = IdentityConfig(
+            provider="yubikey",
+            yubikey=YubiKeyConfig(credential_id="dGVzdA=="),
+        )
+
+        mock_rns.Identity.from_bytes.return_value = None
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch(
+                "styrened.services.yubikey.derive_identity_bytes",
+                return_value=b"\x00" * 64,
+            ),
+        ):
+            with pytest.raises(ValueError, match="YubiKey-derived bytes"):
+                ensure_operator_identity(identity_config=identity_config)
+
+    def test_file_provider_skips_yubikey(self, tmp_path, mock_rns):
+        """Should use file-based path when provider is 'file'."""
+        from styrened.models.config import IdentityConfig
+
+        identity_config = IdentityConfig(provider="file")
+
+        styrened_identity = tmp_path / "operator.key"
+        styrened_identity.write_bytes(b"x" * 64)
+
+        mock_rns.Identity.from_file.return_value = mock_rns.Identity.from_bytes.return_value
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+        ):
+            result = ensure_operator_identity(identity_config=identity_config)
+            assert result == "y" * 32
+            mock_rns.Identity.from_file.assert_called_once_with(str(styrened_identity))
+
+    def test_none_identity_config_uses_file_path(self, tmp_path):
+        """Should behave as before when identity_config is None."""
+        mock_rns = MagicMock()
+        mock_identity = MagicMock()
+        mock_identity.hash.hex.return_value = "a" * 32
+        mock_rns.Identity.from_file.return_value = mock_identity
+
+        styrened_identity = tmp_path / "operator.key"
+        styrened_identity.write_bytes(b"x" * 64)
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+        ):
+            result = ensure_operator_identity(identity_config=None)
+            assert result == "a" * 32
+
+
 class TestSymlinkTargets:
     """Tests for LXMF_SYMLINK_TARGETS constant."""
 
@@ -754,7 +858,7 @@ class TestLifecycleIdentityWiring:
 
     def test_lifecycle_passes_config_override(self, tmp_path):
         """Config operator_identity_path should reach ensure_operator_identity as config_path."""
-        from styrened.models.config import CoreConfig, ReticulumConfig
+        from styrened.models.config import CoreConfig, IdentityConfig, ReticulumConfig
         from styrened.services.lifecycle import CoreLifecycle
 
         custom_path = tmp_path / "custom" / "identity"
@@ -766,7 +870,10 @@ class TestLifecycleIdentityWiring:
         with stack:
             lifecycle = CoreLifecycle(config)
             lifecycle._initialize_reticulum()
-            mock_ensure.assert_called_once_with(config_path=custom_path)
+            mock_ensure.assert_called_once_with(
+                config_path=custom_path,
+                identity_config=config.identity,
+            )
 
     def test_lifecycle_passes_none_when_no_override(self):
         """No config override should pass None, letting _resolve_identity_path decide."""
@@ -779,4 +886,31 @@ class TestLifecycleIdentityWiring:
         with stack:
             lifecycle = CoreLifecycle(config)
             lifecycle._initialize_reticulum()
-            mock_ensure.assert_called_once_with(config_path=None)
+            mock_ensure.assert_called_once_with(
+                config_path=None,
+                identity_config=config.identity,
+            )
+
+    def test_lifecycle_passes_yubikey_identity_config(self, tmp_path):
+        """YubiKey identity config should reach ensure_operator_identity."""
+        from styrened.models.config import (
+            CoreConfig,
+            IdentityConfig,
+            YubiKeyConfig,
+        )
+        from styrened.services.lifecycle import CoreLifecycle
+
+        identity_config = IdentityConfig(
+            provider="yubikey",
+            yubikey=YubiKeyConfig(credential_id="dGVzdA==", rp_id="test.mesh"),
+        )
+        config = CoreConfig(identity=identity_config)
+
+        stack, mock_ensure = self._patch_lifecycle()
+        with stack:
+            lifecycle = CoreLifecycle(config)
+            lifecycle._initialize_reticulum()
+            mock_ensure.assert_called_once_with(
+                config_path=None,
+                identity_config=identity_config,
+            )

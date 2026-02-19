@@ -37,9 +37,11 @@ from styrened.ipc.messages import (
     CmdDeviceStatusRequest,
     CmdExecRequest,
     CmdMarkReadRequest,
+    CmdRemoveContactRequest,
     CmdRetryMessageRequest,
     CmdSendChatRequest,
     CmdSendRequest,
+    CmdSetContactRequest,
     DaemonStatus,
     DeviceInfo,
     ErrorResponse,
@@ -48,9 +50,11 @@ from styrened.ipc.messages import (
     IPCRequest,
     IPCResponse,
     PongResponse,
+    QueryContactsRequest,
     QueryConversationsRequest,
     QueryDevicesRequest,
     QueryMessagesRequest,
+    QueryResolveNameRequest,
     QuerySearchMessagesRequest,
     RemoteStatusInfo,
     ResultResponse,
@@ -719,6 +723,9 @@ class IPCHandlers:
             tracking_lock = threading.Lock()
             tracking_registered: dict[str, bytes | None] = {"hash": None}
 
+            # Capture daemon reference for delivery status broadcasts
+            daemon = self.daemon
+
             def register_and_callback_delivery(lxmf_message: Any) -> None:
                 """Handle successful delivery with race-safe tracking."""
                 try:
@@ -741,6 +748,12 @@ class IPCHandlers:
                         conversation_service.register_delivery_tracking(msg_id, msg_hash)
                     conversation_service.on_delivery_callback(msg_hash)
                     logger.debug(f"Chat message {msg_id} delivered: {msg_hash.hex()[:16]}...")
+
+                    # Broadcast delivery status event
+                    if daemon is not None:
+                        daemon._broadcast_delivery_status_event(
+                            msg_id, req.peer_hash, "delivered"
+                        )
                 except Exception as e:
                     logger.warning(f"Error in delivery callback: {e}")
 
@@ -766,6 +779,12 @@ class IPCHandlers:
                     logger.warning(
                         f"Chat message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
                     )
+
+                    # Broadcast delivery failure event
+                    if daemon is not None:
+                        daemon._broadcast_delivery_status_event(
+                            msg_id, req.peer_hash, "failed"
+                        )
                 except Exception as e:
                     logger.warning(f"Error in failed callback: {e}")
 
@@ -1001,6 +1020,7 @@ class IPCHandlers:
 
             # Create delivery callbacks
             msg_id = req.message_id
+            daemon = self.daemon
 
             def on_delivery(lxmf_message: Any) -> None:
                 """Handle successful delivery."""
@@ -1008,6 +1028,12 @@ class IPCHandlers:
                     msg_hash = lxmf_message.hash
                     conversation_service.on_delivery_callback(msg_hash)
                     logger.debug(f"Retried message {msg_id} delivered: {msg_hash.hex()[:16]}...")
+
+                    # Broadcast delivery status event
+                    if daemon is not None:
+                        daemon._broadcast_delivery_status_event(
+                            msg_id, dest_hash, "delivered"
+                        )
                 except Exception as e:
                     logger.warning(f"Error in delivery callback: {e}")
 
@@ -1019,6 +1045,12 @@ class IPCHandlers:
                     logger.warning(
                         f"Retried message {msg_id} delivery failed: {msg_hash.hex()[:16]}..."
                     )
+
+                    # Broadcast delivery failure event
+                    if daemon is not None:
+                        daemon._broadcast_delivery_status_event(
+                            msg_id, dest_hash, "failed"
+                        )
                 except Exception as e:
                     logger.warning(f"Error in failed callback: {e}")
 
@@ -1058,3 +1090,125 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error retrying message: {e}")
             return ErrorResponse.internal_error(f"Failed to retry message: {e}")
+
+    # -------------------------------------------------------------------------
+    # Contact handlers
+    # -------------------------------------------------------------------------
+
+    def _check_contact_service(self) -> ErrorResponse | None:
+        """Check that contact service is available."""
+        error = self._check_daemon()
+        if error:
+            return error
+        if not getattr(self.daemon, "_contact_service", None):
+            return ErrorResponse.internal_error("Contact service not initialized")
+        return None
+
+    async def handle_query_contacts(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_CONTACTS request."""
+        error = self._check_contact_service()
+        if error:
+            return error
+        assert self.daemon is not None
+
+        req = request if isinstance(request, QueryContactsRequest) else QueryContactsRequest()
+        _ = req  # Currently unused but available for future filtering
+
+        try:
+            contacts = self.daemon._contact_service.list_contacts()
+            return ResultResponse(
+                data={"contacts": [c.to_dict() for c in contacts]}
+            )
+        except Exception as e:
+            logger.exception(f"Error listing contacts: {e}")
+            return ErrorResponse.internal_error(f"Failed to list contacts: {e}")
+
+    async def handle_query_resolve_name(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_RESOLVE_NAME request."""
+        error = self._check_contact_service()
+        if error:
+            return error
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, QueryResolveNameRequest)
+            else QueryResolveNameRequest()
+        )
+
+        if not req.name or len(req.name) < 1:
+            return ErrorResponse.invalid_request("Name is required")
+
+        try:
+            peer_hash = self.daemon._contact_service.resolve_name(
+                req.name, prefix_match=req.prefix_match
+            )
+            return ResultResponse(data={"peer_hash": peer_hash})
+        except Exception as e:
+            logger.exception(f"Error resolving name: {e}")
+            return ErrorResponse.internal_error(f"Failed to resolve name: {e}")
+
+    async def handle_cmd_set_contact(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SET_CONTACT request."""
+        error = self._check_contact_service()
+        if error:
+            return error
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, CmdSetContactRequest)
+            else CmdSetContactRequest()
+        )
+
+        if not req.peer_hash or not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                "Invalid peer_hash: must be 16-32 hex characters"
+            )
+
+        if not req.alias or len(req.alias.strip()) == 0:
+            return ErrorResponse.invalid_request("Alias is required")
+
+        if len(req.alias) > 100:
+            return ErrorResponse.invalid_request("Alias too long (max 100 characters)")
+
+        if req.notes is not None and len(req.notes) > 500:
+            return ErrorResponse.invalid_request("Notes too long (max 500 characters)")
+
+        try:
+            contact = self.daemon._contact_service.set_alias(
+                req.peer_hash, req.alias.strip(), notes=req.notes
+            )
+            return ResultResponse(data=contact.to_dict())
+        except Exception as e:
+            logger.exception(f"Error setting contact: {e}")
+            return ErrorResponse.internal_error(f"Failed to set contact: {e}")
+
+    async def handle_cmd_remove_contact(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_REMOVE_CONTACT request."""
+        error = self._check_contact_service()
+        if error:
+            return error
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, CmdRemoveContactRequest)
+            else CmdRemoveContactRequest()
+        )
+
+        if not req.peer_hash or not HASH_PATTERN.match(req.peer_hash):
+            return ErrorResponse.invalid_request(
+                "Invalid peer_hash: must be 16-32 hex characters"
+            )
+
+        try:
+            removed = self.daemon._contact_service.remove_alias(req.peer_hash)
+            if not removed:
+                return ErrorResponse.not_found(
+                    f"Contact not found: {req.peer_hash[:16]}..."
+                )
+            return ResultResponse(data={"removed": True})
+        except Exception as e:
+            logger.exception(f"Error removing contact: {e}")
+            return ErrorResponse.internal_error(f"Failed to remove contact: {e}")

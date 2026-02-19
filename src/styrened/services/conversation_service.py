@@ -250,6 +250,7 @@ class ConversationService:
         db_engine: Engine,
         local_identity_hash: str,
         node_store: Any | None = None,
+        contact_service: Any | None = None,
     ) -> None:
         """Initialize ConversationService.
 
@@ -260,10 +261,12 @@ class ConversationService:
                 NOT the RNS identity hash. LXMF messages use destination hashes
                 for source/dest identification in message.source_hash/destination_hash.
             node_store: Optional NodeStore for display name lookups
+            contact_service: Optional ContactService for alias-based display names
         """
         self._db_engine = db_engine
         self._local_identity_hash = local_identity_hash  # Actually LXMF dest hash
         self._node_store = node_store
+        self._contact_service = contact_service
 
         # Thread safety
         self._lock = threading.Lock()
@@ -1159,7 +1162,10 @@ class ConversationService:
         return count
 
     def _get_display_name(self, peer_hash: str) -> str | None:
-        """Get display name for a peer from node store.
+        """Get display name for a peer.
+
+        Delegates to ContactService when available (alias takes priority),
+        falling back to NodeStore announce name lookup.
 
         Args:
             peer_hash: LXMF destination hash of the peer
@@ -1167,6 +1173,13 @@ class ConversationService:
         Returns:
             Display name or None if not found
         """
+        # Delegate to contact service if available (handles full resolution chain)
+        if self._contact_service is not None:
+            display_name: str | None = self._contact_service.get_display_name(peer_hash)
+            if display_name is not None:
+                return display_name
+
+        # Fallback: direct NodeStore lookup
         if self._node_store is None:
             return None
 
