@@ -543,20 +543,100 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    # Start discovery and wait for target device to announce
-    # This is required to get the identity into memory for sending
+    # --- Path resolution ---
+    # RNS.Transport.request_path() asks transport nodes for a route.
+    # We must wait for has_path() == True before DIRECT delivery.
+    # Identity recall alone is NOT sufficient — send_message needs a path
+    # to select DIRECT mode, otherwise it falls back to PROPAGATED.
+    import RNS
+    from styrened.services.lxmf_service import DeliveryMethod
+
+    dest_bytes = bytes.fromhex(destination)
+    print(f"Requesting path to {destination[:16]}...")
+    RNS.Transport.request_path(dest_bytes)
+
+    path_resolved = False
+    identity_known = False
+    start_time = time.time()
+    path_wait = min(discovery_wait, 15)
+    while time.time() - start_time < path_wait:
+        if RNS.Transport.has_path(dest_bytes):
+            path_resolved = True
+            break
+        if not identity_known:
+            if RNS.Identity.recall(dest_bytes) or RNS.Identity.recall(
+                dest_bytes, from_identity_hash=True
+            ):
+                identity_known = True
+                print(f"Identity known, waiting for path...")
+        await asyncio.sleep(0.5)
+
+    payload = {"type": "chat", "protocol": "chat", "content": message}
+
+    # --- Helper: send and wait for delivery ---
+    # LXMF delivery is async — handle_outbound() just queues work.
+    # We must wait for the delivery/failure callback before shutting down,
+    # otherwise the RNS Link handshake gets torn down mid-flight.
+    async def _send_and_wait(
+        dest_hash: str,
+        method: str = DeliveryMethod.DIRECT,
+        delivery_timeout: float = 30.0,
+    ) -> bool:
+        loop = asyncio.get_event_loop()
+        delivery_event = asyncio.Event()
+        delivery_result: dict[str, bool] = {"success": False}
+
+        def on_delivery(msg: object) -> None:
+            delivery_result["success"] = True
+            loop.call_soon_threadsafe(delivery_event.set)
+
+        def on_failed(msg: object) -> None:
+            delivery_result["success"] = False
+            loop.call_soon_threadsafe(delivery_event.set)
+
+        result = lxmf_service.send_message(
+            dest_hash,
+            payload,
+            on_delivery=on_delivery,
+            on_failed=on_failed,
+            delivery_method=method,
+        )
+        if result is None:
+            return False
+
+        print(f"Waiting for delivery ({int(delivery_timeout)}s timeout)...")
+        try:
+            await asyncio.wait_for(delivery_event.wait(), timeout=delivery_timeout)
+        except asyncio.TimeoutError:
+            print("Delivery timed out (Link handshake may have failed)")
+            return False
+
+        return delivery_result["success"]
+
+    if path_resolved:
+        print(f"Path resolved, sending direct to {destination[:16]}...")
+        success = await _send_and_wait(destination, DeliveryMethod.DIRECT)
+        if success:
+            print("Message delivered successfully")
+            lifecycle.shutdown()
+            return 0
+        else:
+            print("Direct delivery failed, trying discovery fallback...")
+
+    # Fallback: discover via announces (needed if path request failed)
     node_store = get_node_store()
-    print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
+    remaining_wait = max(discovery_wait - (time.time() - start_time), 5)
+    if identity_known and not path_resolved:
+        print(f"Identity known but no direct path after {int(time.time() - start_time)}s")
+    print(f"Listening for announces ({int(remaining_wait)}s)...")
     start_discovery(node_store=node_store)
 
-    # Wait for announce from target device
     target_device = None
-    start_time = time.time()
+    disc_start = time.time()
     prefix = destination[:16]
-    while time.time() - start_time < discovery_wait:
+    while time.time() - disc_start < remaining_wait:
         devices = discover_devices()
         for device in devices:
-            # Match by any hash: destination, LXMF destination, or identity
             if (
                 (device.destination_hash and device.destination_hash.startswith(prefix))
                 or (
@@ -567,9 +647,7 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
                 target_device = device
                 break
         if target_device:
-            # Wait a bit more for LXMF destination announce (arrives shortly after operator announce)
             await asyncio.sleep(1.0)
-            # Refresh device info to get LXMF destination if it arrived
             devices = discover_devices()
             for device in devices:
                 if (
@@ -585,7 +663,6 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
             break
         await asyncio.sleep(0.5)
 
-    # Stop discovery before sending
     stop_discovery()
     await asyncio.sleep(0.5)
 
@@ -594,26 +671,16 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
-    # Use the LXMF destination for sending
     lxmf_dest = target_device.lxmf_destination_hash or destination
     print(f"Found {target_device.name or 'device'}, sending to LXMF dest {lxmf_dest[:16]}...")
 
-    payload = {"type": "chat", "protocol": "chat", "content": message}
-
-    if retry:
-        success = lxmf_service.send_with_retry(
-            lxmf_dest, payload, max_wait=max_wait, check_interval=2.0
-        )
-    else:
-        result = lxmf_service.send_message(lxmf_dest, payload)
-        success = result is not None
-
+    success = await _send_and_wait(lxmf_dest, DeliveryMethod.DIRECT)
     if success:
-        print("Message sent successfully")
+        print("Message delivered successfully")
         lifecycle.shutdown()
         return 0
     else:
-        print("Failed to send message (no path or identity not known)", file=sys.stderr)
+        print("Failed to deliver message", file=sys.stderr)
         lifecycle.shutdown()
         return 1
 
