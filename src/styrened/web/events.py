@@ -49,16 +49,20 @@ class SSEBroadcaster:
         for q in dead:
             self._clients.discard(q)
 
-    def broadcast_message_event(self, event_dict: dict) -> None:
-        """Queue a message event for broadcast (called from sync context)."""
+    def _broadcast_sync(self, event_type: str, data: dict) -> None:
+        """Broadcast from a sync context (schedules on the event loop)."""
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                loop.create_task(self.broadcast("message-event", event_dict))
+                loop.create_task(self.broadcast(event_type, data))
             else:
-                loop.run_until_complete(self.broadcast("message-event", event_dict))
+                loop.run_until_complete(self.broadcast(event_type, data))
         except RuntimeError:
             pass  # No event loop available
+
+    def broadcast_message_event(self, event_dict: dict) -> None:
+        """Queue a message event for broadcast (called from sync context)."""
+        self._broadcast_sync("message-event", event_dict)
 
     def broadcast_device_event(self, device: MeshDevice) -> None:
         """Queue a device event for broadcast (called from sync context)."""
@@ -71,14 +75,17 @@ class SSEBroadcaster:
             "announce_count": device.announce_count,
             "version": device.version,
         }
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(self.broadcast("device-updated", data))
-            else:
-                loop.run_until_complete(self.broadcast("device-updated", data))
-        except RuntimeError:
-            pass  # No event loop available
+        self._broadcast_sync("device-updated", data)
+
+    def broadcast_conversation_event(self, peer_hash: str, update: dict) -> None:
+        """Broadcast conversation list change (new unread, new message, etc.)."""
+        data = {"peer_hash": peer_hash, **update}
+        self._broadcast_sync("conversation-updated", data)
+
+    def broadcast_contact_event(self, peer_hash: str, action: str) -> None:
+        """Broadcast contact change (set/removed)."""
+        data = {"peer_hash": peer_hash, "action": action}
+        self._broadcast_sync("contact-updated", data)
 
 
 def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:

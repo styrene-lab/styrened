@@ -75,6 +75,20 @@ typecheck:
 # Run all validation checks (lint + typecheck + test)
 validate: lint typecheck test
 
+# ─── Frontend ──────────────────────────────────────────────────────────────
+
+# Build frontend (outputs to src/styrened/web/static/)
+build-frontend:
+    cd frontend && npm ci && npx vite build
+
+# Start frontend dev server (proxies /api to localhost:8080)
+dev-frontend:
+    cd frontend && npm run dev
+
+# Type-check frontend
+typecheck-frontend:
+    cd frontend && npx tsc --noEmit
+
 # ─── Documentation ──────────────────────────────────────────────────────────
 
 # Generate API documentation (output: docs/api/)
