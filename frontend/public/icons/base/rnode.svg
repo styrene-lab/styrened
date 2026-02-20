@@ -1,0 +1,9 @@
+<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <!-- RNode: radio/antenna device -->
+  <path d="M12 14a2 2 0 100-4 2 2 0 000 4z" fill="currentColor"/>
+  <path d="M12 2v6M12 16v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M7.5 5.5a7 7 0 000 13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M16.5 5.5a7 7 0 010 13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M5 3.5a10.5 10.5 0 000 17" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+  <path d="M19 3.5a10.5 10.5 0 010 17" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+</svg>

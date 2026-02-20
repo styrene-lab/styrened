@@ -43,6 +43,11 @@ docs/api/
 *.swo
 *~
 
+# Frontend build output (Vite hashed bundles)
+src/styrened/web/static/assets/
+src/styrened/web/static/icons/
+frontend/node_modules/
+
 # Nix
 result
 result-*
