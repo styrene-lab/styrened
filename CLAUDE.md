@@ -373,14 +373,17 @@ All workflows run as `ci-workflow-sa` and use GHCR credentials from Vault-synced
 
 ### Release Process
 
-```bash
-# 1. Bump version
-sed -i '' 's/version = "X.Y.Z"/version = "X.Y.W"/' pyproject.toml
-sed -i '' 's/__version__ = "X.Y.Z"/__version__ = "X.Y.W"/' src/styrened/__init__.py
+Version is canonical in `src/styrened/__init__.py` (hatchling reads it). The `VERSION` file mirrors it for Nix.
 
-# 2. Commit and tag
-git add pyproject.toml src/styrened/__init__.py
-git commit -m "chore: Bump version to X.Y.W"
+```bash
+# Preferred: use justfile
+just release X.Y.W    # validate → bump → commit → tag
+
+# Manual:
+sed -i '' 's/__version__ = "X.Y.Z"/__version__ = "X.Y.W"/' src/styrened/__init__.py
+echo "X.Y.W" > VERSION
+git add src/styrened/__init__.py VERSION
+git commit -m "chore: bump version to X.Y.W"
 git push
 git tag -a vX.Y.W -m "Release vX.Y.W"
 git push origin vX.Y.W
@@ -391,8 +394,9 @@ The `release-build` workflow then:
 2. Builds Python wheel and sdist
 3. Builds OCI image via Nix (`nix build .#oci`)
 4. Pushes to GHCR with version + commit SHA tags (`latest` only for stable releases)
-5. Generates changelog from commits since previous tag
-6. Creates GitHub Release with wheel and source tarball
+5. Publishes to PyPI via twine
+6. Generates changelog from commits since previous tag
+7. Creates GitHub Release with wheel and source tarball
 
 ### Integration Testing
 
@@ -427,7 +431,11 @@ Test tiers:
 ### Installation
 
 ```bash
-# From GitHub Release
+# From PyPI (preferred)
+pip install styrened
+pip install styrened[web]    # with FastAPI/uvicorn
+
+# From GitHub Release (wheel)
 pip install https://github.com/styrene-lab/styrened/releases/download/vX.Y.Z/styrened-X.Y.Z-py3-none-any.whl
 
 # From git tag

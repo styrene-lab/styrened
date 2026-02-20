@@ -64,8 +64,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = [
             python
-            python.pkgs.setuptools
-            python.pkgs.wheel
+            python.pkgs.hatchling
             python.pkgs.pytest
             python.pkgs.pytest-asyncio
             python.pkgs.mypy

@@ -17,28 +17,29 @@ Argo Events maps GitHub webhook events (push, tag, pull_request) to workflow sub
 
 ### Triggering a Release
 
-Releases are triggered by pushing a version tag:
+Releases are triggered by pushing a version tag. Version is canonical in `src/styrened/__init__.py` (hatchling reads it dynamically). The `VERSION` file mirrors it for the Nix flake.
 
 ```bash
-# 1. Update version in both files
-sed -i '' 's/version = "X.Y.Z"/version = "X.Y.W"/' pyproject.toml
+# Preferred: use justfile (validates, bumps, commits, tags)
+just release X.Y.W
+git push origin main --tags
+```
+
+Or manually:
+
+```bash
+# 1. Update version in both canonical files
 sed -i '' 's/__version__ = "X.Y.Z"/__version__ = "X.Y.W"/' src/styrened/__init__.py
+echo "X.Y.W" > VERSION
 
 # 2. Commit version bump
-git add pyproject.toml src/styrened/__init__.py
-git commit -m "chore: Bump version to X.Y.W"
+git add src/styrened/__init__.py VERSION
+git commit -m "chore: bump version to X.Y.W"
 
 # 3. Push and tag
 git push
 git tag -a vX.Y.W -m "Release vX.Y.W"
 git push origin vX.Y.W
-```
-
-Or use the justfile helper:
-
-```bash
-just bump-version X.Y.W
-just release X.Y.W
 ```
 
 ### What the Release Workflow Does
@@ -48,12 +49,14 @@ just release X.Y.W
 3. **Build Python Wheel** - Creates wheel and sdist
 4. **Build OCI Image** - Builds linux/amd64 container via Nix (nix2container)
 5. **Push to GHCR** - Pushes with version + commit SHA tags (`latest` only for stable releases)
-6. **Create GitHub Release** - Generates changelog, publishes release with wheel and source tarball
+6. **Publish to PyPI** - Uploads wheel and sdist via twine (idempotent with `--skip-existing`)
+7. **Create GitHub Release** - Generates changelog, publishes release with wheel and source tarball
 
 ### Release Artifacts
 
 | Artifact | Location |
 |----------|----------|
+| PyPI package | `pip install styrened==X.Y.Z` |
 | Python wheel | GitHub Release: `styrened-X.Y.Z-py3-none-any.whl` |
 | Source tarball | GitHub Release: `styrened-X.Y.Z.tar.gz` |
 | Container (amd64) | `ghcr.io/styrene-lab/styrened:X.Y.Z` |
@@ -71,6 +74,10 @@ just release X.Y.W
 ### Installation
 
 ```bash
+# From PyPI (preferred)
+pip install styrened
+pip install styrened[web]    # with FastAPI/uvicorn
+
 # From GitHub Release (wheel)
 pip install https://github.com/styrene-lab/styrened/releases/download/vX.Y.Z/styrened-X.Y.Z-py3-none-any.whl
 
@@ -184,7 +191,7 @@ Nightly builds run tiered test suites:
 
 ### Release Workflow Fails
 
-1. **Version mismatch**: Ensure `pyproject.toml` and `src/styrened/__init__.py` match the tag
+1. **Version mismatch**: Ensure `src/styrened/__init__.py` and `VERSION` match the tag (run `just check-versions`)
 2. **GHCR push denied**: Check package permissions at https://github.com/orgs/styrene-lab/packages/container/package/styrened/settings
 3. **Build fails**: Check workflow logs in Argo UI at https://argo.vanderlyn.house
 
@@ -200,7 +207,7 @@ Nightly builds run tiered test suites:
 |-------|-------|-----|
 | `denied: installation not allowed to Write` | Missing package permission | Add repo to package settings with Write access |
 | `manifest unknown` | Image tag doesn't exist | Check GHCR for available tags |
-| `VERSION file` override | Stale VERSION file | Remove VERSION file, use pyproject.toml |
+| `VERSION file` override | Stale VERSION file | Run `just check-versions` to verify `__init__.py` == `VERSION` |
 
 ## Workflow Files
 
@@ -221,6 +228,7 @@ Nightly builds run tiered test suites:
 | `ci-workflow-sa` ServiceAccount | `argo` | Workflow pod identity |
 | `ci-test-runner` ClusterRole | cluster | Namespace/pod/helm RBAC for test harness |
 | `ghcr-secret` Secret | `argo` | GHCR registry auth (Vault-synced) |
+| `pypi-secret` Secret | `argo` | PyPI API token (Vault-synced from `secret/bootstrap/pypi/styrened`) |
 | `ghcr-secret` Secret | `styrene-infra` | GHCR auth source for test namespace copies |
 | `operate-workflow-sa` ServiceAccount | `argo-events` | Sensor → Workflow submission |
 

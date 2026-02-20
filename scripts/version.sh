@@ -7,10 +7,20 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Function to extract version from pyproject.toml
+# Function to extract version from pyproject.toml or hatch
 extract_from_pyproject() {
     if [ -f "$PROJECT_ROOT/pyproject.toml" ]; then
-        grep '^version = ' "$PROJECT_ROOT/pyproject.toml" | sed 's/version = "\(.*\)"/\1/'
+        # Try static version first
+        local ver
+        ver=$(grep '^version = ' "$PROJECT_ROOT/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
+        if [ -n "$ver" ]; then
+            echo "$ver"
+            return
+        fi
+        # Dynamic version — read from __init__.py (same source hatchling uses)
+        if [ -f "$PROJECT_ROOT/src/styrened/__init__.py" ]; then
+            grep '^__version__ = ' "$PROJECT_ROOT/src/styrened/__init__.py" | sed 's/__version__ = "\(.*\)"/\1/'
+        fi
     fi
 }
 
