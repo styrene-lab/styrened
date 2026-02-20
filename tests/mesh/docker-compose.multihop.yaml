@@ -1,0 +1,109 @@
+# Three-node multi-hop mesh topology for transport routing tests.
+#
+# Network isolation:
+#   alpha network: node-a-edge <-> node-b-transport
+#   beta  network: node-b-transport <-> node-c-edge
+#
+# Node A and Node C share NO network — messages between them must
+# route through Node B, which has transport enabled and bridges
+# both networks.
+#
+# IPC access via TCP relay:
+#   node-a-edge:      host port 9011
+#   node-b-transport:  host port 9012
+#   node-c-edge:      host port 9013
+#
+# Usage:
+#   docker compose -f docker-compose.multihop.yaml up -d --build
+#   pytest tests/mesh/test_multihop.py -v -m multihop
+#   docker compose -f docker-compose.multihop.yaml down -v
+
+services:
+  node-b-transport:
+    build:
+      context: ../..
+      dockerfile: tests/mesh/Dockerfile
+    image: styrened-mesh-dev:latest
+    container_name: styrene-multihop-node-b
+    hostname: node-b-transport
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        styrened daemon &
+        sleep 3
+        python3 /relay/tcp_relay.py /run/styrened/control.sock 9012
+    volumes:
+      - ./rns/node-b-transport.conf:/root/.reticulum/config:ro
+      - ./tcp_relay.py:/relay/tcp_relay.py:ro
+    environment:
+      - STYRENED_SOCKET=/run/styrened/control.sock
+      - STYRENE_CONFIG_DIR=/config
+      - RNS_LOGLEVEL=4
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "${MULTIHOP_NODE_B_PORT:-9012}:9012"
+    networks:
+      - alpha
+      - beta
+
+  node-a-edge:
+    build:
+      context: ../..
+      dockerfile: tests/mesh/Dockerfile
+    image: styrened-mesh-dev:latest
+    container_name: styrene-multihop-node-a
+    hostname: node-a-edge
+    depends_on:
+      - node-b-transport
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        styrened daemon &
+        sleep 3
+        python3 /relay/tcp_relay.py /run/styrened/control.sock 9011
+    volumes:
+      - ./rns/node-a-multihop.conf:/root/.reticulum/config:ro
+      - ./tcp_relay.py:/relay/tcp_relay.py:ro
+    environment:
+      - STYRENED_SOCKET=/run/styrened/control.sock
+      - STYRENE_CONFIG_DIR=/config
+      - RNS_LOGLEVEL=4
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "${MULTIHOP_NODE_A_PORT:-9011}:9011"
+    networks:
+      - alpha
+
+  node-c-edge:
+    build:
+      context: ../..
+      dockerfile: tests/mesh/Dockerfile
+    image: styrened-mesh-dev:latest
+    container_name: styrene-multihop-node-c
+    hostname: node-c-edge
+    depends_on:
+      - node-b-transport
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        styrened daemon &
+        sleep 3
+        python3 /relay/tcp_relay.py /run/styrened/control.sock 9013
+    volumes:
+      - ./rns/node-c.conf:/root/.reticulum/config:ro
+      - ./tcp_relay.py:/relay/tcp_relay.py:ro
+    environment:
+      - STYRENED_SOCKET=/run/styrened/control.sock
+      - STYRENE_CONFIG_DIR=/config
+      - RNS_LOGLEVEL=4
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "${MULTIHOP_NODE_C_PORT:-9013}:9013"
+    networks:
+      - beta
+
+networks:
+  alpha:
+    driver: bridge
+  beta:
+    driver: bridge

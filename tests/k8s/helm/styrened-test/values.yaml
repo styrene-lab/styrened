@@ -54,6 +54,13 @@ styrene:
   chat:
     auto_reply_enabled: false
 
+# IPC relay (test-only) — exposes daemon Unix socket over TCP for
+# MeshControlClient access from outside the cluster via kubectl port-forward.
+# NEVER enable in production.
+ipcRelay:
+  enabled: false
+  port: 9000
+
 # RNS configuration (written to /root/.reticulum/config)
 rns:
   enable_transport: false
