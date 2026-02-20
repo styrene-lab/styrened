@@ -59,8 +59,10 @@ class ContactService:
     Provides name resolution chain:
     1. Exact alias match
     2. Prefix alias match (unique)
-    3. Exact NodeStore announce name
-    4. Prefix NodeStore announce name (unique)
+    3. Exact short_name match (NodeStore, unique with lxmf_dest)
+    4. Prefix short_name match (NodeStore, unique)
+    5. Exact NodeStore announce name
+    6. Prefix NodeStore announce name (unique)
 
     Args:
         db_engine: SQLAlchemy engine for persistence
@@ -153,8 +155,10 @@ class ContactService:
         Resolution chain:
         1. Exact alias match (case-insensitive)
         2. Prefix alias match (unique, case-insensitive)
-        3. Exact NodeStore announce name (case-insensitive)
-        4. Prefix NodeStore announce name (unique, case-insensitive)
+        3. Exact short_name match (NodeStore, unique with lxmf_dest)
+        4. Prefix short_name match (NodeStore, unique)
+        5. Exact NodeStore announce name (case-insensitive)
+        6. Prefix NodeStore announce name (unique, case-insensitive)
 
         Args:
             name: Name to resolve
@@ -180,8 +184,28 @@ class ContactService:
                 if len(prefix_matches) == 1:
                     return prefix_matches[0].peer_hash
 
-        # 3. NodeStore exact name match
         if self._node_store is not None:
+            # 3. Exact short_name match (unique with lxmf_dest)
+            if hasattr(self._node_store, "get_nodes_by_short_name"):
+                sn_matches = [
+                    n
+                    for n in self._node_store.get_nodes_by_short_name(name_lower)
+                    if n.lxmf_destination_hash
+                ]
+                if len(sn_matches) == 1:
+                    return sn_matches[0].lxmf_destination_hash
+
+            # 4. Prefix short_name match (must be unique)
+            if prefix_match and hasattr(self._node_store, "get_nodes_by_short_name_prefix"):
+                sn_prefix_matches = [
+                    n
+                    for n in self._node_store.get_nodes_by_short_name_prefix(name_lower)
+                    if n.lxmf_destination_hash
+                ]
+                if len(sn_prefix_matches) == 1:
+                    return sn_prefix_matches[0].lxmf_destination_hash
+
+            # 5. NodeStore exact announce name match
             nodes = self._node_store.get_all_nodes()
             for node in nodes:
                 if node.name and node.name.lower() == name_lower:
@@ -189,7 +213,7 @@ class ContactService:
                         result: str = node.lxmf_destination_hash
                         return result
 
-            # 4. NodeStore prefix match (must be unique)
+            # 6. NodeStore prefix announce name match (must be unique)
             if prefix_match:
                 node_matches = [
                     n

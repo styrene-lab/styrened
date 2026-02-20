@@ -5,6 +5,7 @@ headless (core) and TUI applications. TUI-specific config is in
 styrene-tui/src/styrene/models/config.py.
 """
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -220,6 +221,17 @@ class YubiKeyConfig:
     require_touch: bool = False
 
 
+_SHORT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$")
+
+
+def validate_short_name(name: str) -> bool:
+    """Validate a short-name identifier.
+
+    3-20 chars, lowercase alphanumeric + hyphens, no leading/trailing hyphens.
+    """
+    return bool(_SHORT_NAME_PATTERN.match(name))
+
+
 @dataclass
 class IdentityConfig:
     """Identity appearance and provider configuration.
@@ -236,12 +248,15 @@ class IdentityConfig:
             Defaults to "Anonymous Styrene".
         icon: Emoji or short string displayed as identity icon.
             Defaults to 🔗. Common alternatives: 🖥️ (server), 📱 (mobile), 🏠 (home).
+        short_name: Optional human-readable identifier for discovery (e.g., "alice").
+            Claimed by the node, not globally unique. 3-20 chars, lowercase alphanumeric + hyphens.
         provider: Identity provider type ("file" or "yubikey").
         yubikey: YubiKey-specific configuration (used when provider is "yubikey").
     """
 
     display_name: str = "Anonymous Styrene"
     icon: str = "🔗"
+    short_name: str | None = None
     provider: str = "file"
     yubikey: YubiKeyConfig = field(default_factory=YubiKeyConfig)
 

@@ -250,3 +250,19 @@ class TestContactManagement:
         assert any(
             c["peer_hash"] == b_lxmf for c in contacts
         ), f"Contact {b_lxmf} not found in contacts list"
+
+    async def test_short_name_visible_in_device_list(
+        self,
+        node_a_client: ControlClient,
+        node_b_client: ControlClient,
+        discovered_mesh,
+    ):
+        """Devices list includes short_name when announced."""
+        # Node B's short_name (if configured) should appear in A's device list.
+        # Even without config, the short_name field should be present (possibly None).
+        devices = await node_a_client.query_devices()
+        for d in devices:
+            # DeviceInfo.to_dict() always includes short_name key
+            assert "short_name" in d.to_dict(), (
+                f"Device {d.name} missing short_name field in DeviceInfo"
+            )

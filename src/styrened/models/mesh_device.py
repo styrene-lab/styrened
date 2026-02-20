@@ -67,6 +67,7 @@ class MeshDevice:
     capabilities: list[str] | None = None
     version: str | None = None
     lxmf_destination_hash: str | None = None
+    short_name: str | None = None
 
     # Legacy alias for backwards compatibility
     @property
@@ -128,10 +129,11 @@ class MeshDevice:
 
 def parse_announce_data(
     app_data: bytes | None,
-) -> tuple[str, DeviceType, list[str] | None, str | None, str | None]:
+) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None]:
     """Parse announce app_data to extract device information.
 
-    Styrene nodes announce with format: "styrene:<hostname>:<version>:<capabilities>:<lxmf_dest>"
+    Styrene nodes announce with format:
+        "styrene:<hostname>:<version>:<capabilities>:<lxmf_dest>:<short_name>"
     RNodes announce with: "rnode:<device_name>"
     LXMF clients announce with JSON containing "display_name".
     Generic announces may contain any UTF-8 string.
@@ -140,16 +142,17 @@ def parse_announce_data(
         app_data: Raw app_data bytes from announce.
 
     Returns:
-        Tuple of (name, device_type, capabilities, version, lxmf_destination_hash).
+        Tuple of (name, device_type, capabilities, version,
+                  lxmf_destination_hash, short_name).
     """
     if not app_data:
-        return ("unknown", DeviceType.UNKNOWN, None, None, None)
+        return ("unknown", DeviceType.UNKNOWN, None, None, None, None)
 
     try:
         decoded = app_data.decode("utf-8").strip()
     except UnicodeDecodeError:
         # Binary app_data - can't parse
-        return ("binary-data", DeviceType.UNKNOWN, None, None, None)
+        return ("binary-data", DeviceType.UNKNOWN, None, None, None, None)
 
     # Check for Styrene node
     if decoded.lower().startswith("styrene"):
@@ -163,18 +166,20 @@ def parse_announce_data(
             version = parts[2] if len(parts) > 2 else None
             capabilities = parts[3].split(",") if len(parts) > 3 and parts[3] else None
             lxmf_dest = parts[4] if len(parts) > 4 and parts[4] else None
+            short_name = parts[5] if len(parts) > 5 and parts[5] else None
         else:
             name = "styrene-node"
             version = None
             capabilities = None
             lxmf_dest = None
-        return (name, DeviceType.STYRENE_NODE, capabilities, version, lxmf_dest)
+            short_name = None
+        return (name, DeviceType.STYRENE_NODE, capabilities, version, lxmf_dest, short_name)
 
     # Check for RNode
     if decoded.lower().startswith("rnode:"):
         parts = decoded.split(":")
         name = parts[1] if len(parts) > 1 else "rnode"
-        return (name, DeviceType.RNODE, None, None, None)
+        return (name, DeviceType.RNODE, None, None, None, None)
 
     # Check for JSON app_data (common in LXMF clients like Sideband/NomadNet)
     # These typically have {"display_name": "...", ...} format
@@ -189,11 +194,11 @@ def parse_announce_data(
                 if display_name and isinstance(display_name, str):
                     # Truncate long names
                     name = display_name[:32] if len(display_name) > 32 else display_name
-                    return (name, DeviceType.GENERIC, None, None, None)
+                    return (name, DeviceType.GENERIC, None, None, None, None)
         except (json.JSONDecodeError, TypeError):
             pass
         # JSON but no usable name - treat as unknown
-        return ("unknown", DeviceType.UNKNOWN, None, None, None)
+        return ("unknown", DeviceType.UNKNOWN, None, None, None, None)
 
     # Generic announce with custom name (simple string, not JSON/hex)
     # Sanitize: only allow reasonable name characters, reject serialized data
@@ -203,10 +208,10 @@ def parse_announce_data(
         and len(decoded) <= 64
         and not any(c in decoded for c in "{}[]()<>")
     ):
-        return (decoded, DeviceType.GENERIC, None, None, None)
+        return (decoded, DeviceType.GENERIC, None, None, None, None)
 
     # Unknown or unparseable
-    return ("unknown", DeviceType.UNKNOWN, None, None, None)
+    return ("unknown", DeviceType.UNKNOWN, None, None, None, None)
 
 
 def create_mesh_device(
@@ -226,7 +231,9 @@ def create_mesh_device(
     Returns:
         MeshDevice instance.
     """
-    name, device_type, capabilities, version, lxmf_dest = parse_announce_data(app_data)
+    name, device_type, capabilities, version, lxmf_dest, short_name = parse_announce_data(
+        app_data
+    )
 
     # Generate fallback name if needed
     if name == "unknown":
@@ -243,4 +250,5 @@ def create_mesh_device(
         capabilities=capabilities,
         version=version,
         lxmf_destination_hash=lxmf_dest,
+        short_name=short_name,
     )
