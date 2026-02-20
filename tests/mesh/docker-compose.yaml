@@ -1,0 +1,78 @@
+# Dual-container mesh topology for LXMF conversation testing.
+#
+# Node A: TCPServerInterface on :4242 (transport hub)
+# Node B: TCPClientInterface -> node-a:4242 (peer)
+#
+# Image: Built from local styrened source via Dockerfile so tests always
+# run against the current code (contact handlers, FTS5 fixes, etc.).
+#
+# IPC access: Each container runs a Python TCP relay that bridges the
+# internal Unix socket to a TCP port exposed to the host. This avoids
+# Docker Desktop for Mac limitations with Unix sockets on bind mounts.
+#
+#   node-a IPC: host port 9001 -> container Unix socket
+#   node-b IPC: host port 9002 -> container Unix socket
+#
+# Usage:
+#   docker compose up -d --build
+#   pytest tests/mesh/ -v -m mesh
+#   docker compose down -v
+
+services:
+  node-a:
+    build:
+      context: ../..
+      dockerfile: tests/mesh/Dockerfile
+    image: styrened-mesh-dev:latest
+    container_name: styrene-mesh-node-a
+    hostname: node-a
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        styrened daemon &
+        sleep 3
+        python3 /relay/tcp_relay.py /run/styrened/control.sock 9001
+    volumes:
+      - ./rns/node-a.conf:/root/.reticulum/config:ro
+      - ./tcp_relay.py:/relay/tcp_relay.py:ro
+    environment:
+      - STYRENED_SOCKET=/run/styrened/control.sock
+      - STYRENE_CONFIG_DIR=/config
+      - RNS_LOGLEVEL=4
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "${MESH_NODE_A_PORT:-9001}:9001"
+    networks:
+      - mesh
+
+  node-b:
+    build:
+      context: ../..
+      dockerfile: tests/mesh/Dockerfile
+    image: styrened-mesh-dev:latest
+    container_name: styrene-mesh-node-b
+    hostname: node-b
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        styrened daemon &
+        sleep 3
+        python3 /relay/tcp_relay.py /run/styrened/control.sock 9002
+    depends_on:
+      - node-a
+    volumes:
+      - ./rns/node-b.conf:/root/.reticulum/config:ro
+      - ./tcp_relay.py:/relay/tcp_relay.py:ro
+    environment:
+      - STYRENED_SOCKET=/run/styrened/control.sock
+      - STYRENE_CONFIG_DIR=/config
+      - RNS_LOGLEVEL=4
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "${MESH_NODE_B_PORT:-9002}:9002"
+    networks:
+      - mesh
+
+networks:
+  mesh:
+    driver: bridge

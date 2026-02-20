@@ -447,6 +447,96 @@ async def metrics_collector(k8s_cluster: K8sTestHarness, request) -> MetricsColl
             print(f"[observability] Grafana resources:  {links['pod_resources']}")
 
 
+# ---------------------------------------------------------------------------
+# Port-forward and mesh topology fixtures for IPC-level K8s tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def port_forward_manager():
+    """Session-scoped PortForwardManager for kubectl port-forward tunnels.
+
+    Cleans up all port-forward subprocesses at session end.
+    """
+    from tests.harness.port_forward import PortForwardManager
+
+    manager = PortForwardManager(namespace="default")
+    yield manager
+    manager.stop_all()
+
+
+@pytest.fixture
+def k8s_mesh_topology(
+    k8s_cluster: K8sTestHarness,
+    test_namespace: str,
+    port_forward_manager,
+):
+    """Fixture that deploys a topology spec to K8s and provides MeshControlClients.
+
+    Returns a callable:
+        clients = k8s_mesh_topology(topology_spec)
+        # clients = {"node-a": MeshControlClient, "node-b": MeshControlClient, ...}
+
+    Tears down topology on test completion.
+    """
+    from tests.harness.ipc_client import MeshControlClient, wait_for_ping
+    from tests.harness.port_forward import PortForwardManager
+    from tests.topology.k8s_backend import deploy_topology, teardown_topology
+
+    deployed_topologies = []
+    created_managers = []
+
+    async def _deploy(topology_spec):
+        import asyncio
+
+        # Deploy to K8s
+        pod_names = deploy_topology(
+            topology=topology_spec,
+            namespace=test_namespace,
+            helm_dir=k8s_cluster.helm_dir,
+            kubeconfig=str(k8s_cluster.kubeconfig) if k8s_cluster.kubeconfig else None,
+            image_values=k8s_cluster._get_image_values(),
+        )
+        deployed_topologies.append(topology_spec)
+
+        # Wait for pods to be ready
+        if not k8s_cluster.wait_for_ready(pod_names, timeout=120):
+            k8s_cluster.collect_logs(pod_names)
+            raise RuntimeError(f"Pods not ready after 120s: {pod_names}")
+
+        # Start port-forwards
+        mgr = PortForwardManager(
+            namespace=test_namespace,
+            relay_port=9000,
+            kubeconfig=str(k8s_cluster.kubeconfig) if k8s_cluster.kubeconfig else None,
+        )
+        mgr.start(pod_names)
+        created_managers.append(mgr)
+
+        # Create MeshControlClients
+        clients = {}
+        for node, pod in zip(topology_spec.nodes, pod_names):
+            host, port = mgr.get_endpoint(pod)
+            client = MeshControlClient(host=host, port=port, timeout=10.0)
+            if not await wait_for_ping(client, timeout=60):
+                raise RuntimeError(f"Pod {pod} not responsive via port-forward")
+            clients[node.name] = client
+
+        return clients
+
+    yield _deploy
+
+    # Teardown
+    for mgr in created_managers:
+        mgr.stop_all()
+    for topo in deployed_topologies:
+        teardown_topology(
+            topology=topo,
+            namespace=test_namespace,
+            kubeconfig=str(k8s_cluster.kubeconfig) if k8s_cluster.kubeconfig else None,
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def check_docker_image(k8s_cluster: K8sTestHarness):
     """Session-level fixture to check if styrened-test image exists.
@@ -503,6 +593,10 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "slow_extended: marks tests as very slow (overnight tests, 4-8+ hours)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "k8s_mesh: K8s mesh topology tests (requires cluster + IPC relay)",
     )
 
 

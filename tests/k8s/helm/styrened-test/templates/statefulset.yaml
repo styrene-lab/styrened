@@ -53,10 +53,24 @@ spec:
         {{- end }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+        {{- if .Values.ipcRelay.enabled }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          styrened daemon &
+          sleep 3
+          python3 /relay/tcp_relay.py /run/styrened/control.sock {{ .Values.ipcRelay.port }}
+        {{- end }}
         ports:
         - name: rns
           containerPort: 4242
           protocol: TCP
+        {{- if .Values.ipcRelay.enabled }}
+        - name: ipc-relay
+          containerPort: {{ .Values.ipcRelay.port }}
+          protocol: TCP
+        {{- end }}
         env:
         - name: POD_NAME
           valueFrom:
@@ -76,6 +90,10 @@ spec:
           value: "4"
         - name: PYTHONUNBUFFERED
           value: "1"
+        {{- if .Values.ipcRelay.enabled }}
+        - name: STYRENED_SOCKET
+          value: "/run/styrened/control.sock"
+        {{- end }}
         volumeMounts:
         - name: config
           mountPath: /config
@@ -84,6 +102,11 @@ spec:
           mountPath: /root/.reticulum
         - name: data
           mountPath: /data
+        {{- if .Values.ipcRelay.enabled }}
+        - name: relay
+          mountPath: /relay
+          readOnly: true
+        {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         livenessProbe:
@@ -113,6 +136,11 @@ spec:
         emptyDir: {}
       - name: data
         emptyDir: {}
+      {{- if .Values.ipcRelay.enabled }}
+      - name: relay
+        configMap:
+          name: {{ include "styrened-test.fullname" . }}-relay
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

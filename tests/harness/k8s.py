@@ -438,8 +438,15 @@ class K8sHarness(TestHarness):
         image_repository: str | None = None,
         image_tag: str | None = None,
         image_pull_policy: str | None = None,
+        ipc_relay: bool = False,
+        ipc_relay_port: int = 9000,
     ) -> list[str]:
-        """Deploy styrened stack using Helm."""
+        """Deploy styrened stack using Helm.
+
+        Args:
+            ipc_relay: Enable IPC TCP relay sidecar for MeshControlClient access.
+            ipc_relay_port: Container port for the IPC relay (default 9000).
+        """
         set_values = [
             f"replicaCount={replica_count}",
             f"styrene.reticulum.mode={mode}",
@@ -451,6 +458,10 @@ class K8sHarness(TestHarness):
             f"resources.requests.memory={memory_request}",
             f"resources.limits.memory={memory_limit}",
         ]
+
+        if ipc_relay:
+            set_values.append(f"ipcRelay.enabled=true")
+            set_values.append(f"ipcRelay.port={ipc_relay_port}")
 
         if image_repository:
             set_values.append(f"image.repository={image_repository}")
