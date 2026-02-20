@@ -329,6 +329,12 @@ class RPCServer:
                     f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
                     f"not authorized"
                 )
+                try:
+                    from styrened.web.metrics import security_events_total
+
+                    security_events_total.labels(type="auth_rejected").inc()
+                except ImportError:
+                    pass
                 if envelope.request_id and envelope.request_id != NO_CORRELATION:
                     await self._send_error(
                         source_hash,
@@ -345,6 +351,12 @@ class RPCServer:
                 f"[SECURITY] Rate limited {msg_type.name} from {source_hash[:16]}... - "
                 f"{rate_limit_result}"
             )
+            try:
+                from styrened.web.metrics import security_events_total
+
+                security_events_total.labels(type="rate_limited").inc()
+            except ImportError:
+                pass
             if envelope.request_id and envelope.request_id != NO_CORRELATION:
                 await self._send_error(
                     source_hash,
@@ -361,10 +373,23 @@ class RPCServer:
                     f"[SECURITY] Rejected replay of {msg_type.name} from {source_hash[:16]}... - "
                     f"request_id already seen"
                 )
+                try:
+                    from styrened.web.metrics import security_events_total
+
+                    security_events_total.labels(type="replay_detected").inc()
+                except ImportError:
+                    pass
                 # Don't send error response for replays (avoid amplification)
                 return
 
         logger.info(f"Received RPC {msg_type.name} from {source_hash[:16]}...")
+
+        try:
+            from styrened.web.metrics import rpc_requests_total
+
+            rpc_requests_total.labels(type=msg_type.name, result="dispatched").inc()
+        except ImportError:
+            pass
 
         # Dispatch to handler (handlers use asyncio.create_task internally)
         try:

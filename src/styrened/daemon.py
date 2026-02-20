@@ -150,6 +150,13 @@ class StyreneDaemon:
             f"Discovered: {device.name} ({device.device_type.value}) - {device.status.value}"
         )
 
+        try:
+            from styrened.web.metrics import devices_discovered_total
+
+            devices_discovered_total.inc()
+        except ImportError:
+            pass
+
         # Broadcast to web UI SSE clients
         if self._api_server is not None:
             try:
@@ -544,6 +551,13 @@ class StyreneDaemon:
                             )
                             if len(first_file) >= 3 and first_file[2]:
                                 attachment_mime = str(first_file[2])
+
+            try:
+                from styrened.web.metrics import messages_total
+
+                messages_total.labels(direction="incoming", status="received").inc()
+            except ImportError:
+                pass
 
             # Save to conversation service
             msg_id = self._conversation_service.save_incoming_message(
@@ -1146,6 +1160,13 @@ class StyreneDaemon:
             self._operator_destination.announce(app_data=app_data)
             logger.info(f"Announced as Styrene node: {display_name}")
 
+            try:
+                from styrened.web.metrics import announces_total
+
+                announces_total.labels(result="success").inc()
+            except ImportError:
+                pass
+
             # Also announce LXMF delivery destination
             try:
                 from styrened.services.lxmf_service import get_lxmf_service
@@ -1163,6 +1184,12 @@ class StyreneDaemon:
 
         except Exception as e:
             logger.warning(f"Announce failed: {e}")
+            try:
+                from styrened.web.metrics import announces_total
+
+                announces_total.labels(result="failure").inc()
+            except ImportError:
+                pass
 
     async def _run_loop(self) -> None:
         """Main daemon loop with periodic announces."""
@@ -1227,6 +1254,13 @@ class StyreneDaemon:
                     destination.announce(app_data=app_data)
                     logger.info(f"Re-announced as Styrene node: {display_name}")
 
+                    try:
+                        from styrened.web.metrics import announces_total
+
+                        announces_total.labels(result="success").inc()
+                    except ImportError:
+                        pass
+
                     # Also re-announce LXMF delivery destination so clients can send to us
                     try:
                         from styrened.services.lxmf_service import get_lxmf_service
@@ -1244,6 +1278,12 @@ class StyreneDaemon:
 
             except Exception as e:
                 logger.warning(f"Announce failed: {e}")
+                try:
+                    from styrened.web.metrics import announces_total
+
+                    announces_total.labels(result="failure").inc()
+                except ImportError:
+                    pass
 
             # Log discovered device count
             devices = discover_devices()

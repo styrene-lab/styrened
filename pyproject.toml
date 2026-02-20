@@ -43,6 +43,9 @@ web = [
     "fastapi>=0.109",
     "uvicorn[standard]>=0.27",
 ]
+metrics = [
+    "prometheus-client>=0.19",
+]
 yubikey = [
     "python-fido2>=1.0",
 ]
@@ -126,6 +129,8 @@ markers = [
     "propagation: LXMF propagation and multi-hop routing tests",
     "resilience: failover and recovery tests",
     "convergence: mesh discovery and convergence tests",
+    "mesh: requires Docker mesh topology (two styrened containers)",
+    "multihop: requires multi-hop Docker topology (three containers, two networks)",
 ]
 # pytest-xdist configuration
 # Use --dist loadscope to keep session-scoped fixtures shared within workers
