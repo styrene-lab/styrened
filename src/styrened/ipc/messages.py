@@ -535,6 +535,7 @@ class DeviceInfo:
     lxmf_destination_hash: str | None
     last_announce: float
     announce_count: int
+    short_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -547,6 +548,7 @@ class DeviceInfo:
             "lxmf_destination_hash": self.lxmf_destination_hash,
             "last_announce": self.last_announce,
             "announce_count": self.announce_count,
+            "short_name": self.short_name,
         }
 
     @classmethod
@@ -561,6 +563,7 @@ class DeviceInfo:
             lxmf_destination_hash=data.get("lxmf_destination_hash"),
             last_announce=data.get("last_announce", 0.0),
             announce_count=data.get("announce_count", 0),
+            short_name=data.get("short_name"),
         )
 
     @classmethod
@@ -583,6 +586,7 @@ class DeviceInfo:
             lxmf_destination_hash=device.lxmf_destination_hash,
             last_announce=device.last_announce or 0.0,
             announce_count=device.announce_count or 0,
+            short_name=getattr(device, "short_name", None),
         )
 
 

@@ -286,6 +286,19 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                 logging.getLogger(__name__).warning(
                     f"Unknown identity provider '{provider}', falling back to 'file'"
                 )
+        if "short_name" in ident and ident["short_name"]:
+            from styrened.models.config import validate_short_name
+
+            candidate = str(ident["short_name"])
+            if validate_short_name(candidate):
+                config.identity.short_name = candidate
+            else:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Invalid short_name '{candidate}' in config, ignoring"
+                )
+
         if "yubikey" in ident and isinstance(ident["yubikey"], dict):
             yk = ident["yubikey"]
             config.identity.yubikey = YubiKeyConfig(
@@ -424,8 +437,17 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
     if config.reticulum.config_path_override is not None:
         reticulum_dict["config_path_override"] = str(config.reticulum.config_path_override)
 
+    identity_dict: dict[str, Any] = {
+        "display_name": config.identity.display_name,
+        "icon": config.identity.icon,
+        "provider": config.identity.provider,
+    }
+    if config.identity.short_name:
+        identity_dict["short_name"] = config.identity.short_name
+
     config_dict: dict[str, Any] = {
         "reticulum": reticulum_dict,
+        "identity": identity_dict,
         "rpc": {
             "enabled": config.rpc.enabled,
         },

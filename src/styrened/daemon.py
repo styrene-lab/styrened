@@ -1155,8 +1155,9 @@ class StyreneDaemon:
             except Exception as e:
                 logger.warning(f"Could not get LXMF destination for announce: {e}")
 
-            # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}
-            app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}".encode()
+            # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}:{short_name}
+            short_name = self.config.identity.short_name or ""
+            app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}".encode()
             self._operator_destination.announce(app_data=app_data)
             logger.info(f"Announced as Styrene node: {display_name}")
 

@@ -155,9 +155,22 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
         # Column already exists, this is expected
         pass
 
+    # Schema migration: Add short_name column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE nodes ADD COLUMN short_name TEXT")
+        logger.debug("Added short_name column to nodes table")
+    except sqlite3.OperationalError:
+        # Column already exists, this is expected
+        pass
+
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
+    """)
+
+    # Index on short_name for name resolution queries
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_short_name ON nodes(short_name)
     """)
 
     # Index on lxmf_destination_hash for message sending lookups
@@ -285,8 +298,8 @@ class NodeStore:
                     INSERT INTO nodes (
                         destination_hash, identity_hash, name, device_type,
                         last_announce, announce_count, capabilities, version,
-                        lxmf_destination_hash, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                        lxmf_destination_hash, short_name, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
                     ON CONFLICT(destination_hash) DO UPDATE SET
                         identity_hash = excluded.identity_hash,
                         name = excluded.name,
@@ -296,6 +309,7 @@ class NodeStore:
                         capabilities = excluded.capabilities,
                         version = excluded.version,
                         lxmf_destination_hash = excluded.lxmf_destination_hash,
+                        short_name = excluded.short_name,
                         updated_at = strftime('%s', 'now')
                     """,
                     (
@@ -308,6 +322,7 @@ class NodeStore:
                         caps,
                         device.version,
                         device.lxmf_destination_hash,
+                        device.short_name,
                     ),
                 )
                 conn.commit()
@@ -542,6 +557,38 @@ class NodeStore:
 
             return [self._row_to_device(row) for row in rows]
 
+    def get_nodes_by_short_name(self, short_name: str) -> list[MeshDevice]:
+        """Get nodes by exact short_name match (case-insensitive).
+
+        Args:
+            short_name: Short name to search for.
+
+        Returns:
+            List of matching MeshDevice objects.
+        """
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM nodes WHERE LOWER(short_name) = LOWER(?)",
+                (short_name,),
+            ).fetchall()
+            return [self._row_to_device(row) for row in rows]
+
+    def get_nodes_by_short_name_prefix(self, prefix: str) -> list[MeshDevice]:
+        """Get nodes by short_name prefix match (case-insensitive).
+
+        Args:
+            prefix: Short name prefix to search for.
+
+        Returns:
+            List of matching MeshDevice objects.
+        """
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM nodes WHERE LOWER(short_name) LIKE LOWER(? || '%')",
+                (prefix,),
+            ).fetchall()
+            return [self._row_to_device(row) for row in rows]
+
     def delete_node(self, destination_hash: str) -> bool:
         """Delete a node from the store.
 
@@ -737,10 +784,16 @@ class NodeStore:
         """
         caps = row["capabilities"].split(",") if row["capabilities"] else None
 
-        # Handle optional lxmf_destination_hash column (may not exist in older DBs)
+        # Handle optional columns (may not exist in older DBs)
         lxmf_dest = None
         try:
             lxmf_dest = row["lxmf_destination_hash"]
+        except (KeyError, IndexError):
+            pass
+
+        short_name = None
+        try:
+            short_name = row["short_name"]
         except (KeyError, IndexError):
             pass
 
@@ -756,6 +809,7 @@ class NodeStore:
             capabilities=caps,
             version=row["version"],
             lxmf_destination_hash=lxmf_dest,
+            short_name=short_name,
         )
 
     def get_connection_count(self) -> int:
