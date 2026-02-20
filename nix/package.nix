@@ -8,8 +8,7 @@ python.pkgs.buildPythonApplication {
   inherit src;
 
   nativeBuildInputs = with python.pkgs; [
-    setuptools
-    wheel
+    hatchling
   ];
 
   propagatedBuildInputs = with python.pkgs; [

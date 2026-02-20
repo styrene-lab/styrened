@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
 
 [project]
 name = "styrened"
-version = "0.6.0"
+dynamic = ["version"]
 description = "Unified Styrene library and headless daemon for RNS/LXMF mesh networking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,14 +24,15 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
     "Topic :: Communications",
 ]
 
 # Core dependencies (merged from styrene-core)
 dependencies = [
-    "rns>=0.7.5",
-    "lxmf>=0.4.3",
+    "rns>=1.0.0",
+    "lxmf>=0.8.0",
     "pyyaml>=6.0",
     "platformdirs>=4.0",
     "sqlalchemy>=2.0",
@@ -50,12 +51,12 @@ yubikey = [
     "python-fido2>=1.0",
 ]
 dev = [
-    "pytest>=7.4",
+    "pytest>=8.0",
     "pytest-cov>=4.1",
-    "pytest-asyncio>=0.21",
+    "pytest-asyncio>=0.23",
     "pytest-xdist>=3.5",
-    "mypy>=1.7",
-    "ruff>=0.1.6",
+    "mypy>=1.8",
+    "ruff>=0.4.0",
     "types-pyyaml>=6.0",
     "python-fido2>=1.0",
 ]
@@ -71,11 +72,11 @@ Homepage = "https://github.com/styrene-lab/styrened"
 Repository = "https://github.com/styrene-lab/styrened"
 Documentation = "https://styrene-lab.github.io/styrened/"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.hatch.version]
+path = "src/styrened/__init__.py"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/styrened"]
 
 [tool.ruff]
 line-length = 100

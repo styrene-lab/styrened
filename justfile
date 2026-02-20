@@ -109,18 +109,16 @@ docs-clean:
     rm -rf docs/api/
     @echo "Cleaned: docs/api/"
 
-# Check version synchronization across all sources
+# Check version synchronization across canonical sources
 check-versions:
     #!/usr/bin/env bash
     set -euo pipefail
-    PYPROJECT_VER=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
     INIT_VER=$(grep '^__version__ = ' src/styrened/__init__.py | cut -d'"' -f2)
     FILE_VER=$(cat VERSION)
-    echo "pyproject.toml: $PYPROJECT_VER"
-    echo "__init__.py:    $INIT_VER"
-    echo "VERSION:        $FILE_VER"
-    if [[ "$PYPROJECT_VER" == "$INIT_VER" && "$INIT_VER" == "$FILE_VER" ]]; then
-        echo "OK: All versions synchronized"
+    echo "__init__.py: $INIT_VER"
+    echo "VERSION:     $FILE_VER"
+    if [[ "$INIT_VER" == "$FILE_VER" ]]; then
+        echo "OK: Versions synchronized"
     else
         echo "ERROR: VERSION DRIFT DETECTED"
         exit 1
@@ -429,7 +427,7 @@ clean-all: clean clean-images
 
 # ─── Release Helpers ────────────────────────────────────────────────────────
 
-# Bump version in all source files (interactive)
+# Bump version in canonical sources (interactive)
 bump-version new_version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -442,11 +440,9 @@ bump-version new_version:
         echo "Aborted"
         exit 1
     fi
-    # Update pyproject.toml
-    sed -i '' 's/^version = ".*"/version = "{{ new_version }}"/' pyproject.toml
-    # Update __init__.py
+    # Update __init__.py (canonical source — hatchling reads this)
     sed -i '' 's/__version__ = ".*"/__version__ = "{{ new_version }}"/' src/styrened/__init__.py
-    # Update VERSION file
+    # Update VERSION file (mirrors for Nix flake)
     echo "{{ new_version }}" > VERSION
     echo "Updated version to {{ new_version }}"
     just check-versions
@@ -463,7 +459,7 @@ tag-release:
 # Full release workflow: validate, bump, commit, tag
 release new_version: validate
     just bump-version {{ new_version }}
-    git add pyproject.toml src/styrened/__init__.py VERSION
+    git add src/styrened/__init__.py VERSION
     git commit -m "chore: bump version to {{ new_version }}"
     just tag-release
     @echo ""

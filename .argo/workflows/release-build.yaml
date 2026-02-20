@@ -28,6 +28,9 @@ spec:
     - name: ghcr-auth
       secret:
         secretName: ghcr-secret
+    - name: pypi-auth
+      secret:
+        secretName: pypi-secret
 
   templates:
     - name: pipeline
@@ -53,9 +56,16 @@ spec:
                   value: "{{tasks.extract-version.outputs.parameters.version}}"
                 - name: prerelease
                   value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
+          - name: publish-pypi
+            template: publish-pypi
+            depends: "build-wheel && extract-version"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
           - name: create-release
             template: github-release
-            depends: "push-oci && build-wheel"
+            depends: "push-oci && publish-pypi"
             arguments:
               parameters:
                 - name: version
@@ -134,6 +144,35 @@ spec:
           requests:
             cpu: 500m
             memory: 512Mi
+
+    - name: publish-pypi
+      inputs:
+        parameters:
+          - name: version
+      container:
+        image: python:3.11-slim
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            pip install --quiet twine
+            VERSION="{{inputs.parameters.version}}"
+            echo "Publishing styrened ${VERSION} to PyPI..."
+            ls -la /workspace/dist/
+            TWINE_USERNAME=__token__ \
+            TWINE_PASSWORD=$(cat /pypi/token) \
+            twine upload --skip-existing /workspace/dist/styrened-${VERSION}*
+            echo "Published to PyPI"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: pypi-auth
+            mountPath: /pypi
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
 
     - name: nix-build-oci
       container:
