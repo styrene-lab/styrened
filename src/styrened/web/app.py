@@ -38,6 +38,17 @@ def create_app(daemon: StyreneDaemon) -> FastAPI:
     router = create_router(daemon, broadcaster)
     app.include_router(router)
 
+    # Prometheus metrics endpoint (optional)
+    if daemon.config.api.metrics.enabled:
+        try:
+            from styrened.web.metrics import create_metrics_router, init_metrics
+
+            init_metrics(daemon)
+            app.include_router(create_metrics_router())
+            logger.info("Prometheus metrics endpoint enabled at /metrics")
+        except ImportError:
+            logger.warning("Metrics enabled but prometheus_client not installed")
+
     # Static files (SPA frontend)
     static_dir = importlib.resources.files("styrened.web") / "static"
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")

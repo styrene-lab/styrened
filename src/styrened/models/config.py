@@ -247,6 +247,17 @@ class IdentityConfig:
 
 
 @dataclass
+class MetricsConfig:
+    """Prometheus metrics endpoint configuration.
+
+    Attributes:
+        enabled: Whether to enable the /metrics endpoint.
+    """
+
+    enabled: bool = False
+
+
+@dataclass
 class APIConfig:
     """HTTP API configuration for headless mode.
 
@@ -254,11 +265,13 @@ class APIConfig:
         enabled: Whether to enable HTTP API.
         host: IP address to bind to.
         port: TCP port for API server.
+        metrics: Prometheus metrics endpoint configuration.
     """
 
     enabled: bool = False
     host: str = "0.0.0.0"
     port: int = 8000
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
 
 
 @dataclass

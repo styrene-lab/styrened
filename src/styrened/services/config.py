@@ -264,6 +264,10 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.api.host = str(api["host"])
         if "port" in api:
             config.api.port = int(api["port"])
+        if "metrics" in api and isinstance(api["metrics"], dict):
+            metrics = api["metrics"]
+            if "enabled" in metrics:
+                config.api.metrics.enabled = _parse_bool(metrics["enabled"])
 
     # Parse identity section (ecosystem appearance + provider)
     if "identity" in data and isinstance(data["identity"], dict):
@@ -437,6 +441,9 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
             "enabled": config.api.enabled,
             "host": config.api.host,
             "port": config.api.port,
+            "metrics": {
+                "enabled": config.api.metrics.enabled,
+            },
         },
     }
 

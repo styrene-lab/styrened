@@ -121,6 +121,12 @@ class AutoReplyHandler:
 
             # Check cooldown (fast path - no string conversion)
             if not self._check_cooldown(source_hash_bytes):
+                try:
+                    from styrened.web.metrics import auto_replies_total
+
+                    auto_replies_total.labels(result="cooldown_skip").inc()
+                except ImportError:
+                    pass
                 return
 
             # Check if path to sender exists before attempting reply
@@ -128,6 +134,12 @@ class AutoReplyHandler:
                 logger.warning(
                     f"No path to sender {source_hash_bytes.hex()[:16]}..., skipping auto-reply"
                 )
+                try:
+                    from styrened.web.metrics import auto_replies_total
+
+                    auto_replies_total.labels(result="no_path_skip").inc()
+                except ImportError:
+                    pass
                 return
 
             # Only log and process if we're actually sending a reply
@@ -209,6 +221,13 @@ class AutoReplyHandler:
 
             # Update cooldown tracker with LRU eviction
             self._record_reply(destination_hash)
+
+            try:
+                from styrened.web.metrics import auto_replies_total
+
+                auto_replies_total.labels(result="sent").inc()
+            except ImportError:
+                pass
 
             logger.info(f"Sent auto-reply to {destination_hash.hex()[:16]}...")
 
