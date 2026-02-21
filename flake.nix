@@ -23,7 +23,11 @@
                   watchfiles = pyPrev.watchfiles.overridePythonAttrs { doCheck = false; };
                   orjson = pyPrev.orjson.overridePythonAttrs { doCheck = false; };
                   uvicorn = pyPrev.uvicorn.overridePythonAttrs { doCheck = false; };
-                  inline-snapshot = pyPrev.inline-snapshot.overridePythonAttrs { doCheck = false; };
+                  inline-snapshot = pyPrev.inline-snapshot.overridePythonAttrs {
+                    doCheck = false;
+                    pythonRuntimeDepsCheck = false;
+                    dontCheckRuntimeDeps = true;
+                  };
                   rich-toolkit = pyPrev.rich-toolkit.overridePythonAttrs { doCheck = false; };
                   pendulum = pyPrev.pendulum.overridePythonAttrs { doCheck = false; };
                 };
