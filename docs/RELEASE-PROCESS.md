@@ -228,7 +228,7 @@ Nightly builds run tiered test suites:
 | `ci-workflow-sa` ServiceAccount | `argo` | Workflow pod identity |
 | `ci-test-runner` ClusterRole | cluster | Namespace/pod/helm RBAC for test harness |
 | `ghcr-secret` Secret | `argo` | GHCR registry auth (Vault-synced) |
-| `pypi-secret` Secret | `argo` | PyPI API token (Vault-synced from `secret/bootstrap/pypi/styrened`) |
+| `pypi-secret` Secret | `argo` | PyPI API token (Vault-synced from `secret/bootstrap/pypi/styrene-lab`) |
 | `ghcr-secret` Secret | `styrene-infra` | GHCR auth source for test namespace copies |
 | `operate-workflow-sa` ServiceAccount | `argo-events` | Sensor → Workflow submission |
 
