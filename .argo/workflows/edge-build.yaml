@@ -81,8 +81,12 @@ spec:
             set -euo pipefail
             # Enable flakes
             mkdir -p /etc/nix
-            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
-            echo "sandbox = false" >> /etc/nix/nix.conf
+            cat >> /etc/nix/nix.conf <<'NIXCONF'
+            experimental-features = nix-command flakes
+            sandbox = false
+            max-jobs = auto
+            cores = 0
+            NIXCONF
 
             # Configure Cachix for faster builds
             nix-env -iA cachix -f https://cachix.org/api/v1/install
@@ -104,11 +108,11 @@ spec:
             readOnly: true
         resources:
           requests:
-            cpu: "2"
-            memory: 4Gi
-          limits:
             cpu: "4"
             memory: 8Gi
+          limits:
+            cpu: "16"
+            memory: 32Gi
 
     - name: push-ghcr
       container:
