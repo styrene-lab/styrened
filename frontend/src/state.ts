@@ -190,6 +190,7 @@ export const appState = {
   identity: null as Identity | null,
   connectionStatus: 'connecting' as 'connecting' | 'connected' | 'reconnecting' | 'error',
   activePanel: 'topology' as string,
+  publicMode: false,
 }
 
 export function setConnectionStatus(status: typeof appState.connectionStatus): void {
@@ -199,5 +200,10 @@ export function setConnectionStatus(status: typeof appState.connectionStatus): v
 
 export function setActivePanel(panel: string): void {
   appState.activePanel = panel
+  notify('app')
+}
+
+export function setPublicMode(mode: boolean): void {
+  appState.publicMode = mode
   notify('app')
 }

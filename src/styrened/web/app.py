@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from styrened.web.events import SSEBroadcaster
+from styrened.web.middleware import PublicModeMiddleware
 from styrened.web.routes import create_router
 
 if TYPE_CHECKING:
@@ -33,6 +34,9 @@ def create_app(daemon: StyreneDaemon) -> FastAPI:
     broadcaster = SSEBroadcaster()
     app.state.broadcaster = broadcaster
     app.state.daemon = daemon
+
+    # Public mode middleware (gates write operations before they reach routes)
+    app.add_middleware(PublicModeMiddleware)
 
     # API routes
     router = create_router(daemon, broadcaster)

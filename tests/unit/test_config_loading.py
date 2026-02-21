@@ -147,7 +147,7 @@ api:
         assert config.api.enabled is True
 
     def test_load_config_preserves_defaults_on_missing(self) -> None:
-        """Missing config sections should use defaults."""
+        """Missing config sections should use operator profile defaults."""
         yaml_content = """
 # Empty config
 """
@@ -156,10 +156,10 @@ api:
             f.flush()
             config = load_core_config(Path(f.name))
 
-        # Check defaults are preserved
-        assert config.rpc.enabled is True  # Default
-        assert config.discovery.enabled is True  # Default
-        assert config.chat.auto_reply_enabled is True  # Default
+        # Check operator profile defaults are preserved
+        assert config.rpc.enabled is True
+        assert config.discovery.enabled is True
+        assert config.chat.auto_reply_enabled is False  # Operator profile: human is present
 
     def test_load_config_with_all_string_bools(self) -> None:
         """Comprehensive test with all boolean fields as strings."""

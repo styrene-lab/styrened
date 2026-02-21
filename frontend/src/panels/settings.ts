@@ -2,10 +2,12 @@
 
 import { fetchConfig, fetchIdentity, updateConfig } from '../api'
 import * as sse from '../sse'
+import { appState } from '../state'
 
 let mounted = false
 let currentSection = 'reticulum'
 let configData: Record<string, any> = {}
+let profileValue = 'operator'
 let identityData: { identity_hash: string; destination_hash: string; lxmf_destination_hash: string } | null = null
 let sseHandler: ((data: any) => void) | null = null
 
@@ -16,6 +18,9 @@ const SECTIONS = [
 
 // Enum field definitions — constrained to valid backend values
 const ENUM_FIELDS: Record<string, Record<string, string[]>> = {
+  _toplevel: {
+    profile: ['operator', 'endpoint', 'hub'],
+  },
   reticulum: {
     mode: ['standalone', 'hub', 'peer'],
   },
@@ -25,15 +30,32 @@ const ENUM_FIELDS: Record<string, Record<string, string[]>> = {
 }
 
 function createHTML(): string {
+  const isPublic = appState.publicMode
+  const disabledAttr = isPublic ? ' disabled' : ''
+
   const tabs = SECTIONS.map(s =>
     `<button class="settings-tab${s === currentSection ? ' active' : ''}" data-section="${s}">${s.toUpperCase()}</button>`
   ).join('')
+
+  const profileOptions = ENUM_FIELDS._toplevel.profile.map(opt =>
+    `<option value="${opt}" ${profileValue === opt ? 'selected' : ''}>${opt.toUpperCase()}</option>`
+  ).join('')
+
+  const headerAction = isPublic
+    ? '<span class="read-only-badge">READ-ONLY</span>'
+    : '<button id="settings-save-btn" class="modal-btn modal-btn-primary" disabled>SAVE</button>'
 
   return `
     <div class="settings-panel">
       <div class="settings-header">
         <span class="panel-title">CONFIGURATION</span>
-        <button id="settings-save-btn" class="modal-btn modal-btn-primary" disabled>SAVE</button>
+        ${headerAction}
+      </div>
+      <div class="settings-field" style="padding: 0.5rem 1rem;">
+        <label class="form-label" for="field-profile">PROFILE</label>
+        <select id="field-profile" class="form-select settings-input" data-section="_toplevel" data-key="profile" data-type="string"${disabledAttr}>
+          ${profileOptions}
+        </select>
       </div>
       <div class="settings-tabs" id="settings-tabs">${tabs}</div>
       <div class="settings-form" id="settings-form">
@@ -51,7 +73,11 @@ async function loadConfig(): Promise<void> {
       fetchIdentity().catch(() => null),
     ])
     configData = result.config
+    profileValue = configData.profile || 'operator'
     identityData = identity
+    // Update profile dropdown without full re-render
+    const profileSelect = document.getElementById('field-profile') as HTMLSelectElement
+    if (profileSelect) profileSelect.value = profileValue
     renderSection(currentSection)
   } catch (err: any) {
     const form = document.getElementById('settings-form')
@@ -120,6 +146,7 @@ function renderField(section: string, key: string, value: any): string {
   const label = key.replace(/_/g, ' ').toUpperCase()
   // Use the leaf key for enum lookup (e.g., 'mode' from 'reticulum.mode')
   const leafKey = key.split('.').pop() || key
+  const disabledAttr = appState.publicMode ? ' disabled' : ''
 
   // Check for enum fields first
   const enumOptions = ENUM_FIELDS[section]?.[leafKey]
@@ -130,7 +157,7 @@ function renderField(section: string, key: string, value: any): string {
     return `
       <div class="settings-field">
         <label class="form-label" for="${id}">${label}</label>
-        <select id="${id}" class="form-select settings-input" data-section="${section}" data-key="${key}" data-type="string">
+        <select id="${id}" class="form-select settings-input" data-section="${section}" data-key="${key}" data-type="string"${disabledAttr}>
           ${options}
         </select>
       </div>
@@ -141,7 +168,7 @@ function renderField(section: string, key: string, value: any): string {
     return `
       <div class="settings-field">
         <label class="form-label" for="${id}">${label}</label>
-        <select id="${id}" class="form-select settings-input" data-section="${section}" data-key="${key}" data-type="bool">
+        <select id="${id}" class="form-select settings-input" data-section="${section}" data-key="${key}" data-type="bool"${disabledAttr}>
           <option value="true" ${value ? 'selected' : ''}>TRUE</option>
           <option value="false" ${!value ? 'selected' : ''}>FALSE</option>
         </select>
@@ -154,7 +181,7 @@ function renderField(section: string, key: string, value: any): string {
       <div class="settings-field">
         <label class="form-label" for="${id}">${label}</label>
         <input type="number" id="${id}" class="form-input settings-input" value="${value}"
-               data-section="${section}" data-key="${key}" data-type="number" />
+               data-section="${section}" data-key="${key}" data-type="number"${disabledAttr} />
       </div>
     `
   }
@@ -164,7 +191,7 @@ function renderField(section: string, key: string, value: any): string {
     <div class="settings-field">
       <label class="form-label" for="${id}">${label}</label>
       <input type="text" id="${id}" class="form-input settings-input" value="${escapeHtml(String(value ?? ''))}"
-             data-section="${section}" data-key="${key}" data-type="string" />
+             data-section="${section}" data-key="${key}" data-type="string"${disabledAttr} />
     </div>
   `
 }
@@ -213,6 +240,12 @@ async function handleSave(): Promise<void> {
       value = Number(input.value)
     } else {
       value = input.value
+    }
+
+    // Top-level fields (profile) go directly on the changes root
+    if (section === '_toplevel') {
+      changes[key] = value
+      return
     }
 
     // Build nested structure from dot-notation keys

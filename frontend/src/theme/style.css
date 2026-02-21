@@ -1188,6 +1188,13 @@ div.vis-tooltip {
     border-top: 1px solid rgba(224, 96, 96, 0.3);
 }
 
+/* Read-only badge (public mode) */
+.read-only-badge {
+    color: var(--color-warning);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+
 /* ============================================
    MODAL / SETUP
    ============================================ */

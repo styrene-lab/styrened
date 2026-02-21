@@ -34,6 +34,7 @@ class ExecCommandRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     """Partial config update. Only provided sections/fields are changed."""
 
+    profile: str | None = None
     reticulum: dict[str, Any] | None = None
     identity: dict[str, Any] | None = None
     rpc: dict[str, Any] | None = None
