@@ -70,6 +70,8 @@ export function connect(): void {
     'message-event',
     'conversation-updated',
     'contact-updated',
+    'config-updated',
+    'auto-reply-updated',
   ]
 
   for (const type of eventTypes) {

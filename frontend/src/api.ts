@@ -10,6 +10,14 @@ import type {
   Contact,
   ExecResult,
   DeviceStatus,
+  SystemStatus,
+  ReticulumStatus,
+  DiskInfo,
+  NetworkInterface,
+  SetupStatus,
+  RebootResult,
+  UpdateConfigResult,
+  AutoReplyState,
 } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -36,12 +44,22 @@ export async function fetchConfig(): Promise<{ config: Record<string, any> }> {
 
 // Mesh topology
 
-export async function fetchTopology(includeUnnamed = false): Promise<TopologyData> {
-  return request(`/api/mesh/topology?include_unnamed=${includeUnnamed}`)
+export async function fetchTopology(
+  includeUnnamed = false,
+  excludeStatus?: string,
+): Promise<TopologyData> {
+  const params = new URLSearchParams({ include_unnamed: String(includeUnnamed) })
+  if (excludeStatus) params.set('exclude_status', excludeStatus)
+  return request(`/api/mesh/topology?${params}`)
 }
 
-export async function fetchDevices(includeUnnamed = false): Promise<MeshDevice[]> {
-  return request(`/api/mesh/devices?include_unnamed=${includeUnnamed}`)
+export async function fetchDevices(
+  includeUnnamed = false,
+  excludeStatus?: string,
+): Promise<MeshDevice[]> {
+  const params = new URLSearchParams({ include_unnamed: String(includeUnnamed) })
+  if (excludeStatus) params.set('exclude_status', excludeStatus)
+  return request(`/api/mesh/devices?${params}`)
 }
 
 export async function fetchMeshStatus(): Promise<MeshStatus> {
@@ -155,4 +173,74 @@ export async function fleetStatus(destination: string): Promise<DeviceStatus> {
 
 export async function announce(): Promise<{ announced: boolean; destination_hash: string }> {
   return request('/api/announce', { method: 'POST' })
+}
+
+export async function fleetReboot(
+  destination: string,
+  delay = 0,
+): Promise<RebootResult> {
+  return request(`/api/fleet/${destination}/reboot`, {
+    method: 'POST',
+    body: JSON.stringify({ delay }),
+  })
+}
+
+export async function fleetConfigUpdate(
+  destination: string,
+  configUpdates: Record<string, any>,
+  timeout = 10,
+): Promise<UpdateConfigResult> {
+  return request(`/api/fleet/${destination}/config`, {
+    method: 'PUT',
+    body: JSON.stringify({ config_updates: configUpdates, timeout }),
+  })
+}
+
+// Auto-reply
+
+export async function fetchAutoReplyStatus(): Promise<AutoReplyState> {
+  return request('/api/auto-reply')
+}
+
+export async function toggleAutoReply(
+  enabled: boolean,
+  message?: string,
+): Promise<AutoReplyState> {
+  return request('/api/auto-reply', {
+    method: 'POST',
+    body: JSON.stringify({ enabled, message }),
+  })
+}
+
+// Config
+
+export async function updateConfig(
+  updates: Record<string, any>,
+): Promise<{ config: Record<string, any> }> {
+  return request('/api/config', {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  })
+}
+
+// System
+
+export async function fetchSystemStatus(): Promise<SystemStatus> {
+  return request('/api/system/status')
+}
+
+export async function fetchReticulumStatus(): Promise<ReticulumStatus> {
+  return request('/api/system/reticulum')
+}
+
+export async function fetchDisks(): Promise<DiskInfo[]> {
+  return request('/api/system/disks')
+}
+
+export async function fetchNetworkInterfaces(): Promise<NetworkInterface[]> {
+  return request('/api/system/network')
+}
+
+export async function fetchSetupStatus(): Promise<SetupStatus> {
+  return request('/api/system/setup-status')
 }

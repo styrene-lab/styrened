@@ -6,7 +6,7 @@ export const networkOptions = {
   nodes: {
     font: {
       color: theme.greenBright,
-      face: 'VT323, monospace',
+      face: 'JetBrains Mono, monospace',
       size: 14,
     },
     margin: { top: 10, right: 14, bottom: 10, left: 14 },

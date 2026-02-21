@@ -1,9 +1,13 @@
-// Chat panel — conversation list + message thread
+// Chat panel — conversation list + message thread + OOO toggle
 
 import {
   fetchConversations, fetchMessages, sendChat, markRead,
+  fetchAutoReplyStatus, toggleAutoReply,
 } from '../api'
-import { chatStore, setConversations, setActiveConversation, setMessages, addMessage, subscribe } from '../state'
+import {
+  chatStore, setConversations, setActiveConversation, setMessages,
+  addMessage, subscribe, autoReplyStore, setAutoReplyState,
+} from '../state'
 import * as sse from '../sse'
 import type { Conversation, Message } from '../types'
 
@@ -15,6 +19,21 @@ function createHTML(): string {
       <div class="chat-sidebar">
         <div class="chat-sidebar-header">
           <span class="sidebar-title">CONVERSATIONS</span>
+          <button id="ooo-toggle" class="auto-reply-btn" title="Out of Office">OOO</button>
+        </div>
+        <div id="ooo-popover" class="auto-reply-popover hidden">
+          <div class="auto-reply-popover-header">
+            <span class="sidebar-title">AUTO-REPLY</span>
+            <label class="auto-reply-switch">
+              <input type="checkbox" id="ooo-enabled" />
+              <span class="auto-reply-switch-label" id="ooo-switch-label">OFF</span>
+            </label>
+          </div>
+          <textarea id="ooo-message" class="form-input auto-reply-textarea" rows="3" maxlength="1024" placeholder="Auto-reply message..."></textarea>
+          <div class="auto-reply-popover-footer">
+            <button id="ooo-save" class="modal-btn modal-btn-primary modal-btn-small">SAVE</button>
+            <button id="ooo-cancel" class="modal-btn modal-btn-small">CLOSE</button>
+          </div>
         </div>
         <div class="conversation-list" id="conversation-list"></div>
       </div>
@@ -37,6 +56,59 @@ function createHTML(): string {
       </div>
     </div>
   `
+}
+
+function updateOOOButton(): void {
+  const btn = document.getElementById('ooo-toggle')
+  if (!btn) return
+  if (autoReplyStore.enabled) {
+    btn.classList.add('active')
+  } else {
+    btn.classList.remove('active')
+  }
+}
+
+function updateOOOPopover(): void {
+  const checkbox = document.getElementById('ooo-enabled') as HTMLInputElement
+  const textarea = document.getElementById('ooo-message') as HTMLTextAreaElement
+  const label = document.getElementById('ooo-switch-label')
+  if (checkbox) checkbox.checked = autoReplyStore.enabled
+  if (textarea) textarea.value = autoReplyStore.message
+  if (label) label.textContent = autoReplyStore.enabled ? 'ON' : 'OFF'
+}
+
+function toggleOOOPopover(): void {
+  const popover = document.getElementById('ooo-popover')
+  if (!popover) return
+  const isHidden = popover.classList.contains('hidden')
+  if (isHidden) {
+    updateOOOPopover()
+    popover.classList.remove('hidden')
+  } else {
+    popover.classList.add('hidden')
+  }
+}
+
+async function handleOOOSave(): Promise<void> {
+  const checkbox = document.getElementById('ooo-enabled') as HTMLInputElement
+  const textarea = document.getElementById('ooo-message') as HTMLTextAreaElement
+  if (!checkbox || !textarea) return
+
+  try {
+    const result = await toggleAutoReply(checkbox.checked, textarea.value || undefined)
+    setAutoReplyState(result)
+    updateOOOButton()
+    const popover = document.getElementById('ooo-popover')
+    popover?.classList.add('hidden')
+  } catch (err) {
+    console.error('Failed to update auto-reply:', err)
+  }
+}
+
+function onOOOEnabledChange(): void {
+  const checkbox = document.getElementById('ooo-enabled') as HTMLInputElement
+  const label = document.getElementById('ooo-switch-label')
+  if (label && checkbox) label.textContent = checkbox.checked ? 'ON' : 'OFF'
 }
 
 function renderConversationList(): void {
@@ -203,18 +275,41 @@ function onConversationUpdated(data: any): void {
   }).catch(() => {})
 }
 
+function onAutoReplyUpdated(data: any): void {
+  setAutoReplyState({
+    enabled: data.enabled,
+    message: data.message,
+    cooldown: autoReplyStore.cooldown,
+  })
+  updateOOOButton()
+  updateOOOPopover()
+}
+
 export async function mount(target: HTMLElement): Promise<void> {
   target.innerHTML = createHTML()
   mounted = true
 
   // Load initial data
   try {
-    const { conversations } = await fetchConversations()
+    const [{ conversations }, autoReply] = await Promise.all([
+      fetchConversations(),
+      fetchAutoReplyStatus(),
+    ])
     setConversations(conversations)
+    setAutoReplyState(autoReply)
     renderConversationList()
+    updateOOOButton()
   } catch (err) {
-    console.error('Failed to load conversations:', err)
+    console.error('Failed to load chat data:', err)
   }
+
+  // Wire OOO toggle
+  document.getElementById('ooo-toggle')?.addEventListener('click', toggleOOOPopover)
+  document.getElementById('ooo-save')?.addEventListener('click', handleOOOSave)
+  document.getElementById('ooo-cancel')?.addEventListener('click', () => {
+    document.getElementById('ooo-popover')?.classList.add('hidden')
+  })
+  document.getElementById('ooo-enabled')?.addEventListener('change', onOOOEnabledChange)
 
   // Wire input
   document.getElementById('send-btn')?.addEventListener('click', handleSend)
@@ -228,12 +323,14 @@ export async function mount(target: HTMLElement): Promise<void> {
   // SSE handlers
   sse.on('message-event', onMessageEvent)
   sse.on('conversation-updated', onConversationUpdated)
+  sse.on('auto-reply-updated', onAutoReplyUpdated)
 }
 
 export function unmount(): void {
   mounted = false
   sse.off('message-event', onMessageEvent)
   sse.off('conversation-updated', onConversationUpdated)
+  sse.off('auto-reply-updated', onAutoReplyUpdated)
 }
 
 // --- Helpers ---

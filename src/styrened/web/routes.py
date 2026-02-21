@@ -9,10 +9,17 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
 
 from styrened.web.events import SSEBroadcaster, create_events_router
-from styrened.web.models import ExecCommandRequest, SendChatRequest, SetContactRequest
+from styrened.web.models import (
+    AutoReplyToggleRequest,
+    ConfigUpdateRequest,
+    ExecCommandRequest,
+    FleetConfigUpdateRequest,
+    RebootRequest,
+    SendChatRequest,
+    SetContactRequest,
+)
 
 if TYPE_CHECKING:
     from styrened.daemon import StyreneDaemon
@@ -60,43 +67,179 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         if lxmf_service and lxmf_service._destination:
             lxmf_destination_hash = lxmf_service._destination.hexhash
 
+        display_name = daemon.config.identity.display_name
+
         return {
             "identity_hash": identity_hash,
             "destination_hash": destination_hash,
             "lxmf_destination_hash": lxmf_destination_hash,
+            "display_name": display_name,
         }
 
     @router.get("/api/config")
     async def config():
-        """Return sanitized configuration (no secrets)."""
+        """Return sanitized configuration (all 10 sections, no secrets)."""
+        from styrened.services.config import _serialize_config
+
         cfg = daemon.config
+        config_dict = _serialize_config(cfg)
+
+        # Sanitize sensitive fields
+        if "identity" in config_dict:
+            yk = config_dict["identity"].get("yubikey")
+            if yk and yk.get("credential_id"):
+                yk["credential_id"] = "***"
+
+        if "terminal" in config_dict:
+            auth_ids = config_dict["terminal"].get("authorized_identities")
+            if auth_ids:
+                config_dict["terminal"]["authorized_identities_count"] = len(auth_ids)
+                del config_dict["terminal"]["authorized_identities"]
+
+        return {"config": config_dict}
+
+    @router.put("/api/config")
+    async def update_config(body: ConfigUpdateRequest):
+        """Update configuration (partial merge). Protected fields are rejected."""
+        from styrened.models.config import ConfigValidationError
+        from styrened.services.config import (
+            _serialize_config,
+            load_core_config,
+            save_core_config,
+            validate_core_config,
+        )
+
+        protected_fields = {
+            ("identity", "yubikey", "credential_id"),
+            ("terminal", "authorized_identities"),
+        }
+
+        # Check for protected fields
+        updates = body.model_dump(exclude_none=True)
+        for section_key, section_val in updates.items():
+            if isinstance(section_val, dict):
+                for field_key, field_val in section_val.items():
+                    for protected in protected_fields:
+                        if len(protected) == 2 and protected == (section_key, field_key):
+                            raise HTTPException(
+                                403,
+                                detail=f"Field '{section_key}.{field_key}' cannot be set via API",
+                            )
+                        if (
+                            len(protected) == 3
+                            and protected[0] == section_key
+                            and protected[1] == field_key
+                            and isinstance(field_val, dict)
+                            and protected[2] in field_val
+                        ):
+                            raise HTTPException(
+                                403,
+                                detail=f"Field '{'.'.join(protected)}' cannot be set via API",
+                            )
+
+        # Load current → deep-merge → validate → save
+        current = load_core_config()
+        current_dict = _serialize_config(current)
+
+        for section_key, section_val in updates.items():
+            if section_key in current_dict and isinstance(section_val, dict):
+                if isinstance(current_dict[section_key], dict):
+                    current_dict[section_key].update(section_val)
+                else:
+                    current_dict[section_key] = section_val
+            elif isinstance(section_val, dict):
+                current_dict[section_key] = section_val
+
+        # Re-load from merged dict by saving temp and loading
+        import tempfile
+        from pathlib import Path
+
+        import yaml
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(current_dict, f, default_flow_style=False, sort_keys=False)
+            temp_path = Path(f.name)
+
+        try:
+            merged_config = load_core_config(temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        # Validate
+        try:
+            validate_core_config(merged_config, raise_on_error=True)
+        except ConfigValidationError as e:
+            raise HTTPException(
+                422,
+                detail={
+                    "message": "Validation failed",
+                    "errors": [{"field": err.field, "message": err.message, "value": err.value} for err in e.errors],
+                },
+            ) from None
+
+        # Save and reload
+        save_core_config(merged_config)
+        daemon.config = load_core_config()
+
+        # Re-announce if chat section was updated (capability changes)
+        if "chat" in updates:
+            daemon._announce()
+
+        # Broadcast change
+        broadcaster.broadcast_config_event()
+
+        # Return sanitized config
+        result = _serialize_config(daemon.config)
+        if "identity" in result:
+            yk = result["identity"].get("yubikey")
+            if yk and yk.get("credential_id"):
+                yk["credential_id"] = "***"
+        if "terminal" in result:
+            auth_ids = result["terminal"].get("authorized_identities")
+            if auth_ids:
+                result["terminal"]["authorized_identities_count"] = len(auth_ids)
+                del result["terminal"]["authorized_identities"]
+
+        return {"config": result}
+
+    # -------------------------------------------------------------------------
+    # Auto-reply (out-of-office)
+    # -------------------------------------------------------------------------
+
+    @router.get("/api/auto-reply")
+    async def get_auto_reply():
+        """Return current auto-reply state."""
         return {
-            "config": {
-                "reticulum": {
-                    "mode": cfg.reticulum.mode.value,
-                    "announce_interval": cfg.reticulum.announce_interval,
-                    "hub_enabled": cfg.reticulum.hub_enabled,
-                },
-                "rpc": {
-                    "enabled": cfg.rpc.enabled,
-                    "relay_mode": cfg.rpc.relay_mode,
-                    "allow_command_execution": cfg.rpc.allow_command_execution,
-                },
-                "discovery": {
-                    "enabled": cfg.discovery.enabled,
-                    "auto_announce": cfg.discovery.auto_announce,
-                },
-                "chat": {
-                    "enabled": cfg.chat.enabled,
-                    "auto_reply_enabled": cfg.chat.auto_reply_enabled,
-                    "auto_reply_cooldown": cfg.chat.auto_reply_cooldown,
-                    "persist_messages": cfg.chat.persist_messages,
-                },
-                "api": {
-                    "enabled": cfg.api.enabled,
-                    "port": cfg.api.port,
-                },
-            }
+            "enabled": daemon.config.chat.auto_reply_enabled,
+            "message": daemon.config.chat.auto_reply_message,
+            "cooldown": daemon.config.chat.auto_reply_cooldown,
+        }
+
+    @router.post("/api/auto-reply")
+    async def toggle_auto_reply(body: AutoReplyToggleRequest):
+        """Toggle auto-reply and optionally update the message."""
+        from styrened.services.config import save_core_config
+
+        daemon.config.chat.auto_reply_enabled = body.enabled
+        if body.message is not None:
+            daemon.config.chat.auto_reply_message = body.message
+
+        # Persist to disk
+        save_core_config(daemon.config)
+
+        # Re-announce to propagate capability change
+        daemon._announce()
+
+        # Broadcast SSE event
+        broadcaster.broadcast_auto_reply_event(
+            daemon.config.chat.auto_reply_enabled,
+            daemon.config.chat.auto_reply_message,
+        )
+
+        return {
+            "enabled": daemon.config.chat.auto_reply_enabled,
+            "message": daemon.config.chat.auto_reply_message,
+            "cooldown": daemon.config.chat.auto_reply_cooldown,
         }
 
     # -------------------------------------------------------------------------
@@ -104,11 +247,16 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
     # -------------------------------------------------------------------------
 
     @router.get("/api/mesh/topology")
-    async def topology(include_unnamed: bool = Query(False)):
+    async def topology(
+        include_unnamed: bool = Query(False),
+        exclude_status: str | None = Query(None),
+    ):
         """Return graph JSON with nodes and edges for vis-network."""
         node_store = daemon._node_store
         if node_store is None:
             return {"nodes": [], "edges": []}
+
+        excluded = set(s.strip() for s in exclude_status.split(",")) if exclude_status else set()
 
         devices = node_store.get_all_nodes()
         paths = node_store.get_all_paths()
@@ -118,6 +266,8 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         node_ids = set()
         for d in devices:
             if not include_unnamed and d.name == "binary-data":
+                continue
+            if d.status.value in excluded:
                 continue
             node_ids.add(d.destination_hash)
             nodes.append({
@@ -164,16 +314,23 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         return {"nodes": nodes, "edges": edges}
 
     @router.get("/api/mesh/devices")
-    async def devices(include_unnamed: bool = Query(False)):
+    async def devices(
+        include_unnamed: bool = Query(False),
+        exclude_status: str | None = Query(None),
+    ):
         """Return device list with status information."""
         node_store = daemon._node_store
         if node_store is None:
             return []
 
+        excluded = set(s.strip() for s in exclude_status.split(",")) if exclude_status else set()
+
         all_devices = node_store.get_all_nodes()
         result = []
         for d in all_devices:
             if not include_unnamed and d.name == "binary-data":
+                continue
+            if d.status.value in excluded:
                 continue
             result.append({
                 "destination_hash": d.destination_hash,
@@ -603,6 +760,47 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         except TimeoutError:
             raise HTTPException(504, detail="Status request timed out")
 
+    @router.post("/api/fleet/{destination}/reboot")
+    async def fleet_reboot(destination: str, body: RebootRequest):
+        """Reboot a remote device."""
+        _validate_peer_hash(destination)
+        if not daemon._rpc_client:
+            raise HTTPException(503, detail="RPC client not initialized")
+
+        try:
+            result = await daemon._rpc_client.call_reboot(
+                destination=destination,
+                delay=body.delay,
+            )
+            return {
+                "success": result.success,
+                "message": result.message,
+                "scheduled_time": result.scheduled_time,
+            }
+        except TimeoutError:
+            raise HTTPException(504, detail="Reboot request timed out") from None
+
+    @router.put("/api/fleet/{destination}/config")
+    async def fleet_config_update(destination: str, body: FleetConfigUpdateRequest):
+        """Update configuration on a remote device."""
+        _validate_peer_hash(destination)
+        if not daemon._rpc_client:
+            raise HTTPException(503, detail="RPC client not initialized")
+
+        try:
+            result = await daemon._rpc_client.call_update_config(
+                destination=destination,
+                config_updates=body.config_updates,
+                timeout=body.timeout,
+            )
+            return {
+                "success": result.success,
+                "message": result.message,
+                "updated_keys": result.updated_keys,
+            }
+        except TimeoutError:
+            raise HTTPException(504, detail=f"Config update timed out after {body.timeout}s") from None
+
     @router.post("/api/announce")
     async def announce():
         """Trigger a network announce."""
@@ -612,6 +810,133 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         return {
             "announced": True,
             "destination_hash": daemon._operator_destination.hexhash,
+        }
+
+    # -------------------------------------------------------------------------
+    # System status
+    # -------------------------------------------------------------------------
+
+    @router.get("/api/system/status")
+    async def system_status():
+        """Return local system hardware information."""
+        import platform as plat
+
+        from styrened import __version__
+        from styrened.services.hardware import get_system_info
+
+        try:
+            info = get_system_info()
+            return {
+                "hostname": plat.node(),
+                "platform": plat.system().lower(),
+                "cpu_model": info.cpu_model,
+                "cpu_cores": info.cpu_cores,
+                "ram_total_bytes": info.ram_total_bytes,
+                "ram_total_gb": round(info.ram_total_gb, 1),
+                "version": __version__,
+                "uptime": round(time.time() - daemon._start_time, 1),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get system info: {e}")
+            return {
+                "hostname": plat.node(),
+                "platform": plat.system().lower(),
+                "cpu_model": "unknown",
+                "cpu_cores": 0,
+                "ram_total_bytes": 0,
+                "ram_total_gb": 0,
+                "version": __version__,
+                "uptime": round(time.time() - daemon._start_time, 1),
+            }
+
+    @router.get("/api/system/reticulum")
+    async def reticulum_status():
+        """Return Reticulum network status."""
+        from styrened.services.reticulum import get_operator_identity
+
+        identity_hash = get_operator_identity()
+        destination_hash = ""
+        if daemon._operator_destination:
+            destination_hash = daemon._operator_destination.hexhash
+
+        # Interface info from node store
+        interfaces: list[dict[str, Any]] = []
+        path_count = 0
+        announce_count = 0
+
+        if daemon._node_store:
+            paths = daemon._node_store.get_all_paths()
+            path_count = len(paths)
+            devices = daemon._node_store.get_all_nodes()
+            announce_count = sum(d.announce_count for d in devices)
+
+        transport_enabled = daemon.config.reticulum.resolve_transport_enabled()
+
+        return {
+            "initialized": identity_hash is not None,
+            "transport_enabled": transport_enabled,
+            "identity_hash": identity_hash or "",
+            "destination_hash": destination_hash,
+            "interfaces": interfaces,
+            "path_count": path_count,
+            "announce_count": announce_count,
+        }
+
+    @router.get("/api/system/disks")
+    async def system_disks():
+        """Return disk information."""
+        from styrened.services.hardware import get_disks
+
+        try:
+            disks = get_disks()
+            return [
+                {
+                    "name": d.name,
+                    "size_bytes": d.size_bytes,
+                    "size_gb": round(d.size_gb, 1),
+                    "disk_type": d.disk_type.value,
+                    "mount_point": d.mount_point,
+                    "filesystem": d.filesystem,
+                }
+                for d in disks
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to get disk info: {e}")
+            return []
+
+    @router.get("/api/system/network")
+    async def system_network():
+        """Return network interface information."""
+        from styrened.services.hardware import get_network_interfaces
+
+        try:
+            interfaces = get_network_interfaces()
+            return [
+                {
+                    "name": iface.name,
+                    "interface_type": iface.interface_type.value,
+                    "category": iface.category.value,
+                    "mac_address": iface.mac_address,
+                    "ip_address": iface.ip_address,
+                }
+                for iface in interfaces
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to get network info: {e}")
+            return []
+
+    @router.get("/api/system/setup-status")
+    async def setup_status():
+        """Return first-run setup status."""
+        from styrened.services.setup import get_setup_status
+
+        status = get_setup_status()
+        return {
+            "identity_configured": status.identity_configured,
+            "config_file_exists": status.config_file_exists,
+            "display_name_set": status.display_name_set,
+            "rns_initialized": status.rns_initialized,
+            "is_complete": status.is_complete,
         }
 
     # SSE events
