@@ -96,6 +96,27 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 config_dict["terminal"]["authorized_identities_count"] = len(auth_ids)
                 del config_dict["terminal"]["authorized_identities"]
 
+        # Redact infrastructure details in public mode
+        if cfg.api.public_mode:
+            if "reticulum" in config_dict:
+                ret = config_dict["reticulum"]
+                if "interfaces" in ret:
+                    ifaces = ret["interfaces"]
+                    ret["interfaces"] = {
+                        "auto": ifaces.get("auto", True),
+                        "server": {"enabled": bool(ifaces.get("server", {}).get("enabled"))},
+                    }
+                # Strip filesystem paths
+                for key in ("config_path_override", "operator_identity_path"):
+                    ret.pop(key, None)
+            if "terminal" in config_dict:
+                config_dict["terminal"] = {
+                    "enabled": config_dict["terminal"].get("enabled", False),
+                }
+            if "ipc" in config_dict:
+                for key in ("socket_path", "socket_mode"):
+                    config_dict["ipc"].pop(key, None)
+
         return {"config": config_dict}
 
     @router.put("/api/config")
@@ -142,12 +163,13 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         current_dict = _serialize_config(current)
 
         for section_key, section_val in updates.items():
-            if section_key in current_dict and isinstance(section_val, dict):
-                if isinstance(current_dict[section_key], dict):
+            if isinstance(section_val, dict):
+                if section_key in current_dict and isinstance(current_dict[section_key], dict):
                     current_dict[section_key].update(section_val)
                 else:
                     current_dict[section_key] = section_val
-            elif isinstance(section_val, dict):
+            else:
+                # Top-level scalar fields (e.g., profile)
                 current_dict[section_key] = section_val
 
         # Re-load from merged dict by saving temp and loading
@@ -824,10 +846,13 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         from styrened import __version__
         from styrened.services.hardware import get_system_info
 
+        is_public = daemon.config.api.public_mode
+        hostname = daemon.config.identity.display_name or "styrened" if is_public else plat.node()
+
         try:
             info = get_system_info()
             return {
-                "hostname": plat.node(),
+                "hostname": hostname,
                 "platform": plat.system().lower(),
                 "cpu_model": info.cpu_model,
                 "cpu_cores": info.cpu_cores,
@@ -839,7 +864,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         except Exception as e:
             logger.warning(f"Failed to get system info: {e}")
             return {
-                "hostname": plat.node(),
+                "hostname": hostname,
                 "platform": plat.system().lower(),
                 "cpu_model": "unknown",
                 "cpu_cores": 0,
@@ -909,18 +934,22 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         """Return network interface information."""
         from styrened.services.hardware import get_network_interfaces
 
+        is_public = daemon.config.api.public_mode
+
         try:
             interfaces = get_network_interfaces()
-            return [
-                {
+            result = []
+            for iface in interfaces:
+                entry: dict[str, Any] = {
                     "name": iface.name,
                     "interface_type": iface.interface_type.value,
                     "category": iface.category.value,
-                    "mac_address": iface.mac_address,
-                    "ip_address": iface.ip_address,
                 }
-                for iface in interfaces
-            ]
+                if not is_public:
+                    entry["mac_address"] = iface.mac_address
+                    entry["ip_address"] = iface.ip_address
+                result.append(entry)
+            return result
         except Exception as e:
             logger.warning(f"Failed to get network info: {e}")
             return []
