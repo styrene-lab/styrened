@@ -245,11 +245,11 @@ spec:
             readOnly: true
         resources:
           requests:
-            cpu: "1"
-            memory: 2Gi
+            cpu: "2"
+            memory: 4Gi
           limits:
             cpu: "4"
-            memory: 4Gi
+            memory: 8Gi
 
     - name: push-ghcr-release
       inputs:
