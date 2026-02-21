@@ -17,6 +17,7 @@ from styrened.models.config import (
     CoreConfig,
     DeploymentMode,
     NotificationsConfig,
+    Profile,
     PropagationNodeConfig,
     YubiKeyConfig,
     validate_short_name,
@@ -99,21 +100,78 @@ def ensure_directories() -> None:
     get_log_dir().mkdir(parents=True, exist_ok=True)
 
 
-def get_default_core_config() -> CoreConfig:
-    """Return a CoreConfig with default values.
+def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
+    """Return a CoreConfig with profile-appropriate defaults.
+
+    Profile controls which services run and with what defaults, independent
+    of network topology (mode). Every individual setting can still be
+    overridden by YAML.
+
+    Args:
+        profile: Operational profile (operator or endpoint).
 
     Returns:
-        CoreConfig instance with sensible defaults for headless mode.
+        CoreConfig instance with profile-appropriate defaults.
     """
     config = CoreConfig()
-    # Headless mode defaults
+    config.profile = profile
     config.reticulum.mode = DeploymentMode.STANDALONE
-    config.rpc.enabled = True
-    config.discovery.enabled = True
-    config.discovery.auto_announce = True
-    config.chat.enabled = True
-    config.chat.auto_reply_enabled = True
+
+    if profile == Profile.OPERATOR:
+        config.rpc.enabled = True
+        config.rpc.allow_command_execution = False
+        config.chat.enabled = True
+        config.chat.auto_reply_enabled = False
+        config.discovery.enabled = True
+        config.discovery.auto_announce = True
+        config.ipc.enabled = True
+        config.terminal.enabled = False
+        config.notifications.enabled = True
+        config.reticulum.announce_interval = 300
+
+    elif profile == Profile.ENDPOINT:
+        config.rpc.enabled = True
+        config.rpc.allow_command_execution = True
+        config.chat.enabled = True
+        config.chat.auto_reply_enabled = True
+        config.discovery.enabled = True
+        config.discovery.auto_announce = True
+        config.api.enabled = False
+        config.ipc.enabled = False
+        config.terminal.enabled = True
+        config.notifications.enabled = False
+        config.reticulum.announce_interval = 600
+
+    elif profile == Profile.HUB:
+        config.reticulum.mode = DeploymentMode.HUB
+        config.reticulum.enable_transport = True
+        config.reticulum.announce_interval = 3600
+        config.rpc.enabled = True
+        config.rpc.relay_mode = True
+        config.rpc.allow_command_execution = False
+        config.chat.enabled = True
+        config.chat.auto_reply_enabled = True
+        config.chat.auto_reply_cooldown = 600
+        config.discovery.enabled = True
+        config.discovery.auto_announce = True
+        config.api.enabled = True
+        config.api.public_mode = True
+        config.ipc.enabled = False
+        config.terminal.enabled = False
+        config.notifications.enabled = False
+        config.lxmf.propagation_node.enabled = True
+        config.lxmf.autopeer = True
+
     return config
+
+
+def get_default_core_config() -> CoreConfig:
+    """Return default config. Backward-compatible wrapper.
+
+    Returns:
+        CoreConfig instance with operator profile defaults.
+    """
+    return get_profile_defaults(Profile.OPERATOR)
 
 
 def load_core_config(config_path: Path | None = None) -> CoreConfig:
@@ -160,8 +218,15 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     if not isinstance(data, dict):
         return get_default_core_config()
 
-    # Parse CoreConfig from dictionary
-    config = CoreConfig()
+    # Two-pass: extract profile first, then build config from profile defaults
+    profile = Profile.OPERATOR
+    if "profile" in data:
+        try:
+            profile = Profile(data["profile"])
+        except ValueError:
+            pass  # Keep default
+
+    config = get_profile_defaults(profile)
 
     # Parse reticulum section
     if "reticulum" in data and isinstance(data["reticulum"], dict):
@@ -283,6 +348,8 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.api.host = str(api["host"])
         if "port" in api:
             config.api.port = int(api["port"])
+        if "public_mode" in api:
+            config.api.public_mode = _parse_bool(api["public_mode"])
         if "metrics" in api and isinstance(api["metrics"], dict):
             metrics = api["metrics"]
             if "enabled" in metrics:
@@ -553,6 +620,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "enabled": config.api.enabled,
         "host": config.api.host,
         "port": config.api.port,
+        "public_mode": config.api.public_mode,
         "metrics": {
             "enabled": config.api.metrics.enabled,
         },
@@ -616,6 +684,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         terminal_dict["authorized_identities"] = sorted(config.terminal.authorized_identities)
 
     return {
+        "profile": config.profile.value,
         "reticulum": reticulum_dict,
         "identity": identity_dict,
         "rpc": rpc_dict,
@@ -652,6 +721,14 @@ def validate_core_config(
     def _check_port(field: str, port: int) -> None:
         if not 1 <= port <= 65535:
             errors.append(ConfigFieldError(field, "Port must be 1-65535", str(port)))
+
+    # --- Profile ---
+    try:
+        Profile(config.profile.value)
+    except ValueError:
+        errors.append(
+            ConfigFieldError("profile", "Must be 'operator', 'endpoint', or 'hub'", str(config.profile))
+        )
 
     # --- Reticulum ---
     try:

@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from styrened.models.config import CoreConfig, DeploymentMode
+from styrened.models.config import CoreConfig, DeploymentMode, Profile
 from styrened.services.config import (
     get_default_core_config,
     load_core_config,
@@ -12,12 +12,14 @@ from styrened.services.config import (
 
 
 def test_default_config() -> None:
-    """Default config should have sensible values."""
+    """Default config should have sensible operator profile values."""
     config = get_default_core_config()
+    assert config.profile == Profile.OPERATOR
     assert config.reticulum.mode == DeploymentMode.STANDALONE
     assert config.rpc.enabled is True
+    assert config.rpc.allow_command_execution is False
     assert config.discovery.enabled is True
-    assert config.chat.auto_reply_enabled is True
+    assert config.chat.auto_reply_enabled is False
 
 
 def test_config_roundtrip() -> None:

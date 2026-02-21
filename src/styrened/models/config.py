@@ -49,6 +49,18 @@ class GatewayMode(Enum):
     SERVER = "server"  # Provide internet to mesh clients
 
 
+class Profile(Enum):
+    """Node operational profile.
+
+    Determines service defaults independent of network topology (mode).
+    Profile controls "what to run"; mode controls "how to connect".
+    """
+
+    OPERATOR = "operator"  # Human-facing: sends commands, reads chat
+    ENDPOINT = "endpoint"  # Machine-facing: accepts commands, managed remotely
+    HUB = "hub"  # Public infrastructure: routes, propagates, read-only web dashboard
+
+
 # -----------------------------------------------------------------------------
 # Configuration validation errors
 # -----------------------------------------------------------------------------
@@ -280,12 +292,14 @@ class APIConfig:
         enabled: Whether to enable HTTP API.
         host: IP address to bind to.
         port: TCP port for API server.
+        public_mode: If true, reject all write operations via the web API (read-only dashboard).
         metrics: Prometheus metrics endpoint configuration.
     """
 
     enabled: bool = False
     host: str = "0.0.0.0"
     port: int = 8000
+    public_mode: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
 
 
@@ -495,6 +509,7 @@ class CoreConfig:
     containing only core mesh and messaging settings.
 
     Attributes:
+        profile: Operational profile (operator or endpoint).
         reticulum: Reticulum integration settings.
         identity: Identity appearance configuration.
         rpc: RPC server configuration.
@@ -507,6 +522,7 @@ class CoreConfig:
         terminal: Terminal session configuration.
     """
 
+    profile: Profile = Profile.OPERATOR
     reticulum: ReticulumConfig = field(default_factory=ReticulumConfig)
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     rpc: RPCConfig = field(default_factory=RPCConfig)
