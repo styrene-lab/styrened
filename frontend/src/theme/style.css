@@ -2,21 +2,21 @@
    Migrated from specularium, adapted for mesh fleet ops */
 
 :root {
-    --crt-green-bright: #39ff14;
-    --crt-green-medium: #32cd32;
-    --crt-green-dim: #228b22;
-    --crt-green-dark: #1a5c1a;
-    --crt-green-darker: #0d2d0d;
-    --crt-off-black: #0a0a0a;
-    --crt-glow: rgba(57, 255, 20, 0.3);
-    --crt-glow-dim: rgba(57, 255, 20, 0.15);
+    --crt-green-bright: #7ee8d2;
+    --crt-green-medium: #4fb8a5;
+    --crt-green-dim: #38897a;
+    --crt-green-dark: #1c3530;
+    --crt-green-darker: #111e1c;
+    --crt-off-black: #0c1117;
+    --crt-glow: rgba(94, 228, 199, 0.25);
+    --crt-glow-dim: rgba(94, 228, 199, 0.12);
 
-    --color-warning: #ffa94d;
-    --color-danger: #ff6b6b;
-    --color-info: #74c0fc;
-    --color-success: #69db7c;
+    --color-warning: #e8b560;
+    --color-danger: #e06060;
+    --color-info: #6caed4;
+    --color-success: #5de4c7;
 
-    --font-terminal: "VT323", monospace;
+    --font-terminal: "JetBrains Mono", monospace;
 }
 
 * {
@@ -48,8 +48,8 @@ body {
     z-index: 1000;
     background: repeating-linear-gradient(
         0deg,
-        rgba(0, 0, 0, 0.15) 0px,
-        rgba(0, 0, 0, 0.15) 1px,
+        rgba(0, 0, 0, 0.03) 0px,
+        rgba(0, 0, 0, 0.03) 1px,
         transparent 1px,
         transparent 2px
     );
@@ -83,7 +83,7 @@ body {
     margin: 0;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    text-shadow: 0 0 10px var(--crt-glow);
+    text-shadow: 0 0 4px var(--crt-glow-dim);
 }
 
 .stats-inline {
@@ -155,7 +155,7 @@ body {
     color: var(--crt-green-bright);
     border-left-color: var(--crt-green-bright);
     background: var(--crt-green-darker);
-    text-shadow: 0 0 8px var(--crt-glow);
+    text-shadow: 0 0 4px var(--crt-glow-dim);
 }
 
 .nav-icon {
@@ -229,7 +229,7 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(10, 10, 10, 0.95);
+    background: rgba(12, 17, 23, 0.95);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -294,7 +294,7 @@ body {
     flex-direction: column;
     align-items: center;
     gap: 0.25rem;
-    background: rgba(10, 10, 10, 0.9);
+    background: rgba(12, 17, 23, 0.9);
     border: 1px solid var(--crt-green-dark);
     padding: 0.25rem;
 }
@@ -302,7 +302,7 @@ body {
 .zoom-btn {
     width: 32px;
     height: 32px;
-    background: rgba(10, 10, 10, 0.9);
+    background: rgba(12, 17, 23, 0.9);
     border: 1px solid var(--crt-green-dark);
     color: var(--crt-green-medium);
     font-family: var(--font-terminal);
@@ -397,11 +397,11 @@ body {
 }
 
 .device-item.stale {
-    border-color: rgba(255, 169, 77, 0.3);
+    border-color: rgba(232, 181, 96, 0.3);
 }
 
 .device-item.lost {
-    border-color: rgba(255, 107, 107, 0.3);
+    border-color: rgba(224, 96, 96, 0.3);
 }
 
 .device-name {
@@ -621,7 +621,7 @@ body {
 
 .retry-btn {
     background: transparent;
-    border: 1px solid rgba(255, 107, 107, 0.4);
+    border: 1px solid rgba(224, 96, 96, 0.4);
     color: var(--color-danger);
     font-family: var(--font-terminal);
     font-size: 0.65rem;
@@ -631,7 +631,7 @@ body {
 }
 
 .retry-btn:hover {
-    background: rgba(255, 107, 107, 0.15);
+    background: rgba(224, 96, 96, 0.15);
     border-color: var(--color-danger);
 }
 
@@ -670,7 +670,7 @@ body {
     font-size: 1rem;
     letter-spacing: 0.15em;
     color: var(--crt-green-bright);
-    text-shadow: 0 0 8px var(--crt-glow);
+    text-shadow: 0 0 4px var(--crt-glow-dim);
 }
 
 .contacts-search {
@@ -811,7 +811,7 @@ body {
     overflow-y: auto;
     border: 1px solid var(--crt-green-darker);
     padding: 0.75rem;
-    background: rgba(10, 10, 10, 0.5);
+    background: rgba(12, 17, 23, 0.5);
 }
 
 .output-placeholder {
@@ -887,7 +887,7 @@ body {
 
 .output-pre.stderr {
     color: var(--color-danger);
-    border-color: rgba(255, 107, 107, 0.2);
+    border-color: rgba(224, 96, 96, 0.2);
 }
 
 /* Device status grid */
@@ -919,23 +919,24 @@ body {
    FORM ELEMENTS
    ============================================ */
 .form-group {
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
 }
 
 .form-label {
     display: block;
-    font-size: 0.8rem;
-    color: var(--crt-green-medium);
-    letter-spacing: 0.1em;
-    margin-bottom: 0.35rem;
+    font-size: 0.7rem;
+    color: var(--crt-green-dim);
+    letter-spacing: 0.15em;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
 }
 
 .form-input,
 .form-select {
     width: 100%;
-    padding: 0.5rem 0.75rem;
-    background: var(--crt-off-black);
-    border: 1px solid var(--crt-green-dark);
+    padding: 0.4rem 0.6rem;
+    background: rgba(12, 17, 23, 0.8);
+    border: 1px solid var(--crt-green-dim);
     color: var(--crt-green-bright);
     font-family: var(--font-terminal);
     font-size: 0.9rem;
@@ -946,7 +947,7 @@ body {
 .form-select:focus {
     outline: none;
     border-color: var(--crt-green-medium);
-    box-shadow: 0 0 6px var(--crt-glow-dim);
+    box-shadow: 0 0 3px var(--crt-glow-dim);
 }
 
 .form-input::placeholder {
@@ -1016,16 +1017,16 @@ body {
 
 .modal-btn-primary:hover {
     background: var(--crt-green-dark);
-    box-shadow: 0 0 8px var(--crt-glow-dim);
+    box-shadow: 0 0 4px var(--crt-glow-dim);
 }
 
 .modal-btn-danger {
-    border-color: rgba(255, 107, 107, 0.4);
+    border-color: rgba(224, 96, 96, 0.4);
     color: var(--color-danger);
 }
 
 .modal-btn-danger:hover {
-    background: rgba(255, 107, 107, 0.15);
+    background: rgba(224, 96, 96, 0.15);
     border-color: var(--color-danger);
 }
 
@@ -1071,6 +1072,334 @@ div.vis-tooltip {
         inset 0 0 20px rgba(0, 0, 0, 0.5) !important;
     white-space: pre-line;
     max-width: 300px;
+}
+
+/* ============================================
+   SETTINGS PANEL
+   ============================================ */
+.settings-panel {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 1rem;
+    flex-shrink: 0;
+}
+
+.settings-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 0 1rem;
+    border-bottom: 1px solid var(--crt-green-dark);
+    flex-shrink: 0;
+}
+
+.settings-tab {
+    background: transparent;
+    border: 1px solid var(--crt-green-darker);
+    border-bottom: none;
+    color: var(--crt-green-dim);
+    font-family: var(--font-terminal);
+    font-size: 0.7rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    transition: all 0.15s ease;
+    margin-bottom: -1px;
+}
+
+.settings-tab:hover {
+    color: var(--crt-green-medium);
+    background: var(--crt-green-darker);
+}
+
+.settings-tab.active {
+    color: var(--crt-green-bright);
+    background: var(--crt-off-black);
+    border-color: var(--crt-green-dark);
+    border-bottom-color: var(--crt-off-black);
+    text-shadow: 0 0 3px var(--crt-glow-dim);
+}
+
+.settings-form {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.75rem 1rem;
+}
+
+.settings-field {
+    margin-bottom: 0.6rem;
+}
+
+.settings-field .form-label {
+    margin-bottom: 0.15rem;
+}
+
+.settings-field .form-input,
+.settings-field .form-select {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+.settings-nested {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--crt-green-darker);
+}
+
+.settings-nested > .output-label {
+    font-size: 0.65rem;
+    color: var(--crt-green-dark);
+    letter-spacing: 0.15em;
+    margin-bottom: 0.4rem;
+    text-transform: uppercase;
+}
+
+.settings-toast {
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.settings-toast.toast-visible {
+    padding: 0.5rem 1rem;
+    max-height: 3rem;
+}
+
+.settings-toast.toast-success {
+    color: var(--color-success);
+    border-top: 1px solid rgba(93, 228, 199, 0.3);
+}
+
+.settings-toast.toast-error {
+    color: var(--color-danger);
+    border-top: 1px solid rgba(224, 96, 96, 0.3);
+}
+
+/* ============================================
+   MODAL / SETUP
+   ============================================ */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-dialog {
+    background: var(--crt-off-black);
+    border: 1px solid var(--crt-green-dim);
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow:
+        0 0 10px var(--crt-glow-dim),
+        inset 0 0 15px rgba(0, 0, 0, 0.4);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--crt-green-dark);
+}
+
+.modal-close {
+    background: transparent;
+    border: none;
+    color: var(--crt-green-dim);
+    font-family: var(--font-terminal);
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    transition: color 0.15s ease;
+}
+
+.modal-close:hover {
+    color: var(--crt-green-bright);
+}
+
+.modal-body {
+    padding: 1rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--crt-green-dark);
+}
+
+/* Setup-specific styles */
+.setup-field-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.3rem;
+}
+
+.setup-field-hint {
+    font-size: 0.75rem;
+    color: var(--crt-green-dark);
+    letter-spacing: 0.05em;
+    margin-top: 0.3rem;
+}
+
+.setup-field-row .setup-field-hint {
+    margin-top: 0;
+}
+
+.setup-char-count {
+    font-size: 0.7rem;
+    color: var(--crt-green-dark);
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+}
+
+.setup-preview {
+    border: 1px solid var(--crt-green-dark);
+    background: var(--crt-green-darker);
+    padding: 0.6rem 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.setup-preview-title {
+    font-size: 0.7rem;
+    color: var(--crt-green-dim);
+    letter-spacing: 0.15em;
+    margin-bottom: 0.4rem;
+}
+
+.setup-preview-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.2rem 0;
+    font-size: 0.85rem;
+}
+
+.setup-preview-label {
+    color: var(--crt-green-dim);
+    letter-spacing: 0.1em;
+}
+
+.setup-preview-value {
+    color: var(--crt-green-bright);
+}
+
+.setup-error {
+    color: var(--color-danger);
+    font-size: 0.8rem;
+    min-height: 1.2em;
+    margin-top: 0.5rem;
+    letter-spacing: 0.05em;
+}
+
+/* ============================================
+   AUTO-REPLY (OOO) TOGGLE
+   ============================================ */
+.auto-reply-btn {
+    background: transparent;
+    border: 1px solid var(--crt-green-dark);
+    color: var(--crt-green-dim);
+    font-family: var(--font-terminal);
+    font-size: 0.65rem;
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    transition: all 0.2s ease;
+    border-radius: 9px;
+}
+
+.auto-reply-btn:hover {
+    border-color: var(--crt-green-medium);
+    color: var(--crt-green-medium);
+}
+
+.auto-reply-btn.active {
+    border-color: var(--color-success);
+    color: var(--color-success);
+    box-shadow: 0 0 6px rgba(93, 228, 199, 0.3);
+}
+
+.auto-reply-popover {
+    border: 1px solid var(--crt-green-dark);
+    background: var(--crt-off-black);
+    padding: 0.6rem 0.75rem;
+    box-shadow: 0 0 8px var(--crt-glow-dim);
+}
+
+.auto-reply-popover-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.auto-reply-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.auto-reply-switch input[type="checkbox"] {
+    accent-color: var(--color-success);
+    cursor: pointer;
+}
+
+.auto-reply-switch-label {
+    font-size: 0.7rem;
+    color: var(--crt-green-dim);
+    letter-spacing: 0.1em;
+}
+
+.auto-reply-textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 3rem;
+    max-height: 8rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.auto-reply-popover-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.35rem;
+}
+
+/* Node auto-reply (OOO) indicator */
+.node-autoreply {
+    opacity: 0.55;
+}
+
+.device-ooo-badge {
+    font-size: 0.6rem;
+    color: var(--color-warning);
+    letter-spacing: 0.1em;
+    margin-left: 0.3rem;
 }
 
 /* ============================================

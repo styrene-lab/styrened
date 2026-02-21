@@ -87,6 +87,7 @@ export interface Identity {
   identity_hash: string
   destination_hash: string
   lxmf_destination_hash: string
+  display_name: string
 }
 
 export interface MeshStatus {
@@ -153,4 +154,77 @@ export interface ZoomConfig {
   dynamicMax: number
   baseScale: number
   fitScale?: number
+}
+
+// System status types
+
+export interface SystemStatus {
+  hostname: string
+  platform: string
+  cpu_model: string
+  cpu_cores: number
+  ram_total_bytes: number
+  ram_total_gb: number
+  version: string
+  uptime: number
+}
+
+export interface ReticulumInterface {
+  name: string
+  type: string
+  status: string
+  peer?: string
+}
+
+export interface ReticulumStatus {
+  initialized: boolean
+  transport_enabled: boolean
+  identity_hash: string
+  destination_hash: string
+  interfaces: ReticulumInterface[]
+  path_count: number
+  announce_count: number
+}
+
+export interface DiskInfo {
+  name: string
+  size_bytes: number
+  size_gb: number
+  disk_type: string
+  mount_point: string | null
+  filesystem: string | null
+}
+
+export interface NetworkInterface {
+  name: string
+  interface_type: string
+  category: string
+  mac_address: string | null
+  ip_address: string | null
+}
+
+export interface SetupStatus {
+  identity_configured: boolean
+  config_file_exists: boolean
+  display_name_set: boolean
+  rns_initialized: boolean
+  is_complete: boolean
+}
+
+export interface RebootResult {
+  success: boolean
+  message: string
+  scheduled_time: number | null
+}
+
+export interface UpdateConfigResult {
+  success: boolean
+  message: string
+  updated_keys: string[]
+}
+
+export interface AutoReplyState {
+  enabled: boolean
+  message: string
+  cooldown: number
 }

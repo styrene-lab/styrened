@@ -4,6 +4,7 @@ import { fetchIdentity } from './api'
 import { addRoute, startRouter } from './router'
 import { appState, setActivePanel, setConnectionStatus } from './state'
 import * as sse from './sse'
+import { checkAndShow as checkSetup } from './components/setup-modal'
 import type { Identity } from './types'
 
 // Panel modules (lazy-loaded on first nav)
@@ -12,6 +13,8 @@ const panelModules = {
   chat: () => import('./panels/chat'),
   contacts: () => import('./panels/contacts'),
   fleet: () => import('./panels/fleet'),
+  settings: () => import('./panels/settings'),
+  status: () => import('./panels/status'),
 }
 
 let currentPanel: string | null = null
@@ -83,7 +86,7 @@ function updateNavActive(panel: string): void {
 
 function updateIdentity(identity: Identity): void {
   const el = document.getElementById('header-identity')
-  if (el) el.textContent = identity.destination_hash.slice(0, 16) + '...'
+  if (el) el.textContent = identity.display_name || identity.destination_hash.slice(0, 16) + '...'
 }
 
 function updateConnectionStatus(status: string): void {
@@ -115,6 +118,8 @@ async function init(): Promise<void> {
   addRoute('/chat/{peer}', (params) => switchPanel('chat', params))
   addRoute('/contacts', () => switchPanel('contacts'))
   addRoute('/fleet', () => switchPanel('fleet'))
+  addRoute('/settings', () => switchPanel('settings'))
+  addRoute('/status', () => switchPanel('status'))
 
   // Load identity
   try {
@@ -127,6 +132,9 @@ async function init(): Promise<void> {
 
   // Start SSE
   sse.connect()
+
+  // Check first-run setup
+  checkSetup()
 
   // Start router (triggers first panel load)
   startRouter()

@@ -5,25 +5,26 @@ import type { DataSet } from 'vis-data/standalone'
 import type {
   Conversation, Message, Contact, MeshDevice, Identity,
   ZoomConfig, NodeTypeConfig, BorderConfig, SegmentumColor,
+  AutoReplyState,
 } from './types'
 
 // Theme colors
 export const theme = {
-  greenBright: '#39ff14',
-  greenMedium: '#32cd32',
-  greenDim: '#228b22',
-  greenDark: '#1a5c1a',
-  greenDarker: '#0d2d0d',
-  offBlack: '#0a0a0a',
-  blue: '#74c0fc',
-  orange: '#ffa94d',
-  red: '#ff6b6b',
-  teal: '#69db7c',
-  yellow: '#ffd43b',
-  gray: '#666666',
-  gold: '#ffd700',
-  amber: '#ffbf00',
-  purple: '#9b59b6',
+  greenBright: '#7ee8d2',
+  greenMedium: '#4fb8a5',
+  greenDim: '#38897a',
+  greenDark: '#1c3530',
+  greenDarker: '#111e1c',
+  offBlack: '#0c1117',
+  blue: '#6caed4',
+  orange: '#e8b560',
+  red: '#e06060',
+  teal: '#5de4c7',
+  yellow: '#e8d560',
+  gray: '#4a5568',
+  gold: '#c9a84c',
+  amber: '#d4a04a',
+  purple: '#7b6eb8',
 }
 
 // Status colors for mesh device state
@@ -42,7 +43,7 @@ export const ICON_CONSTANTS = {
   SVG_CENTER: 32,
   SVG_BASE_SIZE: 64,
   BACKGROUND_CIRCLE_RADIUS: 28,
-  BACKGROUND_FILL: '#0a0a0a',
+  BACKGROUND_FILL: '#0c1117',
 }
 
 // Border configuration
@@ -79,12 +80,12 @@ export const nodeTypes: Record<string, NodeTypeConfig> = {
 
 // Segmentum palette for subnet nebulae
 export const segmentumPalette: SegmentumColor[] = [
-  { base: 'rgba(57, 255, 20, 0.12)', glow: 'rgba(57, 255, 20, 0.25)' },
-  { base: 'rgba(116, 192, 252, 0.10)', glow: 'rgba(116, 192, 252, 0.22)' },
-  { base: 'rgba(255, 169, 77, 0.10)', glow: 'rgba(255, 169, 77, 0.22)' },
-  { base: 'rgba(105, 219, 124, 0.10)', glow: 'rgba(105, 219, 124, 0.22)' },
-  { base: 'rgba(255, 107, 107, 0.10)', glow: 'rgba(255, 107, 107, 0.22)' },
-  { base: 'rgba(186, 135, 252, 0.10)', glow: 'rgba(186, 135, 252, 0.22)' },
+  { base: 'rgba(94, 228, 199, 0.10)', glow: 'rgba(94, 228, 199, 0.22)' },
+  { base: 'rgba(108, 174, 212, 0.08)', glow: 'rgba(108, 174, 212, 0.18)' },
+  { base: 'rgba(232, 181, 96, 0.08)', glow: 'rgba(232, 181, 96, 0.18)' },
+  { base: 'rgba(93, 228, 199, 0.08)', glow: 'rgba(93, 228, 199, 0.18)' },
+  { base: 'rgba(224, 96, 96, 0.08)', glow: 'rgba(224, 96, 96, 0.18)' },
+  { base: 'rgba(123, 110, 184, 0.08)', glow: 'rgba(123, 110, 184, 0.18)' },
 ]
 
 // Simple event emitter for store changes
@@ -166,6 +167,21 @@ export const contactStore = {
 export function setContacts(contacts: Contact[]): void {
   contactStore.contacts = contacts
   notify('contacts')
+}
+
+// --- Auto-reply store ---
+
+export const autoReplyStore: AutoReplyState = {
+  enabled: false,
+  message: '',
+  cooldown: 300,
+}
+
+export function setAutoReplyState(state: AutoReplyState): void {
+  autoReplyStore.enabled = state.enabled
+  autoReplyStore.message = state.message
+  autoReplyStore.cooldown = state.cooldown
+  notify('autoReply')
 }
 
 // --- App state ---

@@ -106,11 +106,11 @@ function drawNebula(
 function drawSegmentumLabel(ctx: CanvasRenderingContext2D, segmentum: string, x: number, y: number): void {
   ctx.save()
   ctx.textAlign = 'center'
-  ctx.font = '14px VT323, monospace'
+  ctx.font = '14px JetBrains Mono, monospace'
   ctx.textBaseline = 'middle'
-  ctx.shadowColor = 'rgba(57, 255, 20, 0.5)'
-  ctx.shadowBlur = 8
-  ctx.fillStyle = 'rgba(57, 255, 20, 0.6)'
+  ctx.shadowColor = 'rgba(94, 228, 199, 0.4)'
+  ctx.shadowBlur = 6
+  ctx.fillStyle = 'rgba(94, 228, 199, 0.5)'
   ctx.fillText(`SEGMENTUM ${segmentum}`, x, y)
   ctx.restore()
 }
@@ -207,13 +207,17 @@ export async function renderNetwork(graph: TopologyData, container: HTMLElement)
   const nodes = await Promise.all(
     graph.nodes.map(async n => {
       const visuals = await prepareNodeVisuals(n)
+      const hasAutoReply = n.capabilities?.includes('autoreply')
+      const nodeOpacity = hasAutoReply ? 0.45 : 1.0
+      const label = hasAutoReply ? `${visuals.label} (OOO)` : visuals.label
       return {
         id: n.id,
-        label: visuals.label,
+        label,
         title: buildTooltip(n),
         shape: visuals.shape,
         image: visuals.iconDataUri,
         size: visuals.size,
+        opacity: nodeOpacity,
         color: {
           border: visuals.borderColor,
           background: theme.offBlack,
@@ -224,7 +228,7 @@ export async function renderNetwork(graph: TopologyData, container: HTMLElement)
         borderWidthSelected: 0,
         font: {
           color: visuals.borderColor,
-          face: 'VT323, monospace',
+          face: 'JetBrains Mono, monospace',
           size: 14,
           vadjust: 8,
         },
@@ -355,7 +359,7 @@ export async function updateNode(deviceData: any): Promise<void> {
     borderWidthSelected: 0,
     font: {
       color: visuals.borderColor,
-      face: 'VT323, monospace',
+      face: 'JetBrains Mono, monospace',
       size: 14,
       vadjust: 8,
     },
