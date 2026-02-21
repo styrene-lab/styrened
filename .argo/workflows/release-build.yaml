@@ -287,6 +287,10 @@ spec:
             GHCR_TOKEN=$(cat /ghcr/password)
             echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$(echo -n "${GHCR_USER}:${GHCR_TOKEN}" | base64)\"}}}" > ~/.docker/config.json
 
+            # Trust policy for skopeo (nixos/nix image lacks this)
+            mkdir -p /etc/containers
+            echo '{"default":[{"type":"insecureAcceptAnything"}]}' > /etc/containers/policy.json
+
             # Push version tag via nix2container
             nix run .#oci.copyToRegistry
 
