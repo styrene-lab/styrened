@@ -16,7 +16,15 @@ spec:
 
   volumeClaimTemplates:
     - metadata:
-        name: workspace
+        name: workspace-pypi
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: workspace-oci
       spec:
         accessModes: ["ReadWriteOnce"]
         storageClassName: local-path
@@ -31,22 +39,35 @@ spec:
     - name: pypi-auth
       secret:
         secretName: pypi-secret
+    - name: cachix-auth
+      secret:
+        secretName: cachix-auth-token
+    - name: version-scratch
+      emptyDir: {}
 
   templates:
     - name: pipeline
       dag:
         tasks:
-          - name: checkout
-            template: git-checkout
           - name: extract-version
             template: parse-version
-            depends: "checkout"
+          - name: checkout-pypi
+            template: git-checkout-pypi
+          - name: checkout-oci
+            template: git-checkout-oci
           - name: build-wheel
             template: build-wheel
-            depends: "checkout"
+            depends: "checkout-pypi"
           - name: build-oci
             template: nix-build-oci
-            depends: "checkout"
+            depends: "checkout-oci"
+          - name: publish-pypi
+            template: publish-pypi
+            depends: "build-wheel && extract-version"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
           - name: push-oci
             template: push-ghcr-release
             depends: "build-oci && extract-version"
@@ -56,13 +77,6 @@ spec:
                   value: "{{tasks.extract-version.outputs.parameters.version}}"
                 - name: prerelease
                   value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
-          - name: publish-pypi
-            template: publish-pypi
-            depends: "build-wheel && extract-version"
-            arguments:
-              parameters:
-                - name: version
-                  value: "{{tasks.extract-version.outputs.parameters.version}}"
           - name: create-release
             template: github-release
             depends: "push-oci && publish-pypi"
@@ -73,7 +87,36 @@ spec:
                 - name: prerelease
                   value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
 
-    - name: git-checkout
+    - name: parse-version
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            REF="{{workflow.parameters.ref}}"
+            VERSION="${REF#refs/tags/v}"
+            echo "$VERSION" > /scratch/version
+            # Detect prerelease
+            if echo "$VERSION" | grep -qE '(rc|alpha|beta|dev)'; then
+              echo "true" > /scratch/prerelease
+            else
+              echo "false" > /scratch/prerelease
+            fi
+            echo "Version: $VERSION, Prerelease: $(cat /scratch/prerelease)"
+        volumeMounts:
+          - name: version-scratch
+            mountPath: /scratch
+      outputs:
+        parameters:
+          - name: version
+            valueFrom:
+              path: /scratch/version
+          - name: prerelease
+            valueFrom:
+              path: /scratch/prerelease
+
+    - name: git-checkout-pypi
       container:
         image: alpine/git:latest
         command: [sh, -c]
@@ -87,7 +130,7 @@ spec:
             cd /workspace/src
             git checkout {{workflow.parameters.commit-sha}}
         volumeMounts:
-          - name: workspace
+          - name: workspace-pypi
             mountPath: /workspace
           - name: ghcr-auth
             mountPath: /ghcr
@@ -97,34 +140,29 @@ spec:
             cpu: 100m
             memory: 128Mi
 
-    - name: parse-version
+    - name: git-checkout-oci
       container:
-        image: alpine:latest
+        image: alpine/git:latest
         command: [sh, -c]
         args:
           - |
             set -euo pipefail
-            REF="{{workflow.parameters.ref}}"
-            VERSION="${REF#refs/tags/v}"
-            echo "$VERSION" > /workspace/version
-            # Detect prerelease
-            if echo "$VERSION" | grep -qE '(rc|alpha|beta|dev)'; then
-              echo "true" > /workspace/prerelease
-            else
-              echo "false" > /workspace/prerelease
-            fi
-            echo "Version: $VERSION, Prerelease: $(cat /workspace/prerelease)"
+            TOKEN=$(cat /ghcr/password)
+            git clone \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
+            cd /workspace/src
+            git checkout {{workflow.parameters.commit-sha}}
         volumeMounts:
-          - name: workspace
+          - name: workspace-oci
             mountPath: /workspace
-      outputs:
-        parameters:
-          - name: version
-            valueFrom:
-              path: /workspace/version
-          - name: prerelease
-            valueFrom:
-              path: /workspace/prerelease
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
 
     - name: build-wheel
       container:
@@ -138,7 +176,7 @@ spec:
             python -m build --wheel --sdist -o /workspace/dist/
             ls -la /workspace/dist/
         volumeMounts:
-          - name: workspace
+          - name: workspace-pypi
             mountPath: /workspace
         resources:
           requests:
@@ -164,7 +202,7 @@ spec:
             twine upload --skip-existing /workspace/dist/styrened-${VERSION}*
             echo "Published to PyPI"
         volumeMounts:
-          - name: workspace
+          - name: workspace-pypi
             mountPath: /workspace
           - name: pypi-auth
             mountPath: /pypi
@@ -187,12 +225,24 @@ spec:
             mkdir -p /etc/nix
             echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
             echo "sandbox = false" >> /etc/nix/nix.conf
+
+            # Configure Cachix for faster builds
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
+            export CACHIX_AUTH_TOKEN=$(cat /cachix/token)
+            cachix use styrene
+
             cd /workspace/src
             nix build .#oci --no-link --print-out-paths > /workspace/oci-path
             echo "Built: $(cat /workspace/oci-path)"
+
+            # Push build results to Cachix for future runs
+            cachix push styrene $(cat /workspace/oci-path)
         volumeMounts:
-          - name: workspace
+          - name: workspace-oci
             mountPath: /workspace
+          - name: cachix-auth
+            mountPath: /cachix
+            readOnly: true
         resources:
           requests:
             cpu: "1"
@@ -218,6 +268,11 @@ spec:
             mkdir -p /etc/nix
             echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
             echo "sandbox = false" >> /etc/nix/nix.conf
+
+            # Configure Cachix
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
+            export CACHIX_AUTH_TOKEN=$(cat /cachix/token)
+            cachix use styrene
 
             cd /workspace/src
             VERSION="{{inputs.parameters.version}}"
@@ -249,8 +304,11 @@ spec:
               echo "Tagged: ${VERSION}, ${SHORT_SHA} (prerelease, no latest)"
             fi
         volumeMounts:
-          - name: workspace
+          - name: workspace-oci
             mountPath: /workspace
+          - name: cachix-auth
+            mountPath: /cachix
+            readOnly: true
           - name: ghcr-auth
             mountPath: /ghcr
             readOnly: true
@@ -318,7 +376,7 @@ spec:
             done
             echo "Release v${VERSION} published"
         volumeMounts:
-          - name: workspace
+          - name: workspace-pypi
             mountPath: /workspace
           - name: ghcr-auth
             mountPath: /ghcr

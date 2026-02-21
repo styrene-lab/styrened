@@ -27,6 +27,9 @@ spec:
     - name: ghcr-auth
       secret:
         secretName: ghcr-secret
+    - name: cachix-auth
+      secret:
+        secretName: cachix-auth-token
 
   templates:
     - name: pipeline
@@ -81,13 +84,24 @@ spec:
             echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
             echo "sandbox = false" >> /etc/nix/nix.conf
 
+            # Configure Cachix for faster builds
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
+            export CACHIX_AUTH_TOKEN=$(cat /cachix/token)
+            cachix use styrene
+
             cd /workspace/src
             echo "Building OCI image..."
             nix build .#oci --no-link --print-out-paths > /workspace/oci-path
             echo "Build complete: $(cat /workspace/oci-path)"
+
+            # Push build results to Cachix for future runs
+            cachix push styrene $(cat /workspace/oci-path)
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: cachix-auth
+            mountPath: /cachix
+            readOnly: true
         resources:
           requests:
             cpu: "1"
@@ -109,6 +123,11 @@ spec:
             mkdir -p /etc/nix
             echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
             echo "sandbox = false" >> /etc/nix/nix.conf
+
+            # Configure Cachix
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
+            export CACHIX_AUTH_TOKEN=$(cat /cachix/token)
+            cachix use styrene
 
             cd /workspace/src
             SHORT_SHA=$(echo "{{workflow.parameters.commit-sha}}" | cut -c1-7)
@@ -138,6 +157,9 @@ spec:
         volumeMounts:
           - name: workspace
             mountPath: /workspace
+          - name: cachix-auth
+            mountPath: /cachix
+            readOnly: true
           - name: ghcr-auth
             mountPath: /ghcr
             readOnly: true
