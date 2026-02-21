@@ -876,15 +876,12 @@ class StyreneDaemon:
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
 
-        This handler responds to messages from NomadNet, MeshChat, or other
-        LXMF clients with a configurable auto-reply when no operator is available.
+        The handler is always created (even when disabled) so it can be
+        toggled at runtime without a daemon restart. The handler itself
+        gates on config.auto_reply_enabled in handle_message().
         """
         if not self.config.chat.enabled:
             logger.info("Chat disabled in configuration")
-            return
-
-        if not self.config.chat.auto_reply_enabled:
-            logger.info("Auto-reply disabled in configuration")
             return
 
         try:
@@ -903,7 +900,7 @@ class StyreneDaemon:
                 return
 
             self._auto_reply_handler = AutoReplyHandler(
-                config=self.config.chat,
+                config_accessor=lambda: self.config.chat,
                 identity=identity,
                 router=lxmf_service.router,
                 start_time=self._start_time,
@@ -913,8 +910,10 @@ class StyreneDaemon:
             # Use raw_mode=True since AutoReplyHandler expects LXMF.LXMessage
             lxmf_service.register_callback(self._auto_reply_handler.handle_message, raw_mode=True)
 
+            state = "enabled" if self.config.chat.auto_reply_enabled else "disabled"
             logger.info(
-                f"Auto-reply handler started (cooldown: {self.config.chat.auto_reply_cooldown}s)"
+                f"Auto-reply handler registered ({state}, "
+                f"cooldown: {self.config.chat.auto_reply_cooldown}s)"
             )
 
         except ImportError as e:
@@ -1116,6 +1115,48 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to initialize notification service: {e}")
 
+    def _build_announce_data(self) -> bytes:
+        """Build announce app_data bytes from current config.
+
+        Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}:{short_name}
+
+        Returns:
+            Encoded announce app_data.
+        """
+        import socket
+
+        hostname = socket.gethostname()
+        version = "0.1.0"
+        capabilities = []
+        if self.config.reticulum.mode.value == "hub":
+            capabilities.append("hub")
+        if self.config.api.enabled:
+            capabilities.append("api")
+        if self.config.chat.auto_reply_enabled:
+            capabilities.append("autoreply")
+
+        caps_str = ",".join(capabilities) if capabilities else "node"
+
+        # Use display_name from config, fall back to hostname
+        display_name = self.config.identity.display_name or hostname
+        # Include icon in display_name if configured
+        if self.config.identity.icon:
+            display_name = f"{self.config.identity.icon} {display_name}"
+
+        # Include LXMF delivery destination in announce
+        lxmf_dest = ""
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            lxmf_service = get_lxmf_service()
+            if lxmf_service.is_initialized and lxmf_service.delivery_destination:
+                lxmf_dest = lxmf_service.delivery_destination.hash.hex()
+        except Exception as e:
+            logger.warning(f"Could not get LXMF destination for announce: {e}")
+
+        short_name = self.config.identity.short_name or ""
+        return f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}".encode()
+
     def _announce(self) -> None:
         """Trigger an announce of the local operator destination.
 
@@ -1126,39 +1167,11 @@ class StyreneDaemon:
             return
 
         try:
-            import socket
-
-            hostname = socket.gethostname()
-            version = "0.1.0"
-            capabilities = []
-            if self.config.reticulum.mode.value == "hub":
-                capabilities.append("hub")
-            if self.config.api.enabled:
-                capabilities.append("api")
-
-            caps_str = ",".join(capabilities) if capabilities else "node"
-
-            # Use display_name from config, fall back to hostname
-            display_name = self.config.identity.display_name or hostname
-            # Include icon in display_name if configured
-            if self.config.identity.icon:
-                display_name = f"{self.config.identity.icon} {display_name}"
-
-            # Include LXMF delivery destination in announce
-            lxmf_dest = ""
-            try:
-                from styrened.services.lxmf_service import get_lxmf_service
-
-                lxmf_service = get_lxmf_service()
-                if lxmf_service.is_initialized and lxmf_service.delivery_destination:
-                    lxmf_dest = lxmf_service.delivery_destination.hash.hex()
-            except Exception as e:
-                logger.warning(f"Could not get LXMF destination for announce: {e}")
-
-            # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}:{short_name}
-            short_name = self.config.identity.short_name or ""
-            app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}".encode()
+            app_data = self._build_announce_data()
             self._operator_destination.announce(app_data=app_data)
+
+            # Extract display_name for logging
+            display_name = app_data.decode("utf-8").split(":")[1]
             logger.info(f"Announced as Styrene node: {display_name}")
 
             try:
@@ -1202,83 +1215,17 @@ class StyreneDaemon:
             await asyncio.sleep(announce_interval)
             logger.info(f"Run loop woke up, _running={self._running}")
 
-            # Re-announce presence using cached destination
+            # Re-announce presence using _announce() (shared with IPC/API)
             try:
                 # Use cached destination if available, otherwise try to recover
-                destination = self._operator_destination
-                if destination is None:
-                    # Recovery: try to get/create destination if not cached
+                if self._operator_destination is None:
                     logger.debug("No cached destination, attempting recovery")
                     self._init_operator_destination()
-                    destination = self._operator_destination
 
-                if destination:
-                    # Re-announce with LXMF destination
-                    import socket
-
-                    hostname = socket.gethostname()
-                    version = "0.1.0"
-                    capabilities = []
-                    if self.config.reticulum.mode.value == "hub":
-                        capabilities.append("hub")
-                    if self.config.api.enabled:
-                        capabilities.append("api")
-
-                    caps_str = ",".join(capabilities) if capabilities else "node"
-
-                    # Use display_name from config, fall back to hostname
-                    display_name = self.config.identity.display_name or hostname
-                    # Include icon in display_name if configured
-                    if self.config.identity.icon:
-                        display_name = f"{self.config.identity.icon} {display_name}"
-
-                    # Include LXMF delivery destination in announce
-                    lxmf_dest = ""
-                    try:
-                        from styrened.services.lxmf_service import get_lxmf_service
-
-                        lxmf_service = get_lxmf_service()
-                        if lxmf_service.is_initialized and lxmf_service.delivery_destination:
-                            lxmf_dest = lxmf_service.delivery_destination.hash.hex()
-                            logger.info(f"Including LXMF dest in re-announce: {lxmf_dest[:16]}...")
-                        else:
-                            logger.warning(
-                                "LXMF not initialized or no delivery destination for re-announce"
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not get LXMF destination for re-announce: {e}", exc_info=True
-                        )
-
-                    # Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}
-                    app_data = f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}".encode()
-                    destination.announce(app_data=app_data)
-                    logger.info(f"Re-announced as Styrene node: {display_name}")
-
-                    try:
-                        from styrened.web.metrics import announces_total
-
-                        announces_total.labels(result="success").inc()
-                    except ImportError:
-                        pass
-
-                    # Also re-announce LXMF delivery destination so clients can send to us
-                    try:
-                        from styrened.services.lxmf_service import get_lxmf_service
-
-                        lxmf_service = get_lxmf_service()
-                        if (
-                            lxmf_service.is_initialized
-                            and lxmf_service.router
-                            and lxmf_service.delivery_destination
-                        ):
-                            lxmf_service.router.announce(lxmf_service.delivery_destination.hash)
-                            logger.info("Re-announced LXMF delivery destination")
-                    except Exception as e:
-                        logger.warning(f"LXMF re-announce failed: {e}")
+                self._announce()
 
             except Exception as e:
-                logger.warning(f"Announce failed: {e}")
+                logger.warning(f"Re-announce failed: {e}")
                 try:
                     from styrened.web.metrics import announces_total
 

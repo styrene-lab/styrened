@@ -38,7 +38,8 @@ Headless Styrene daemon for edge deployments on Reticulum mesh networks.
 ### PyPI
 
 ```bash
-pip install styrened
+pip install styrened            # Daemon only (no UI dependencies)
+pip install styrened[tui]       # Daemon + Terminal UI
 ```
 
 ### Nix Flake
@@ -139,6 +140,14 @@ styrened
 
 # Or via Python module
 python -m styrened
+
+# Run TUI (requires styrened[tui])
+styrene
+
+# TUI with options
+styrene --dashboard           # Compact dashboard mode
+styrene --headless            # Headless mode with daemon
+styrene --peer host:port      # Connect to specific peer
 ```
 
 ### Configuration
@@ -240,16 +249,15 @@ api:
   port: 8000
 ```
 
-## Differences from `styrene-tui`
+## Installation Extras
 
-| Feature | styrene-tui | styrened |
-|---------|-------------|----------|
-| **UI** | Textual TUI | Headless only |
-| **Dependencies** | +textual, +psutil | Minimal (RNS, LXMF, msgpack) |
-| **Use Case** | Interactive operator | Service/edge device |
-| **Nix Support** | Python package | Nix flake + module |
-
-Both packages share the same underlying library code (protocols, services, models) which lives in styrened.
+| Extra | Install | Adds |
+|-------|---------|------|
+| (none) | `pip install styrened` | Headless daemon only (minimal deps) |
+| `[tui]` | `pip install styrened[tui]` | Terminal UI (+textual, +psutil) |
+| `[web]` | `pip install styrened[web]` | HTTP API (+fastapi, +uvicorn) |
+| `[metrics]` | `pip install styrened[metrics]` | Prometheus metrics |
+| `[yubikey]` | `pip install styrened[yubikey]` | YubiKey authentication |
 
 ## Development
 

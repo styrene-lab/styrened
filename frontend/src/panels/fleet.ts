@@ -1,6 +1,6 @@
 // Fleet panel — remote exec, device status, announce
 
-import { fetchDevices, fleetExec, fleetStatus, announce } from '../api'
+import { fetchDevices, fleetExec, fleetStatus, fleetReboot, fleetConfigUpdate, announce } from '../api'
 import type { MeshDevice, ExecResult, DeviceStatus } from '../types'
 
 let mounted = false
@@ -19,6 +19,8 @@ function createHTML(): string {
           <option value="">-- Select device --</option>
         </select>
         <button id="device-status-btn" class="modal-btn" disabled>STATUS</button>
+        <button id="device-reboot-btn" class="modal-btn" disabled>REBOOT</button>
+        <button id="device-config-btn" class="modal-btn" disabled>CONFIG</button>
       </div>
       <div class="fleet-exec-area">
         <label class="form-label">REMOTE EXECUTE</label>
@@ -44,7 +46,10 @@ async function loadDevices(): Promise<void> {
     const devices = await fetchDevices()
     const options = devices
       .filter(d => d.status === 'active')
-      .map(d => `<option value="${d.destination_hash}">${escapeHtml(d.name || d.destination_hash.slice(0, 16))}</option>`)
+      .map(d => {
+        const ooo = d.capabilities?.includes('autoreply') ? ' [OOO]' : ''
+        return `<option value="${d.destination_hash}">${escapeHtml(d.name || d.destination_hash.slice(0, 16))}${ooo}</option>`
+      })
 
     select.innerHTML = '<option value="">-- Select device --</option>' + options.join('')
   } catch (err) {
@@ -55,10 +60,15 @@ async function loadDevices(): Promise<void> {
 function onDeviceSelect(e: Event): void {
   const select = e.target as HTMLSelectElement
   selectedDevice = select.value || null
+  const disabled = !selectedDevice
   const statusBtn = document.getElementById('device-status-btn') as HTMLButtonElement
   const execBtn = document.getElementById('exec-btn') as HTMLButtonElement
-  if (statusBtn) statusBtn.disabled = !selectedDevice
-  if (execBtn) execBtn.disabled = !selectedDevice
+  const rebootBtn = document.getElementById('device-reboot-btn') as HTMLButtonElement
+  const configBtn = document.getElementById('device-config-btn') as HTMLButtonElement
+  if (statusBtn) statusBtn.disabled = disabled
+  if (execBtn) execBtn.disabled = disabled
+  if (rebootBtn) rebootBtn.disabled = disabled
+  if (configBtn) configBtn.disabled = disabled
 }
 
 async function handleExec(): Promise<void> {
@@ -149,6 +159,72 @@ function renderDeviceStatus(status: DeviceStatus): void {
   `
 }
 
+async function handleReboot(): Promise<void> {
+  if (!selectedDevice) return
+  const output = document.getElementById('fleet-output')
+  if (!output) return
+
+  if (!confirm('Reboot this device? This will disrupt all active connections.')) return
+
+  output.innerHTML = '<div class="output-running">SENDING REBOOT COMMAND...</div>'
+
+  try {
+    const result = await fleetReboot(selectedDevice)
+    const cls = result.success ? 'output-success' : 'output-error'
+    output.innerHTML = `<div class="${cls}">${escapeHtml(result.message)}</div>`
+  } catch (err: any) {
+    output.innerHTML = `<div class="output-error">REBOOT FAILED: ${escapeHtml(err.message)}</div>`
+  }
+}
+
+async function handleConfigPush(): Promise<void> {
+  if (!selectedDevice) return
+  const output = document.getElementById('fleet-output')
+  if (!output) return
+
+  // Render inline config form
+  output.innerHTML = `
+    <div class="fleet-config-form">
+      <div class="output-label">CONFIG UPDATE (JSON)</div>
+      <textarea id="config-json" class="form-input fleet-config-textarea" rows="6" placeholder='{"reticulum": {"announce_interval": 600}}'></textarea>
+      <div class="exec-input-row">
+        <button id="config-send-btn" class="modal-btn modal-btn-primary">PUSH CONFIG</button>
+        <button id="config-cancel-btn" class="modal-btn">CANCEL</button>
+      </div>
+    </div>
+  `
+
+  document.getElementById('config-send-btn')?.addEventListener('click', async () => {
+    const textarea = document.getElementById('config-json') as HTMLTextAreaElement
+    if (!textarea || !selectedDevice) return
+
+    let updates: Record<string, any>
+    try {
+      updates = JSON.parse(textarea.value)
+    } catch {
+      output.innerHTML = '<div class="output-error">INVALID JSON</div>'
+      return
+    }
+
+    output.innerHTML = '<div class="output-running">PUSHING CONFIG...</div>'
+
+    try {
+      const result = await fleetConfigUpdate(selectedDevice, updates)
+      const cls = result.success ? 'output-success' : 'output-error'
+      const keys = result.updated_keys.length > 0
+        ? `\nUpdated: ${result.updated_keys.join(', ')}`
+        : ''
+      output.innerHTML = `<div class="${cls}">${escapeHtml(result.message)}${keys ? `<br/><span class="output-label">${escapeHtml(keys)}</span>` : ''}</div>`
+    } catch (err: any) {
+      output.innerHTML = `<div class="output-error">CONFIG PUSH FAILED: ${escapeHtml(err.message)}</div>`
+    }
+  })
+
+  document.getElementById('config-cancel-btn')?.addEventListener('click', () => {
+    output.innerHTML = '<div class="output-placeholder">Select a device and run a command</div>'
+  })
+}
+
 async function handleAnnounce(): Promise<void> {
   const output = document.getElementById('fleet-output')
   if (!output) return
@@ -168,6 +244,8 @@ export async function mount(target: HTMLElement): Promise<void> {
   document.getElementById('device-select')?.addEventListener('change', onDeviceSelect)
   document.getElementById('exec-btn')?.addEventListener('click', handleExec)
   document.getElementById('device-status-btn')?.addEventListener('click', handleDeviceStatus)
+  document.getElementById('device-reboot-btn')?.addEventListener('click', handleReboot)
+  document.getElementById('device-config-btn')?.addEventListener('click', handleConfigPush)
   document.getElementById('announce-btn')?.addEventListener('click', handleAnnounce)
   document.getElementById('exec-command')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') handleExec()

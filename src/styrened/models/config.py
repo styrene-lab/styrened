@@ -332,7 +332,7 @@ class ChatConfig:
     """
 
     enabled: bool = True
-    auto_reply_enabled: bool = True
+    auto_reply_enabled: bool = False
     auto_reply_message: str = (
         "This is {hostname}, a Styrene mesh node running in headless mode. "
         "No operator is currently available to respond. "

@@ -87,6 +87,15 @@ class SSEBroadcaster:
         data = {"peer_hash": peer_hash, "action": action}
         self._broadcast_sync("contact-updated", data)
 
+    def broadcast_config_event(self) -> None:
+        """Broadcast config change notification."""
+        self._broadcast_sync("config-updated", {})
+
+    def broadcast_auto_reply_event(self, enabled: bool, message: str) -> None:
+        """Broadcast auto-reply state change."""
+        data = {"enabled": enabled, "message": message}
+        self._broadcast_sync("auto-reply-updated", data)
+
 
 def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:
     """Create the SSE events router."""

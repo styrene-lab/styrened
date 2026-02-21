@@ -11,12 +11,15 @@ import yaml
 from platformdirs import user_config_dir
 
 from styrened.models.config import (
+    ConfigFieldError,
     ConfigLoadError,
+    ConfigValidationError,
     CoreConfig,
     DeploymentMode,
     NotificationsConfig,
     PropagationNodeConfig,
     YubiKeyConfig,
+    validate_short_name,
 )
 
 
@@ -170,8 +173,24 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                 pass  # Keep default
         if "announce_interval" in ret:
             config.reticulum.announce_interval = int(ret["announce_interval"])
+        if "auto_initialize" in ret:
+            config.reticulum.auto_initialize = _parse_bool(ret["auto_initialize"])
         if "enable_transport" in ret:
             config.reticulum.enable_transport = _parse_bool(ret["enable_transport"])
+        if "hub_enabled" in ret:
+            config.reticulum.hub_enabled = _parse_bool(ret["hub_enabled"])
+        if "hub_address" in ret and ret["hub_address"]:
+            addr = str(ret["hub_address"])
+            if len(addr) == 32:
+                config.reticulum.hub_address = addr
+        if "hub_announce_interval" in ret:
+            config.reticulum.hub_announce_interval = int(ret["hub_announce_interval"])
+
+        # Parse operator_identity_path
+        if "operator_identity_path" in ret and ret["operator_identity_path"]:
+            config.reticulum.operator_identity_path = Path(
+                str(ret["operator_identity_path"])
+            ).expanduser()
 
         # Parse config_path_override (new in v0.3.5)
         if "config_path_override" in ret:
@@ -377,6 +396,16 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         if "max_peering_cost" in lxmf:
             config.lxmf.max_peering_cost = int(lxmf["max_peering_cost"])
 
+    # Parse ipc section
+    if "ipc" in data and isinstance(data["ipc"], dict):
+        ipc = data["ipc"]
+        if "enabled" in ipc:
+            config.ipc.enabled = _parse_bool(ipc["enabled"])
+        if "socket_path" in ipc and ipc["socket_path"]:
+            config.ipc.socket_path = Path(str(ipc["socket_path"])).expanduser()
+        if "socket_mode" in ipc:
+            config.ipc.socket_mode = int(ipc["socket_mode"])
+
     # Parse terminal section
     if "terminal" in data and isinstance(data["terminal"], dict):
         term = data["terminal"]
@@ -415,6 +444,9 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
 def save_core_config(config: CoreConfig, config_path: Path | None = None) -> None:
     """Save core configuration to YAML file.
 
+    Serializes ALL 10 CoreConfig sections with ALL fields. The round-trip
+    invariant is: load_core_config(save_core_config(config)) == config.
+
     Args:
         config: CoreConfig instance to save.
         config_path: Optional path to config file. If None, uses default location.
@@ -427,16 +459,59 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
 
     ensure_directories()
 
-    # Convert CoreConfig to dictionary
-    # For now, minimal implementation - full serialization can be added later
+    config_dict = _serialize_config(config)
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with config_path.open("w") as f:
+            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+    except OSError as e:
+        raise ConfigLoadError(f"Failed to save config to {config_path}: {e}", config_path) from e
+
+
+def _serialize_config(config: CoreConfig) -> dict[str, Any]:
+    """Serialize CoreConfig to a dictionary suitable for YAML output.
+
+    Args:
+        config: CoreConfig instance to serialize.
+
+    Returns:
+        Nested dictionary matching the YAML config file structure.
+    """
+    # Reticulum section
     reticulum_dict: dict[str, Any] = {
         "mode": config.reticulum.mode.value,
+        "auto_initialize": config.reticulum.auto_initialize,
         "announce_interval": config.reticulum.announce_interval,
+        "hub_enabled": config.reticulum.hub_enabled,
+        "hub_announce_interval": config.reticulum.hub_announce_interval,
     }
-    # Include config_path_override if set
+    if config.reticulum.enable_transport is not None:
+        reticulum_dict["enable_transport"] = config.reticulum.enable_transport
     if config.reticulum.config_path_override is not None:
         reticulum_dict["config_path_override"] = str(config.reticulum.config_path_override)
+    if config.reticulum.operator_identity_path is not None:
+        reticulum_dict["operator_identity_path"] = str(config.reticulum.operator_identity_path)
+    if config.reticulum.hub_address is not None:
+        reticulum_dict["hub_address"] = config.reticulum.hub_address
 
+    # Interfaces sub-section
+    interfaces_dict: dict[str, Any] = {
+        "auto": config.reticulum.interfaces.auto,
+        "server": {
+            "enabled": config.reticulum.interfaces.server.enabled,
+            "listen_ip": config.reticulum.interfaces.server.listen_ip,
+            "port": config.reticulum.interfaces.server.port,
+        },
+    }
+    if config.reticulum.interfaces.peers:
+        interfaces_dict["peers"] = [
+            {"host": p.host, "port": p.port, **({"name": p.name} if p.name else {})}
+            for p in config.reticulum.interfaces.peers
+        ]
+    reticulum_dict["interfaces"] = interfaces_dict
+
+    # Identity section
     identity_dict: dict[str, Any] = {
         "display_name": config.identity.display_name,
         "icon": config.identity.icon,
@@ -444,33 +519,301 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
     }
     if config.identity.short_name:
         identity_dict["short_name"] = config.identity.short_name
+    if config.identity.provider == "yubikey" or config.identity.yubikey.credential_id:
+        identity_dict["yubikey"] = {
+            "credential_id": config.identity.yubikey.credential_id,
+            "rp_id": config.identity.yubikey.rp_id,
+            "require_touch": config.identity.yubikey.require_touch,
+        }
 
-    config_dict: dict[str, Any] = {
-        "reticulum": reticulum_dict,
-        "identity": identity_dict,
-        "rpc": {
-            "enabled": config.rpc.enabled,
-        },
-        "discovery": {
-            "enabled": config.discovery.enabled,
-            "auto_announce": config.discovery.auto_announce,
-        },
-        "chat": {
-            "enabled": config.chat.enabled,
-            "auto_reply_enabled": config.chat.auto_reply_enabled,
-        },
-        "api": {
-            "enabled": config.api.enabled,
-            "host": config.api.host,
-            "port": config.api.port,
-            "metrics": {
-                "enabled": config.api.metrics.enabled,
-            },
+    # RPC section
+    rpc_dict: dict[str, Any] = {
+        "enabled": config.rpc.enabled,
+        "relay_mode": config.rpc.relay_mode,
+        "allow_command_execution": config.rpc.allow_command_execution,
+    }
+
+    # Discovery section
+    discovery_dict: dict[str, Any] = {
+        "enabled": config.discovery.enabled,
+        "auto_announce": config.discovery.auto_announce,
+    }
+
+    # Chat section
+    chat_dict: dict[str, Any] = {
+        "enabled": config.chat.enabled,
+        "auto_reply_enabled": config.chat.auto_reply_enabled,
+        "auto_reply_message": config.chat.auto_reply_message,
+        "auto_reply_cooldown": config.chat.auto_reply_cooldown,
+        "persist_messages": config.chat.persist_messages,
+    }
+
+    # API section
+    api_dict: dict[str, Any] = {
+        "enabled": config.api.enabled,
+        "host": config.api.host,
+        "port": config.api.port,
+        "metrics": {
+            "enabled": config.api.metrics.enabled,
         },
     }
 
+    # IPC section
+    ipc_dict: dict[str, Any] = {
+        "enabled": config.ipc.enabled,
+        "socket_mode": config.ipc.socket_mode,
+    }
+    if config.ipc.socket_path is not None:
+        ipc_dict["socket_path"] = str(config.ipc.socket_path)
+
+    # Notifications section
+    notifications_dict: dict[str, Any] = {
+        "enabled": config.notifications.enabled,
+    }
+    if config.notifications.quiet_hours_start is not None:
+        notifications_dict["quiet_hours_start"] = config.notifications.quiet_hours_start
+    if config.notifications.quiet_hours_end is not None:
+        notifications_dict["quiet_hours_end"] = config.notifications.quiet_hours_end
+
+    # LXMF section
+    lxmf_dict: dict[str, Any] = {
+        "propagation_node": {
+            "enabled": config.lxmf.propagation_node.enabled,
+        },
+        "propagation_limit": config.lxmf.propagation_limit,
+        "sync_limit": config.lxmf.sync_limit,
+        "delivery_limit": config.lxmf.delivery_limit,
+        "autopeer": config.lxmf.autopeer,
+        "autopeer_maxdepth": config.lxmf.autopeer_maxdepth,
+        "max_peers": config.lxmf.max_peers,
+        "from_static_only": config.lxmf.from_static_only,
+        "propagation_cost": config.lxmf.propagation_cost,
+        "propagation_cost_flexibility": config.lxmf.propagation_cost_flexibility,
+        "peering_cost": config.lxmf.peering_cost,
+        "max_peering_cost": config.lxmf.max_peering_cost,
+    }
+    if config.lxmf.propagation_node.name is not None:
+        lxmf_dict["propagation_node"]["name"] = config.lxmf.propagation_node.name
+    if config.lxmf.propagation_destination is not None:
+        lxmf_dict["propagation_destination"] = config.lxmf.propagation_destination
+    if config.lxmf.static_peers:
+        lxmf_dict["static_peers"] = list(config.lxmf.static_peers)
+
+    # Terminal section
+    terminal_dict: dict[str, Any] = {
+        "enabled": config.terminal.enabled,
+        "allow_unauthenticated": config.terminal.allow_unauthenticated,
+        "session_idle_timeout": config.terminal.session_idle_timeout,
+        "max_sessions_per_identity": config.terminal.max_sessions_per_identity,
+        "max_total_sessions": config.terminal.max_total_sessions,
+        "rate_limit_requests": config.terminal.rate_limit_requests,
+    }
+    if config.terminal.default_shell is not None:
+        terminal_dict["default_shell"] = config.terminal.default_shell
+    if config.terminal.allowed_shells:
+        terminal_dict["allowed_shells"] = sorted(config.terminal.allowed_shells)
+    if config.terminal.authorized_identities:
+        terminal_dict["authorized_identities"] = sorted(config.terminal.authorized_identities)
+
+    return {
+        "reticulum": reticulum_dict,
+        "identity": identity_dict,
+        "rpc": rpc_dict,
+        "discovery": discovery_dict,
+        "chat": chat_dict,
+        "api": api_dict,
+        "ipc": ipc_dict,
+        "notifications": notifications_dict,
+        "lxmf": lxmf_dict,
+        "terminal": terminal_dict,
+    }
+
+
+def validate_core_config(
+    config: CoreConfig, *, raise_on_error: bool = False
+) -> list[ConfigFieldError]:
+    """Validate a CoreConfig instance for semantic correctness.
+
+    Checks port ranges, enum values, string constraints, and cross-field
+    dependencies. Does NOT check file existence or network reachability.
+
+    Args:
+        config: CoreConfig instance to validate.
+        raise_on_error: If True, raise ConfigValidationError on first batch of errors.
+
+    Returns:
+        List of ConfigFieldError instances (empty = valid).
+
+    Raises:
+        ConfigValidationError: If raise_on_error is True and errors are found.
+    """
+    errors: list[ConfigFieldError] = []
+
+    def _check_port(field: str, port: int) -> None:
+        if not 1 <= port <= 65535:
+            errors.append(ConfigFieldError(field, "Port must be 1-65535", str(port)))
+
+    # --- Reticulum ---
     try:
-        with config_path.open("w") as f:
-            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
-    except OSError as e:
-        raise ConfigLoadError(f"Failed to save config to {config_path}: {e}", config_path) from e
+        DeploymentMode(config.reticulum.mode.value)
+    except ValueError:
+        errors.append(
+            ConfigFieldError("reticulum.mode", "Invalid deployment mode", str(config.reticulum.mode))
+        )
+
+    if config.reticulum.announce_interval <= 0:
+        errors.append(
+            ConfigFieldError(
+                "reticulum.announce_interval",
+                "Must be > 0",
+                str(config.reticulum.announce_interval),
+            )
+        )
+
+    if config.reticulum.hub_announce_interval <= 0:
+        errors.append(
+            ConfigFieldError(
+                "reticulum.hub_announce_interval",
+                "Must be > 0",
+                str(config.reticulum.hub_announce_interval),
+            )
+        )
+
+    if config.reticulum.hub_address is not None and len(config.reticulum.hub_address) != 32:
+        errors.append(
+            ConfigFieldError(
+                "reticulum.hub_address",
+                "Must be a 32-character hex hash",
+                config.reticulum.hub_address,
+            )
+        )
+
+    # Interfaces
+    _check_port("reticulum.interfaces.server.port", config.reticulum.interfaces.server.port)
+    for i, peer in enumerate(config.reticulum.interfaces.peers):
+        _check_port(f"reticulum.interfaces.peers[{i}].port", peer.port)
+        if not peer.host:
+            errors.append(
+                ConfigFieldError(f"reticulum.interfaces.peers[{i}].host", "Host cannot be empty")
+            )
+
+    # Cross-field: hub mode should have connectivity
+    if config.reticulum.mode == DeploymentMode.HUB:
+        has_server = config.reticulum.interfaces.server.enabled
+        has_peers = len(config.reticulum.interfaces.peers) > 0
+        if not has_server and not has_peers:
+            errors.append(
+                ConfigFieldError(
+                    "reticulum.mode",
+                    "Hub mode requires at least a server interface or peer connections",
+                    "hub",
+                )
+            )
+
+    # --- Identity ---
+    if not config.identity.display_name or len(config.identity.display_name) > 100:
+        errors.append(
+            ConfigFieldError(
+                "identity.display_name",
+                "Must be 1-100 characters",
+                config.identity.display_name[:20] if config.identity.display_name else "",
+            )
+        )
+
+    if config.identity.short_name is not None and not validate_short_name(
+        config.identity.short_name
+    ):
+        errors.append(
+            ConfigFieldError(
+                "identity.short_name",
+                "Must be 3-20 lowercase alphanumeric + hyphens, no leading/trailing hyphens",
+                config.identity.short_name,
+            )
+        )
+
+    if config.identity.provider not in ("file", "yubikey"):
+        errors.append(
+            ConfigFieldError(
+                "identity.provider",
+                "Must be 'file' or 'yubikey'",
+                config.identity.provider,
+            )
+        )
+
+    # --- API ---
+    _check_port("api.port", config.api.port)
+
+    # --- IPC ---
+    if not 0 <= config.ipc.socket_mode <= 0o777:
+        errors.append(
+            ConfigFieldError(
+                "ipc.socket_mode",
+                "Must be a valid Unix permission (0-0o777)",
+                oct(config.ipc.socket_mode),
+            )
+        )
+
+    # --- Chat ---
+    if config.chat.auto_reply_cooldown < 0:
+        errors.append(
+            ConfigFieldError(
+                "chat.auto_reply_cooldown",
+                "Must be >= 0",
+                str(config.chat.auto_reply_cooldown),
+            )
+        )
+
+    # --- Notifications ---
+    for field_name, val in [
+        ("notifications.quiet_hours_start", config.notifications.quiet_hours_start),
+        ("notifications.quiet_hours_end", config.notifications.quiet_hours_end),
+    ]:
+        if val is not None and not 0 <= val <= 23:
+            errors.append(
+                ConfigFieldError(field_name, "Must be 0-23", str(val))
+            )
+
+    # --- LXMF ---
+    if config.lxmf.propagation_node.enabled and not config.lxmf.propagation_node.name:
+        errors.append(
+            ConfigFieldError(
+                "lxmf.propagation_node.name",
+                "Propagation node requires a name when enabled",
+            )
+        )
+
+    if config.lxmf.propagation_destination is not None:
+        if len(config.lxmf.propagation_destination) != 32:
+            errors.append(
+                ConfigFieldError(
+                    "lxmf.propagation_destination",
+                    "Must be a 32-character hex hash",
+                    config.lxmf.propagation_destination,
+                )
+            )
+
+    for peer in config.lxmf.static_peers:
+        if len(peer) != 32:
+            errors.append(
+                ConfigFieldError(
+                    "lxmf.static_peers",
+                    "Each peer must be a 32-character hex hash",
+                    peer,
+                )
+            )
+
+    # --- Terminal ---
+    for ident in config.terminal.authorized_identities:
+        if len(ident) != 32:
+            errors.append(
+                ConfigFieldError(
+                    "terminal.authorized_identities",
+                    "Each identity must be a 32-character hex hash",
+                    ident,
+                )
+            )
+
+    if raise_on_error and errors:
+        raise ConfigValidationError(errors)
+
+    return errors

@@ -15,6 +15,7 @@ import logging
 import socket
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from importlib.metadata import version as get_version
 from typing import TYPE_CHECKING, Any
 
@@ -46,33 +47,43 @@ class AutoReplyHandler:
     """
 
     __slots__ = (
+        "_config_accessor",
         "_identity",
         "_last_reply",
         "_router",
         "_start_time",
-        "config",
         "skip_reply_on_no_path",
     )
 
     def __init__(
         self,
-        config: "ChatConfig",
-        identity: Any,  # RNS.Identity
-        router: Any,  # LXMF.LXMRouter
+        config: "ChatConfig | None" = None,
+        identity: Any = None,  # RNS.Identity
+        router: Any = None,  # LXMF.LXMRouter
         start_time: float | None = None,
         skip_reply_on_no_path: bool = True,
+        *,
+        config_accessor: "Callable[[], ChatConfig] | None" = None,
     ) -> None:
         """Initialize the auto-reply handler.
 
         Args:
-            config: Chat configuration with auto-reply settings.
+            config: Chat configuration (legacy, creates a static accessor).
             identity: RNS identity for this node.
             router: LXMF router for sending messages.
             start_time: Daemon start time for uptime calculation.
             skip_reply_on_no_path: If True, skip auto-reply when no path
                 to sender exists. If False, attempt sending anyway.
+            config_accessor: Callable returning current ChatConfig.
+                Preferred over config for hot-reload support.
         """
-        self.config = config
+        if config_accessor is not None:
+            self._config_accessor = config_accessor
+        elif config is not None:
+            _static = config
+            self._config_accessor = lambda: _static
+        else:
+            raise TypeError("Either config or config_accessor must be provided")
         self._identity = identity
         self._router = router
         self._start_time = start_time or time.time()
@@ -81,6 +92,11 @@ class AutoReplyHandler:
         # Track last reply time per sender (bytes key for memory efficiency)
         # OrderedDict provides LRU semantics via move_to_end()
         self._last_reply: OrderedDict[bytes, float] = OrderedDict()
+
+    @property
+    def config(self) -> "ChatConfig":
+        """Return current chat config via accessor for hot-reload support."""
+        return self._config_accessor()
 
     def handle_message(self, message: "LXMF.LXMessage") -> None:
         """Handle an incoming LXMF message.
@@ -273,7 +289,7 @@ class AutoReplyHandler:
             hostname = "unknown"
 
         try:
-            version = get_version("styrene-tui")
+            version = get_version("styrened")
         except Exception:
             version = "0.1.0"
 
