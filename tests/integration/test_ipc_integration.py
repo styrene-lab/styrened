@@ -229,6 +229,7 @@ class TestQueryDevices:
         mock_device.lxmf_destination_hash = "lxmf789"
         mock_device.last_announce = 1234567890.0
         mock_device.announce_count = 5
+        mock_device.short_name = None
 
         with (
             patch("styrened.services.reticulum.discover_devices", return_value=[mock_device]),
@@ -264,6 +265,7 @@ class TestQueryDevices:
         styrene_device.lxmf_destination_hash = "lxmf1"
         styrene_device.last_announce = 1234567890.0
         styrene_device.announce_count = 1
+        styrene_device.short_name = None
 
         other_device = MagicMock()
         other_device.destination_hash = "other1"
@@ -275,6 +277,7 @@ class TestQueryDevices:
         other_device.lxmf_destination_hash = "lxmf2"
         other_device.last_announce = 1234567890.0
         other_device.announce_count = 1
+        other_device.short_name = None
 
         with (
             patch(

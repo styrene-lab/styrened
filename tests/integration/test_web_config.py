@@ -56,7 +56,7 @@ class TestGetConfig:
         config = data["config"]
 
         expected_sections = {
-            "reticulum", "identity", "rpc", "discovery", "chat",
+            "profile", "reticulum", "identity", "rpc", "discovery", "chat",
             "api", "ipc", "notifications", "lxmf", "terminal",
         }
         assert expected_sections == set(config.keys())
@@ -157,3 +157,132 @@ class TestPutConfig:
             json={"identity": {"yubikey": {"credential_id": "new-cred"}}},
         )
         assert response.status_code == 403
+
+
+class TestPublicModeInConfig:
+    """Tests for public_mode visibility in config API."""
+
+    def test_public_mode_appears_in_config(self, client) -> None:
+        """GET /api/config includes api.public_mode field."""
+        test_client, _, _ = client
+        response = test_client.get("/api/config")
+        assert response.status_code == 200
+        config = response.json()["config"]
+        assert "public_mode" in config["api"]
+        assert config["api"]["public_mode"] is False
+
+
+class TestPublicModeConfigRedaction:
+    """Tests for config redaction when public_mode is enabled."""
+
+    def _make_public_client(self):
+        config = CoreConfig()
+        config.api.public_mode = True
+        # Set up some interface data to verify redaction
+        config.reticulum.interfaces.server.enabled = True
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        return TestClient(app), daemon
+
+    def test_config_redacts_interfaces_in_public_mode(self) -> None:
+        """In public mode, interfaces only shows auto + server.enabled."""
+        test_client, _ = self._make_public_client()
+        response = test_client.get("/api/config")
+        assert response.status_code == 200
+        config = response.json()["config"]
+        ifaces = config["reticulum"]["interfaces"]
+        # Should only have 'auto' and 'server' keys
+        assert set(ifaces.keys()) == {"auto", "server"}
+        assert isinstance(ifaces["server"]["enabled"], bool)
+
+    def test_config_full_interfaces_when_not_public(self) -> None:
+        """When public_mode is off, interfaces show full details."""
+        config = CoreConfig()
+        config.api.public_mode = False
+        config.reticulum.interfaces.server.enabled = True
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        test_client = TestClient(app)
+
+        response = test_client.get("/api/config")
+        assert response.status_code == 200
+        config_resp = response.json()["config"]
+        ifaces = config_resp["reticulum"]["interfaces"]
+        # Should contain full interface details (server, peers, auto)
+        assert "server" in ifaces
+        # Server should have full details, not just {enabled: bool}
+        assert "enabled" in ifaces["server"]
+
+    def test_config_redacts_terminal_in_public_mode(self) -> None:
+        """In public mode, terminal section only shows enabled status."""
+        test_client, _ = self._make_public_client()
+        response = test_client.get("/api/config")
+        assert response.status_code == 200
+        config = response.json()["config"]
+        terminal = config["terminal"]
+        # Should only have 'enabled' key
+        assert set(terminal.keys()) == {"enabled"}
+        assert isinstance(terminal["enabled"], bool)
+
+    def test_config_redacts_filesystem_paths_in_public_mode(self) -> None:
+        """In public mode, filesystem paths are stripped from config."""
+        test_client, _ = self._make_public_client()
+        response = test_client.get("/api/config")
+        assert response.status_code == 200
+        config = response.json()["config"]
+        ret = config["reticulum"]
+        assert "config_path_override" not in ret
+        assert "operator_identity_path" not in ret
+        ipc = config["ipc"]
+        assert "socket_path" not in ipc
+        assert "socket_mode" not in ipc
+
+
+class TestPublicModeNetworkRedaction:
+    """Tests for network info redaction when public_mode is enabled."""
+
+    def test_network_omits_mac_and_ip_in_public_mode(self) -> None:
+        """In public mode, MAC and IP addresses are omitted from network info."""
+        config = CoreConfig()
+        config.api.public_mode = True
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        test_client = TestClient(app)
+
+        response = test_client.get("/api/system/network")
+        assert response.status_code == 200
+        interfaces = response.json()
+        for iface in interfaces:
+            assert "mac_address" not in iface
+            assert "ip_address" not in iface
+            # Should still have basic info
+            assert "name" in iface
+            assert "interface_type" in iface
+            assert "category" in iface
+
+    def test_network_includes_mac_and_ip_when_not_public(self) -> None:
+        """When public_mode is off, MAC and IP addresses are included."""
+        config = CoreConfig()
+        config.api.public_mode = False
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        test_client = TestClient(app)
+
+        response = test_client.get("/api/system/network")
+        assert response.status_code == 200
+        interfaces = response.json()
+        for iface in interfaces:
+            assert "mac_address" in iface
+            assert "ip_address" in iface

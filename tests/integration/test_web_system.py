@@ -71,6 +71,65 @@ class TestSystemStatus:
         assert data["version"] == __version__
 
 
+class TestSystemStatusPublicMode:
+    """Tests for hostname redaction in public mode."""
+
+    def test_hostname_redacted_in_public_mode(self) -> None:
+        """In public mode, hostname uses display_name instead of platform.node()."""
+        import platform as plat
+
+        config = CoreConfig()
+        config.api.public_mode = True
+        config.identity.display_name = "Public Hub"
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        test_client = TestClient(app)
+
+        response = test_client.get("/api/system/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hostname"] == "Public Hub"
+        assert data["hostname"] != plat.node()
+
+    def test_hostname_shows_real_when_not_public(self) -> None:
+        """When public_mode is off, hostname is the real system hostname."""
+        import platform as plat
+
+        config = CoreConfig()
+        config.api.public_mode = False
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        test_client = TestClient(app)
+
+        response = test_client.get("/api/system/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hostname"] == plat.node()
+
+    def test_hostname_fallback_when_no_display_name(self) -> None:
+        """In public mode with no display_name, hostname falls back to 'styrened'."""
+        config = CoreConfig()
+        config.api.public_mode = True
+        config.identity.display_name = ""
+        daemon = _make_mock_daemon(config)
+        broadcaster = SSEBroadcaster()
+        app = FastAPI()
+        router = create_router(daemon, broadcaster)
+        app.include_router(router)
+        test_client = TestClient(app)
+
+        response = test_client.get("/api/system/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hostname"] == "styrened"
+
+
 class TestReticulumStatus:
     """Tests for GET /api/system/reticulum."""
 

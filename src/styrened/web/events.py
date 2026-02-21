@@ -97,6 +97,11 @@ class SSEBroadcaster:
         self._broadcast_sync("auto-reply-updated", data)
 
 
+# Events safe to broadcast in public mode (whitelist — new event types
+# are blocked until explicitly added here).
+_PUBLIC_EVENTS = frozenset({"device-updated", "config-updated"})
+
+
 def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:
     """Create the SSE events router."""
     router = APIRouter()
@@ -104,6 +109,10 @@ def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:
     @router.get("/events")
     async def events(request: Request) -> StreamingResponse:
         queue = await broadcaster.subscribe()
+
+        def _is_public() -> bool:
+            daemon = getattr(request.app.state, "daemon", None)
+            return daemon is not None and daemon.config.api.public_mode
 
         async def stream():
             try:
@@ -113,6 +122,11 @@ def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:
                         break
                     try:
                         msg = await asyncio.wait_for(queue.get(), timeout=1.0)
+                        # Filter private events in public mode
+                        if _is_public():
+                            event_type = msg.split("\n", 1)[0].removeprefix("event: ").strip()
+                            if event_type not in _PUBLIC_EVENTS:
+                                continue
                         yield msg
                     except asyncio.TimeoutError:
                         if time.monotonic() - last_keepalive >= KEEPALIVE_INTERVAL:

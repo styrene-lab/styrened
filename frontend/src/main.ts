@@ -1,8 +1,8 @@
 // Styrened Web UI — entry point
 
-import { fetchIdentity } from './api'
-import { addRoute, startRouter } from './router'
-import { appState, setActivePanel, setConnectionStatus } from './state'
+import { fetchConfig, fetchIdentity } from './api'
+import { addRoute, navigate, startRouter } from './router'
+import { appState, setActivePanel, setConnectionStatus, setPublicMode } from './state'
 import * as sse from './sse'
 import { checkAndShow as checkSetup } from './components/setup-modal'
 import type { Identity } from './types'
@@ -20,9 +20,17 @@ const panelModules = {
 let currentPanel: string | null = null
 let currentUnmount: (() => void) | null = null
 
+const PRIVATE_PANELS = new Set(['chat', 'contacts', 'fleet'])
+
 // --- Panel switching ---
 
 async function switchPanel(panel: string, params: Record<string, string> = {}): Promise<void> {
+  // Guard: redirect private panels to topology in public mode
+  if (appState.publicMode && PRIVATE_PANELS.has(panel)) {
+    navigate('#/topology')
+    return
+  }
+
   const container = document.getElementById('panel-container')
   if (!container) return
 
@@ -82,6 +90,39 @@ function updateNavActive(panel: string): void {
   })
 }
 
+// --- Public mode ---
+
+function updateNavForPublicMode(publicMode: boolean): void {
+  const hidePanels = ['chat', 'contacts', 'fleet']
+  hidePanels.forEach(panel => {
+    const el = document.querySelector(`.nav-item[data-panel="${panel}"]`) as HTMLElement
+    if (el) el.style.display = publicMode ? 'none' : ''
+  })
+
+  const badge = document.getElementById('header-readonly-badge')
+  const sep = badge?.previousElementSibling as HTMLElement | null
+
+  if (publicMode) {
+    // Add badge if not present
+    const statsEl = document.getElementById('header-stats')
+    if (statsEl && !badge) {
+      const newSep = document.createElement('span')
+      newSep.className = 'stat-sep'
+      newSep.textContent = '|'
+      const newBadge = document.createElement('span')
+      newBadge.id = 'header-readonly-badge'
+      newBadge.className = 'read-only-badge'
+      newBadge.textContent = 'READ-ONLY'
+      statsEl.appendChild(newSep)
+      statsEl.appendChild(newBadge)
+    }
+  } else {
+    // Remove badge if present
+    if (sep) sep.remove()
+    if (badge) badge.remove()
+  }
+}
+
 // --- Header ---
 
 function updateIdentity(identity: Identity): void {
@@ -121,17 +162,39 @@ async function init(): Promise<void> {
   addRoute('/settings', () => switchPanel('settings'))
   addRoute('/status', () => switchPanel('status'))
 
-  // Load identity
+  // Load identity and config in parallel
   try {
-    const identity = await fetchIdentity()
+    const [identity, configResult] = await Promise.all([
+      fetchIdentity(),
+      fetchConfig().catch(() => null),
+    ])
     appState.identity = identity
     updateIdentity(identity)
+
+    if (configResult?.config?.api?.public_mode) {
+      setPublicMode(true)
+      updateNavForPublicMode(true)
+    }
   } catch (err) {
     console.error('Failed to load identity:', err)
   }
 
   // Start SSE
   sse.connect()
+
+  // Listen for config changes to re-check public mode
+  sse.on('config-updated', async () => {
+    try {
+      const result = await fetchConfig()
+      const isPublic = !!result?.config?.api?.public_mode
+      if (isPublic !== appState.publicMode) {
+        setPublicMode(isPublic)
+        updateNavForPublicMode(isPublic)
+      }
+    } catch {
+      // Ignore — SSE reconnect will retry
+    }
+  })
 
   // Check first-run setup
   checkSetup()
