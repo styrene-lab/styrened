@@ -1,0 +1,315 @@
+"""Node Info Panel - consolidated local node status.
+
+Combines system hardware, Reticulum stack, and Styrene mesh configuration
+into a single unified view of "this node" - the daemon behind the TUI.
+
+Uses cascade colors for theme-aware rendering.
+"""
+
+import RNS  # type: ignore
+from textual.reactive import reactive
+from textual.widgets import Static
+
+from styrened.models.mesh_device import DeviceType
+from styrened.models.rns_error import RNSErrorState
+from styrened.services.hub_connection import HubStatus, get_hub_connection
+from styrened.tui.models.hardware import NetworkInterface, SystemInfo
+from styrened.tui.services.config import load_config
+from styrened.tui.services.hardware import (
+    PlatformNotSupportedError,
+    get_disks,
+    get_network_interfaces,
+    get_system_info,
+)
+from styrened.tui.services.reticulum import discover_devices, get_reticulum_status
+from styrened.tui.themes.semantic import SemanticSymbols
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
+
+
+class NodeInfoPanel(Static):
+    """Consolidated panel showing local node configuration and status.
+
+    Displays three sections:
+    - SYSTEM: Hardware configuration (CPU, RAM, network, storage)
+    - STYRENE: Mesh participation and hub connection
+    - RETICULUM: Network stack and interface status
+    """
+
+    DEFAULT_CSS = """
+    NodeInfoPanel {
+        height: auto;
+        padding: 0 1;
+    }
+    """
+
+    # Hardware reactive vars
+    system_info: reactive[SystemInfo | None] = reactive(None)
+    primary_interface: reactive[NetworkInterface | None] = reactive(None)
+    removable_count: reactive[int] = reactive(0)
+    hardware_error: reactive[str | None] = reactive(None)
+
+    # Styrene reactive vars
+    mode: reactive[str] = reactive("standalone")
+    hub_status: reactive[HubStatus] = reactive(HubStatus.DISABLED)
+    styrene_mesh_count: reactive[int] = reactive(0)
+
+    # Reticulum reactive vars
+    rns_online: reactive[bool] = reactive(False)
+    interface_count: reactive[int] = reactive(0)
+    interface_status: reactive[str] = reactive("")
+    error_state: reactive[RNSErrorState | None] = reactive(None)
+
+    def render(self) -> str:
+        """Render consolidated node info display.
+
+        Uses cascade hex colors for theme-aware Rich markup.
+        """
+        cascade = get_color_cascade()
+        lines = []
+
+        # === SYSTEM SECTION ===
+        lines.append(f"[{cascade.bright}]SYSTEM[/]")
+
+        if self.hardware_error:
+            lines.append(f"  [{cascade.dim}]Hardware detection not supported on this platform[/]")
+        else:
+            # CPU/RAM
+            if self.system_info:
+                cpu = self.system_info.cpu_model
+                if len(cpu) > 35:
+                    cpu = cpu[:32] + "..."
+                cores = self.system_info.cpu_cores
+                ram_gb = self.system_info.ram_total_gb
+                lines.append(f"  CPU: {cpu} ({cores}c, {ram_gb:.1f}GB)")
+            else:
+                lines.append(f"  CPU: [{cascade.dim}]detecting...[/]")
+
+            # Network
+            if self.primary_interface:
+                iface = self.primary_interface
+                ip = iface.ip_address or f"[{cascade.dim}]no ip[/]"
+                iface_type = iface.interface_type.value.upper()
+                if iface.is_up:
+                    lines.append(
+                        f"  NET: {iface.name} ({iface_type}) [{cascade.medium}]{ip}[/]"
+                    )
+                else:
+                    lines.append(f"  NET: {iface.name} ({iface_type}) [{cascade.dim}]{ip}[/]")
+            else:
+                lines.append(f"  NET: [{cascade.dim}]none[/]")
+
+            # Storage
+            if self.removable_count > 0:
+                lines.append(
+                    f"  STORAGE: [{cascade.bright} bold]{self.removable_count} removable[/]"
+                )
+            else:
+                lines.append(f"  STORAGE: [{cascade.dim}]no removable[/]")
+
+        # === RETICULUM SECTION ===
+        lines.append("")  # Blank line separator
+        lines.append(f"[{cascade.bright}]RETICULUM[/]")
+
+        # Network stack status
+        if self.rns_online:
+            lines.append(
+                f"  RNS: {SemanticSymbols.ONLINE} [{cascade.medium}]online ({self.interface_count} if)[/]"
+            )
+        else:
+            if self.error_state and self.error_state.is_error:
+                lines.append(
+                    f"  RNS: {SemanticSymbols.REJECTED} [{cascade.bright}]{self.error_state.title}[/]"
+                )
+            else:
+                lines.append(f"  RNS: {SemanticSymbols.OFFLINE} [{cascade.dim}]offline[/]")
+
+        # Interface uplink status
+        if self.rns_online:
+            if self.interface_status:
+                lines.append(f"  UPLINK: {self.interface_status}")
+            else:
+                lines.append(
+                    f"  UPLINK: {SemanticSymbols.OFFLINE} [{cascade.dim}]no interfaces[/]"
+                )
+        elif self.error_state and self.error_state.is_error:
+            # Show recovery guidance instead of uplink when there's an error
+            recovery = self.error_state.recovery
+            if recovery:
+                # Truncate long recovery messages for the panel
+                if len(recovery) > 50:
+                    recovery = recovery[:47] + "..."
+                lines.append(f"  [{cascade.medium}]{SemanticSymbols.PROCESSING} {recovery}[/]")
+
+        # === STYRENE SECTION ===
+        lines.append("")  # Blank line separator
+        lines.append(f"[{cascade.bright}]STYRENE[/]")
+
+        # Mode
+        mode_display = self.mode.upper()
+        if self.mode == "hub":
+            lines.append(f"  MODE: {SemanticSymbols.ONLINE} [{cascade.medium}]{mode_display}[/]")
+        elif self.mode == "peer":
+            lines.append(
+                f"  MODE: {SemanticSymbols.PENDING} [{cascade.medium}]{mode_display}[/]"
+            )
+        else:
+            lines.append(f"  MODE: {SemanticSymbols.IDLE} [{cascade.dim}]{mode_display}[/]")
+
+        # Hub connection
+        if self.hub_status == HubStatus.CONNECTED:
+            lines.append(f"  HUB: {SemanticSymbols.ONLINE} [{cascade.medium}]connected[/]")
+        elif self.hub_status == HubStatus.WAITING:
+            lines.append(f"  HUB: {SemanticSymbols.PENDING} [{cascade.medium}]waiting...[/]")
+        elif self.hub_status == HubStatus.DISCONNECTED:
+            lines.append(f"  HUB: {SemanticSymbols.OFFLINE} [{cascade.dim}]disconnected[/]")
+        else:  # DISABLED
+            lines.append(f"  HUB: {SemanticSymbols.OFFLINE} [{cascade.dim}]disabled[/]")
+
+        # Mesh participation
+        if self.styrene_mesh_count > 0:
+            lines.append(
+                f"  MESH: {SemanticSymbols.ONLINE} [{cascade.medium}]{self.styrene_mesh_count} peers[/]"
+            )
+        elif not self.rns_online and self.error_state and self.error_state.is_error:
+            # Don't show mesh status when offline due to error
+            pass
+        else:
+            lines.append(f"  MESH: {SemanticSymbols.OFFLINE} [{cascade.dim}]no peers[/]")
+
+        return "\n".join(lines)
+
+    def on_mount(self) -> None:
+        """Load all node data on mount."""
+        self._load_all_data()
+
+    def _load_all_data(self) -> None:
+        """Load hardware, Styrene, and Reticulum data."""
+        self._load_hardware_data()
+        self._load_styrene_data()
+        self._load_reticulum_data()
+
+    def _load_hardware_data(self) -> None:
+        """Load system hardware information."""
+        try:
+            self.system_info = get_system_info()
+        except PlatformNotSupportedError as e:
+            self.hardware_error = str(e)
+            return
+
+        # Network interfaces
+        try:
+            interfaces = get_network_interfaces()
+            hardware_ifaces = [i for i in interfaces if i.is_hardware and i.is_up and i.ip_address]
+            self.primary_interface = hardware_ifaces[0] if hardware_ifaces else None
+        except PlatformNotSupportedError:
+            self.primary_interface = None
+
+        # Storage
+        try:
+            disks = get_disks()
+            self.removable_count = len([d for d in disks if d.is_removable])
+        except PlatformNotSupportedError:
+            self.removable_count = 0
+
+    def _load_styrene_data(self) -> None:
+        """Load Styrene mesh and hub configuration."""
+        # Get config for mode
+        try:
+            config = load_config()
+            self.mode = config.reticulum.mode.value
+        except Exception:
+            self.mode = "standalone"
+
+        # Get hub connection status
+        hub_connection = get_hub_connection()
+        try:
+            config = load_config()
+            hub_connection.set_announce_interval(config.reticulum.hub_announce_interval)
+
+            # Try to connect/reconnect if hub is configured but not connected
+            if (
+                config.reticulum.hub_enabled
+                and config.reticulum.hub_address
+                and not hub_connection.is_connected
+            ):
+                hub_connection.retry_connection()
+        except Exception:
+            pass
+
+        self.hub_status = hub_connection.status
+
+        # Get Styrene mesh device count from discovery
+        devices = discover_devices()
+
+        # Count only Styrene nodes (other device types shown in Exploration screen)
+        self.styrene_mesh_count = len(
+            [d for d in devices if d.device_type == DeviceType.STYRENE_NODE]
+        )
+
+    def _load_reticulum_data(self) -> None:
+        """Load Reticulum stack status."""
+        # Get RNS status
+        status = get_reticulum_status()
+        self.rns_online = bool(status.get("running", False))
+
+        # Get error state from app's lifecycle if available
+        self.error_state = self._get_error_state()
+
+        # Get interface information
+        if self.rns_online and hasattr(RNS.Transport, "interfaces"):
+            try:
+                interfaces = RNS.Transport.interfaces
+                if interfaces:
+                    self.interface_count = len(interfaces)
+                    # Get interface types and online status
+                    interface_parts = []
+                    for interface in interfaces:
+                        iface_type = type(interface).__name__
+
+                        # Shorten common names
+                        if "LocalClient" in iface_type:
+                            iface_type = "Local"
+                        elif "AutoInterface" in iface_type:
+                            iface_type = "Auto"
+                        elif "TCPClient" in iface_type:
+                            iface_type = "TCP"
+                        elif "UDPInterface" in iface_type:
+                            iface_type = "UDP"
+
+                        # Color by status
+                        cascade = get_color_cascade()
+                        iface_online = getattr(interface, "online", False)
+                        if iface_online:
+                            interface_parts.append(f"[{cascade.medium}]{iface_type}[/]")
+                        else:
+                            interface_parts.append(f"[{cascade.dim}]{iface_type}[/]")
+
+                    self.interface_status = ", ".join(interface_parts)
+                else:
+                    self.interface_count = 0
+                    self.interface_status = ""
+            except Exception:
+                self.interface_count = 0
+                self.interface_status = ""
+        else:
+            self.interface_count = 0
+            self.interface_status = ""
+
+    def _get_error_state(self) -> RNSErrorState | None:
+        """Get the RNS error state from the app's lifecycle.
+
+        Returns:
+            RNSErrorState if available, None otherwise.
+        """
+        try:
+            app = self.app
+            if hasattr(app, "_lifecycle"):
+                error_state: RNSErrorState = app._lifecycle.rns_error_state
+                return error_state
+        except Exception:
+            pass
+        return None
+
+    def refresh_data(self) -> None:
+        """Refresh all node data."""
+        self._load_all_data()

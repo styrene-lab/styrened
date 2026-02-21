@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -27,3 +29,38 @@ class ExecCommandRequest(BaseModel):
     command: str = Field(..., min_length=1)
     args: list[str] = Field(default_factory=list)
     timeout: float = Field(60.0, ge=1.0, le=300.0)
+
+
+class ConfigUpdateRequest(BaseModel):
+    """Partial config update. Only provided sections/fields are changed."""
+
+    reticulum: dict[str, Any] | None = None
+    identity: dict[str, Any] | None = None
+    rpc: dict[str, Any] | None = None
+    discovery: dict[str, Any] | None = None
+    chat: dict[str, Any] | None = None
+    api: dict[str, Any] | None = None
+    ipc: dict[str, Any] | None = None
+    notifications: dict[str, Any] | None = None
+    lxmf: dict[str, Any] | None = None
+    terminal: dict[str, Any] | None = None
+
+
+class AutoReplyToggleRequest(BaseModel):
+    """Request body for toggling auto-reply (out-of-office) mode."""
+
+    enabled: bool
+    message: str | None = Field(None, max_length=1024)
+
+
+class RebootRequest(BaseModel):
+    """Request body for remote device reboot."""
+
+    delay: int = Field(0, ge=0, le=3600)
+
+
+class FleetConfigUpdateRequest(BaseModel):
+    """Request body for remote config update."""
+
+    config_updates: dict[str, Any]
+    timeout: float = Field(10.0, ge=1.0, le=60.0)

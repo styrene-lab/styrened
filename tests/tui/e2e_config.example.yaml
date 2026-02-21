@@ -1,0 +1,36 @@
+# E2E Test Configuration Template
+# Copy to e2e_config.yaml and fill in actual values
+# e2e_config.yaml is gitignored
+
+hub:
+  # LXMF propagation destination hash (from hub announce)
+  address: "6fc8bf22aa293588c9bf8d7488102e95"
+  # TCP transport endpoint
+  tcp_host: "192.168.0.102"
+  tcp_port: 4242
+  # Expected hub name (for verification)
+  expected_name: "Styrene Propagation Node"
+
+nodes:
+  # Add nodes as they are provisioned
+  # Run `make run` and note the destination_hash from announces
+  q502:
+    destination_hash: "<fill after first boot>"
+    identity_hash: "<fill after first boot>"
+    name: "q502-styrene"
+    # Set to true once node is provisioned and online
+    available: false
+
+operator:
+  # Path to operator identity key
+  identity_path: "~/.styrene/operator.key"
+
+timeouts:
+  # Hub announce interval (hub announces every N seconds)
+  hub_announce_interval: 60
+  # Max wait for hub connection
+  hub_connection_timeout: 90
+  # RPC request timeout
+  rpc_timeout: 30
+  # Node discovery timeout
+  discovery_timeout: 120

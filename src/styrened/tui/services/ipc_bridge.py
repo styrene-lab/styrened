@@ -1,0 +1,434 @@
+"""IPC bridge — service abstraction layer for daemon communication.
+
+Wraps styrened's ControlClient with auto-reconnection, TUI-friendly
+method names, and event subscription support.  This is the single point
+of contact between the TUI and the daemon for all service calls.
+
+Usage::
+
+    bridge = IPCBridge()
+    await bridge.connect()
+
+    devices = await bridge.get_devices()
+    status = await bridge.get_status()
+
+    async for event_type, payload in bridge.iter_events():
+        ...
+
+    await bridge.disconnect()
+"""
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+from typing import Any
+
+from styrened.ipc import (
+    ControlClient,
+    IPCConnectionError,
+    IPCMessageType,
+    get_default_socket_path,
+)
+from styrened.ipc.messages import (
+    DaemonStatus,
+    DeviceInfo,
+    ExecResultInfo,
+    IdentityInfo,
+    RemoteStatusInfo,
+)
+
+logger = logging.getLogger(__name__)
+
+# Reconnect backoff parameters
+_RECONNECT_DELAY_INITIAL = 1.0
+_RECONNECT_DELAY_MAX = 30.0
+_RECONNECT_BACKOFF_FACTOR = 2.0
+_MAX_RECONNECT_ATTEMPTS = 5
+
+
+class IPCBridge:
+    """Service abstraction layer over the styrened IPC client.
+
+    Provides TUI-friendly method names, automatic reconnection,
+    and event subscription management.
+    """
+
+    def __init__(
+        self,
+        socket_path: Path | None = None,
+        timeout: float = 30.0,
+        auto_reconnect: bool = True,
+    ) -> None:
+        self._socket_path = socket_path or get_default_socket_path()
+        self._timeout = timeout
+        self._auto_reconnect = auto_reconnect
+        self._client: ControlClient | None = None
+        self._connected = False
+        self._reconnect_task: asyncio.Task | None = None
+
+    @property
+    def connected(self) -> bool:
+        return self._connected and self._client is not None and self._client.connected
+
+    async def connect(self) -> bool:
+        """Connect to the daemon.
+
+        Returns:
+            True if connected successfully.
+        """
+        if self.connected:
+            return True
+
+        try:
+            self._client = ControlClient(
+                socket_path=self._socket_path,
+                timeout=self._timeout,
+            )
+            await self._client.connect()
+            if await self._client.ping(timeout=3.0):
+                self._connected = True
+                logger.info(f"IPCBridge connected to {self._socket_path}")
+                return True
+            else:
+                await self._client.disconnect()
+                self._client = None
+                return False
+        except IPCConnectionError as e:
+            logger.warning(f"IPCBridge connection failed: {e}")
+            self._client = None
+            return False
+        except Exception as e:
+            logger.error(f"IPCBridge unexpected error: {e}")
+            self._client = None
+            return False
+
+    async def disconnect(self) -> None:
+        """Disconnect from the daemon."""
+        self._connected = False
+
+        if self._reconnect_task is not None:
+            self._reconnect_task.cancel()
+            self._reconnect_task = None
+
+        if self._client is not None:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+
+        logger.debug("IPCBridge disconnected")
+
+    async def _ensure_connected(self) -> ControlClient:
+        """Ensure we have a live connection, attempting reconnect if needed.
+
+        Returns:
+            Connected ControlClient.
+
+        Raises:
+            IPCConnectionError: If connection cannot be established.
+        """
+        if self.connected and self._client is not None:
+            return self._client
+
+        if self._auto_reconnect:
+            if await self._reconnect():
+                assert self._client is not None
+                return self._client
+
+        raise IPCConnectionError("Not connected to daemon")
+
+    async def _reconnect(self) -> bool:
+        """Attempt to reconnect with exponential backoff."""
+        delay = _RECONNECT_DELAY_INITIAL
+
+        for attempt in range(_MAX_RECONNECT_ATTEMPTS):
+            logger.info(f"Reconnect attempt {attempt + 1}/{_MAX_RECONNECT_ATTEMPTS}")
+
+            if await self.connect():
+                return True
+
+            if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
+                await asyncio.sleep(delay)
+                delay = min(delay * _RECONNECT_BACKOFF_FACTOR, _RECONNECT_DELAY_MAX)
+
+        logger.error("Failed to reconnect after all attempts")
+        return False
+
+    async def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        """Call a method on the underlying ControlClient with reconnection.
+
+        Args:
+            method: Method name on ControlClient.
+            *args, **kwargs: Passed to the method.
+
+        Returns:
+            Method return value.
+        """
+        client = await self._ensure_connected()
+        try:
+            return await getattr(client, method)(*args, **kwargs)
+        except IPCConnectionError:
+            # Connection lost — try one reconnect
+            if self._auto_reconnect:
+                self._connected = False
+                client = await self._ensure_connected()
+                return await getattr(client, method)(*args, **kwargs)
+            raise
+
+    # -------------------------------------------------------------------------
+    # Device queries (maps: discover_devices → get_devices)
+    # -------------------------------------------------------------------------
+
+    async def get_devices(self, styrene_only: bool = False) -> list[DeviceInfo]:
+        """Get list of discovered mesh devices.
+
+        Args:
+            styrene_only: If True, only return Styrene nodes.
+        """
+        return await self._call("query_devices", styrene_only=styrene_only)
+
+    # -------------------------------------------------------------------------
+    # Status queries (maps: get_rns_service().get_status() → get_status)
+    # -------------------------------------------------------------------------
+
+    async def get_status(self) -> DaemonStatus:
+        """Get daemon status (uptime, init state, device counts)."""
+        return await self._call("query_status")
+
+    # -------------------------------------------------------------------------
+    # Identity (maps: get_operator_identity → get_identity)
+    # -------------------------------------------------------------------------
+
+    async def get_identity(self) -> IdentityInfo:
+        """Get local operator identity hashes."""
+        return await self._call("query_identity")
+
+    # -------------------------------------------------------------------------
+    # Chat (maps: ChatProtocol.send_message → send_chat)
+    # -------------------------------------------------------------------------
+
+    async def send_chat(
+        self,
+        peer_hash: str,
+        content: str,
+        title: str | None = None,
+        delivery_method: str = "auto",
+        reply_to_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a chat message to a peer."""
+        return await self._call(
+            "send_chat",
+            peer_hash=peer_hash,
+            content=content,
+            title=title,
+            delivery_method=delivery_method,
+            reply_to_hash=reply_to_hash,
+        )
+
+    # -------------------------------------------------------------------------
+    # Messages (maps: session.query(Message) → get_messages)
+    # -------------------------------------------------------------------------
+
+    async def get_messages(
+        self,
+        peer_hash: str,
+        limit: int = 50,
+        before_timestamp: float | None = None,
+        status_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get message history for a conversation."""
+        return await self._call(
+            "query_messages",
+            peer_hash=peer_hash,
+            limit=limit,
+            before_timestamp=before_timestamp,
+            status_filter=status_filter,
+        )
+
+    async def get_conversations(self) -> list[dict[str, Any]]:
+        """Get list of conversations with unread counts."""
+        return await self._call("query_conversations")
+
+    async def mark_read(self, peer_hash: str) -> int:
+        """Mark all messages in a conversation as read."""
+        return await self._call("mark_read", peer_hash=peer_hash)
+
+    async def search_messages(
+        self,
+        query: str,
+        peer_hash: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Search messages by content."""
+        return await self._call(
+            "search_messages",
+            query=query,
+            peer_hash=peer_hash,
+            limit=limit,
+        )
+
+    async def delete_conversation(self, peer_hash: str) -> int:
+        """Delete all messages in a conversation."""
+        return await self._call("delete_conversation", peer_hash=peer_hash)
+
+    async def delete_message(self, message_id: int) -> bool:
+        """Delete a specific message."""
+        return await self._call("delete_message", message_id=message_id)
+
+    async def retry_message(self, message_id: int) -> dict[str, Any]:
+        """Retry sending a failed message."""
+        return await self._call("retry_message", message_id=message_id)
+
+    # -------------------------------------------------------------------------
+    # RPC (maps: RPCClient.call_status → query_device_status)
+    # -------------------------------------------------------------------------
+
+    async def query_device_status(
+        self,
+        destination: str,
+        timeout: float = 30.0,
+    ) -> RemoteStatusInfo:
+        """Query status of a remote device."""
+        return await self._call(
+            "device_status",
+            destination=destination,
+            timeout=timeout,
+        )
+
+    async def send_rpc(
+        self,
+        destination: str,
+        command: str,
+        args: list[str] | None = None,
+        timeout: float = 60.0,
+    ) -> ExecResultInfo:
+        """Execute a command on a remote node."""
+        return await self._call(
+            "exec_command",
+            destination=destination,
+            command=command,
+            args=args,
+            timeout=timeout,
+        )
+
+    # -------------------------------------------------------------------------
+    # Mesh operations
+    # -------------------------------------------------------------------------
+
+    async def send_message(
+        self,
+        destination: str,
+        message: str,
+        protocol: str = "chat",
+        retry: bool = False,
+        timeout: float = 30.0,
+    ) -> bool:
+        """Send a message via the mesh."""
+        return await self._call(
+            "send_message",
+            destination=destination,
+            message=message,
+            protocol=protocol,
+            retry=retry,
+            timeout=timeout,
+        )
+
+    async def announce(self) -> str:
+        """Trigger a local announce. Returns destination hash."""
+        return await self._call("announce")
+
+    async def get_config(self) -> dict[str, Any]:
+        """Query daemon configuration."""
+        return await self._call("query_config")
+
+    # -------------------------------------------------------------------------
+    # Contacts
+    # -------------------------------------------------------------------------
+
+    async def get_contacts(self) -> list[dict[str, Any]]:
+        """Get list of contacts."""
+        return await self._call("query_contacts")
+
+    async def set_contact(
+        self,
+        peer_hash: str,
+        alias: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Set or update a contact alias."""
+        return await self._call(
+            "set_contact",
+            peer_hash=peer_hash,
+            alias=alias,
+            notes=notes,
+        )
+
+    async def remove_contact(self, peer_hash: str) -> bool:
+        """Remove a contact alias."""
+        return await self._call("remove_contact", peer_hash=peer_hash)
+
+    async def resolve_name(
+        self,
+        name: str,
+        prefix_match: bool = True,
+    ) -> str | None:
+        """Resolve a name to a peer hash."""
+        return await self._call(
+            "resolve_name",
+            name=name,
+            prefix_match=prefix_match,
+        )
+
+    # -------------------------------------------------------------------------
+    # Event subscriptions
+    # -------------------------------------------------------------------------
+
+    async def subscribe_messages(
+        self,
+        peer_hashes: list[str] | None = None,
+    ) -> bool:
+        """Subscribe to real-time message events."""
+        return await self._call(
+            "subscribe_messages",
+            peer_hashes=peer_hashes,
+        )
+
+    async def subscribe_devices(self) -> bool:
+        """Subscribe to real-time device events."""
+        return await self._call("subscribe_devices")
+
+    async def unsubscribe(self, subscription_type: str = "") -> bool:
+        """Unsubscribe from events."""
+        return await self._call(
+            "unsubscribe",
+            subscription_type=subscription_type,
+        )
+
+    def on_event(
+        self,
+        event_type: IPCMessageType,
+        callback: Callable,
+    ) -> None:
+        """Register a callback for a specific event type."""
+        if self._client is not None:
+            self._client.on_event(event_type, callback)
+
+    def remove_event_handler(
+        self,
+        event_type: IPCMessageType,
+        callback: Callable,
+    ) -> None:
+        """Unregister an event callback."""
+        if self._client is not None:
+            self._client.remove_event_handler(event_type, callback)
+
+    async def iter_events(
+        self,
+        event_type: IPCMessageType | None = None,
+    ) -> AsyncIterator[tuple[IPCMessageType, dict]]:
+        """Async iterator over incoming events from the daemon."""
+        client = await self._ensure_connected()
+        async for evt_type, payload in client.iter_events(event_type):
+            yield evt_type, payload

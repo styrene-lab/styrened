@@ -38,20 +38,22 @@ def test_<unit>_<scenario>_<expected_outcome>():
 
 ## Project Overview
 
-Styrened is a headless daemon for running Styrene services on Reticulum mesh networks. It's optimized for resource-constrained edge devices and supports deployment via Nix flakes, containers, or PyPI. The styrene-core library has been merged into this package.
+Styrened is a headless daemon for running Styrene services on Reticulum mesh networks. It's optimized for resource-constrained edge devices and supports deployment via Nix flakes, containers, or PyPI. The styrene-core library and styrene-tui have been merged into this package.
 
-**Key features**: RPC server for remote management, auto-reply handler, device discovery, optional HTTP API.
+**Key features**: RPC server for remote management, auto-reply handler, device discovery, optional HTTP API, optional TUI (`pip install styrened[tui]`).
 
 ## Commands
 
 ```bash
 # Development setup
 make install              # Install with dev dependencies
+pip install -e ".[tui,dev]"  # Install with TUI + dev dependencies
 
 # Testing
 make test                 # Run all tests
 make test-unit            # Run unit tests only (excludes k8s)
 make test-k8s             # Run k8s integration tests
+pytest tests/tui/models/ -v  # Run TUI model tests
 pytest tests/test_models.py::test_name -v  # Run single test
 
 # Code quality
@@ -127,11 +129,22 @@ src/styrened/
 │   ├── client.py       # Sends RPC commands
 │   ├── messages.py     # Request/response message types
 │   └── errors.py       # RPCError, RPCTimeoutError
-└── protocols/          # LXMF protocol handlers
-    ├── base.py         # Abstract Protocol base class
-    ├── chat.py         # Chat protocol (NomadNet/MeshChat)
-    ├── styrene.py      # Styrene-specific protocol
-    └── registry.py     # Protocol routing via fields["protocol"]
+├── protocols/          # LXMF protocol handlers
+│   ├── base.py         # Abstract Protocol base class
+│   ├── chat.py         # Chat protocol (NomadNet/MeshChat)
+│   ├── styrene.py      # Styrene-specific protocol
+│   └── registry.py     # Protocol routing via fields["protocol"]
+└── tui/                # Terminal UI (optional, pip install styrened[tui])
+    ├── app.py          # Main StyreneApp (Textual)
+    ├── dashboard_app.py # Compact local dashboard
+    ├── cli/            # TUI-specific CLI commands
+    ├── models/         # TUI data models (config, fleet, hardware)
+    ├── screens/        # TUI screens (dashboard, inbox, settings, etc.)
+    ├── services/       # TUI services (lifecycle, IPC bridge, provisioner)
+    ├── widgets/        # Custom Textual widgets
+    ├── themes/         # Imperial CRT theming system
+    ├── forge/          # Edge device provisioning (disk detect, nix build)
+    └── styles/         # TCSS stylesheets
 ```
 
 **Async-first**: All network operations use asyncio. The daemon runs an event loop with periodic tasks for announces and cleanup.

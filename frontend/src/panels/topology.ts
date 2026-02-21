@@ -7,6 +7,7 @@ import type { MeshDevice, MeshStatus } from '../types'
 
 let mounted = false
 let statusInterval: ReturnType<typeof setInterval> | null = null
+const DEFAULT_EXCLUDE = 'lost'
 
 function createHTML(): string {
   return `
@@ -43,16 +44,21 @@ function renderDeviceList(devices: MeshDevice[]): void {
   if (!list) return
   if (count) count.textContent = String(devices.length)
 
-  list.innerHTML = devices.map(d => `
-    <div class="device-item ${d.status}">
-      <div class="device-name">${escapeHtml(d.name || d.destination_hash.slice(0, 16))}</div>
-      <div class="device-meta">
-        <span class="device-type">${d.type}</span>
-        <span class="device-status ${d.status}">${d.status.toUpperCase()}</span>
+  list.innerHTML = devices.map(d => {
+    const hasAutoReply = d.capabilities?.includes('autoreply')
+    const oooClass = hasAutoReply ? ' node-autoreply' : ''
+    const oooLabel = hasAutoReply ? ' <span class="device-ooo-badge">OOO</span>' : ''
+    return `
+      <div class="device-item ${d.status}${oooClass}">
+        <div class="device-name">${escapeHtml(d.name || d.destination_hash.slice(0, 16))}${oooLabel}</div>
+        <div class="device-meta">
+          <span class="device-type">${d.type}</span>
+          <span class="device-status ${d.status}">${d.status.toUpperCase()}</span>
+        </div>
+        ${d.last_seen_display ? `<div class="device-seen">${escapeHtml(d.last_seen_display)}</div>` : ''}
       </div>
-      ${d.last_seen_display ? `<div class="device-seen">${escapeHtml(d.last_seen_display)}</div>` : ''}
-    </div>
-  `).join('')
+    `
+  }).join('')
 }
 
 function renderStats(status: MeshStatus): void {
@@ -75,8 +81,8 @@ async function loadTopology(): Promise<void> {
   try {
     loading?.classList.remove('hidden')
     const [topology, devices, status] = await Promise.all([
-      fetchTopology(),
-      fetchDevices(),
+      fetchTopology(false, DEFAULT_EXCLUDE),
+      fetchDevices(false, DEFAULT_EXCLUDE),
       fetchMeshStatus(),
     ])
     await renderNetwork(topology, container)
@@ -108,7 +114,7 @@ export function mount(target: HTMLElement): void {
   // Refresh status periodically
   statusInterval = setInterval(async () => {
     try {
-      const [devices, status] = await Promise.all([fetchDevices(), fetchMeshStatus()])
+      const [devices, status] = await Promise.all([fetchDevices(false, DEFAULT_EXCLUDE), fetchMeshStatus()])
       renderDeviceList(devices)
       renderStats(status)
     } catch { /* ignore */ }

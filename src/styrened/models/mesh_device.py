@@ -104,6 +104,11 @@ class MeshDevice:
             return f"{elapsed // 86400}d ago"
 
     @property
+    def has_auto_reply(self) -> bool:
+        """Check if this node has auto-reply (out-of-office) enabled."""
+        return "autoreply" in (self.capabilities or [])
+
+    @property
     def is_styrene_node(self) -> bool:
         """Check if this is a Styrene-managed node."""
         return self.device_type == DeviceType.STYRENE_NODE
