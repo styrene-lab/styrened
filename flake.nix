@@ -13,7 +13,24 @@
   outputs = { self, nixpkgs, flake-utils, nix2container }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            (final: prev: {
+              python311 = prev.python311.override {
+                packageOverrides = pyFinal: pyPrev: {
+                  # Disable test suites for deps that hang or take 30+ min in CI
+                  watchfiles = pyPrev.watchfiles.overridePythonAttrs { doCheck = false; };
+                  orjson = pyPrev.orjson.overridePythonAttrs { doCheck = false; };
+                  uvicorn = pyPrev.uvicorn.overridePythonAttrs { doCheck = false; };
+                  inline-snapshot = pyPrev.inline-snapshot.overridePythonAttrs { doCheck = false; };
+                  rich-toolkit = pyPrev.rich-toolkit.overridePythonAttrs { doCheck = false; };
+                  pendulum = pyPrev.pendulum.overridePythonAttrs { doCheck = false; };
+                };
+              };
+            })
+          ];
+        };
         python = pkgs.python311;
 
         version = builtins.replaceStrings [ "\n" ] [ "" ]
