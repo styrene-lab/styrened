@@ -223,12 +223,10 @@ spec:
           - |
             set -euo pipefail
             mkdir -p /etc/nix
-            cat >> /etc/nix/nix.conf <<'NIXCONF'
-            experimental-features = nix-command flakes
-            sandbox = false
-            max-jobs = auto
-            cores = 0
-            NIXCONF
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+            echo "max-jobs = auto" >> /etc/nix/nix.conf
+            echo "cores = 0" >> /etc/nix/nix.conf
 
             # Configure Cachix for faster builds
             nix-env -iA cachix -f https://cachix.org/api/v1/install
