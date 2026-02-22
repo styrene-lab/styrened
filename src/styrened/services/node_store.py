@@ -163,6 +163,14 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
         # Column already exists, this is expected
         pass
 
+    # Schema migration: Add system_fingerprint column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE nodes ADD COLUMN system_fingerprint TEXT")
+        logger.debug("Added system_fingerprint column to nodes table")
+    except sqlite3.OperationalError:
+        # Column already exists, this is expected
+        pass
+
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
@@ -298,8 +306,8 @@ class NodeStore:
                     INSERT INTO nodes (
                         destination_hash, identity_hash, name, device_type,
                         last_announce, announce_count, capabilities, version,
-                        lxmf_destination_hash, short_name, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                        lxmf_destination_hash, short_name, system_fingerprint, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
                     ON CONFLICT(destination_hash) DO UPDATE SET
                         identity_hash = excluded.identity_hash,
                         name = excluded.name,
@@ -310,6 +318,7 @@ class NodeStore:
                         version = excluded.version,
                         lxmf_destination_hash = excluded.lxmf_destination_hash,
                         short_name = excluded.short_name,
+                        system_fingerprint = excluded.system_fingerprint,
                         updated_at = strftime('%s', 'now')
                     """,
                     (
@@ -323,6 +332,7 @@ class NodeStore:
                         device.version,
                         device.lxmf_destination_hash,
                         device.short_name,
+                        device.system_fingerprint,
                     ),
                 )
                 conn.commit()
@@ -797,6 +807,12 @@ class NodeStore:
         except (KeyError, IndexError):
             pass
 
+        system_fingerprint = None
+        try:
+            system_fingerprint = row["system_fingerprint"]
+        except (KeyError, IndexError):
+            pass
+
         return MeshDevice(
             destination_hash=row["destination_hash"],
             identity_hash=row["identity_hash"],
@@ -810,6 +826,7 @@ class NodeStore:
             version=row["version"],
             lxmf_destination_hash=lxmf_dest,
             short_name=short_name,
+            system_fingerprint=system_fingerprint,
         )
 
     def get_connection_count(self) -> int:

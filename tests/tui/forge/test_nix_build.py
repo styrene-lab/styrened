@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from styrened.tui.forge.nix_build import resolve_nix_image, _diagnose_nix_error
-from tests.forge.conftest import collect_nix, has_error
+from tests.tui.forge.conftest import collect_nix, has_error
 
 
 class TestResolveNixImage:

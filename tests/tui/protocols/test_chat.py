@@ -38,12 +38,25 @@ def mock_identity():
 
 
 @pytest.fixture
-def chat_protocol(mock_router, mock_identity, test_db):
+def mock_node_store():
+    """Create mock node store for destination lookup."""
+    store = Mock()
+    # Default: return a mock node with identity_hash and lxmf destination
+    mock_node = Mock()
+    mock_node.identity_hash = "0123456789abcdef0123456789abcdef"
+    mock_node.lxmf_destination_hash = "abcdef0123456789abcdef0123456789"
+    store.get_node_by_destination.return_value = mock_node
+    return store
+
+
+@pytest.fixture
+def chat_protocol(mock_router, mock_identity, test_db, mock_node_store):
     """Create ChatProtocol instance."""
     return ChatProtocol(
         router=mock_router,
         identity=mock_identity,
         db_engine=test_db,
+        node_store=mock_node_store,
     )
 
 
@@ -180,7 +193,7 @@ async def test_chat_protocol_send_message_unknown_destination_raises(
 
     hex_dest = "deadbeefcafe0123456789abcdef0123"
 
-    with pytest.raises(ValueError, match="identity not known"):
+    with pytest.raises(ValueError, match="not known to RNS"):
         await chat_protocol.send_message(
             destination=hex_dest,
             content="Test message",

@@ -309,8 +309,14 @@ class StyreneLifecycle:
             except Exception:
                 pass
 
-            # Format: styrene:<hostname>:<version>:<capabilities>:<lxmf_dest>
-            announce_data = f"styrene:{hostname}:{version}:{capabilities_str}:{lxmf_dest}"
+            # Short name and system fingerprint
+            from styrened.services.system_info import get_system_fingerprint
+
+            short_name = hostname[:2].upper() if hostname else "SN"
+            fingerprint = get_system_fingerprint()
+
+            # Format: styrene:<hostname>:<version>:<caps>:<lxmf_dest>:<short_name>:<fingerprint>
+            announce_data = f"styrene:{hostname}:{version}:{capabilities_str}:{lxmf_dest}:{short_name}:{fingerprint}"
 
             # Send announce
             destination.announce(announce_data.encode("utf-8"))

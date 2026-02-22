@@ -28,6 +28,7 @@ from styrened.ipc.messages import (
     CmdRetryMessageRequest,
     CmdSendChatRequest,
     CmdSendRequest,
+    CmdSetAutoReplyRequest,
     CmdSetContactRequest,
     DaemonStatus,
     DeviceInfo,
@@ -36,6 +37,7 @@ from styrened.ipc.messages import (
     IdentityInfo,
     IPCRequest,
     PingRequest,
+    QueryAutoReplyRequest,
     QueryConfigRequest,
     QueryContactsRequest,
     QueryConversationsRequest,
@@ -757,6 +759,42 @@ class ControlClient:
             QueryResolveNameRequest(name=name, prefix_match=prefix_match)
         )
         return cast(str | None, data.get("peer_hash"))
+
+    # -------------------------------------------------------------------------
+    # Auto-reply methods
+    # -------------------------------------------------------------------------
+
+    async def query_auto_reply(self) -> dict[str, Any]:
+        """Query auto-reply configuration.
+
+        Returns:
+            Dict with enabled, message, cooldown fields.
+        """
+        return await self._request(QueryAutoReplyRequest())
+
+    async def set_auto_reply(
+        self,
+        enabled: bool,
+        message: str = "",
+        cooldown: int = 300,
+    ) -> dict[str, Any]:
+        """Set auto-reply configuration.
+
+        Args:
+            enabled: Whether auto-reply is enabled.
+            message: Auto-reply message text.
+            cooldown: Cooldown between replies in seconds.
+
+        Returns:
+            Dict with updated enabled, message, cooldown fields.
+        """
+        return await self._request(
+            CmdSetAutoReplyRequest(
+                enabled=enabled,
+                message=message,
+                cooldown=cooldown,
+            )
+        )
 
 
 async def get_daemon_client() -> ControlClient | None:

@@ -1118,15 +1118,18 @@ class StyreneDaemon:
     def _build_announce_data(self) -> bytes:
         """Build announce app_data bytes from current config.
 
-        Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}:{short_name}
+        Format: styrene:{display_name}:{version}:{caps}:{lxmf_dest}:{short_name}:{sys_fingerprint}
 
         Returns:
             Encoded announce app_data.
         """
         import socket
 
+        from styrened import __version__
+        from styrened.services.system_info import get_system_fingerprint
+
         hostname = socket.gethostname()
-        version = "0.1.0"
+        version = __version__
         capabilities = []
         if self.config.reticulum.mode.value == "hub":
             capabilities.append("hub")
@@ -1155,7 +1158,8 @@ class StyreneDaemon:
             logger.warning(f"Could not get LXMF destination for announce: {e}")
 
         short_name = self.config.identity.short_name or ""
-        return f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}".encode()
+        fingerprint = get_system_fingerprint()
+        return f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}:{fingerprint}".encode()
 
     def _announce(self) -> None:
         """Trigger an announce of the local operator destination.

@@ -41,6 +41,7 @@ from styrened.ipc.messages import (
     CmdRetryMessageRequest,
     CmdSendChatRequest,
     CmdSendRequest,
+    CmdSetAutoReplyRequest,
     CmdSetContactRequest,
     DaemonStatus,
     DeviceInfo,
@@ -1212,3 +1213,72 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error removing contact: {e}")
             return ErrorResponse.internal_error(f"Failed to remove contact: {e}")
+
+    # -------------------------------------------------------------------------
+    # Auto-reply handlers
+    # -------------------------------------------------------------------------
+
+    async def handle_query_auto_reply(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_AUTO_REPLY request.
+
+        Returns current auto-reply configuration from daemon config.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        try:
+            return ResultResponse(
+                data={
+                    "enabled": self.daemon.config.chat.auto_reply_enabled,
+                    "message": self.daemon.config.chat.auto_reply_message,
+                    "cooldown": self.daemon.config.chat.auto_reply_cooldown,
+                }
+            )
+        except Exception as e:
+            logger.exception(f"Error querying auto-reply: {e}")
+            return ErrorResponse.internal_error(f"Failed to query auto-reply: {e}")
+
+    async def handle_cmd_set_auto_reply(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SET_AUTO_REPLY request.
+
+        Updates auto-reply configuration, persists to disk, and re-announces.
+        Same pattern as web route POST /api/auto-reply.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, CmdSetAutoReplyRequest)
+            else CmdSetAutoReplyRequest()
+        )
+
+        try:
+            from styrened.services.config import save_core_config
+
+            self.daemon.config.chat.auto_reply_enabled = req.enabled
+            if req.message:
+                self.daemon.config.chat.auto_reply_message = req.message
+            if req.cooldown > 0:
+                self.daemon.config.chat.auto_reply_cooldown = req.cooldown
+
+            # Persist to disk
+            save_core_config(self.daemon.config)
+
+            # Re-announce to propagate capability change
+            self.daemon._announce()
+
+            return ResultResponse(
+                data={
+                    "enabled": self.daemon.config.chat.auto_reply_enabled,
+                    "message": self.daemon.config.chat.auto_reply_message,
+                    "cooldown": self.daemon.config.chat.auto_reply_cooldown,
+                }
+            )
+        except Exception as e:
+            logger.exception(f"Error setting auto-reply: {e}")
+            return ErrorResponse.internal_error(f"Failed to set auto-reply: {e}")

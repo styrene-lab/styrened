@@ -31,14 +31,17 @@ parent_src = Path(__file__).parent.parent.parent / "packages" / "styrene-bond-rp
 if parent_src.exists():
     sys.path.insert(0, str(parent_src))
 
-from styrene_bond_rpc.auth import AuthorizationService  # noqa: E402
-from styrene_bond_rpc.handlers import (  # noqa: E402
-    handle_exec,
-    handle_reboot,
-    handle_status,
-    handle_update_config,
-)
-from styrene_bond_rpc.server import RPCServer  # noqa: E402
+try:
+    from styrene_bond_rpc.auth import AuthorizationService  # noqa: E402
+    from styrene_bond_rpc.handlers import (  # noqa: E402
+        handle_exec,
+        handle_reboot,
+        handle_status,
+        handle_update_config,
+    )
+    from styrene_bond_rpc.server import RPCServer  # noqa: E402
+except ImportError:
+    pytest.skip("styrene_bond_rpc not available", allow_module_level=True)
 
 
 class MockLXMFTransport:

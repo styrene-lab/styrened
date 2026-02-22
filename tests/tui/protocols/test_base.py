@@ -5,7 +5,7 @@ import pytest
 from styrened.protocols.base import LXMFMessage, Protocol
 
 # Import shared MockProtocol from conftest
-from tests.conftest import MockProtocol
+from tests.tui.conftest import MockProtocol
 
 
 def test_lxmf_message_creation():

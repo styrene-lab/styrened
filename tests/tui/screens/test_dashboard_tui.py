@@ -5,11 +5,11 @@ using Textual's app.run_test() and pilot.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from styrened.tui.app import StyreneApp
-from styrened.models.mesh_device import DeviceType, MeshDevice
+from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTable
 
 
@@ -423,3 +423,67 @@ class TestDashboardScreenLifecycle:
                 # Verify the mechanism exists
                 screen = app.screen
                 assert hasattr(screen, "_refresh_device_table")
+
+
+class TestDashboardLostNodeFiltering:
+    """Test that lost nodes are excluded from the dashboard device table."""
+
+    @pytest.mark.asyncio
+    async def test_mesh_device_table_excludes_lost_nodes(self):
+        """MeshDeviceTable should not display devices with LOST status."""
+        now = int(datetime.now().timestamp())
+
+        active_device = MeshDevice(
+            destination_hash="active_hash",
+            identity_hash="active_hash",
+            name="Active Node",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=now,  # Just now -> ACTIVE
+            announce_count=5,
+        )
+        lost_device = MeshDevice(
+            destination_hash="lost_hash",
+            identity_hash="lost_hash",
+            name="Lost Node",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=now - 86400,  # 24h ago -> LOST
+            announce_count=1,
+        )
+        stale_device = MeshDevice(
+            destination_hash="stale_hash",
+            identity_hash="stale_hash",
+            name="Stale Node",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=now - 600,  # 10min ago -> STALE
+            announce_count=3,
+        )
+
+        # Verify status assumptions
+        assert active_device.status == NodeStatus.ACTIVE
+        assert lost_device.status == NodeStatus.LOST
+        assert stale_device.status == NodeStatus.STALE
+
+        devices = [active_device, lost_device, stale_device]
+
+        app = StyreneApp()
+
+        mock_store = MagicMock()
+        mock_store.get_styrene_nodes.return_value = []
+
+        with (
+            patch(
+                "styrened.tui.screens.dashboard.discover_devices", return_value=devices
+            ),
+            patch(
+                "styrened.services.node_store.get_node_store", return_value=mock_store
+            ),
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(DashboardScreen())
+                await pilot.pause()
+
+                screen = app.screen
+                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+
+                # Should have 2 rows (active + stale), NOT 3 (lost excluded)
+                assert device_table.row_count == 2

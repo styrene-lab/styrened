@@ -536,20 +536,6 @@ class TestDeviceDiscovery:
         assert isinstance(devices, list)
         assert len(devices) == 0
 
-    def test_get_device_identity_known_device(self) -> None:
-        """Test get_device_identity returns identity for known device."""
-        from styrened.tui.services.reticulum import get_device_identity
-
-        identity = get_device_identity("rpi-01")
-        assert identity is not None
-        assert isinstance(identity, str)
-
-    def test_get_device_identity_unknown_device(self) -> None:
-        """Test get_device_identity returns None for unknown device."""
-        from styrened.tui.services.reticulum import get_device_identity
-
-        identity = get_device_identity("non-existent-device")
-        assert identity is None
 
 
 class TestStyreneAnnounceHandler:

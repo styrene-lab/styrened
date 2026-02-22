@@ -89,7 +89,7 @@ class TestAnnounceFormatWithShortName:
     def test_parse_6_field_announce(self):
         """6-field announce includes short_name."""
         app_data = b"styrene:Alice:0.5.0:node:abc123def456abc123def456abc12345:alice"
-        name, dtype, caps, version, lxmf, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf, short_name, _fp = parse_announce_data(app_data)
         assert name == "Alice"
         assert dtype == DeviceType.STYRENE_NODE
         assert version == "0.5.0"
@@ -99,7 +99,7 @@ class TestAnnounceFormatWithShortName:
     def test_parse_5_field_announce_backward_compat(self):
         """5-field announce returns None for short_name (backward compat)."""
         app_data = b"styrene:Alice:0.5.0:node:abc123def456abc123def456abc12345"
-        name, dtype, caps, version, lxmf, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf, short_name, _fp = parse_announce_data(app_data)
         assert name == "Alice"
         assert lxmf == "abc123def456abc123def456abc12345"
         assert short_name is None
@@ -107,13 +107,13 @@ class TestAnnounceFormatWithShortName:
     def test_parse_6_field_empty_short_name(self):
         """6-field with empty short_name returns None."""
         app_data = b"styrene:Alice:0.5.0:node:abc123def456abc123def456abc12345:"
-        name, dtype, caps, version, lxmf, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf, short_name, _fp = parse_announce_data(app_data)
         assert short_name is None
 
     def test_parse_4_field_legacy(self):
         """4-field legacy announce returns None for lxmf and short_name."""
         app_data = b"styrene:Alice:0.5.0:node"
-        name, dtype, caps, version, lxmf, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf, short_name, _fp = parse_announce_data(app_data)
         assert name == "Alice"
         assert lxmf is None
         assert short_name is None
@@ -122,13 +122,13 @@ class TestAnnounceFormatWithShortName:
         """Non-Styrene announces return None short_name in 6-tuple."""
         app_data = b"rnode:my-rnode"
         result = parse_announce_data(app_data)
-        assert len(result) == 6
+        assert len(result) == 7
         assert result[5] is None  # short_name
 
     def test_parse_empty_app_data(self):
         """Empty app_data returns 6-tuple with Nones."""
         result = parse_announce_data(None)
-        assert len(result) == 6
+        assert len(result) == 7
         assert result[5] is None
 
     def test_create_mesh_device_with_short_name(self):

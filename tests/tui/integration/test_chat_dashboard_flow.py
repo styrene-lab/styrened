@@ -202,7 +202,7 @@ class TestCompleteChatWorkflow:
 
                 # Step 3: Verify in conversation screen
                 if isinstance(app.screen, ConversationScreen):
-                    assert app.screen.destination_hash == "node01_identity_hash"
+                    assert app.screen.peer_hash == "node01_identity_hash"
 
                     # Step 4: Return to dashboard
                     await pilot.press("escape")

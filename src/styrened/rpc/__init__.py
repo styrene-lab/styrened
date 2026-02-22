@@ -47,11 +47,15 @@ from styrened.rpc.errors import (
     RPCTransportError,
 )
 
-# Response types
+# Message types (requests + responses)
 from styrened.rpc.messages import (
+    ExecCommand,
     ExecResult,
+    RebootCommand,
     RebootResult,
+    StatusRequest,
     StatusResponse,
+    UpdateConfigCommand,
     UpdateConfigResult,
 )
 
@@ -64,6 +68,11 @@ __all__ = [
     # Server
     "RPCServer",
     "get_rpc_server",
+    # Request types
+    "StatusRequest",
+    "ExecCommand",
+    "RebootCommand",
+    "UpdateConfigCommand",
     # Response types
     "StatusResponse",
     "ExecResult",

@@ -67,14 +67,19 @@ class TestStatusResponse:
         )
         data = msg.to_dict()
 
-        assert data == {
-            "type": "status_response",
-            "uptime": 123456,
-            "ip": "192.168.0.101",
-            "services": ["reticulum", "nomadnet"],
-            "disk_used": 4200000000,
-            "disk_total": 28000000000,
-        }
+        assert data["type"] == "status_response"
+        assert data["uptime"] == 123456
+        assert data["ip"] == "192.168.0.101"
+        assert data["services"] == ["reticulum", "nomadnet"]
+        assert data["disk_used"] == 4200000000
+        assert data["disk_total"] == 28000000000
+        # New optional fields default to None
+        assert data["styrened_version"] is None
+        assert data["hostname"] is None
+        assert data["arch"] is None
+        assert data["os_id"] is None
+        assert data["os_version"] is None
+        assert data["nixos_generation"] is None
 
     def test_status_response_from_dict(self) -> None:
         """Test StatusResponse deserializes from JSON."""

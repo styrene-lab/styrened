@@ -26,7 +26,7 @@ from styrened.tui.forge.media_writer import (
     _sbc_dir,
     run_media_writer,
 )
-from tests.forge.conftest import (
+from tests.tui.forge.conftest import (
     _specs,
     collect,
     has_complete,

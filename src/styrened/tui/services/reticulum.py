@@ -290,28 +290,6 @@ def initialize_reticulum_with_config(config: "StyreneConfig") -> bool:
         return False
 
 
-def get_device_identity(device_name: str) -> str | None:
-    """Get Reticulum identity for a named device.
-
-    Phase 2A: Returns mock data.
-    Phase 2B+: Will query device registry or announces.
-
-    Args:
-        device_name: Device hostname to look up.
-
-    Returns:
-        Hex-encoded Reticulum identity, or None if not found.
-    """
-    # Mock identity mapping for Phase 2A
-    mock_identities = {
-        "rpi-01": "a3f5d8e9b1c2",
-        "rpi-02": "b4e6c7d8a2f3",
-        "t100ta-01": "c5d7a8e9f3b4",
-    }
-
-    return mock_identities.get(device_name)
-
-
 # First-Run Configuration Generation
 
 

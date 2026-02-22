@@ -98,6 +98,9 @@ class MeshDeviceTable(DataTable[str]):
             if d.device_type == DeviceType.STYRENE_NODE
         ]
 
+        # Exclude lost nodes from the dashboard (ExplorationScreen shows all)
+        devices = [d for d in devices if d.status != NodeStatus.LOST]
+
         # Get unread message counts
         unread_counts = self._get_unread_counts()
 
@@ -423,26 +426,18 @@ class DashboardScreen(Screen[None]):
 
         device_identity = str(cell_key.row_key.value)
 
-        # Get app reference for chat protocol access
+        # Get app reference for IPC bridge access
         app: StyreneApp = self.app  # type: ignore[assignment]
 
-        if app.chat_protocol is None:
-            self.notify("Chat not available (no protocol initialized)", severity="warning")
-            return
-
-        if not app.local_identity_hash:
-            self.notify("Chat not available (no local identity)", severity="warning")
+        if app._lifecycle.ipc_bridge is None:
+            self.notify("Chat requires daemon mode", severity="warning")
             return
 
         # Push conversation screen with callback to refresh on return
         from styrened.tui.screens.conversation import ConversationScreen
 
         self.app.push_screen(
-            ConversationScreen(
-                destination_hash=device_identity,
-                local_identity_hash=app.local_identity_hash,
-                chat_protocol=app.chat_protocol,
-            ),
+            ConversationScreen(peer_hash=device_identity),
             callback=self._on_chat_return,
         )
 

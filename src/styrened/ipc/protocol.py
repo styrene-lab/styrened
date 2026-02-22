@@ -60,6 +60,7 @@ class IPCMessageType(IntEnum):
     QUERY_SEARCH_MESSAGES = 0x16
     QUERY_CONTACTS = 0x17
     QUERY_RESOLVE_NAME = 0x18
+    QUERY_AUTO_REPLY = 0x19
 
     # Command requests (0x20-0x2F)
     CMD_SEND = 0x20
@@ -73,6 +74,7 @@ class IPCMessageType(IntEnum):
     CMD_RETRY_MESSAGE = 0x28
     CMD_SET_CONTACT = 0x29
     CMD_REMOVE_CONTACT = 0x2A
+    CMD_SET_AUTO_REPLY = 0x2B
 
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30
