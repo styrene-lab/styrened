@@ -25,6 +25,94 @@ from typing import Any
 
 
 @dataclass
+class StatusRequest:
+    """Status request message.
+
+    Attributes:
+        type: Message type identifier.
+    """
+
+    type: str = "status_request"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StatusRequest":
+        """Deserialize from dict."""
+        return cls()
+
+
+@dataclass
+class ExecCommand:
+    """Remote command execution request.
+
+    Attributes:
+        command: Command to execute.
+        args: Command arguments.
+    """
+
+    command: str
+    args: list[str]
+    type: str = "exec"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExecCommand":
+        """Deserialize from dict."""
+        return cls(
+            command=data["command"],
+            args=data.get("args", []),
+        )
+
+
+@dataclass
+class RebootCommand:
+    """Remote reboot request.
+
+    Attributes:
+        delay: Delay in seconds before reboot (0 = immediate).
+    """
+
+    delay: int = 0
+    type: str = "reboot"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RebootCommand":
+        """Deserialize from dict."""
+        return cls(delay=data.get("delay", 0))
+
+
+@dataclass
+class UpdateConfigCommand:
+    """Remote config update request.
+
+    Attributes:
+        config_updates: Dictionary of config key/value pairs to update.
+    """
+
+    config_updates: dict[str, Any]
+    type: str = "update_config"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return {"type": self.type, "config": self.config_updates}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "UpdateConfigCommand":
+        """Deserialize from dict."""
+        return cls(config_updates=data.get("config", {}))
+
+
+@dataclass
 class StatusResponse:
     """Device status response.
 
@@ -34,6 +122,12 @@ class StatusResponse:
         services: List of running services.
         disk_used: Used disk space in bytes.
         disk_total: Total disk space in bytes.
+        styrened_version: Remote styrened version string.
+        hostname: Remote hostname.
+        arch: CPU architecture (e.g. x86_64, aarch64).
+        os_id: OS identifier (e.g. nixos, debian, darwin).
+        os_version: OS version string.
+        nixos_generation: NixOS store hash prefix (7 chars), empty if not NixOS.
     """
 
     uptime: int
@@ -41,6 +135,12 @@ class StatusResponse:
     services: list[str]
     disk_used: int
     disk_total: int
+    styrened_version: str | None = None
+    hostname: str | None = None
+    arch: str | None = None
+    os_id: str | None = None
+    os_version: str | None = None
+    nixos_generation: str | None = None
     type: str = "status_response"
 
     def to_dict(self) -> dict[str, Any]:
@@ -82,6 +182,12 @@ class StatusResponse:
             services=data["services"],
             disk_used=data["disk_used"],
             disk_total=data["disk_total"],
+            styrened_version=data.get("styrened_version"),
+            hostname=data.get("hostname"),
+            arch=data.get("arch"),
+            os_id=data.get("os_id"),
+            os_version=data.get("os_version"),
+            nixos_generation=data.get("nixos_generation"),
         )
 
 

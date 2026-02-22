@@ -335,6 +335,12 @@ class RPCClient(Protocol):
                 services=payload_data.get("services", []),
                 disk_used=payload_data.get("disk_used", 0),
                 disk_total=payload_data.get("disk_total", 0),
+                styrened_version=payload_data.get("styrened_version"),
+                hostname=payload_data.get("hostname"),
+                arch=payload_data.get("arch"),
+                os_id=payload_data.get("os_id"),
+                os_version=payload_data.get("os_version"),
+                nixos_generation=payload_data.get("nixos_generation"),
             )
         elif envelope.message_type == StyreneMessageType.EXEC_RESULT:
             return ExecResult(

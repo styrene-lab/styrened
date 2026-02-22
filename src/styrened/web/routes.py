@@ -301,6 +301,8 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 "announce_count": d.announce_count,
                 "capabilities": d.capabilities,
                 "version": d.version,
+                "short_name": d.short_name,
+                "system_fingerprint": d.system_fingerprint,
             })
 
         # Determine self node (hub) — highest announce count
@@ -366,6 +368,8 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 "capabilities": d.capabilities,
                 "version": d.version,
                 "lxmf_destination_hash": d.lxmf_destination_hash,
+                "short_name": d.short_name,
+                "system_fingerprint": d.system_fingerprint,
             })
         return result
 
@@ -778,6 +782,12 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 "services": result.services,
                 "disk_used": result.disk_used,
                 "disk_total": result.disk_total,
+                "styrened_version": result.styrened_version,
+                "hostname": result.hostname,
+                "arch": result.arch,
+                "os_id": result.os_id,
+                "os_version": result.os_version,
+                "nixos_generation": result.nixos_generation,
             }
         except TimeoutError:
             raise HTTPException(504, detail="Status request timed out")

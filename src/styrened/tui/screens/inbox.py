@@ -1,41 +1,33 @@
 """InboxScreen - Conversation list for chat messages.
 
 This screen displays a list of conversations with unread counts and message previews.
-Follows the Imperial CRT theme (green phosphor #39ff14 on #0a0a0a).
+Uses IPCBridge for daemon communication and theme variables for styling.
 """
 
-from typing import TYPE_CHECKING, Any, ClassVar
+import logging
+from typing import Any, ClassVar
 
-from sqlalchemy import or_
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Static, Switch
 
-from styrened.models.messages import Message
-
-if TYPE_CHECKING:
-    from styrened.protocols.chat import ChatProtocol
+logger = logging.getLogger(__name__)
 
 
 class InboxScreen(Screen[None]):
     """Inbox screen showing conversation list.
 
     Displays all chat conversations with:
-    - Destination identity (short hash)
+    - Display name or short hash
     - Last message preview
     - Unread message count
     - Timestamp of last message
 
     Conversations are ordered by most recent message first.
-
-    Attributes:
-        db_engine: SQLAlchemy engine for message persistence
-        local_identity_hash: Local node's identity hash
+    All data is loaded via IPCBridge from the daemon.
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -45,54 +37,54 @@ class InboxScreen(Screen[None]):
 
     CSS = """
     InboxScreen {
-        background: #0a0a0a;
+        background: $background;
     }
 
     InboxScreen Static {
-        color: #39ff14;
-        background: #0a0a0a;
+        color: $primary;
+        background: $background;
     }
 
     InboxScreen DataTable {
-        background: #0a0a0a;
-        color: #39ff14;
+        background: $background;
+        color: $primary;
     }
 
     InboxScreen DataTable > .datatable--header {
-        background: #0a0a0a;
-        color: #39ff14;
+        background: $surface;
+        color: $primary;
         text-style: bold;
     }
 
     InboxScreen DataTable > .datatable--cursor {
-        background: #1a3a1a;
-        color: #39ff14;
+        background: $surface;
+        color: $primary;
+    }
+
+    InboxScreen #ooo-bar {
+        height: 3;
+        padding: 0 1;
+    }
+
+    InboxScreen #ooo-bar Static {
+        width: auto;
+    }
+
+    InboxScreen #ooo-bar Switch {
+        width: auto;
     }
     """
-
-    def __init__(
-        self,
-        db_engine: Engine | None,
-        local_identity_hash: str,
-        chat_protocol: "ChatProtocol | None" = None,
-    ) -> None:
-        """Initialize InboxScreen.
-
-        Args:
-            db_engine: SQLAlchemy engine for message persistence
-            local_identity_hash: Local node's identity hash
-            chat_protocol: Optional ChatProtocol for opening conversations
-        """
-        super().__init__()
-        self.db_engine = db_engine
-        self.local_identity_hash = local_identity_hash
-        self.chat_protocol = chat_protocol
 
     def compose(self) -> ComposeResult:
         """Compose inbox UI."""
         yield Header()
         yield Container(
             Static("INBOX - LXMF Conversations", id="inbox-title"),
+            Horizontal(
+                Static("Auto-Reply (OOO): "),
+                Switch(value=False, id="ooo-switch"),
+                id="ooo-bar",
+            ),
             Vertical(
                 DataTable(id="conversation-table"),
                 id="inbox-container",
@@ -100,142 +92,132 @@ class InboxScreen(Screen[None]):
         )
         yield Footer()
 
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge from app lifecycle."""
+        try:
+            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
     def on_mount(self) -> None:
         """Load conversations on mount."""
         table = self.query_one("#conversation-table", DataTable)
         table.cursor_type = "row"
         table.add_columns("DESTINATION", "LAST MESSAGE", "UNREAD", "TIMESTAMP")
 
-        # Load conversation data
-        conversations = self.get_conversations()
+        if self._ipc_bridge is None:
+            table.add_row("-", "[dim]Chat requires daemon mode[/]", "-", "-")
+            return
+
+        self.run_worker(self._load_conversations())
+        self.run_worker(self._load_auto_reply_state())
+
+    async def _load_conversations(self) -> None:
+        """Load conversations via IPCBridge."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        try:
+            conversations = await bridge.get_conversations()
+        except Exception as e:
+            logger.warning(f"Failed to load conversations: {e}")
+            conversations = []
+
+        table = self.query_one("#conversation-table", DataTable)
+        table.clear()
 
         if not conversations:
             table.add_row("-", "[dim]No conversations yet[/]", "-", "-")
-        else:
-            for conv in conversations:
-                # Format destination (short hash)
-                dest_short = conv["destination_hash"][:8] + "..."
+            return
 
-                # Format last message (truncate to 40 chars)
-                last_msg = conv["last_message"] or "[dim]No content[/]"
-                if len(last_msg) > 40:
-                    last_msg = last_msg[:37] + "..."
+        for conv in conversations:
+            peer_hash = conv.get("peer_hash", "")
+            display_name = conv.get("display_name")
 
-                # Format unread count
-                unread = conv["unread_count"]
-                unread_text = f"[bold green]{unread}[/]" if unread > 0 else "-"
+            # Use display_name when present, fall back to short hash
+            if display_name:
+                dest_display = display_name
+            else:
+                dest_display = peer_hash[:8] + "..." if peer_hash else "unknown"
 
-                # Format timestamp
-                timestamp_text = f"{int(conv['last_timestamp'])}"
+            # Format last message (truncate to 40 chars)
+            last_msg = conv.get("last_message_preview") or "[dim]No content[/]"
+            if len(last_msg) > 40:
+                last_msg = last_msg[:37] + "..."
 
-                table.add_row(
-                    dest_short,
-                    last_msg,
-                    unread_text,
-                    timestamp_text,
-                    key=conv["destination_hash"],  # Row key for selection
-                )
+            # Format unread count
+            unread = conv.get("unread_count", 0)
+            unread_text = f"[bold]{unread}[/]" if unread > 0 else "-"
 
-    def get_conversations(self) -> list[dict[str, Any]]:
-        """Retrieve conversation list from database.
+            # Format timestamp
+            last_time = conv.get("last_message_time")
+            timestamp_text = f"{int(last_time)}" if last_time else "-"
 
-        Returns:
-            List of conversation dicts with:
-            - destination_hash: Conversation partner's identity
-            - last_message: Most recent message content
-            - last_timestamp: Timestamp of most recent message
-            - unread_count: Number of unread messages
-        """
-        if self.db_engine is None:
-            return []
-
-        with Session(self.db_engine) as session:
-            # Query for all chat messages involving this identity
-            messages = (
-                session.query(Message)
-                .filter(
-                    Message.protocol_id == "chat",
-                    or_(
-                        Message.source_hash == self.local_identity_hash,
-                        Message.destination_hash == self.local_identity_hash,
-                    ),
-                )
-                .order_by(Message.timestamp.desc())
-                .all()
+            table.add_row(
+                dest_display,
+                last_msg,
+                unread_text,
+                timestamp_text,
+                key=peer_hash,
             )
 
-            if not messages:
-                return []
+    async def _load_auto_reply_state(self) -> None:
+        """Load auto-reply state from IPCBridge."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
 
-            # Group messages by conversation partner
-            conversations: dict[str, dict[str, Any]] = {}
+        try:
+            data = await bridge.get_auto_reply()
+            switch = self.query_one("#ooo-switch", Switch)
+            switch.value = data.get("enabled", False)
+        except Exception as e:
+            logger.warning(f"Failed to load auto-reply state: {e}")
 
-            for msg in messages:
-                # Determine conversation partner (the other party)
-                if msg.source_hash == self.local_identity_hash:
-                    partner_hash = msg.destination_hash
-                else:
-                    partner_hash = msg.source_hash
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle OOO switch toggle."""
+        if str(event.switch.id) == "ooo-switch":
+            self.run_worker(self._toggle_auto_reply(event.value))
 
-                # Initialize conversation entry if not exists
-                if partner_hash not in conversations:
-                    conversations[partner_hash] = {
-                        "destination_hash": partner_hash,
-                        "last_message": None,
-                        "last_timestamp": 0.0,
-                        "unread_count": 0,
-                    }
+    async def _toggle_auto_reply(self, enabled: bool) -> None:
+        """Toggle auto-reply via IPCBridge."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            self.notify("Auto-reply requires daemon mode", severity="warning")
+            return
 
-                conv = conversations[partner_hash]
-
-                # Update last message (most recent)
-                if msg.timestamp > conv["last_timestamp"]:
-                    conv["last_message"] = msg.content
-                    conv["last_timestamp"] = msg.timestamp
-
-                # Count unread messages (pending status + not from me)
-                if msg.status == "pending" and msg.destination_hash == self.local_identity_hash:
-                    conv["unread_count"] += 1
-
-            # Convert to list and sort by most recent first
-            conversation_list = list(conversations.values())
-            conversation_list.sort(key=lambda c: c["last_timestamp"], reverse=True)
-
-            return conversation_list
+        try:
+            await bridge.set_auto_reply(enabled=enabled)
+            state = "enabled" if enabled else "disabled"
+            self.notify(f"Auto-reply {state}", severity="information")
+        except Exception as e:
+            logger.warning(f"Failed to toggle auto-reply: {e}")
+            self.notify(f"Failed to toggle auto-reply: {e}", severity="error")
 
     def action_open_conversation(self) -> None:
         """Open conversation screen for selected row."""
         table = self.query_one("#conversation-table", DataTable)
 
-        # Ensure we have a valid cursor position
         cursor_row = table.cursor_row
         if cursor_row is None:
-            # Try to select first row if none selected
             if table.row_count > 0:
                 table.move_cursor(row=0)
                 cursor_row = 0
             else:
                 return
 
-        # Get destination hash from row key
         cell_key = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
         if not cell_key or not cell_key.row_key or cell_key.row_key.value == "-":
             return
 
-        destination_hash = str(cell_key.row_key.value)
+        peer_hash = str(cell_key.row_key.value)
 
-        # Require chat protocol to open conversation
-        if self.chat_protocol is None:
-            self.notify("Chat not available", severity="warning")
+        if self._ipc_bridge is None:
+            self.notify("Chat requires daemon mode", severity="warning")
             return
 
-        # Push conversation screen
         from styrened.tui.screens.conversation import ConversationScreen
 
-        self.app.push_screen(
-            ConversationScreen(
-                destination_hash=destination_hash,
-                local_identity_hash=self.local_identity_hash,
-                chat_protocol=self.chat_protocol,
-            )
-        )
+        self.app.push_screen(ConversationScreen(peer_hash=peer_hash))

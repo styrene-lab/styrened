@@ -253,6 +253,81 @@ class TestEnsureOperatorIdentityWithDetection:
             mock_rns.Identity.assert_called_with(create_keys=True)
 
 
+class TestEnsureOperatorIdentityCorruptRecovery:
+    """Tests for self-healing when operator.key is corrupt."""
+
+    @pytest.fixture
+    def mock_rns(self):
+        """Mock RNS module where from_file fails on corrupt data."""
+        mock = MagicMock()
+        mock_identity = MagicMock()
+        mock_identity.hash.hex.return_value = "b" * 32
+        mock.Identity.return_value = mock_identity
+        # from_file returns None for corrupt files (first call),
+        # normal identity for regenerated (second call, if any)
+        mock.Identity.from_file.return_value = None
+        return mock
+
+    def test_corrupt_identity_backed_up_and_regenerated(self, tmp_path, mock_rns):
+        """Corrupt identity should be backed up and a new one generated."""
+        identity_file = tmp_path / "operator.key"
+        identity_file.write_bytes(b"x" * 32)  # Wrong size / format
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", identity_file),
+        ):
+            result = ensure_operator_identity(use_existing=False)
+
+        assert result == "b" * 32
+        # Original file should be gone
+        assert not identity_file.exists()
+        # Backup should exist
+        backup = tmp_path / "operator.key.corrupt"
+        assert backup.exists()
+        assert backup.read_bytes() == b"x" * 32
+        # New identity should have been created
+        mock_rns.Identity.assert_called_with(create_keys=True)
+
+    def test_corrupt_identity_exception_also_recovers(self, tmp_path, mock_rns):
+        """Identity file that raises on load should also be backed up."""
+        identity_file = tmp_path / "operator.key"
+        identity_file.write_bytes(b"bad")
+
+        mock_rns.Identity.from_file.side_effect = [
+            Exception("An Ed25519 private key is 32 bytes long"),
+            None,  # won't be called, but just in case
+        ]
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", identity_file),
+        ):
+            result = ensure_operator_identity(use_existing=False)
+
+        assert result == "b" * 32
+        assert not identity_file.exists()
+        backup = tmp_path / "operator.key.corrupt"
+        assert backup.exists()
+        assert backup.read_bytes() == b"bad"
+
+    def test_corrupt_identity_backup_failure_raises(self, tmp_path, mock_rns):
+        """If backup rename fails, should raise with manual instructions."""
+        identity_file = tmp_path / "operator.key"
+        identity_file.write_bytes(b"x" * 32)
+
+        with (
+            patch("styrened.services.reticulum.RNS", mock_rns),
+            patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", identity_file),
+            patch.object(type(identity_file), "rename", side_effect=OSError("Permission denied")),
+        ):
+            with pytest.raises(ValueError, match="corrupt and could not be backed up"):
+                ensure_operator_identity(use_existing=False)
+
+
 class TestEnsureOperatorIdentityYubiKey:
     """Tests for ensure_operator_identity() with YubiKey provider."""
 

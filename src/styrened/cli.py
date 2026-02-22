@@ -983,9 +983,12 @@ async def _cmd_announce_async(args: argparse.Namespace) -> int:
         lifecycle.shutdown()
         return 1
 
+    from styrened import __version__
+    from styrened.services.system_info import get_system_fingerprint
+
     hostname = socket.gethostname()
-    version = "0.2.0"
-    app_data = f"styrene:{hostname}:{version}:cli:".encode()
+    fingerprint = get_system_fingerprint()
+    app_data = f"styrene:{hostname}:{__version__}:cli:::{fingerprint}".encode()
     destination.announce(app_data=app_data)
 
     print(f"Announced as {hostname}")

@@ -6,7 +6,7 @@ from styrened.protocols.base import LXMFMessage, Protocol
 from styrened.protocols.registry import ProtocolNotFoundError, ProtocolRegistry
 
 # Import shared MockProtocol from conftest
-from tests.conftest import MockProtocol
+from tests.tui.conftest import MockProtocol
 
 
 def test_registry_initialization():

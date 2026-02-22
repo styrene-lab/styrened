@@ -268,6 +268,8 @@ class ControlServer:
             IPCMessageType.QUERY_RESOLVE_NAME: self._handlers.handle_query_resolve_name,
             IPCMessageType.CMD_SET_CONTACT: self._handlers.handle_cmd_set_contact,
             IPCMessageType.CMD_REMOVE_CONTACT: self._handlers.handle_cmd_remove_contact,
+            IPCMessageType.QUERY_AUTO_REPLY: self._handlers.handle_query_auto_reply,
+            IPCMessageType.CMD_SET_AUTO_REPLY: self._handlers.handle_cmd_set_auto_reply,
         }
 
     async def _handle_client(

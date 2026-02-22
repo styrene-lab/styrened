@@ -25,7 +25,7 @@ from styrened.tui.forge.models import (
     _parse_device,
 )
 
-from tests.forge.conftest import _specs
+from tests.tui.forge.conftest import _specs
 
 
 # ===================================================================

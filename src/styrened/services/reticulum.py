@@ -796,15 +796,30 @@ def ensure_operator_identity(
     # Check for existing identity (config override -> system -> user)
     existing_path = _resolve_identity_path(config_path)
     if existing_path:
-        identity = RNS.Identity.from_file(str(existing_path))
-        if identity is None:
-            raise ValueError(
-                f"Failed to load operator identity from {existing_path}. "
-                "The identity file may be corrupt. Delete it to regenerate: "
-                f"rm {existing_path}"
+        try:
+            identity = RNS.Identity.from_file(str(existing_path))
+        except Exception as e:
+            identity = None
+            logger.warning(f"Exception loading identity from {existing_path}: {e}")
+
+        if identity is not None:
+            logger.info(f"Loaded operator identity from {existing_path}")
+            return str(identity.hash.hex())
+
+        # Corrupt or unparseable — back up and fall through to regenerate
+        backup_path = existing_path.with_suffix(".key.corrupt")
+        try:
+            existing_path.rename(backup_path)
+            logger.warning(
+                f"Identity file {existing_path} is corrupt — "
+                f"backed up to {backup_path}, regenerating"
             )
-        logger.info(f"Loaded operator identity from {existing_path}")
-        return str(identity.hash.hex())
+        except OSError as e:
+            logger.error(f"Could not back up corrupt identity {existing_path}: {e}")
+            raise ValueError(
+                f"Identity file {existing_path} is corrupt and could not be "
+                f"backed up ({e}). Remove it manually: rm {existing_path}"
+            ) from e
 
     # No identity found at any standard path - check LXMF apps
     if use_existing:

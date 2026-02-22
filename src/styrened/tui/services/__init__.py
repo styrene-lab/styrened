@@ -47,7 +47,6 @@ from styrened.tui.services.hardware import (
 from styrened.tui.services.reticulum import (
     discover_devices,
     ensure_operator_identity,
-    get_device_identity,
     get_operator_identity,
     get_reticulum_config,
     get_reticulum_status,
@@ -78,7 +77,6 @@ __all__ = [
     "get_data_dir",
     "get_default_config",
     "get_device",
-    "get_device_identity",
     "get_disks",
     "get_fleet_summary",
     "get_log_dir",

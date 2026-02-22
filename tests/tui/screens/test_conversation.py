@@ -1,145 +1,66 @@
-"""Tests for ConversationScreen - message thread display."""
+"""Tests for ConversationScreen - message thread display via IPCBridge."""
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
-from styrened.models.messages import Base, Message
-from styrened.protocols.chat import ChatProtocol
-from styrened.tui.screens.conversation import ConversationScreen
+from styrened.tui.screens.conversation import ConversationScreen, STATUS_ICONS
 
 
-@pytest.fixture
-def test_db(tmp_path):
-    """Create test database with sample messages."""
-    db_path = tmp_path / "test_conversation.db"
-    engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(engine)
+class TestConversationScreenInit:
+    """Tests for ConversationScreen initialization."""
 
-    # Add sample conversation with Alice
-    with Session(engine) as session:
-        session.add(Message(
-            source_hash="alice_hash",
-            destination_hash="me_hash",
-            timestamp=100.0,
-            content="Hello!",
-            protocol_id="chat",
-            status="sent",
-        ))
-        session.add(Message(
-            source_hash="me_hash",
-            destination_hash="alice_hash",
-            timestamp=200.0,
-            content="Hi Alice!",
-            protocol_id="chat",
-            status="sent",
-        ))
-        session.add(Message(
-            source_hash="alice_hash",
-            destination_hash="me_hash",
-            timestamp=300.0,
-            content="How are you?",
-            protocol_id="chat",
-            status="sent",
-        ))
-        session.commit()
+    def test_conversation_screen_initialization(self) -> None:
+        """ConversationScreen should initialize with peer_hash."""
+        screen = ConversationScreen(peer_hash="alice_hash")
+        assert screen.peer_hash == "alice_hash"
+        assert screen.display_name is None
 
-    return engine
+    def test_conversation_screen_with_display_name(self) -> None:
+        """ConversationScreen should accept optional display_name."""
+        screen = ConversationScreen(peer_hash="alice_hash", display_name="Alice")
+        assert screen.peer_hash == "alice_hash"
+        assert screen.display_name == "Alice"
 
 
-@pytest.fixture
-def mock_chat_protocol():
-    """Create mock ChatProtocol."""
-    protocol = Mock(spec=ChatProtocol)
-    protocol.send_message = AsyncMock()
-    protocol.get_conversation_history = Mock(return_value=[])
-    return protocol
+class TestConversationScreenCSS:
+    """Tests for ConversationScreen CSS theming."""
+
+    def test_no_hardcoded_colors(self) -> None:
+        """ConversationScreen CSS should not contain hardcoded hex colors."""
+        assert "#39ff14" not in ConversationScreen.CSS
+        assert "#0a0a0a" not in ConversationScreen.CSS
 
 
-def test_conversation_screen_initialization(mock_chat_protocol):
-    """ConversationScreen should initialize without errors."""
-    screen = ConversationScreen(
-        destination_hash="alice_hash",
-        local_identity_hash="me_hash",
-        chat_protocol=mock_chat_protocol,
-    )
-    assert screen is not None
-    assert screen.destination_hash == "alice_hash"
+class TestConversationScreenNoBridge:
+    """Tests for ConversationScreen without IPCBridge."""
+
+    def test_handles_no_bridge(self) -> None:
+        """ConversationScreen should handle missing IPCBridge gracefully."""
+        screen = ConversationScreen(peer_hash="alice_hash")
+        assert screen._ipc_bridge is None
 
 
-def test_conversation_screen_get_messages(test_db, mock_chat_protocol):
-    """ConversationScreen should retrieve message history."""
-    # Mock chat protocol to return messages from database
-    with Session(test_db) as session:
-        messages = (
-            session.query(Message)
-            .filter(
-                Message.protocol_id == "chat",
-            )
-            .order_by(Message.timestamp.asc())
-            .all()
-        )
-        mock_chat_protocol.get_conversation_history.return_value = messages
+class TestStatusIcons:
+    """Tests for delivery status indicators."""
 
-    screen = ConversationScreen(
-        destination_hash="alice_hash",
-        local_identity_hash="me_hash",
-        chat_protocol=mock_chat_protocol,
-    )
+    def test_all_statuses_have_icons(self) -> None:
+        """All expected statuses should have icons."""
+        expected = {"pending", "sent", "delivered", "failed", "read"}
+        assert expected == set(STATUS_ICONS.keys())
 
-    history = screen.get_messages()
+    def test_pending_icon(self) -> None:
+        """Pending should show hourglass."""
+        assert STATUS_ICONS["pending"] == "\u23f3"
 
-    assert len(history) == 3
-    assert history[0].content == "Hello!"
-    assert history[1].content == "Hi Alice!"
-    assert history[2].content == "How are you?"
+    def test_sent_icon(self) -> None:
+        """Sent should show single check."""
+        assert STATUS_ICONS["sent"] == "\u2713"
 
+    def test_delivered_icon(self) -> None:
+        """Delivered should show double check."""
+        assert STATUS_ICONS["delivered"] == "\u2713\u2713"
 
-@pytest.mark.asyncio
-async def test_conversation_screen_send_message(mock_chat_protocol):
-    """ConversationScreen should send messages via ChatProtocol."""
-    screen = ConversationScreen(
-        destination_hash="alice_hash",
-        local_identity_hash="me_hash",
-        chat_protocol=mock_chat_protocol,
-    )
-
-    await screen.send_message("Test message")
-
-    # Verify ChatProtocol.send_message was called
-    mock_chat_protocol.send_message.assert_called_once_with(
-        "alice_hash", "Test message"
-    )
-
-
-def test_conversation_screen_message_formatting(test_db, mock_chat_protocol):
-    """ConversationScreen should format messages for display."""
-    with Session(test_db) as session:
-        messages = (
-            session.query(Message)
-            .filter(Message.protocol_id == "chat")
-            .order_by(Message.timestamp.asc())
-            .all()
-        )
-        mock_chat_protocol.get_conversation_history.return_value = messages
-
-    screen = ConversationScreen(
-        destination_hash="alice_hash",
-        local_identity_hash="me_hash",
-        chat_protocol=mock_chat_protocol,
-    )
-
-    formatted = screen.format_messages()
-
-    # Should have 3 formatted messages
-    assert len(formatted) == 3
-
-    # First message from Alice
-    assert "alice_hash" in formatted[0]["source"]
-    assert formatted[0]["content"] == "Hello!"
-
-    # Second message from me
-    assert "me_hash" in formatted[1]["source"]
-    assert formatted[1]["content"] == "Hi Alice!"
+    def test_failed_icon(self) -> None:
+        """Failed should show cross."""
+        assert STATUS_ICONS["failed"] == "\u2717"

@@ -21,7 +21,7 @@ from styrened.tui.forge.models import (
     MediaEvent,
     StageKey,
 )
-from tests.forge.conftest import collect, has_complete, has_error, stages
+from tests.tui.forge.conftest import collect, has_complete, has_error, stages
 
 
 # Helper for mocking async generators

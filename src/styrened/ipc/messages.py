@@ -381,6 +381,30 @@ class CmdRemoveContactRequest(IPCRequest):
         return {"peer_hash": self.peer_hash}
 
 
+@dataclass
+class QueryAutoReplyRequest(IPCRequest):
+    """Query auto-reply configuration."""
+
+    MSG_TYPE = IPCMessageType.QUERY_AUTO_REPLY
+
+
+@dataclass
+class CmdSetAutoReplyRequest(IPCRequest):
+    """Set auto-reply configuration."""
+
+    MSG_TYPE = IPCMessageType.CMD_SET_AUTO_REPLY
+    enabled: bool = False
+    message: str = ""
+    cooldown: int = 300
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "message": self.message,
+            "cooldown": self.cooldown,
+        }
+
+
 # -----------------------------------------------------------------------------
 # Subscription requests
 # -----------------------------------------------------------------------------
@@ -536,6 +560,7 @@ class DeviceInfo:
     last_announce: float
     announce_count: int
     short_name: str | None = None
+    system_fingerprint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -549,6 +574,7 @@ class DeviceInfo:
             "last_announce": self.last_announce,
             "announce_count": self.announce_count,
             "short_name": self.short_name,
+            "system_fingerprint": self.system_fingerprint,
         }
 
     @classmethod
@@ -564,6 +590,7 @@ class DeviceInfo:
             last_announce=data.get("last_announce", 0.0),
             announce_count=data.get("announce_count", 0),
             short_name=data.get("short_name"),
+            system_fingerprint=data.get("system_fingerprint"),
         )
 
     @classmethod
@@ -587,6 +614,7 @@ class DeviceInfo:
             last_announce=device.last_announce or 0.0,
             announce_count=device.announce_count or 0,
             short_name=getattr(device, "short_name", None),
+            system_fingerprint=getattr(device, "system_fingerprint", None),
         )
 
 
@@ -852,6 +880,14 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         )
     elif msg_type == IPCMessageType.CMD_REMOVE_CONTACT:
         return CmdRemoveContactRequest(peer_hash=payload.get("peer_hash", ""))
+    elif msg_type == IPCMessageType.QUERY_AUTO_REPLY:
+        return QueryAutoReplyRequest()
+    elif msg_type == IPCMessageType.CMD_SET_AUTO_REPLY:
+        return CmdSetAutoReplyRequest(
+            enabled=payload.get("enabled", False),
+            message=payload.get("message", ""),
+            cooldown=payload.get("cooldown", 300),
+        )
     elif msg_type == IPCMessageType.SUB_MESSAGES:
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))
     elif msg_type == IPCMessageType.SUB_DEVICES:

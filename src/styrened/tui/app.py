@@ -15,8 +15,8 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header
 
 from styrened.tui.models.config import ConfigLoadError, ConfigValidationErrors, StyreneConfig
+from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.dashboard import DashboardScreen
-from styrened.tui.screens.device import DeviceScreen
 from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
@@ -57,15 +57,15 @@ class StyreneApp(App[None]):
         Binding("?", "toggle_help", "Help"),
         Binding("grave_accent", "push_screen_settings", "Settings", show=True),
         Binding("i", "open_inbox", "Inbox", show=True),
+        Binding("b", "push_screen('contacts')", "Contacts", show=True),
         # Screen shortcuts (can be overridden by screens)
         Binding("p", "push_screen('provision')", "Provision", show=True),
-        Binding("d", "push_screen('device')", "Device", show=False),
     ]
 
     SCREENS: ClassVar[dict[str, type[Screen[Any]]]] = {  # type: ignore[assignment]
+        "contacts": ContactsScreen,
         "dashboard": DashboardScreen,
         "provision": ProvisionScreen,
-        "device": DeviceScreen,
     }
 
     def action_push_screen_settings(self) -> None:
@@ -74,23 +74,13 @@ class StyreneApp(App[None]):
 
     def action_open_inbox(self) -> None:
         """Open inbox screen showing all conversations."""
-        if self.chat_protocol is None:
-            self.notify("Chat not available (no protocol initialized)", severity="warning")
-            return
-
-        if not self.local_identity_hash:
-            self.notify("Chat not available (no local identity)", severity="warning")
+        if self._lifecycle.ipc_bridge is None:
+            self.notify("Chat requires daemon mode", severity="warning")
             return
 
         from styrened.tui.screens.inbox import InboxScreen
 
-        self.push_screen(
-            InboxScreen(
-                db_engine=self.db_engine,
-                local_identity_hash=self.local_identity_hash,
-                chat_protocol=self.chat_protocol,
-            )
-        )
+        self.push_screen(InboxScreen())
 
     def get_unread_count(self) -> int:
         """Get total unread message count.
@@ -270,16 +260,16 @@ class StyreneApp(App[None]):
                 self.log.info("RPC client initialized")
             else:
                 # LXMF not available - use mock
-                from tests.mocks.rpc_client_mock import MockRPCClient
+                from styrened.rpc.offline import OfflineRPCClient
 
-                self.rpc_client = MockRPCClient()  # type: ignore[assignment]
-                self.log.warning("Using mock RPC client (LXMF not available)")
+                self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
+                self.log.warning("Using offline RPC client (LXMF not available)")
         except ImportError:
-            # Child 0/1 not integrated yet - use mock
-            from tests.mocks.rpc_client_mock import MockRPCClient
+            # Child 0/1 not integrated yet - use offline stub
+            from styrened.rpc.offline import OfflineRPCClient
 
-            self.rpc_client = MockRPCClient()  # type: ignore[assignment]
-            self.log.info("Using mock RPC client (development mode)")
+            self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
+            self.log.info("Using offline RPC client (development mode)")
 
     def _initialize_chat(self) -> None:
         """Initialize message database and chat protocol.
@@ -351,11 +341,11 @@ class StyreneApp(App[None]):
             self._initialize_chat()
         elif self._lifecycle.active_mode == LifecycleMode.IPC:
             # In IPC mode, RPC and chat go through the bridge
-            # Initialize mock RPC client for backward compat with screens
+            # Initialize offline RPC client for backward compat with screens
             # that still use self.rpc_client directly
-            from tests.mocks.rpc_client_mock import MockRPCClient
+            from styrened.rpc.offline import OfflineRPCClient
 
-            self.rpc_client = MockRPCClient()  # type: ignore[assignment]
+            self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
             self.log.info(
                 "IPC mode active — screens should migrate to IPCBridge"
             )

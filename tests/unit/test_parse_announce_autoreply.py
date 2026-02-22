@@ -13,7 +13,7 @@ class TestParseAnnounceAutoReply:
     def test_parse_announce_with_autoreply_capability(self):
         """Parser should include 'autoreply' in capabilities list."""
         app_data = b"styrene:test-node:0.1.0:hub,api,autoreply:deadbeef:tnode"
-        name, dtype, caps, version, lxmf_dest, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf_dest, short_name, _fp = parse_announce_data(app_data)
 
         assert name == "test-node"
         assert caps is not None
@@ -25,7 +25,7 @@ class TestParseAnnounceAutoReply:
     def test_parse_announce_without_autoreply(self):
         """Parser should not include autoreply when not in data."""
         app_data = b"styrene:test-node:0.1.0:hub,api:deadbeef:tnode"
-        name, dtype, caps, version, lxmf_dest, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf_dest, short_name, _fp = parse_announce_data(app_data)
 
         assert caps is not None
         assert "autoreply" not in caps
@@ -33,6 +33,6 @@ class TestParseAnnounceAutoReply:
     def test_parse_announce_autoreply_only_capability(self):
         """Parser should handle autoreply as the sole capability."""
         app_data = b"styrene:test-node:0.1.0:autoreply:deadbeef:tnode"
-        name, dtype, caps, version, lxmf_dest, short_name = parse_announce_data(app_data)
+        name, dtype, caps, version, lxmf_dest, short_name, _fp = parse_announce_data(app_data)
 
         assert caps == ["autoreply"]

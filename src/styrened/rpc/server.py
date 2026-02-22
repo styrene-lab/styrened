@@ -50,6 +50,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from styrened import __version__ as _styrened_version
 from styrened.models.styrene_wire import (
     NO_CORRELATION,
     StyreneEnvelope,
@@ -62,6 +63,7 @@ from styrened.models.styrene_wire import (
     decode_payload,
 )
 from styrened.protocols.base import LXMFMessage
+from styrened.services.system_info import get_os_info
 
 # Import response types for backward compatibility
 
@@ -930,14 +932,22 @@ class RPCServer:
         """Gather system status information.
 
         Returns:
-            Dictionary with uptime, ip, services, disk_used, disk_total.
+            Dictionary with uptime, ip, services, disk info, and system identity.
         """
+        os_info = get_os_info()
+        disk_used, disk_total = self._get_disk_usage()
         return {
             "uptime": self._get_uptime(),
             "ip": self._get_ip_address(),
             "services": self._get_services(),
-            "disk_used": self._get_disk_usage()[0],
-            "disk_total": self._get_disk_usage()[1],
+            "disk_used": disk_used,
+            "disk_total": disk_total,
+            "styrened_version": _styrened_version,
+            "hostname": socket.gethostname(),
+            "arch": os_info["arch"],
+            "os_id": os_info["os_id"],
+            "os_version": os_info["os_version"],
+            "nixos_generation": os_info["nixos_generation"],
         }
 
     def _get_uptime(self) -> int:

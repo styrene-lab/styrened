@@ -14,7 +14,7 @@ from styrened.rpc.messages import StatusResponse
 from styrened.tui.services.reticulum import discover_devices
 from styrened.tui.widgets.command_widget import CommandWidget
 from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 
 if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
@@ -35,22 +35,24 @@ class MeshInfoWidget(Static):
 
     def compose(self) -> ComposeResult:
         """Compose mesh info fields."""
+        cascade = get_color_cascade()
+
         # Device name with type-based styling
         if self.device.is_styrene_node:
-            yield Static(f"[bold green]Name:[/] {self.device.name}", classes="info-field")
+            yield Static(f"[{cascade.bright} bold]Name:[/] {self.device.name}", classes="info-field")
         elif self.device.is_rnode:
-            yield Static(f"[bold cyan]Name:[/] {self.device.name}", classes="info-field")
+            yield Static(f"[{cascade.medium} bold]Name:[/] {self.device.name}", classes="info-field")
         else:
             yield Static(f"[bold]Name:[/] {self.device.name}", classes="info-field")
 
         # Device type
         type_display = {
-            DeviceType.STYRENE_NODE: "[bold green]STYRENE NODE[/]",
-            DeviceType.RNODE: "[bold cyan]RNODE[/]",
-            DeviceType.GENERIC: "[dim]GENERIC[/]",
-            DeviceType.UNKNOWN: "[dim]UNKNOWN[/]",
+            DeviceType.STYRENE_NODE: f"[{cascade.bright} bold]STYRENE NODE[/]",
+            DeviceType.RNODE: f"[{cascade.medium} bold]RNODE[/]",
+            DeviceType.GENERIC: f"[{cascade.dim}]GENERIC[/]",
+            DeviceType.UNKNOWN: f"[{cascade.dim}]UNKNOWN[/]",
         }
-        type_text = type_display.get(self.device.device_type, "[dim]?[/]")
+        type_text = type_display.get(self.device.device_type, f"[{cascade.dim}]?[/]")
         yield Static(f"[bold]Type:[/] {type_text}", classes="info-field")
 
         # Identity

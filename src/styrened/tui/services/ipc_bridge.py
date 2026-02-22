@@ -382,6 +382,28 @@ class IPCBridge:
         )
 
     # -------------------------------------------------------------------------
+    # Auto-reply (OOO)
+    # -------------------------------------------------------------------------
+
+    async def get_auto_reply(self) -> dict[str, Any]:
+        """Get auto-reply configuration (enabled, message, cooldown)."""
+        return await self._call("query_auto_reply")
+
+    async def set_auto_reply(
+        self,
+        enabled: bool,
+        message: str = "",
+        cooldown: int = 300,
+    ) -> dict[str, Any]:
+        """Set auto-reply configuration."""
+        return await self._call(
+            "set_auto_reply",
+            enabled=enabled,
+            message=message,
+            cooldown=cooldown,
+        )
+
+    # -------------------------------------------------------------------------
     # Event subscriptions
     # -------------------------------------------------------------------------
 
