@@ -31,8 +31,11 @@ from styrened.tui.services.config import (
     update_styrene_config_from_cli,
 )
 from styrened.tui.services.reticulum import find_reticulum_config
-from styrened.tui.themes.color_cascade import ColorCascade, generate_all_themes
-from styrened.tui.themes.imperial_crt import IMPERIAL_CRT
+from styrened.tui.themes.styrene_brand import (
+    STYRENE_THEME_KEY,
+    create_styrene_cascade,
+    create_styrene_theme,
+)
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
 
 
@@ -171,24 +174,10 @@ class StyreneApp(App[None]):
         # Apply CLI overrides to config
         self._apply_cli_overrides()
 
-        # Register all forge world themes
-        # Keep IMPERIAL_CRT for backwards compatibility
-        self.register_theme(IMPERIAL_CRT)
-        for theme in generate_all_themes().values():
-            self.register_theme(theme)
-
-        # Set theme and cascade together for consistency
-        theme_key = self.config.tui.theme.value
-        self.theme = theme_key
-
-        # Initialize cascade from the selected theme
-        # This ensures Rich markup uses the same colors as CSS
-        try:
-            cascade = ColorCascade.from_preset(theme_key)
-            set_color_cascade(cascade)
-        except ValueError:
-            # Fall back to default cascade if preset not found
-            pass
+        # Register and apply styrene brand theme
+        self.register_theme(create_styrene_theme())
+        self.theme = STYRENE_THEME_KEY
+        set_color_cascade(create_styrene_cascade())
 
         # Initialize defaults for service-layer attributes
         # Actual initialization happens in on_mount() (async)
@@ -451,20 +440,8 @@ class StyreneApp(App[None]):
         self.bell()  # Placeholder until help screen implemented
 
     def watch_theme(self, old_theme: str, new_theme: str) -> None:
-        """React to theme changes - refresh all themed components.
-
-        Args:
-            old_theme: Previous theme name.
-            new_theme: New theme name.
-        """
+        """React to theme changes - refresh all themed components."""
         if old_theme == new_theme:
-            return
-
-        # Update cascade for Rich markup
-        try:
-            cascade = ColorCascade.from_preset(new_theme)
-            set_color_cascade(cascade)
-        except ValueError:
             return
 
         # Guard against early calls before screens are mounted

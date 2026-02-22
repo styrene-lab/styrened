@@ -9,7 +9,7 @@ import pytest
 from textual.widgets import Checkbox, Input, Select
 
 from styrened.tui.app import StyreneApp
-from styrened.tui.models.config import StyreneConfig, ThemeMode
+from styrened.tui.models.config import StyreneConfig
 from styrened.tui.screens.settings import SettingsScreen
 
 
@@ -295,122 +295,9 @@ class TestSettingsKeyboardBindings:
 
 
 class TestSettingsThemeChanges:
-    """Test theme selection and application."""
+    """Test theme configuration (theme selector disabled — single theme)."""
 
-    @pytest.mark.asyncio
-    async def test_theme_selector_shows_options(self, test_config):
-        """Theme selector should show available themes."""
-        app = StyreneApp()
-
-        async with app.run_test() as pilot:
-            await app.push_screen(SettingsScreen(test_config))
-            await pilot.pause()
-
-            # Find theme selector
-            theme_select = app.screen.query_one("#theme", Select)
-            assert theme_select is not None
-
-    @pytest.mark.asyncio
-    async def test_theme_change_applies_immediately(self, test_config):
-        """Changing theme should apply immediately (preview)."""
-        app = StyreneApp()
-
-        async with app.run_test() as pilot:
-            await app.push_screen(SettingsScreen(test_config))
-            await pilot.pause()
-
-            # Theme selector exists
-            theme_select = app.screen.query_one("#theme", Select)
-            assert theme_select is not None
-
-    @pytest.mark.asyncio
-    async def test_theme_persists_to_dashboard_after_save(self, test_config, tmp_path):
-        """Theme change should persist to dashboard panels after saving settings.
-
-        This test verifies that when a user changes the theme in settings and
-        returns to the dashboard, ALL themed elements update - not just the
-        cascade global, but the actual rendered panel borders/titles.
-        """
-        from styrened.tui.screens.dashboard import DashboardScreen
-        from styrened.tui.themes.color_cascade import ColorCascade
-        from styrened.tui.widgets.highlighted_panel import (
-            HighlightedPanel,
-            get_color_cascade,
-            set_color_cascade,
-        )
-
-        # Reset cascade to Mars (green) to avoid test pollution
-        set_color_cascade(ColorCascade.from_preset("mars"))
-
-        # Force config to use Mars theme
-        test_config.tui.theme = ThemeMode.MARS
-
-        # Mock load_config to return our test config with Mars theme
-        with patch("styrened.tui.app.load_config", return_value=test_config):
-            app = StyreneApp()
-
-        async with app.run_test() as pilot:
-            # Start at dashboard
-            await app.push_screen(DashboardScreen())
-            await pilot.pause()
-            await pilot.pause()  # Extra pause for widget composition
-
-            # Verify initial theme (mars = green #39ff14)
-            initial_cascade = get_color_cascade()
-            assert initial_cascade.phosphex == "#39ff14", "Should start with Mars (green)"
-
-            # Get dashboard panels and verify they render with green
-            dashboard_panels = list(app.screen.query(HighlightedPanel))
-            assert len(dashboard_panels) > 0, "Dashboard should have HighlightedPanels"
-
-            # Capture rendered border content - should contain green hex color
-            mesh_panel = app.screen.query_one("#mesh-status-panel", HighlightedPanel)
-            mesh_panel._update_borders()  # Force border render
-            top_border = app.screen.query_one("#mesh-status-panel #hp-top")
-            # Access the raw Rich markup content via Static's internal attribute
-            initial_border_content = str(top_border._Static__content)
-            assert (
-                "#39ff14" in initial_border_content or "39ff14" in initial_border_content.lower()
-            ), f"Initial border should contain Mars green, got: {initial_border_content[:100]}"
-
-            # Open settings
-            await app.push_screen(SettingsScreen(test_config))
-            await pilot.pause()
-
-            # Change theme to Moirae (purple #ba55d3)
-            theme_select = app.screen.query_one("#theme", Select)
-            theme_select.value = "moirae"
-            await pilot.pause()
-
-            # Verify cascade updated
-            assert get_color_cascade().phosphex == "#ba55d3", "Cascade should be Moirae purple"
-
-            # Dismiss settings (escape cancels)
-            await pilot.press("escape")
-            await pilot.pause()
-
-            # Back on dashboard
-            assert isinstance(app.screen, DashboardScreen)
-
-            # The cascade should still be Moirae
-            final_cascade = get_color_cascade()
-            assert final_cascade.phosphex == "#ba55d3", "Cascade should persist as Moirae"
-
-            # CRITICAL: Verify dashboard panels actually re-rendered with new theme
-            # NOTE: We do NOT call _update_borders() here - the app should have done this
-            # automatically when the theme changed. If this test fails, the auto-refresh
-            # mechanism is broken.
-            mesh_panel = app.screen.query_one("#mesh-status-panel", HighlightedPanel)
-            top_border = app.screen.query_one("#mesh-status-panel #hp-top")
-            final_border_content = str(top_border._Static__content)
-
-            # Border should now contain Moirae purple, not Mars green
-            assert "#ba55d3" in final_border_content or "ba55d3" in final_border_content.lower(), (
-                f"Final border should contain Moirae purple, got: {final_border_content[:100]}"
-            )
-            assert "#39ff14" not in final_border_content.lower(), (
-                f"Final border should NOT contain Mars green, got: {final_border_content[:100]}"
-            )
+    pass
 
 
 class TestSettingsIdentityManagement:

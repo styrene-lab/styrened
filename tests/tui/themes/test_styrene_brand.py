@@ -1,6 +1,5 @@
 """Tests for Styrene brand theme."""
 
-from styrened.tui.themes.color_cascade import ColorCascade, generate_all_themes, list_presets
 from styrened.tui.themes.styrene_brand import (
     STYRENE_DARK,
     STYRENE_THEME_KEY,
@@ -12,7 +11,7 @@ from styrened.tui.themes.styrene_brand import (
 class TestStyreneCascade:
     """Tests for the brand cascade factory."""
 
-    def test_styrene_cascade_has_explicit_colors(self) -> None:
+    def test_cascade_has_explicit_brand_colors(self) -> None:
         """Brand cascade uses exact spec values, not algorithmically derived."""
         cascade = create_styrene_cascade()
 
@@ -20,14 +19,18 @@ class TestStyreneCascade:
         assert cascade.preset_name == "Styrene Dark"
         assert cascade.bright == STYRENE_DARK["primary"]
         assert cascade.medium == STYRENE_DARK["foreground"]
+        assert cascade.dim == STYRENE_DARK["border"]
+        assert cascade.dark == STYRENE_DARK["secondary"]
         assert cascade.bg_screen == STYRENE_DARK["background"]
         assert cascade.bg_panel == STYRENE_DARK["card"]
         assert cascade.border_medium == STYRENE_DARK["border"]
         assert cascade.corner_highlight == STYRENE_DARK["ring"]
         assert cascade.color_warning == STYRENE_DARK["destructive"]
 
-    def test_styrene_cascade_from_preset(self) -> None:
+    def test_cascade_from_preset(self) -> None:
         """ColorCascade.from_preset('styrene') returns the brand cascade."""
+        from styrened.tui.themes.color_cascade import ColorCascade
+
         cascade = ColorCascade.from_preset("styrene")
 
         assert cascade.phosphex == "#00f0d3"
@@ -71,47 +74,22 @@ class TestStyreneCascade:
 class TestStyreneTheme:
     """Tests for the brand Textual theme."""
 
-    def test_styrene_theme_is_dark(self) -> None:
+    def test_theme_is_dark_with_correct_name(self) -> None:
         """Theme has dark=True and name='styrene'."""
         theme = create_styrene_theme()
 
         assert theme.name == STYRENE_THEME_KEY
         assert theme.dark is True
 
-    def test_styrene_theme_uses_brand_background(self) -> None:
-        """Theme background matches the brand spec."""
+    def test_theme_uses_brand_colors(self) -> None:
+        """Theme maps brand tokens directly, not through cascade mapper."""
         theme = create_styrene_theme()
 
-        assert theme.background is not None
-        assert str(theme.background).lower() == "#16171d"
-
-
-class TestPresetIntegration:
-    """Tests for brand theme integration with the preset system."""
-
-    def test_styrene_in_list_presets(self) -> None:
-        """Brand theme appears first in preset list."""
-        presets = list_presets()
-
-        assert len(presets) > 0
-        first_key, first_preset = presets[0]
-        assert first_key == STYRENE_THEME_KEY
-
-    def test_styrene_in_generate_all_themes(self) -> None:
-        """Brand theme is included in generated themes dict."""
-        themes = generate_all_themes()
-
-        assert STYRENE_THEME_KEY in themes
-        assert themes[STYRENE_THEME_KEY].name == STYRENE_THEME_KEY
-
-    def test_forge_world_presets_still_work(self) -> None:
-        """Existing forge world presets are unaffected."""
-        cascade = ColorCascade.from_preset("mars")
-        assert cascade.phosphex == "#39ff14"
-        assert cascade.preset_name == "Mars Pattern"
-
-        cascade = ColorCascade.from_preset("ryza")
-        assert cascade.phosphex == "#ff8c00"
+        assert str(theme.primary).lower() == STYRENE_DARK["primary"]
+        assert str(theme.background).lower() == STYRENE_DARK["background"]
+        assert str(theme.foreground).lower() == STYRENE_DARK["foreground"]
+        assert str(theme.surface).lower() == STYRENE_DARK["card"]
+        assert str(theme.warning).lower() == STYRENE_DARK["destructive"]
 
 
 class TestConfigDefault:
@@ -124,3 +102,9 @@ class TestConfigDefault:
         config = TUIConfig()
         assert config.theme == ThemeMode.STYRENE
         assert config.theme.value == STYRENE_THEME_KEY
+
+    def test_theme_mode_only_has_styrene(self) -> None:
+        """ThemeMode enum has only the styrene entry."""
+        from styrened.tui.models.config import ThemeMode
+
+        assert list(ThemeMode) == [ThemeMode.STYRENE]

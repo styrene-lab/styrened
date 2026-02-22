@@ -16,11 +16,9 @@ from styrened.tui.models.config import (
     GatewayMode,
     LogLevel,
     StyreneConfig,
-    ThemeMode,
 )
 from styrened.tui.services.config import save_config, validate_config
-from styrened.tui.themes.color_cascade import ColorCascade, list_presets
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 
 # Known Reticulum hubs for LXMF fleet coordination
 
@@ -82,16 +80,6 @@ class SettingsScreen(Screen[None]):
         with VerticalScroll(id="settings-container"):
             # TUI Settings
             yield HighlightedPanel(
-                Horizontal(
-                    Label("Theme:", classes="setting-label"),
-                    Select(
-                        [(preset.name, key) for key, preset in list_presets()],
-                        value=self.config.tui.theme.value,
-                        id="theme",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
                 Horizontal(
                     Label("Log Level:", classes="setting-label"),
                     Select(
@@ -329,38 +317,6 @@ class SettingsScreen(Screen[None]):
         """Cancel and return to previous screen."""
         self.dismiss()
 
-    @on(Select.Changed, "#theme")
-    def on_theme_select_changed(self, event: Select.Changed) -> None:
-        """Handle theme selection change - apply live preview.
-
-        Args:
-            event: Selection change event.
-        """
-        preset_key = str(event.value) if event.value else "mars"
-        self._apply_theme_live(preset_key)
-
-    def _apply_theme_live(self, preset_key: str) -> None:
-        """Apply theme change immediately for live preview.
-
-        Args:
-            preset_key: Forge world preset key (e.g., "mars", "ryza").
-        """
-        try:
-            # Update cascade for Rich markup
-            cascade = ColorCascade.from_preset(preset_key)
-            set_color_cascade(cascade)
-
-            # Switch Textual theme (updates CSS-driven elements)
-            self.app.theme = preset_key
-
-            # Refresh all HighlightedPanel borders (this screen + app)
-            for panel in self.query(HighlightedPanel):
-                panel.refresh_theme()
-
-        except ValueError:
-            # Invalid preset, ignore for live preview
-            pass
-
     @on(Select.Changed, "#hub_select")
     def on_hub_select_changed(self, event: Select.Changed) -> None:
         """Handle hub selection change to show/hide custom address input.
@@ -424,18 +380,9 @@ class SettingsScreen(Screen[None]):
         """Read form values, validate, and save configuration."""
         try:
             # Read TUI settings
-            theme_select = self.query_one("#theme", Select)
             log_level_select = self.query_one("#log_level", Select)
             show_hardware = self.query_one("#show_hardware_panel", Checkbox)
             confirm_destructive = self.query_one("#confirm_destructive", Checkbox)
-
-            # Theme is a string key from forge world presets
-            theme_key = str(theme_select.value) if theme_select.value else "mars"
-            try:
-                self.config.tui.theme = ThemeMode(theme_key)
-            except ValueError:
-                self._show_error(f"Invalid theme: {theme_key}")
-                return
 
             if not isinstance(log_level_select.value, LogLevel):
                 self._show_error("Invalid log level selection")

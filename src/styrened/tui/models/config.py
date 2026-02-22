@@ -84,55 +84,9 @@ __all__ = [
 
 
 class ThemeMode(Enum):
-    """Available visual themes.
+    """Available visual themes."""
 
-    The styrene brand theme is the default. Forge World themes are
-    derived from the phosphex cascade system, each using a different
-    phosphex (phosphor) base color.
-    """
-
-    # Brand theme
     STYRENE = "styrene"
-    # Greens (Imperial standard)
-    MARS = "mars"
-    TERRA = "terra"
-    GRAIA = "graia"
-    INCALADION = "incaladion"
-    # Ambers/Oranges (Ryza plasma)
-    RYZA = "ryza"
-    PHAETON = "phaeton"
-    TIGRUS = "tigrus"
-    ESTABAN = "estaban"
-    # Reds (Blood forges)
-    SARUM = "sarum"
-    CYCLOTHRATHE = "cyclothrathe"
-    SAMECH = "samech"
-    XANA = "xana"
-    # Blues (Stygies stealth)
-    STYGIES = "stygies"
-    DEIMOS = "deimos"
-    HYDRAPHUR = "hydraphur"
-    MEZOA = "mezoa"
-    # Cyans
-    AGRIPINAA = "agripinaa"
-    TRIPLEX_PHALL = "triplex_phall"
-    KIAVAHR = "kiavahr"
-    KONOR = "konor"
-    # Purples
-    LUCIUS = "lucius"
-    VOSS = "voss"
-    ZHAO_ARKHAD = "zhao_arkhad"
-    MOIRAE = "moirae"
-    # Pinks
-    ACCATRAN = "accatran"
-    URDESH = "urdesh"
-    # Whites/Grays
-    METALICA = "metalica"
-    VOSTROYA = "vostroya"
-    GANTZ = "gantz"
-    # Golds/Yellows
-    GRYPHONNE = "gryphonne"
-    SHENLONG = "shenlong"
 
 
 # -----------------------------------------------------------------------------

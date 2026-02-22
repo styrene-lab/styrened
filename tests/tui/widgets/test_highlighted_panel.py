@@ -48,41 +48,39 @@ class TestHighlightedPanelThemeColors:
     def test_panel_border_color_matches_theme(self, snap_compare):
         """Verify border uses correct theme color (dim phosphex)."""
 
-        # Set Mars theme (green) for testing
-        cascade = ColorCascade.from_preset("mars")
+        # Set styrene brand theme for testing
+        cascade = ColorCascade.from_preset("styrene")
         set_color_cascade(cascade)
 
-        # Programmatic assertion BEFORE snapshot: Verify the cascade has actual color values
-        assert cascade.bright.startswith("#"), "Mars bright color should be hex color"
-        assert cascade.dim.startswith("#"), "Mars dim color should be hex color"
-        assert cascade.medium.startswith("#"), "Mars medium color should be hex color"
-
-        # Verify the three cascade levels are distinct
-        assert cascade.bright != cascade.dim, "Mars bright and dim should differ"
-        assert cascade.bright != cascade.medium, "Mars bright and medium should differ"
+        # Verify the cascade has actual distinct color values
+        assert cascade.bright.startswith("#"), "Bright color should be hex"
+        assert cascade.dim.startswith("#"), "Dim color should be hex"
+        assert cascade.medium.startswith("#"), "Medium color should be hex"
+        assert cascade.bright != cascade.dim, "Bright and dim should differ"
+        assert cascade.bright != cascade.medium, "Bright and medium should differ"
 
         class PanelApp(App):
             def compose(self):
                 yield HighlightedPanel(
                     Label("Border Color Test"),
-                    title="Mars Theme",
+                    title="Styrene Theme",
                 )
 
         app = PanelApp()
 
-        # Snapshot comparison - also implicitly tests that Mars theme renders correctly
-        assert snap_compare(app, "panel_border_mars_theme.svg")
+        # Snapshot comparison
+        assert snap_compare(app, "panel_border_styrene_theme.svg")
 
     def test_panel_corner_highlights_match_theme(self, snap_compare):
         """Verify corner symbols use bright theme color."""
 
-        # Set Ryza theme (orange) for visual differentiation
-        cascade = ColorCascade.from_preset("ryza")
+        # Use styrene brand cascade
+        cascade = ColorCascade.from_preset("styrene")
         set_color_cascade(cascade)
 
-        # Programmatic assertion BEFORE snapshot: Verify Ryza cascade has valid colors
-        assert cascade.bright.startswith("#"), "Ryza bright color should be hex color"
-        assert cascade.dim.startswith("#"), "Ryza dim color should be hex color"
+        # Verify cascade has valid colors
+        assert cascade.bright.startswith("#"), "Bright color should be hex"
+        assert cascade.dim.startswith("#"), "Dim color should be hex"
 
         # Verify HighlightedPanel has the box-drawing characters defined
         assert HighlightedPanel.TOP_LEFT == "┌", "Panel should use correct top-left corner char"
@@ -95,7 +93,7 @@ class TestHighlightedPanelThemeColors:
             def compose(self):
                 yield HighlightedPanel(
                     Label("Corner Highlight Test"),
-                    title="Ryza Theme",
+                    title="Corner Test",
                 )
 
         app = PanelApp()

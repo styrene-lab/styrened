@@ -9,8 +9,7 @@ from styrened.tui.themes.color_cascade import ColorCascade
 
 # Module-level cascade for Rich markup colors
 # Use get_color_cascade() to access, set_color_cascade() to change
-# Default to Mars (the default theme) - app.py will set the correct one on startup
-_current_cascade: ColorCascade = ColorCascade.from_preset("mars")
+_current_cascade: ColorCascade = ColorCascade.from_preset("styrene")
 
 
 def get_color_cascade() -> ColorCascade:

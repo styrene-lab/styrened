@@ -11,9 +11,7 @@ from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header
 
-from styrened.tui.themes.color_cascade import FORGE_WORLD_ORDER, ColorCascade
-from styrened.tui.themes.styrene_brand import STYRENE_THEME_KEY
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 from styrened.tui.widgets.uptime_panel import UptimePanel
 
@@ -29,7 +27,6 @@ class LocalDashboardScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit", show=True),
         Binding("r", "refresh", "Refresh", show=True),
-        Binding("t", "cycle_theme", "Theme", show=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -62,30 +59,3 @@ class LocalDashboardScreen(Screen[None]):
         """Manual refresh all panels."""
         self._refresh_all()
         self.notify("Refreshed", timeout=2)
-
-    def action_cycle_theme(self) -> None:
-        """Cycle through all themes (styrene brand + forge worlds)."""
-        cycle = [STYRENE_THEME_KEY, *FORGE_WORLD_ORDER]
-        current = self.app.theme
-        try:
-            idx = cycle.index(current)
-            next_idx = (idx + 1) % len(cycle)
-        except ValueError:
-            next_idx = 0
-
-        new_theme = cycle[next_idx]
-        self.app.theme = new_theme
-
-        # Update cascade for Rich markup
-        try:
-            cascade = ColorCascade.from_preset(new_theme)
-            set_color_cascade(cascade)
-        except ValueError:
-            return
-
-        # Refresh panel borders
-        for panel in self.query(HighlightedPanel):
-            panel.refresh_theme()
-
-        # Refresh content
-        self._refresh_all()
