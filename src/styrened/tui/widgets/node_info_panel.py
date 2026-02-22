@@ -29,10 +29,11 @@ from styrened.tui.widgets.highlighted_panel import get_color_cascade
 class NodeInfoPanel(Static):
     """Consolidated panel showing local node configuration and status.
 
-    Displays three sections:
+    Displays sections:
     - SYSTEM: Hardware configuration (CPU, RAM, network, storage)
-    - STYRENE: Mesh participation and hub connection
+    - DAEMON: IPC connection to backing daemon (only in IPC mode)
     - RETICULUM: Network stack and interface status
+    - STYRENE: Mesh participation and hub connection
     """
 
     DEFAULT_CSS = """
@@ -58,6 +59,35 @@ class NodeInfoPanel(Static):
     interface_count: reactive[int] = reactive(0)
     interface_status: reactive[str] = reactive("")
     error_state: reactive[RNSErrorState | None] = reactive(None)
+
+    # Daemon reactive vars (IPC mode only - None means legacy/standalone mode)
+    daemon_connected: reactive[bool | None] = reactive(None)
+    daemon_version: reactive[str] = reactive("")
+    daemon_uptime: reactive[float] = reactive(0.0)
+
+    # When True, skip local RNS/discovery queries (screen pushes daemon data)
+    ipc_managed: reactive[bool] = reactive(False)
+
+    @staticmethod
+    def _format_uptime(seconds: float) -> str:
+        """Format uptime seconds into human-readable string.
+
+        Returns:
+            Compact uptime like "45s", "12m", "2h 15m", "3d 4h".
+        """
+        s = int(seconds)
+        if s < 60:
+            return f"{s}s"
+        elif s < 3600:
+            return f"{s // 60}m"
+        elif s < 86400:
+            h = s // 3600
+            m = (s % 3600) // 60
+            return f"{h}h {m}m" if m else f"{h}h"
+        else:
+            d = s // 86400
+            h = (s % 86400) // 3600
+            return f"{d}d {h}h" if h else f"{d}d"
 
     def render(self) -> str:
         """Render consolidated node info display.
@@ -106,15 +136,38 @@ class NodeInfoPanel(Static):
             else:
                 lines.append(f"  STORAGE: [{cascade.dim}]no removable[/]")
 
+        # === DAEMON SECTION (IPC mode only) ===
+        if self.daemon_connected is not None:
+            lines.append("")  # Blank line separator
+            lines.append(f"[{cascade.bright}]DAEMON[/]")
+
+            if self.daemon_connected:
+                lines.append(
+                    f"  IPC: {SemanticSymbols.ONLINE} [{cascade.medium}]connected[/]"
+                )
+                if self.daemon_version:
+                    lines.append(f"  VER: {self.daemon_version}")
+                if self.daemon_uptime > 0:
+                    lines.append(f"  UP: {self._format_uptime(self.daemon_uptime)}")
+            else:
+                lines.append(
+                    f"  IPC: {SemanticSymbols.OFFLINE} [{cascade.dim}]disconnected[/]"
+                )
+
         # === RETICULUM SECTION ===
         lines.append("")  # Blank line separator
         lines.append(f"[{cascade.bright}]RETICULUM[/]")
 
-        # Network stack status
+        # Network stack status - nuanced labels
         if self.rns_online:
-            lines.append(
-                f"  RNS: {SemanticSymbols.ONLINE} [{cascade.medium}]online ({self.interface_count} if)[/]"
-            )
+            if self.interface_count > 0:
+                lines.append(
+                    f"  RNS: {SemanticSymbols.ONLINE} [{cascade.medium}]online ({self.interface_count} if)[/]"
+                )
+            else:
+                lines.append(
+                    f"  RNS: {SemanticSymbols.PENDING} [{cascade.medium}]no peers[/]"
+                )
         else:
             if self.error_state and self.error_state.is_error:
                 lines.append(
@@ -127,6 +180,9 @@ class NodeInfoPanel(Static):
         if self.rns_online:
             if self.interface_status:
                 lines.append(f"  UPLINK: {self.interface_status}")
+            elif self.interface_count > 0:
+                # IPC mode: we know interface count but not individual status
+                pass
             else:
                 lines.append(
                     f"  UPLINK: {SemanticSymbols.OFFLINE} [{cascade.dim}]no interfaces[/]"
@@ -213,12 +269,16 @@ class NodeInfoPanel(Static):
 
     def _load_styrene_data(self) -> None:
         """Load Styrene mesh and hub configuration."""
-        # Get config for mode
+        # Get config for mode (always relevant, even in IPC mode)
         try:
             config = load_config()
             self.mode = config.reticulum.mode.value
         except Exception:
             self.mode = "standalone"
+
+        # In IPC mode, dashboard pushes mesh count and hub status from daemon
+        if self.ipc_managed:
+            return
 
         # Get hub connection status
         hub_connection = get_hub_connection()
@@ -248,6 +308,10 @@ class NodeInfoPanel(Static):
 
     def _load_reticulum_data(self) -> None:
         """Load Reticulum stack status."""
+        # In IPC mode, dashboard pushes RNS status from daemon
+        if self.ipc_managed:
+            return
+
         # Get RNS status
         status = get_reticulum_status()
         self.rns_online = bool(status.get("running", False))

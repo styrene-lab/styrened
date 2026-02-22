@@ -875,9 +875,10 @@ class TestLifecycleModeSelection:
         lifecycle = StyreneLifecycle(legacy_config)
         assert lifecycle.mode == LifecycleMode.LEGACY
 
-    def test_auto_from_config_none(self, auto_config):
+    def test_ipc_from_config_none(self, auto_config):
+        """use_ipc=None defaults to IPC mode (TUI is a pure daemon client)."""
         lifecycle = StyreneLifecycle(auto_config)
-        assert lifecycle.mode == LifecycleMode.AUTO
+        assert lifecycle.mode == LifecycleMode.IPC
 
     def test_explicit_mode_overrides_config(self, ipc_config):
         lifecycle = StyreneLifecycle(ipc_config, mode=LifecycleMode.LEGACY)
@@ -988,7 +989,11 @@ class TestIPCInitialization:
 
 
 class TestAutoMode:
-    """Test AUTO mode: tries IPC first, falls back to legacy."""
+    """Test AUTO mode: tries IPC first, falls back to legacy.
+
+    AUTO mode is no longer the default (IPC is), but remains accessible
+    via explicit mode override.
+    """
 
     @pytest.mark.asyncio
     async def test_uses_ipc_when_available(
@@ -1004,7 +1009,7 @@ class TestAutoMode:
                 return_value=mock_ipc_bridge,
             ),
         ):
-            lifecycle = StyreneLifecycle(auto_config)
+            lifecycle = StyreneLifecycle(auto_config, mode=LifecycleMode.AUTO)
             result = await lifecycle.initialize_async()
 
         assert result is True
@@ -1022,7 +1027,7 @@ class TestAutoMode:
                 return_value=mock_daemon_manager,
             ),
         ):
-            lifecycle = StyreneLifecycle(auto_config)
+            lifecycle = StyreneLifecycle(auto_config, mode=LifecycleMode.AUTO)
             result = await lifecycle.initialize_async()
 
         assert result is True

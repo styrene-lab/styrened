@@ -4,7 +4,7 @@ Tests device information display, RPC actions, and real-time updates.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from styrened.tui.app import StyreneApp
@@ -29,6 +29,7 @@ def mock_reticulum(tmp_path):
             "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
         ),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
         yield
 
@@ -551,3 +552,95 @@ class TestDeviceDetailNavigation:
                 )
 
                 # Should handle gracefully (show error or return to list)
+
+
+class TestDeviceDetailNodeStoreFallback:
+    """Test NodeStore fallback for IPC mode where discover_devices is empty."""
+
+    @pytest.mark.asyncio
+    async def test_device_loaded_from_node_store_when_discover_empty(self, test_device):
+        """Device should load from NodeStore when discover_devices returns empty."""
+        app = StyreneApp()
+
+        mock_store = MagicMock()
+        mock_store.get_all_nodes.return_value = [test_device]
+
+        with (
+            patch(
+                "styrened.tui.screens.mesh_device_detail.discover_devices",
+                return_value=[],
+            ),
+            patch(
+                "styrened.services.node_store.get_node_store",
+                return_value=mock_store,
+            ),
+        ):
+            async with app.run_test() as pilot:
+                screen = MeshDeviceDetailScreen(device_identity=test_device.identity)
+                await app.push_screen(screen)
+                await pilot.pause()
+
+                assert isinstance(app.screen, MeshDeviceDetailScreen)
+                assert app.screen.device is not None
+                assert app.screen.device.identity == test_device.identity
+
+    @pytest.mark.asyncio
+    async def test_live_devices_take_precedence_over_node_store(self, test_device):
+        """Live discovered devices should override NodeStore entries."""
+        app = StyreneApp()
+
+        now = int(datetime.now().timestamp())
+        stale_device = MeshDevice(
+            destination_hash=test_device.destination_hash,
+            identity_hash=test_device.identity_hash,
+            name="Stale Name",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=now - 1000,
+            announce_count=1,
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_all_nodes.return_value = [stale_device]
+
+        with (
+            patch(
+                "styrened.tui.screens.mesh_device_detail.discover_devices",
+                return_value=[test_device],
+            ),
+            patch(
+                "styrened.services.node_store.get_node_store",
+                return_value=mock_store,
+            ),
+        ):
+            async with app.run_test() as pilot:
+                screen = MeshDeviceDetailScreen(device_identity=test_device.identity)
+                await app.push_screen(screen)
+                await pilot.pause()
+
+                assert app.screen.device is not None
+                assert app.screen.device.name == "Test Device"
+
+    @pytest.mark.asyncio
+    async def test_device_not_found_in_either_source(self):
+        """Device not in NodeStore or discover_devices should show error."""
+        app = StyreneApp()
+
+        mock_store = MagicMock()
+        mock_store.get_all_nodes.return_value = []
+
+        with (
+            patch(
+                "styrened.tui.screens.mesh_device_detail.discover_devices",
+                return_value=[],
+            ),
+            patch(
+                "styrened.services.node_store.get_node_store",
+                return_value=mock_store,
+            ),
+        ):
+            async with app.run_test() as pilot:
+                screen = MeshDeviceDetailScreen(device_identity="nonexistent")
+                await app.push_screen(screen)
+                await pilot.pause()
+
+                assert app.screen.device is None

@@ -85,14 +85,15 @@ class StyreneLifecycle:
         self.config = config or get_default_config()
 
         # Determine mode from explicit parameter, config, or default
+        # Default is IPC — the TUI is a pure daemon client.
+        # Legacy mode remains accessible via explicit use_ipc: false.
         if mode is not None:
             self._mode = mode
-        elif self.config.tui.use_ipc is True:
-            self._mode = LifecycleMode.IPC
         elif self.config.tui.use_ipc is False:
             self._mode = LifecycleMode.LEGACY
         else:
-            self._mode = LifecycleMode.AUTO
+            # Both use_ipc=True and use_ipc=None (unset) default to IPC
+            self._mode = LifecycleMode.IPC
 
         self._core = CoreLifecycle(self.config.core)
         self._initialized = False

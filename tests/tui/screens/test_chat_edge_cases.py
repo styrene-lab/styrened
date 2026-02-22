@@ -75,6 +75,7 @@ def mock_reticulum_for_tests(tmp_path):
             "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
         ),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
         yield
 
