@@ -1,10 +1,11 @@
-"""Tests for ConversationScreen - message thread display via IPCBridge."""
+"""Tests for ConversationScreen - message thread display via ChatWidget."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from styrened.tui.screens.conversation import ConversationScreen, STATUS_ICONS
+from styrened.tui.screens.conversation import ConversationScreen
+from styrened.tui.widgets.chat_widget import STATUS_ICONS
 
 
 class TestConversationScreenInit:
@@ -30,15 +31,6 @@ class TestConversationScreenCSS:
         """ConversationScreen CSS should not contain hardcoded hex colors."""
         assert "#39ff14" not in ConversationScreen.CSS
         assert "#0a0a0a" not in ConversationScreen.CSS
-
-
-class TestConversationScreenNoBridge:
-    """Tests for ConversationScreen without IPCBridge."""
-
-    def test_handles_no_bridge(self) -> None:
-        """ConversationScreen should handle missing IPCBridge gracefully."""
-        screen = ConversationScreen(peer_hash="alice_hash")
-        assert screen._ipc_bridge is None
 
 
 class TestStatusIcons:

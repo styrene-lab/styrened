@@ -128,6 +128,7 @@ class MeshDeviceTable(DataTable[str]):
                 f"[{cascade.dim}]No Styrene nodes discovered[/]",
                 "-",
                 "-",
+                key="-",
             )
             return
 
@@ -217,9 +218,7 @@ class DashboardScreen(Screen[None]):
     # Screen-specific bindings - see docs/KEYMAP.md
     # Note: 'p' for Provision is inherited from App, listed here for footer display
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("enter", "select_device", "Select"),
-        Binding("s", "request_status", "Status"),
-        Binding("c", "open_chat", "Chat"),
+        Binding("enter", "select_device", "Details"),
         Binding("r", "refresh", "Refresh"),
         Binding("e", "open_exploration", "Explore", show=True),
     ]
@@ -365,8 +364,24 @@ class DashboardScreen(Screen[None]):
             )
         yield Footer()
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle DataTable enter key - navigate to device detail screen.
+
+        The DataTable consumes enter key events when cursor_type="row",
+        emitting RowSelected instead of letting the screen binding fire.
+        """
+        if event.row_key and event.row_key.value and event.row_key.value != "-":
+            device_identity = str(event.row_key.value)
+            from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+
     def action_select_device(self) -> None:
-        """Handle device selection - navigate to device detail screen."""
+        """Handle device selection - navigate to device detail screen.
+
+        Fallback action for the enter binding. When DataTable is focused,
+        on_data_table_row_selected handles it instead.
+        """
         table = self.query_one("#mesh-device-table", DataTable)
         if table.cursor_row is not None:
             # Get device identity from the row key
@@ -377,100 +392,6 @@ class DashboardScreen(Screen[None]):
                 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
                 self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
-
-    async def action_request_status(self) -> None:
-        """Request status from selected mesh device via RPC."""
-        table = self.query_one("#mesh-device-table", DataTable)
-        if table.cursor_row is None:
-            self.notify("No device selected", severity="warning")
-            return
-
-        # Get device identity from row key
-        cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
-        if not cell_key or not cell_key.row_key or cell_key.row_key.value == "-":
-            return
-
-        device_identity = str(cell_key.row_key.value)
-
-        # Show requesting notification
-        self.notify("Requesting status...", title="Status")
-
-        try:
-            # Import RPC types
-            from styrened.rpc import RPCTimeoutError, RPCTransportError
-
-            # Make RPC call
-            app: StyreneApp = self.app  # type: ignore[assignment]
-            response = await app.rpc_client.call_status(
-                device_identity,
-                timeout=30.0,
-            )
-
-            # Navigate to device detail with status
-            from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-
-            self.app.push_screen(
-                MeshDeviceDetailScreen(
-                    device_identity=device_identity,
-                    initial_status=response,
-                )
-            )
-
-        except RPCTimeoutError:
-            self.notify(
-                "Device did not respond - it may be offline or unreachable",
-                title="Timeout",
-                severity="warning",
-                timeout=5,
-            )
-        except RPCTransportError as e:
-            self.notify(
-                f"Failed to send message: {e}",
-                title="Transport Error",
-                severity="error",
-                timeout=5,
-            )
-        except Exception as e:
-            self.notify(
-                f"Error: {e}",
-                title="Error",
-                severity="error",
-                timeout=5,
-            )
-
-    def action_open_chat(self) -> None:
-        """Open chat conversation with selected device."""
-        table = self.query_one("#mesh-device-table", DataTable)
-        if table.cursor_row is None:
-            self.notify("No device selected", severity="warning")
-            return
-
-        # Get device identity from row key
-        cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
-        if not cell_key or not cell_key.row_key or cell_key.row_key.value == "-":
-            self.notify("Invalid device selection", severity="warning")
-            return
-
-        device_identity = str(cell_key.row_key.value)
-
-        # Get app reference for IPC bridge access
-        app: StyreneApp = self.app  # type: ignore[assignment]
-
-        if app._lifecycle.ipc_bridge is None:
-            self.notify("Chat requires daemon mode", severity="warning")
-            return
-
-        # Push conversation screen with callback to refresh on return
-        from styrened.tui.screens.conversation import ConversationScreen
-
-        self.app.push_screen(
-            ConversationScreen(peer_hash=device_identity),
-            callback=self._on_chat_return,
-        )
-
-    def _on_chat_return(self, result: None) -> None:
-        """Callback when returning from chat screen - refresh unread counts."""
-        self._refresh_device_table()
 
     def action_open_exploration(self) -> None:
         """Open exploration screen for all Reticulum announces."""

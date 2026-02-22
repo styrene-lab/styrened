@@ -571,3 +571,84 @@ FirstRunWizardScreen Button {
     margin-left: 1;
     margin-right: 1;
 }
+
+/* === TabbedContent === */
+TabbedContent {
+    height: 1fr;
+}
+
+Tabs {
+    background: $surface;
+    dock: top;
+}
+
+Tab {
+    background: $surface;
+    color: $panel;
+    padding: 0 2;
+}
+
+Tab:hover {
+    color: $primary;
+}
+
+Tab.-active {
+    background: $background;
+    color: $primary;
+    text-style: bold;
+}
+
+Tab:focus {
+    text-style: bold;
+}
+
+TabPane {
+    background: $background;
+    padding: 1;
+}
+
+/* === Device Detail Layout === */
+#mesh-device-detail-container {
+    height: 1fr;
+}
+
+#mesh-info-panel {
+    height: auto;
+    max-height: 10;
+}
+
+#device-tabs {
+    height: 1fr;
+}
+
+/* === ChatWidget Layout === */
+ChatWidget {
+    height: 1fr;
+}
+
+ChatWidget #chat-message-container {
+    height: 1fr;
+    overflow-y: scroll;
+}
+
+ChatWidget #chat-input-container {
+    height: 3;
+    dock: bottom;
+}
+
+ChatWidget .chat-no-bridge {
+    color: $warning;
+    text-style: bold italic;
+    padding: 1;
+}
+
+ChatWidget .chat-no-messages {
+    color: $panel;
+    padding: 1;
+}
+
+.placeholder-text {
+    color: $panel;
+    text-style: italic;
+    padding: 1;
+}

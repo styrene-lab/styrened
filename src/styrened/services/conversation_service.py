@@ -489,22 +489,31 @@ class ConversationService:
         limit: int = 50,
         before_timestamp: float | None = None,
         status_filter: str | None = None,
+        additional_peer_hashes: list[str] | None = None,
     ) -> list[MessageInfo]:
         """Get message history for a conversation.
 
         Args:
-            peer_hash: LXMF destination hash of the peer
-            limit: Maximum messages to return
-            before_timestamp: Only return messages before this time (for pagination)
-            status_filter: Optional filter by status (pending, sent, delivered, failed)
+            peer_hash: Destination hash of the peer (operator or LXMF hash).
+            limit: Maximum messages to return.
+            before_timestamp: Only return messages before this time (for pagination).
+            status_filter: Optional filter by status (pending, sent, delivered, failed).
+            additional_peer_hashes: Additional hashes for the same peer (e.g. LXMF
+                delivery hash when peer_hash is operator hash). Messages matching
+                ANY of these hashes are included in the conversation.
 
         Returns:
             List of MessageInfo ordered by timestamp ascending (oldest first)
         """
+        # Build list of all hashes that identify this peer
+        peer_hashes = [peer_hash]
+        if additional_peer_hashes:
+            peer_hashes.extend(h for h in additional_peer_hashes if h != peer_hash)
+
         with Session(self._db_engine) as session:
-            query = session.query(Message).filter(
-                Message.protocol_id == "chat",
-                or_(
+            if len(peer_hashes) == 1:
+                # Single hash — use exact match (more efficient)
+                peer_filter = or_(
                     and_(
                         Message.source_hash == self._local_identity_hash,
                         Message.destination_hash == peer_hash,
@@ -513,7 +522,23 @@ class ConversationService:
                         Message.source_hash == peer_hash,
                         Message.destination_hash == self._local_identity_hash,
                     ),
-                ),
+                )
+            else:
+                # Multiple hashes — use IN clause
+                peer_filter = or_(
+                    and_(
+                        Message.source_hash == self._local_identity_hash,
+                        Message.destination_hash.in_(peer_hashes),
+                    ),
+                    and_(
+                        Message.source_hash.in_(peer_hashes),
+                        Message.destination_hash == self._local_identity_hash,
+                    ),
+                )
+
+            query = session.query(Message).filter(
+                Message.protocol_id == "chat",
+                peer_filter,
             )
 
             if before_timestamp is not None:

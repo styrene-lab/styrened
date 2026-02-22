@@ -1,8 +1,8 @@
 """Tests for ConversationScreen lifecycle and message status management.
 
 These tests verify:
-- Mark messages as read when entering conversation
-- Message sending via IPCBridge
+- Mark messages as read when entering conversation (via ChatWidget)
+- Message sending via ChatWidget's IPCBridge
 - Proper screen navigation
 """
 
@@ -13,6 +13,7 @@ import pytest
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.services.app_lifecycle import LifecycleMode
+from styrened.tui.widgets.chat_widget import ChatWidget
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +52,7 @@ class TestConversationMarkAsRead:
 
     @pytest.mark.asyncio
     async def test_entering_conversation_calls_mark_read(self):
-        """Opening ConversationScreen should call mark_read on IPCBridge."""
+        """Opening ConversationScreen should call mark_read on IPCBridge via ChatWidget."""
         lifecycle = _make_mock_lifecycle()
 
         app = StyreneApp()
@@ -117,7 +118,7 @@ class TestConversationMessageSending:
 
     @pytest.mark.asyncio
     async def test_send_message_calls_bridge(self):
-        """Sending a message should call send_chat on IPCBridge."""
+        """Sending a message should call send_chat on IPCBridge via ChatWidget."""
         lifecycle = _make_mock_lifecycle()
 
         app = StyreneApp()
@@ -128,7 +129,8 @@ class TestConversationMessageSending:
             await app.push_screen(conversation)
             await pilot.pause()
 
-            await conversation._send_message("Hello!")
+            chat_widget = conversation.query_one(ChatWidget)
+            await chat_widget._send_message("Hello!")
             await pilot.pause()
 
             lifecycle.ipc_bridge.send_chat.assert_called_with("peer_hash_xyz", "Hello!")

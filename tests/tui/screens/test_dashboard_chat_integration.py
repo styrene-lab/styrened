@@ -1,15 +1,15 @@
 """Tests for dashboard chat integration features.
 
-These tests drive the implementation of:
+These tests cover:
 - Unread message count display in device table
-- Chat navigation from dashboard ('c' key)
 - Message count refresh on screen resume
 
-Tests are written TDD-style and will fail until functionality is implemented.
+Chat navigation is now via the device detail screen's Chat tab,
+not standalone dashboard bindings.
 """
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from styrened.tui.app import StyreneApp
@@ -234,28 +234,22 @@ class TestDashboardMessageIndicators:
                 table = app.screen.query_one("#mesh-device-table", DataTable)
 
                 # The unread cell should have Rich markup for highlighting
-                # e.g., [bold yellow]1[/] or [bold green]1[/]
                 row_data = self._get_row_data(table, "node01_identity_hash")
                 unread_cell = row_data.get("unread_raw", row_data.get("unread"))
 
                 # Check that the cell has formatting (Rich Text or markup)
-                # This is a soft assertion - the key behavior is visibility
                 if hasattr(unread_cell, "plain"):
-                    # It's a Rich Text object - good
-                    pass
+                    pass  # Rich Text object
                 elif isinstance(unread_cell, str) and "[" in unread_cell:
-                    # Contains Rich markup - good
-                    pass
-                # Test passes if we got here - highlighting is implementation detail
+                    pass  # Contains Rich markup
+                # Test passes if we got here
 
     def _get_row_data(self, table: DataTable, row_key: str) -> dict | None:
         """Helper to extract row data from DataTable by row key."""
-        # Find the row with matching key
         for row_idx in range(table.row_count):
             try:
                 coord = table.coordinate_to_cell_key((row_idx, 0))
                 if coord and coord.row_key and str(coord.row_key.value) == row_key:
-                    # Extract all column values for this row
                     data = {}
                     for col_idx, col in enumerate(table.columns.values()):
                         cell_key = table.coordinate_to_cell_key((row_idx, col_idx))
@@ -272,30 +266,13 @@ class TestDashboardMessageIndicators:
         return None
 
 
-class TestDashboardChatNavigation:
-    """Tests for chat navigation from dashboard."""
+class TestDashboardEnterOpensDetail:
+    """Tests for enter key navigating to device detail screen."""
 
     @pytest.mark.asyncio
-    async def test_c_key_opens_chat_screen_for_selected_device(
-        self, sample_devices, message_db, mock_local_identity
-    ):
-        """Pressing 'c' on dashboard should open ConversationScreen for selected device."""
+    async def test_action_select_device_opens_detail(self, sample_devices):
+        """action_select_device should navigate to MeshDeviceDetailScreen."""
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
-
-        # Create ChatProtocol
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
 
         with patch(
             "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
@@ -303,170 +280,37 @@ class TestDashboardChatNavigation:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Focus the table and move to first device row
-                table = app.screen.query_one("#mesh-device-table")
-                table.focus()
+                screen = app.screen
+
+                # Call action directly (key press may be consumed by DataTable)
+                screen.action_select_device()
                 await pilot.pause()
 
-                # Press 'c' to open chat
-                await pilot.press("c")
-                await pilot.pause()
+                from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
-                # Verify ConversationScreen is now active
-                from styrened.tui.screens.conversation import ConversationScreen
-
-                assert isinstance(app.screen, ConversationScreen), (
-                    f"Expected ConversationScreen, got {type(app.screen).__name__}"
+                assert isinstance(app.screen, MeshDeviceDetailScreen), (
+                    f"Expected MeshDeviceDetailScreen, got {type(app.screen).__name__}"
                 )
 
     @pytest.mark.asyncio
-    async def test_chat_screen_receives_correct_device_identity(
-        self, sample_devices, message_db, mock_local_identity
-    ):
-        """ConversationScreen should be initialized with selected device's identity."""
+    async def test_enter_with_no_selection_does_nothing(self):
+        """Pressing enter with no device selected should not crash."""
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
 
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-        from styrened.protocols.chat import ChatProtocol
+        mock_store = MagicMock()
+        mock_store.get_styrene_nodes.return_value = []
+        mock_store.get_all_nodes.return_value = []
 
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]),
+            patch("styrened.services.node_store.get_node_store", return_value=mock_store),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Focus table and select first device (node-01)
-                table = app.screen.query_one("#mesh-device-table")
-                table.focus()
+                await pilot.press("enter")
                 await pilot.pause()
 
-                await pilot.press("c")
-                await pilot.pause()
-
-                from styrened.tui.screens.conversation import ConversationScreen
-
-                if isinstance(app.screen, ConversationScreen):
-                    assert app.screen.destination_hash == "node01_identity_hash", (
-                        f"Expected node01_identity_hash, got {app.screen.destination_hash}"
-                    )
-
-    @pytest.mark.asyncio
-    async def test_c_key_with_no_selection_shows_notification(self):
-        """Pressing 'c' with no device selected should show notification, not crash."""
-        app = StyreneApp()
-
-        # Empty device list
-        with patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]):
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                # Press 'c' with no devices
-                await pilot.press("c")
-                await pilot.pause()
-
-                # Should still be on dashboard (no crash, no navigation)
                 from styrened.tui.screens.dashboard import DashboardScreen
 
                 assert isinstance(app.screen, DashboardScreen)
-
-    @pytest.mark.asyncio
-    async def test_c_key_only_works_for_styrene_nodes(self, sample_devices):
-        """Chat should only open for Styrene nodes, not RNodes or generic devices."""
-        app = StyreneApp()
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
-        ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                # Navigate to RNode (third device)
-                await pilot.press("down")
-                await pilot.press("down")
-                await pilot.press("down")
-                await pilot.pause()
-
-                # Press 'c' - should show notification or do nothing
-                await pilot.press("c")
-                await pilot.pause()
-
-                # Should either stay on dashboard or show appropriate message
-                from styrened.tui.screens.conversation import ConversationScreen
-                from styrened.tui.screens.dashboard import DashboardScreen
-
-                # Either stayed on dashboard OR opened chat is acceptable
-                # (depends on implementation choice)
-                assert isinstance(app.screen, (DashboardScreen, ConversationScreen))
-
-
-class TestDashboardRefreshOnReturn:
-    """Tests for dashboard refresh when returning from chat."""
-
-    @pytest.mark.asyncio
-    async def test_dashboard_refreshes_message_counts_on_return(
-        self, sample_devices, message_db, mock_local_identity
-    ):
-        """Returning from chat should refresh dashboard with updated message counts."""
-        # Setup: node-01 has 2 unread messages
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-            ],
-        )
-
-        app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
-        ):
-                await pilot.pause()
-
-                # Navigate to chat
-                await pilot.press("down")
-                await pilot.press("c")
-                await pilot.pause()
-
-                # Simulate messages being marked as read (would happen in ConversationScreen)
-                from sqlalchemy.orm import Session
-
-                with Session(message_db) as session:
-                    session.query(Message).filter(
-                        Message.source_hash == "node01_identity_hash"
-                    ).update({"status": "read"})
-                    session.commit()
-
-                # Return to dashboard
-                await pilot.press("escape")
-                await pilot.pause()
-
-                # Verify dashboard shows updated count (0 unread)
-                from styrened.tui.screens.dashboard import DashboardScreen
-
-                if isinstance(app.screen, DashboardScreen):
-                    # Dashboard should have refreshed - verify table is accessible
-                    _ = app.screen.query_one("#mesh-device-table", DataTable)
-                    # Count should now be 0 after messages marked as read
-                    # Implementation will determine exact behavior
