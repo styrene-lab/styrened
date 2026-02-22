@@ -1,6 +1,6 @@
 """Comprehensive TUI tests for MeshDeviceDetailScreen.
 
-Tests device information display, RPC actions, and real-time updates.
+Tests device information display, RPC actions, tabbed layout, and real-time updates.
 """
 
 from datetime import datetime
@@ -11,7 +11,7 @@ from styrened.tui.app import StyreneApp
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.rpc.messages import ExecResult, StatusResponse
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-from textual.widgets import Button, Static
+from textual.widgets import Button, Static, TabbedContent
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +74,55 @@ class TestDeviceDetailComposition:
                 assert len(statics) > 0
 
     @pytest.mark.asyncio
+    async def test_device_detail_has_tabbed_content(self, test_device):
+        """Device detail should use TabbedContent layout."""
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=[test_device],
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(
+                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                )
+                await pilot.pause()
+
+                screen = app.screen
+
+                # Should have TabbedContent
+                tabbed = screen.query(TabbedContent)
+                assert len(tabbed) > 0, "Device detail should use TabbedContent"
+
+    @pytest.mark.asyncio
+    async def test_device_detail_has_status_chat_command_ssh_tabs(self, test_device):
+        """Device detail should have Status, Chat, Command, and SSH tabs."""
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=[test_device],
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(
+                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                )
+                await pilot.pause()
+
+                screen = app.screen
+
+                # Check for tab panes by ID
+                from textual.widgets import TabPane
+
+                panes = list(screen.query(TabPane))
+                pane_ids = {p.id for p in panes}
+
+                assert "status" in pane_ids, f"Missing Status tab. Found: {pane_ids}"
+                assert "chat" in pane_ids, f"Missing Chat tab. Found: {pane_ids}"
+                assert "command" in pane_ids, f"Missing Command tab. Found: {pane_ids}"
+                assert "ssh" in pane_ids, f"Missing SSH tab. Found: {pane_ids}"
+
+    @pytest.mark.asyncio
     async def test_device_detail_shows_action_buttons(self, test_device):
         """Device detail should show action buttons."""
         app = StyreneApp()
@@ -95,8 +144,8 @@ class TestDeviceDetailComposition:
                 assert len(buttons) > 0
 
     @pytest.mark.asyncio
-    async def test_device_detail_shows_status_history(self, test_device):
-        """Device detail should show status check history."""
+    async def test_device_detail_accepts_initial_tab(self, test_device):
+        """Device detail should accept initial_tab parameter."""
         app = StyreneApp()
 
         with patch(
@@ -105,11 +154,16 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(
+                        device_identity=test_device.identity,
+                        initial_tab="chat",
+                    )
                 )
                 await pilot.pause()
 
-                # Screen renders successfully
+                screen = app.screen
+                assert isinstance(screen, MeshDeviceDetailScreen)
+                assert screen.initial_tab == "chat"
 
 
 class TestDeviceDetailRPCActions:
@@ -130,7 +184,6 @@ class TestDeviceDetailRPCActions:
             services=[],
         )
         mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
-        app.rpc_client = mock_rpc_client
 
         with patch(
             "styrened.tui.screens.mesh_device_detail.discover_devices",
@@ -141,6 +194,9 @@ class TestDeviceDetailRPCActions:
                     MeshDeviceDetailScreen(device_identity=test_device.identity)
                 )
                 await pilot.pause()
+
+                # Set mock AFTER app startup
+                app.rpc_client = mock_rpc_client
 
                 screen = app.screen
 
@@ -167,25 +223,6 @@ class TestDeviceDetailRPCActions:
                 await pilot.pause()
 
                 # Screen renders successfully
-                # Exec command widget would be tested separately
-
-    @pytest.mark.asyncio
-    async def test_reboot_button_shows_confirmation(self, test_device):
-        """Reboot button should show confirmation dialog."""
-        app = StyreneApp()
-
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=[test_device],
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
-                )
-                await pilot.pause()
-
-                # Screen renders successfully
-                # Reboot confirmation would be implementation-specific
 
 
 class TestDeviceDetailKeyboardBindings:
@@ -226,7 +263,6 @@ class TestDeviceDetailKeyboardBindings:
             services=[],
         )
         mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
-        app.rpc_client = mock_rpc_client
 
         with patch(
             "styrened.tui.screens.mesh_device_detail.discover_devices",
@@ -237,6 +273,9 @@ class TestDeviceDetailKeyboardBindings:
                     MeshDeviceDetailScreen(device_identity=test_device.identity)
                 )
                 await pilot.pause()
+
+                # Set mock AFTER app startup
+                app.rpc_client = mock_rpc_client
 
                 # Press 'r' to refresh
                 await pilot.press("r")
@@ -244,35 +283,6 @@ class TestDeviceDetailKeyboardBindings:
 
                 # Should make RPC call
                 assert mock_rpc_client.call_status.called
-
-    @pytest.mark.asyncio
-    async def test_s_requests_status(self, test_device):
-        """Pressing 's' should request status."""
-        app = StyreneApp()
-
-        mock_rpc_client = AsyncMock()
-        mock_response = StatusResponse(
-            uptime=3600,
-            ip="192.168.1.100",
-            disk_used=1000000,
-            disk_total=10000000,
-            services=[],
-        )
-        mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
-        app.rpc_client = mock_rpc_client
-
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=[test_device],
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
-                )
-                await pilot.pause()
-
-                # Check if 's' binding exists (may not be implemented)
-                # Screen renders successfully
 
 
 class TestDeviceDetailRealTimeUpdates:
@@ -353,11 +363,13 @@ class TestDeviceDetailErrorHandling:
         """RPC timeout should show error message."""
         app = StyreneApp()
 
-        from styrened.tui.models.rpc import RPCTimeoutError
+        from styrened.rpc.errors import RPCTimeoutError
 
         mock_rpc_client = AsyncMock()
         mock_rpc_client.call_status = AsyncMock(
-            side_effect=RPCTimeoutError("RPC timeout")
+            side_effect=RPCTimeoutError(
+                "RPC timeout", request_id="test-id", destination="test-dest", timeout=30.0
+            )
         )
         app.rpc_client = mock_rpc_client
 
@@ -457,8 +469,7 @@ class TestDeviceDetailExecCommand:
                 )
                 await pilot.pause()
 
-                # Command widget would handle exec functionality
-                # Test that screen renders
+                # Command widget is in the Command tab
 
     @pytest.mark.asyncio
     async def test_exec_output_displayed(self, test_device):
@@ -485,32 +496,6 @@ class TestDeviceDetailExecCommand:
                 await pilot.pause()
 
                 # Command widget handles output display
-
-    @pytest.mark.asyncio
-    async def test_exec_stderr_displayed_on_error(self, test_device):
-        """Exec stderr should be displayed on command error."""
-        app = StyreneApp()
-
-        mock_rpc_client = AsyncMock()
-        mock_result = ExecResult(
-            exit_code=1,
-            stdout="",
-            stderr="Command failed: File not found",
-        )
-        mock_rpc_client.call_exec = AsyncMock(return_value=mock_result)
-        app.rpc_client = mock_rpc_client
-
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=[test_device],
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
-                )
-                await pilot.pause()
-
-                # Command widget handles stderr display
 
 
 class TestDeviceDetailNavigation:

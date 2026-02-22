@@ -1,4 +1,8 @@
-"""Mesh Device Detail Screen - Shows details and RPC control for discovered mesh devices."""
+"""Mesh Device Detail Screen - Unified detail view with tabbed interface.
+
+Central hub for all peer-to-peer interactions with a node: status, chat,
+command execution, and future capabilities.
+"""
 
 from typing import TYPE_CHECKING, ClassVar
 
@@ -6,12 +10,13 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Static
+from textual.widgets import Button, Footer, Header, Static, TabbedContent, TabPane
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.rpc import RPCTimeoutError, RPCTransportError
 from styrened.rpc.messages import StatusResponse
 from styrened.tui.services.reticulum import discover_devices
+from styrened.tui.widgets.chat_widget import ChatWidget
 from styrened.tui.widgets.command_widget import CommandWidget
 from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
@@ -76,10 +81,13 @@ class MeshInfoWidget(Static):
 
 
 class MeshDeviceDetailScreen(Screen[None]):
-    """Detail screen for mesh discovered devices with RPC control.
+    """Unified detail screen for mesh devices with tabbed interface.
 
-    This screen shows information about a device discovered via mesh announces
-    and provides RPC controls for status queries and command execution.
+    Provides a persistent header with device info and tabbed content for:
+    - Status: RPC status queries with refresh
+    - Chat: Peer-to-peer messaging via ChatWidget
+    - Command: Remote command execution
+    - SSH: Placeholder for future SSH terminal
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -91,16 +99,19 @@ class MeshDeviceDetailScreen(Screen[None]):
         self,
         device_identity: str,
         initial_status: StatusResponse | None = None,
+        initial_tab: str | None = None,
     ) -> None:
         """Initialize mesh device detail screen.
 
         Args:
             device_identity: Reticulum identity hash of device.
             initial_status: Optional pre-fetched status response.
+            initial_tab: Optional tab ID to open initially (e.g. "chat", "command").
         """
         super().__init__()
         self.device_identity = device_identity
         self.initial_status = initial_status
+        self.initial_tab = initial_tab
         self.device: MeshDevice | None = None
         # Load device before compose() runs
         self._load_device()
@@ -135,7 +146,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         )
 
     def compose(self) -> ComposeResult:
-        """Compose screen layout."""
+        """Compose screen layout with persistent header and tabbed content."""
         yield Header()
 
         if not self.device:
@@ -149,39 +160,53 @@ class MeshDeviceDetailScreen(Screen[None]):
             )
         else:
             with Container(id="mesh-device-detail-container"):
-                # Mesh info panel
+                # Persistent header: mesh info
                 yield HighlightedPanel(
                     MeshInfoWidget(self.device),
                     title="MESH INFO",
                     id="mesh-info-panel",
                 )
 
-                # Device status panel (RPC) - compose status widget first
-                status_widget = DeviceStatusWidget(id="status-widget")
-                if self.initial_status:
-                    status_widget.status = self.initial_status
+                # Tabbed content
+                with TabbedContent(
+                    initial=self.initial_tab or "status",
+                    id="device-tabs",
+                ):
+                    # Status tab
+                    with TabPane("Status", id="status"):
+                        status_widget = DeviceStatusWidget(id="status-widget")
+                        if self.initial_status:
+                            status_widget.status = self.initial_status
 
-                yield HighlightedPanel(
-                    Vertical(
-                        Horizontal(
-                            Button("↻ Refresh", id="refresh-status-btn", variant="default"),
-                            classes="panel-header",
-                        ),
-                        status_widget,
-                    ),
-                    title="DEVICE STATUS",
-                    id="device-status-panel",
-                )
+                        yield Vertical(
+                            Horizontal(
+                                Button("Refresh", id="refresh-status-btn", variant="default"),
+                                classes="panel-header",
+                            ),
+                            status_widget,
+                        )
 
-                # Command execution panel (RPC)
-                yield HighlightedPanel(
-                    CommandWidget(
-                        device_identity=self.device_identity,
-                        id="command-widget",
-                    ),
-                    title="EXECUTE COMMAND",
-                    id="command-panel",
-                )
+                    # Chat tab
+                    with TabPane("Chat", id="chat"):
+                        yield ChatWidget(
+                            peer_hash=self.device_identity,
+                            display_name=self.device.name,
+                            id="chat-widget",
+                        )
+
+                    # Command tab
+                    with TabPane("Command", id="command"):
+                        yield CommandWidget(
+                            device_identity=self.device_identity,
+                            id="command-widget",
+                        )
+
+                    # SSH tab (placeholder)
+                    with TabPane("SSH", id="ssh"):
+                        yield Static(
+                            "[dim]SSH terminal — coming soon[/]",
+                            classes="placeholder-text",
+                        )
 
         yield Footer()
 

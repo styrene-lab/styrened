@@ -513,6 +513,58 @@ class IPCHandlers:
             return ErrorResponse.internal_error("Conversation service not initialized")
         return None
 
+    def _resolve_peer_hashes(self, peer_hash: str) -> list[str]:
+        """Resolve a peer hash to all known hash types for the same identity.
+
+        Device discovery uses operator destination hashes (e.g. styrene_node.operator)
+        while LXMF uses delivery destination hashes (lxmf.delivery). Both are derived
+        from the same RNS identity but have different values. This method finds
+        related hashes so message queries can match both outgoing (operator hash)
+        and incoming (LXMF hash) messages.
+
+        Args:
+            peer_hash: Hash to resolve (operator or LXMF delivery hash).
+
+        Returns:
+            List of additional hashes (may be empty if resolution fails).
+        """
+        additional: list[str] = []
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            lxmf_service = get_lxmf_service()
+            if lxmf_service is None:
+                return additional
+
+            # Try to resolve identity from the peer_hash
+            import RNS
+
+            identity = lxmf_service._resolve_identity(peer_hash)
+            if identity is None:
+                return additional
+
+            # Compute the LXMF delivery destination hash from the identity
+            lxmf_dest = RNS.Destination(
+                identity,
+                RNS.Destination.OUT,
+                RNS.Destination.SINGLE,
+                "lxmf",
+                "delivery",
+            )
+            lxmf_hash = lxmf_dest.hash.hex()
+            if lxmf_hash != peer_hash:
+                additional.append(lxmf_hash)
+
+            # Also add the raw identity hash (in case messages were stored with it)
+            identity_hash = identity.hash.hex()
+            if identity_hash != peer_hash and identity_hash != lxmf_hash:
+                additional.append(identity_hash)
+
+        except Exception as e:
+            logger.debug(f"Could not resolve peer hashes for {peer_hash[:16]}...: {e}")
+
+        return additional
+
     async def handle_query_conversations(self, request: IPCRequest) -> IPCResponse:
         """Handle QUERY_CONVERSATIONS request.
 
@@ -573,11 +625,16 @@ class IPCHandlers:
                 return err
             assert self.daemon is not None and self.daemon._conversation_service is not None
 
+            # Resolve additional hashes for the peer so we find messages
+            # stored under different hash types (operator vs LXMF delivery)
+            additional_hashes = self._resolve_peer_hashes(req.peer_hash)
+
             messages = self.daemon._conversation_service.get_messages(
                 peer_hash=req.peer_hash,
                 limit=limit,
                 before_timestamp=req.before_timestamp,
                 status_filter=req.status_filter,
+                additional_peer_hashes=additional_hashes,
             )
             msg_list = [m.to_dict() for m in messages]
 
@@ -830,15 +887,15 @@ class IPCHandlers:
                     "(no path or identity not known)"
                 )
 
-            # Extract hash, method, and actual destination hash from result
+            # Extract hash and method from result
             lxmf_hash: bytes = result["hash"]
             delivery_method_used: str = result.get("method", delivery_method)
-            actual_dest_hash: str = result.get("destination_hash", req.peer_hash)
 
-            # Step 5: Update destination_hash to the full resolved hash
-            # This normalizes truncated peer_hash inputs to full 32-char hashes
-            if actual_dest_hash != req.peer_hash:
-                conversation_service.update_destination_hash(msg_id, actual_dest_hash)
+            # NOTE: We intentionally do NOT update destination_hash to the LXMF
+            # delivery hash. The saved message uses the peer's operator hash
+            # (from device discovery), which is what the TUI uses for queries.
+            # The LXMF delivery hash is a different aspect of the same identity
+            # and would break get_messages() lookups.
 
             # Step 6: Register delivery tracking (if not already done by callback race)
             # Use the tracking_lock to safely check/update state.

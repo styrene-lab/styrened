@@ -3,15 +3,13 @@
 These tests cover scenarios that might cause issues:
 - Boundary values (empty, excessive counts)
 - Unicode/special characters
-- Network failures and message delivery states
-- Concurrent operations
-- Stale/offline devices
-
-Tests are written TDD-style and will fail until functionality is implemented.
+- Message delivery states
+- Navigation robustness
+- Multi-device scenarios
 """
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -20,6 +18,8 @@ from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.screens.dashboard import DashboardScreen
+from styrened.tui.services.app_lifecycle import LifecycleMode
+from styrened.tui.widgets.chat_widget import ChatWidget
 from textual.widgets import DataTable
 
 
@@ -61,6 +61,21 @@ def add_messages_to_db(engine, messages_data: list[dict]) -> list[int]:
             message_ids.append(msg.id)
         session.commit()
     return message_ids
+
+
+def _make_mock_lifecycle(messages=None):
+    """Create a mock lifecycle with IPCBridge returning given messages."""
+    bridge = MagicMock()
+    bridge.get_messages = AsyncMock(return_value=messages or [])
+    bridge.mark_read = AsyncMock(return_value=0)
+    bridge.send_chat = AsyncMock(return_value={"status": "sent"})
+
+    lifecycle = MagicMock()
+    lifecycle.ipc_bridge = bridge
+    lifecycle.initialize_async = AsyncMock(return_value=True)
+    lifecycle.active_mode = LifecycleMode.IPC
+    lifecycle.shutdown_async = AsyncMock()
+    return lifecycle
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +131,13 @@ class TestBoundaryConditions:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        with patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices):
+        mock_store = MagicMock()
+        mock_store.get_styrene_nodes.return_value = []
+
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
+            patch("styrened.services.node_store.get_node_store", return_value=mock_store),
+        ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
@@ -124,109 +145,43 @@ class TestBoundaryConditions:
                 table = app.screen.query_one("#mesh-device-table", DataTable)
                 assert table.row_count == 1
 
-                # Unread column should show some representation of 150
-                # Implementation may truncate to "99+" or "150"
-
     @pytest.mark.asyncio
     async def test_very_long_message_content_handled_in_conversation(
-        self, message_db, mock_local_identity, peer_identity
+        self, peer_identity
     ):
         """Long messages should not break conversation screen layout."""
-        # 500-character message
         long_content = "A" * 500
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": peer_identity,
-                    "destination_hash": mock_local_identity,
-                    "content": long_content,
-                    "status": "pending",
-                },
-            ],
-        )
+        lifecycle = _make_mock_lifecycle(messages=[
+            {"content": long_content, "is_outgoing": False, "status": "read"},
+        ])
 
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
-
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
+        app._lifecycle = lifecycle
 
         async with app.run_test() as pilot:
-            conversation = ConversationScreen(
-                destination_hash=peer_identity,
-                local_identity_hash=mock_local_identity,
-                chat_protocol=chat_protocol,
-            )
+            conversation = ConversationScreen(peer_hash=peer_identity)
             await app.push_screen(conversation)
             await pilot.pause()
 
-            # Screen should render without crashing
+            # Should render without crashing
             assert isinstance(app.screen, ConversationScreen)
 
     @pytest.mark.asyncio
     async def test_empty_message_content_handled_gracefully(
-        self, message_db, mock_local_identity, peer_identity
+        self, peer_identity
     ):
         """Empty or whitespace-only messages should not crash UI."""
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": peer_identity,
-                    "destination_hash": mock_local_identity,
-                    "content": "",  # Empty
-                    "status": "pending",
-                },
-                {
-                    "source_hash": peer_identity,
-                    "destination_hash": mock_local_identity,
-                    "content": "   ",  # Whitespace only
-                    "status": "pending",
-                },
-                {
-                    "source_hash": peer_identity,
-                    "destination_hash": mock_local_identity,
-                    "content": None,  # Null
-                    "status": "pending",
-                },
-            ],
-        )
+        lifecycle = _make_mock_lifecycle(messages=[
+            {"content": "", "is_outgoing": False, "status": "read"},
+            {"content": "   ", "is_outgoing": False, "status": "read"},
+            {"content": None, "is_outgoing": False, "status": "read"},
+        ])
 
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
-
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
+        app._lifecycle = lifecycle
 
         async with app.run_test() as pilot:
-            conversation = ConversationScreen(
-                destination_hash=peer_identity,
-                local_identity_hash=mock_local_identity,
-                chat_protocol=chat_protocol,
-            )
+            conversation = ConversationScreen(peer_hash=peer_identity)
             await app.push_screen(conversation)
             await pilot.pause()
 
@@ -241,7 +196,7 @@ class TestBoundaryConditions:
                 {
                     "source_hash": "a",
                     "destination_hash": "b",
-                    "content": "Check this out: 🚀 🎉 ✨ 你好 مرحبا",
+                    "content": "Check this out: \U0001f680 \U0001f389 \u2728 \u4f60\u597d \u0645\u0631\u062d\u0628\u0627",
                     "status": "read",
                 },
             ],
@@ -249,7 +204,7 @@ class TestBoundaryConditions:
 
         with Session(message_db) as session:
             msg = session.query(Message).first()
-            assert msg.content == "Check this out: 🚀 🎉 ✨ 你好 مرحبا"
+            assert msg.content == "Check this out: \U0001f680 \U0001f389 \u2728 \u4f60\u597d \u0645\u0631\u062d\u0628\u0627"
 
 
 class TestMessageDeliveryStates:
@@ -257,48 +212,26 @@ class TestMessageDeliveryStates:
 
     @pytest.mark.asyncio
     async def test_failed_message_shows_failure_indicator(
-        self, message_db, mock_local_identity, peer_identity
+        self, peer_identity
     ):
         """Messages with 'failed' status should show failure indicator in conversation."""
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": mock_local_identity,
-                    "destination_hash": peer_identity,
-                    "content": "This message failed to send",
-                    "status": "failed",
-                },
-            ],
-        )
+        lifecycle = _make_mock_lifecycle(messages=[
+            {
+                "content": "This message failed to send",
+                "is_outgoing": True,
+                "status": "failed",
+            },
+        ])
 
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
-
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
+        app._lifecycle = lifecycle
 
         async with app.run_test() as pilot:
-            conversation = ConversationScreen(
-                destination_hash=peer_identity,
-                local_identity_hash=mock_local_identity,
-                chat_protocol=chat_protocol,
-            )
+            conversation = ConversationScreen(peer_hash=peer_identity)
             await app.push_screen(conversation)
             await pilot.pause()
 
-            # Should render - implementation will determine failure styling
+            # Should render
             assert isinstance(app.screen, ConversationScreen)
 
     def test_all_valid_message_statuses_accepted(self, message_db):
@@ -328,10 +261,8 @@ class TestStaleDeviceHandling:
     """Tests for handling stale/offline devices."""
 
     @pytest.mark.asyncio
-    async def test_opening_chat_with_stale_device_shows_warning(
-        self, message_db, mock_local_identity
-    ):
-        """Opening chat with a stale device should show offline warning."""
+    async def test_detail_screen_works_for_stale_device(self):
+        """Device detail screen should work for stale devices."""
         now = int(datetime.now().timestamp())
         stale_device = MeshDevice(
             destination_hash="stale_node_identity_hash",
@@ -343,46 +274,38 @@ class TestStaleDeviceHandling:
         )
 
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
 
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=[stale_device]
+        with (
+            patch(
+                "styrened.tui.screens.dashboard.discover_devices",
+                return_value=[stale_device],
+            ),
+            patch(
+                "styrened.tui.screens.mesh_device_detail.discover_devices",
+                return_value=[stale_device],
+            ),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Select and open chat with stale device
-                await pilot.press("down")
-                await pilot.press("c")
+                # Navigate to detail via enter
+                await pilot.press("enter")
                 await pilot.pause()
 
-                # Should either open chat (with warning) or stay on dashboard
-                # Implementation will determine exact behavior
-                assert isinstance(app.screen, (DashboardScreen, ConversationScreen))
+                # Should navigate to detail screen without crash
+                from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+                assert isinstance(app.screen, (DashboardScreen, MeshDeviceDetailScreen))
 
 
 class TestNavigationRobustness:
     """Tests for rapid/complex navigation patterns."""
 
     @pytest.mark.asyncio
-    async def test_rapid_screen_transitions_dont_corrupt_state(
+    async def test_rapid_detail_transitions_dont_corrupt_state(
         self, message_db, mock_local_identity
     ):
-        """User rapidly navigating shouldn't cause data corruption."""
+        """User rapidly navigating to detail and back shouldn't crash."""
         now = int(datetime.now().timestamp())
         devices = [
             MeshDevice(
@@ -395,7 +318,6 @@ class TestNavigationRobustness:
             ),
         ]
 
-        # Add some messages
         add_messages_to_db(
             message_db,
             [
@@ -411,32 +333,23 @@ class TestNavigationRobustness:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
-
-        with patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices):
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
+            patch(
+                "styrened.tui.screens.mesh_device_detail.discover_devices",
+                return_value=devices,
+            ),
+        ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Rapid navigation: open chat, escape, repeat
+                # Rapid navigation: enter detail, escape, repeat
                 for _ in range(3):
-                    await pilot.press("down")
-                    await pilot.press("c")
+                    await pilot.press("enter")
                     await pilot.pause()
 
-                    if isinstance(app.screen, ConversationScreen):
-                        await pilot.press("escape")
-                        await pilot.pause()
+                    await pilot.press("escape")
+                    await pilot.pause()
 
                 # Should end up on dashboard without crash
                 assert isinstance(app.screen, DashboardScreen)
@@ -451,10 +364,10 @@ class TestMultiDeviceScenarios:
     """Tests for interactions with multiple devices."""
 
     @pytest.mark.asyncio
-    async def test_opening_chat_with_one_device_doesnt_affect_others(
+    async def test_detail_screen_for_correct_device(
         self, message_db, mock_local_identity
     ):
-        """Opening chat with device A should not mark device B's messages as read."""
+        """Entering detail screen should show the selected device."""
         now = int(datetime.now().timestamp())
         devices = [
             MeshDevice(
@@ -475,83 +388,25 @@ class TestMultiDeviceScenarios:
             ),
         ]
 
-        # Both devices have unread messages
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-            ],
-        )
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": "node02_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-                {
-                    "source_hash": "node02_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-                {
-                    "source_hash": "node02_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-            ],
-        )
-
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
 
-        mock_router = Mock()
-        mock_identity = Mock()
-        mock_identity.hexhash = mock_local_identity
-
-        from styrened.protocols.chat import ChatProtocol
-
-        chat_protocol = ChatProtocol(
-            router=mock_router,
-            identity=mock_identity,
-            db_engine=message_db,
-        )
-        app.chat_protocol = chat_protocol
-
-        with patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices):
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
+            patch(
+                "styrened.tui.screens.mesh_device_detail.discover_devices",
+                return_value=devices,
+            ),
+        ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Open chat with node-01 (cursor starts at row 0, which is node-01)
-                await pilot.press("c")
+                # Select first device and enter detail
+                await pilot.press("enter")
                 await pilot.pause()
 
-                if isinstance(app.screen, ConversationScreen):
-                    # Return to dashboard
-                    await pilot.press("escape")
-                    await pilot.pause()
+                from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
-                    # Verify node-02's messages are still pending
-                    with Session(message_db) as session:
-                        node02_pending = (
-                            session.query(Message)
-                            .filter(
-                                Message.source_hash == "node02_identity_hash",
-                                Message.status == "pending",
-                            )
-                            .count()
-                        )
-                        assert node02_pending == 3, (
-                            f"node-02 should still have 3 pending messages, got {node02_pending}"
-                        )
+                assert isinstance(app.screen, MeshDeviceDetailScreen), (
+                    f"Expected MeshDeviceDetailScreen, got {type(app.screen).__name__}"
+                )
+                assert app.screen.device is not None

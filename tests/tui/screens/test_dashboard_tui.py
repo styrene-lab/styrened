@@ -172,19 +172,26 @@ class TestDashboardKeyboardBindings:
             assert len(quit_bindings) > 0
 
     @pytest.mark.asyncio
-    async def test_settings_key_binding(self):
-        """Pressing 's' should open settings screen."""
-        app = StyreneApp()
+    async def test_enter_description_is_details(self):
+        """Enter binding should have 'Details' description."""
+        screen = DashboardScreen()
+        enter_bindings = [b for b in screen.BINDINGS if b.key == "enter"]
+        assert len(enter_bindings) == 1
+        assert enter_bindings[0].description == "Details"
 
-        async with app.run_test() as pilot:
-            await app.push_screen(DashboardScreen())
-            await pilot.pause()
+    @pytest.mark.asyncio
+    async def test_no_standalone_status_binding(self):
+        """Dashboard should not have standalone 's' (status) binding."""
+        screen = DashboardScreen()
+        s_bindings = [b for b in screen.BINDINGS if b.key == "s"]
+        assert len(s_bindings) == 0, "Standalone 's' binding should be removed"
 
-            # Press 's' to open settings
-            await pilot.press("s")
-            await pilot.pause()
-
-            # Settings screen should be pushed
+    @pytest.mark.asyncio
+    async def test_no_standalone_chat_binding(self):
+        """Dashboard should not have standalone 'c' (chat) binding."""
+        screen = DashboardScreen()
+        c_bindings = [b for b in screen.BINDINGS if b.key == "c"]
+        assert len(c_bindings) == 0, "Standalone 'c' binding should be removed"
 
 
 class TestDashboardDeviceSelection:
@@ -232,41 +239,6 @@ class TestDashboardDeviceSelection:
                 await pilot.pause()
 
                 # Should push device detail screen (doesn't crash)
-
-
-class TestDashboardRPCActions:
-    """Test RPC action buttons and commands."""
-
-    @pytest.mark.asyncio
-    async def test_status_request_action(self, mock_devices):
-        """Status request action should send RPC call."""
-        app = StyreneApp()
-
-        # Mock RPC client
-        mock_rpc_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.uptime = 3600
-        mock_response.ip = "192.168.1.100"
-        mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(DashboardScreen())
-                await pilot.pause()
-
-                # Set mock AFTER app startup (which overwrites rpc_client)
-                app.rpc_client = mock_rpc_client
-
-                screen = app.screen
-
-                # Trigger status request action
-                await screen.action_request_status()
-                await pilot.pause()
-
-                # Verify RPC call was made
-                assert mock_rpc_client.call_status.called
 
 
 class TestDashboardAsyncUpdates:
@@ -325,39 +297,6 @@ class TestDashboardAsyncUpdates:
 
 class TestDashboardErrorHandling:
     """Test error handling and edge cases."""
-
-    @pytest.mark.asyncio
-    async def test_rpc_timeout_shows_error(self, mock_devices):
-        """RPC timeout should show error message."""
-        app = StyreneApp()
-
-        # Mock RPC client with timeout
-        from styrened.rpc.errors import RPCTimeoutError
-
-        mock_rpc_client = AsyncMock()
-        mock_rpc_client.call_status = AsyncMock(
-            side_effect=RPCTimeoutError(
-                "Timeout", request_id="test-id", destination="abc123", timeout=30.0
-            )
-        )
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(DashboardScreen())
-                await pilot.pause()
-
-                # Set mock AFTER app startup (which overwrites rpc_client)
-                app.rpc_client = mock_rpc_client
-
-                screen = app.screen
-
-                # Trigger status request (should timeout)
-                await screen.action_request_status()
-                await pilot.pause()
-
-                # Should not crash (error handled gracefully)
 
     @pytest.mark.asyncio
     async def test_database_error_handled_gracefully(self):
