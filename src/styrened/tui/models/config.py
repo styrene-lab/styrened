@@ -86,10 +86,13 @@ __all__ = [
 class ThemeMode(Enum):
     """Available visual themes.
 
-    Forge World themes derived from the phosphex cascade system.
-    Each theme uses a different phosphex (phosphor) base color.
+    The styrene brand theme is the default. Forge World themes are
+    derived from the phosphex cascade system, each using a different
+    phosphex (phosphor) base color.
     """
 
+    # Brand theme
+    STYRENE = "styrene"
     # Greens (Imperial standard)
     MARS = "mars"
     TERRA = "terra"
@@ -150,7 +153,7 @@ class TUIConfig:
             None means auto-detect (try IPC first, fall back to legacy).
     """
 
-    theme: ThemeMode = ThemeMode.MARS
+    theme: ThemeMode = ThemeMode.STYRENE
     log_level: LogLevel = LogLevel.INFO
     show_hardware_panel: bool = True
     confirm_destructive: bool = True

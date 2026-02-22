@@ -244,9 +244,18 @@ def get_preset(name: str) -> ForgeWorldPreset | None:
     return FORGE_WORLD_PRESETS.get(name.lower().replace("-", "_").replace(" ", "_"))
 
 
-def list_presets() -> list[tuple[str, ForgeWorldPreset]]:
-    """List all presets in display order."""
-    return [(key, FORGE_WORLD_PRESETS[key]) for key in FORGE_WORLD_ORDER]
+def list_presets() -> list[tuple[str, ForgeWorldPreset | None]]:
+    """List all presets in display order.
+
+    The styrene brand theme appears first, followed by forge world presets.
+    """
+    from styrened.tui.themes.styrene_brand import STYRENE_THEME_KEY
+
+    result: list[tuple[str, ForgeWorldPreset | None]] = [
+        (STYRENE_THEME_KEY, None),
+    ]
+    result.extend((key, FORGE_WORLD_PRESETS[key]) for key in FORGE_WORLD_ORDER)
+    return result
 
 
 # =============================================================================
@@ -336,7 +345,15 @@ class ColorCascade:
 
     @classmethod
     def from_preset(cls, preset_key: str) -> "ColorCascade":
-        """Create a ColorCascade from a forge world preset name."""
+        """Create a ColorCascade from a preset name.
+
+        The "styrene" key returns the hand-tuned brand cascade;
+        all other keys use the algorithmic forge world derivation.
+        """
+        if preset_key == "styrene":
+            from styrened.tui.themes.styrene_brand import create_styrene_cascade
+
+            return create_styrene_cascade()
         preset = get_preset(preset_key)
         if preset is None:
             raise ValueError(f"Unknown forge world preset: {preset_key}")
@@ -461,14 +478,18 @@ class ColorCascade:
 
 
 def generate_all_themes() -> dict[str, "Theme"]:
-    """Generate Textual themes for all forge world presets.
+    """Generate Textual themes for all presets including the styrene brand theme.
 
     Returns:
         Dictionary mapping preset keys to Theme objects.
     """
     from textual.theme import Theme
 
-    themes: dict[str, Theme] = {}
+    from styrened.tui.themes.styrene_brand import STYRENE_THEME_KEY, create_styrene_theme
+
+    themes: dict[str, Theme] = {
+        STYRENE_THEME_KEY: create_styrene_theme(),
+    }
     for key in FORGE_WORLD_ORDER:
         cascade = ColorCascade.from_preset(key)
         themes[key] = cascade.to_textual_theme(name=key)

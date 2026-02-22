@@ -12,6 +12,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header
 
 from styrened.tui.themes.color_cascade import FORGE_WORLD_ORDER, ColorCascade
+from styrened.tui.themes.styrene_brand import STYRENE_THEME_KEY
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 from styrened.tui.widgets.uptime_panel import UptimePanel
@@ -63,15 +64,16 @@ class LocalDashboardScreen(Screen[None]):
         self.notify("Refreshed", timeout=2)
 
     def action_cycle_theme(self) -> None:
-        """Cycle through forge world themes."""
+        """Cycle through all themes (styrene brand + forge worlds)."""
+        cycle = [STYRENE_THEME_KEY, *FORGE_WORLD_ORDER]
         current = self.app.theme
         try:
-            idx = FORGE_WORLD_ORDER.index(current)
-            next_idx = (idx + 1) % len(FORGE_WORLD_ORDER)
+            idx = cycle.index(current)
+            next_idx = (idx + 1) % len(cycle)
         except ValueError:
             next_idx = 0
 
-        new_theme = FORGE_WORLD_ORDER[next_idx]
+        new_theme = cycle[next_idx]
         self.app.theme = new_theme
 
         # Update cascade for Rich markup
