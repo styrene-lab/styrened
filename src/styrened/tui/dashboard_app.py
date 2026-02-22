@@ -21,8 +21,11 @@ from styrened.tui.services.config import (
     get_default_config,
     load_config,
 )
-from styrened.tui.themes.color_cascade import ColorCascade, generate_all_themes
-from styrened.tui.themes.imperial_crt import IMPERIAL_CRT
+from styrened.tui.themes.styrene_brand import (
+    STYRENE_THEME_KEY,
+    create_styrene_cascade,
+    create_styrene_theme,
+)
 from styrened.tui.widgets.highlighted_panel import set_color_cascade
 
 logger = logging.getLogger(__name__)
@@ -52,20 +55,10 @@ class LocalDashboardApp(App[None]):
         except (ConfigLoadError, ConfigValidationErrors):
             self.config = get_default_config()
 
-        # Register themes
-        self.register_theme(IMPERIAL_CRT)
-        for theme in generate_all_themes().values():
-            self.register_theme(theme)
-
-        # Apply theme from config
-        theme_key = self.config.tui.theme.value
-        self.theme = theme_key
-
-        try:
-            cascade = ColorCascade.from_preset(theme_key)
-            set_color_cascade(cascade)
-        except ValueError:
-            pass
+        # Register and apply styrene brand theme
+        self.register_theme(create_styrene_theme())
+        self.theme = STYRENE_THEME_KEY
+        set_color_cascade(create_styrene_cascade())
 
         # Initialize RNS lifecycle for status display
         self._lifecycle = StyreneLifecycle(self.config)
@@ -78,14 +71,7 @@ class LocalDashboardApp(App[None]):
 
     def watch_theme(self, old_theme: str, new_theme: str) -> None:
         """Update cascade when theme changes."""
-        if old_theme == new_theme:
-            return
-
-        try:
-            cascade = ColorCascade.from_preset(new_theme)
-            set_color_cascade(cascade)
-        except ValueError:
-            return
+        pass
 
     def on_shutdown(self) -> None:
         """Clean up lifecycle on exit."""

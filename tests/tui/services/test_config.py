@@ -35,7 +35,7 @@ class TestGetDefaultConfig:
         """Test generating default configuration."""
         config = get_default_config()
         assert isinstance(config, StyreneConfig)
-        assert config.tui.theme == ThemeMode.MARS
+        assert config.tui.theme == ThemeMode.STYRENE
         assert config.tui.log_level == LogLevel.INFO
         assert config.mesh.mesh_id == "styrene"
         assert config.mesh.channel == 6
@@ -158,7 +158,7 @@ class TestConfigLoadSave:
         config = load_config()
         assert isinstance(config, StyreneConfig)
         # Should be defaults
-        assert config.tui.theme == ThemeMode.MARS
+        assert config.tui.theme == ThemeMode.STYRENE
 
     def test_load_invalid_yaml(self, temp_config_dir, monkeypatch):
         """Test loading invalid YAML raises error."""
@@ -204,7 +204,7 @@ mesh:
         assert config.mesh.mesh_id == "custom-mesh"
 
         # Unspecified values should have defaults
-        assert config.tui.theme == ThemeMode.MARS
+        assert config.tui.theme == ThemeMode.STYRENE
         assert config.mesh.channel == 6
 
     def test_config_file_has_comment_header(self, temp_config_dir, monkeypatch):
@@ -263,13 +263,8 @@ class TestConfigTypes:
         assert LogLevel.ERROR.value == "error"
 
     def test_theme_mode_enum(self):
-        """Test ThemeMode enum values (forge world presets)."""
-        # Default theme is Mars
-        assert ThemeMode.MARS.value == "mars"
-        # Verify a sampling of other forge world themes exist
-        assert ThemeMode.TERRA.value == "terra"
-        assert ThemeMode.RYZA.value == "ryza"
-        assert ThemeMode.STYGIES.value == "stygies"
+        """Test ThemeMode enum values."""
+        assert ThemeMode.STYRENE.value == "styrene"
 
     def test_gateway_mode_enum(self):
         """Test GatewayMode enum values."""
