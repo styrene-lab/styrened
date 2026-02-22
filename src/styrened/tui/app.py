@@ -16,6 +16,7 @@ from textual.widgets import Footer, Header
 
 from styrened.tui.models.config import ConfigLoadError, ConfigValidationErrors, StyreneConfig
 from styrened.tui.screens.contacts import ContactsScreen
+from styrened.tui.screens.daemon_setup import DaemonSetupScreen
 from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
@@ -355,21 +356,76 @@ class StyreneApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
-        """Mount handler - initialize services and check for first-run setup.
+        """Mount handler - check daemon, initialize services, handle first-run.
 
-        Service initialization is done here (not in __init__) because
-        IPC mode requires async operations (spawning daemon, connecting).
+        Flow:
+            1. Check if daemon is reachable via IPC ping
+            2. If no daemon → DaemonSetupScreen (install/start/skip)
+            3. If daemon OK → initialize services → FirstRunWizard or Dashboard
         """
-        # Initialize all services (async-safe for both IPC and legacy)
+        daemon_ok = await self._check_daemon()
+        if not daemon_ok:
+            self.log.info("No daemon detected - launching setup screen")
+            self.push_screen(
+                DaemonSetupScreen(),
+                callback=self._on_daemon_setup_complete,
+            )
+        else:
+            await self._proceed_after_daemon()
+
+    async def _check_daemon(self) -> bool:
+        """Quick IPC socket check — does the socket exist and respond to ping?
+
+        Returns:
+            True if daemon is reachable, False otherwise.
+        """
+        try:
+            from styrened.ipc import ControlClient, get_default_socket_path
+
+            socket_path = get_default_socket_path()
+            if not socket_path.exists():
+                return False
+
+            client = ControlClient(socket_path=socket_path, timeout=3.0)
+            try:
+                await client.connect()
+                result = await client.ping(timeout=2.0)
+                return result
+            finally:
+                await client.disconnect()
+        except Exception:
+            return False
+
+    async def _on_daemon_setup_complete(self, result: bool | None) -> None:
+        """Handle daemon setup screen result.
+
+        Args:
+            result: True if daemon started, False if skipped, None if dismissed.
+        """
+        if result:
+            self.log.info("Daemon started - proceeding with initialization")
+            # If a managed DaemonManager was created by the setup screen,
+            # wire it into the lifecycle
+            manager = getattr(self, "_daemon_manager_from_setup", None)
+            if manager is not None:
+                self._lifecycle._daemon_manager = manager
+                delattr(self, "_daemon_manager_from_setup")
+            await self._proceed_after_daemon()
+        else:
+            self.log.info("Daemon setup skipped - running in offline mode")
+            self.push_screen("dashboard")
+
+    async def _proceed_after_daemon(self) -> None:
+        """Initialize services and continue to wizard or dashboard."""
         await self._initialize_services()
 
-        # Check if Reticulum is configured
         if find_reticulum_config() is None:
-            # No Reticulum config found - show first-run wizard
             self.log.info("Reticulum not configured - launching first-run wizard")
-            self.push_screen(FirstRunWizardScreen(), callback=self._on_wizard_complete)
+            self.push_screen(
+                FirstRunWizardScreen(),
+                callback=self._on_wizard_complete,
+            )
         else:
-            # Reticulum configured - go straight to dashboard
             self.push_screen("dashboard")
 
     def _on_wizard_complete(self, result: bool | None) -> None:

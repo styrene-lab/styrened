@@ -27,6 +27,7 @@ def mock_reticulum(tmp_path):
             "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
         ),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
         yield
 
@@ -247,7 +248,6 @@ class TestDashboardRPCActions:
         mock_response.uptime = 3600
         mock_response.ip = "192.168.1.100"
         mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
-        app.rpc_client = mock_rpc_client
 
         with patch(
             "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
@@ -255,6 +255,9 @@ class TestDashboardRPCActions:
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
+
+                # Set mock AFTER app startup (which overwrites rpc_client)
+                app.rpc_client = mock_rpc_client
 
                 screen = app.screen
 
@@ -329,11 +332,14 @@ class TestDashboardErrorHandling:
         app = StyreneApp()
 
         # Mock RPC client with timeout
-        from styrened.tui.models.rpc import RPCTimeoutError
+        from styrened.rpc.errors import RPCTimeoutError
 
         mock_rpc_client = AsyncMock()
-        mock_rpc_client.call_status = AsyncMock(side_effect=RPCTimeoutError("Timeout"))
-        app.rpc_client = mock_rpc_client
+        mock_rpc_client.call_status = AsyncMock(
+            side_effect=RPCTimeoutError(
+                "Timeout", request_id="test-id", destination="abc123", timeout=30.0
+            )
+        )
 
         with patch(
             "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
@@ -341,6 +347,9 @@ class TestDashboardErrorHandling:
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
+
+                # Set mock AFTER app startup (which overwrites rpc_client)
+                app.rpc_client = mock_rpc_client
 
                 screen = app.screen
 
@@ -417,6 +426,7 @@ class TestDashboardScreenLifecycle:
         with patch(
             "styrened.tui.services.reticulum.discover_devices", return_value=mock_devices
         ):
+            async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 

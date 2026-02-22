@@ -106,20 +106,33 @@ class MeshDeviceDetailScreen(Screen[None]):
         self._load_device()
 
     def _load_device(self) -> None:
-        """Load device from mesh discovery."""
-        # Find device in discovered devices
-        devices = discover_devices()
-        for device in devices:
+        """Load device from mesh discovery and NodeStore."""
+        # Load from NodeStore (works in IPC mode where discover_devices is empty)
+        try:
+            from styrened.services.node_store import get_node_store
+
+            stored_nodes = get_node_store().get_all_nodes()
+        except Exception:
+            stored_nodes = []
+
+        # Get live discovered devices (populated in legacy/standalone mode)
+        live_nodes = discover_devices()
+
+        # Merge: live takes precedence
+        all_devices = {d.destination_hash: d for d in stored_nodes}
+        all_devices.update({d.destination_hash: d for d in live_nodes})
+
+        # Find by identity
+        for device in all_devices.values():
             if device.identity == self.device_identity:
                 self.device = device
-                break
+                return
 
-        if self.device is None:
-            self.notify(
-                f"Device {self.device_identity[:8]}... not found in mesh",
-                title="Error",
-                severity="error",
-            )
+        self.notify(
+            f"Device {self.device_identity[:8]}... not found in mesh",
+            title="Error",
+            severity="error",
+        )
 
     def compose(self) -> ComposeResult:
         """Compose screen layout."""

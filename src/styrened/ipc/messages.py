@@ -653,6 +653,7 @@ class DaemonStatus:
     device_count: int
     styrene_node_count: int
     pending_rpc_count: int
+    interface_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -663,6 +664,7 @@ class DaemonStatus:
             "device_count": self.device_count,
             "styrene_node_count": self.styrene_node_count,
             "pending_rpc_count": self.pending_rpc_count,
+            "interface_count": self.interface_count,
         }
 
     @classmethod
@@ -675,6 +677,7 @@ class DaemonStatus:
             device_count=data.get("device_count", 0),
             styrene_node_count=data.get("styrene_node_count", 0),
             pending_rpc_count=data.get("pending_rpc_count", 0),
+            interface_count=data.get("interface_count", 0),
         )
 
 

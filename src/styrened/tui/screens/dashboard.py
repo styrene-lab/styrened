@@ -1,6 +1,6 @@
 """Dashboard Screen - Main fleet overview."""
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
 if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
+
 
 
 class MeshDeviceTable(DataTable[str]):
@@ -227,6 +228,14 @@ class DashboardScreen(Screen[None]):
     _last_discovery_refresh: float = 0.0
     _discovery_debounce_seconds: float = 2.0  # Min time between discovery-triggered refreshes
 
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge from app lifecycle."""
+        try:
+            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
     def on_mount(self) -> None:
         """Start device discovery when dashboard mounts."""
         # Start announce listener for device discovery
@@ -238,6 +247,16 @@ class DashboardScreen(Screen[None]):
 
         # Set up periodic hub connection retry
         self.set_interval(30.0, self._retry_hub_connection)
+
+        # IPC mode: activate daemon section and fetch initial status
+        if self._ipc_bridge is not None:
+            try:
+                panel = self.query_one(NodeInfoPanel)
+                panel.ipc_managed = True
+                panel.daemon_connected = False  # Activates DAEMON section
+            except Exception:
+                pass
+            self.run_worker(self._fetch_daemon_status())
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
         """Handle screen resume - refresh themed panels.
@@ -255,6 +274,10 @@ class DashboardScreen(Screen[None]):
 
         for table in self.query(MeshDeviceTable):
             table.refresh_data()
+
+        # Refresh daemon status in IPC mode
+        if self._ipc_bridge is not None:
+            self.run_worker(self._fetch_daemon_status())
 
     def _retry_hub_connection(self) -> None:
         """Periodically retry hub connection if not connected."""
@@ -322,6 +345,10 @@ class DashboardScreen(Screen[None]):
             table_widget.refresh_data()
         except Exception:
             pass
+
+        # Also refresh daemon status in IPC mode
+        if self._ipc_bridge is not None:
+            self.run_worker(self._fetch_daemon_status())
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -468,4 +495,30 @@ class DashboardScreen(Screen[None]):
             table_widget.refresh_data()
         except Exception:
             pass
+
+        # Refresh daemon status in IPC mode
+        if self._ipc_bridge is not None:
+            self.run_worker(self._fetch_daemon_status())
+
+    async def _fetch_daemon_status(self) -> None:
+        """Fetch daemon status via IPC and push to NodeInfoPanel."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            status = await bridge.get_status()
+            panel = self.query_one(NodeInfoPanel)
+            panel.daemon_connected = True
+            panel.daemon_version = status.daemon_version
+            panel.daemon_uptime = status.uptime
+            panel.rns_online = status.rns_initialized
+            panel.interface_count = status.interface_count
+            panel.styrene_mesh_count = status.styrene_node_count
+        except Exception:
+            try:
+                panel = self.query_one(NodeInfoPanel)
+                panel.daemon_connected = False
+                panel.rns_online = False
+            except Exception:
+                pass
 

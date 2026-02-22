@@ -254,6 +254,16 @@ class IPCHandlers:
             if self.daemon._rpc_client:
                 pending_rpc = self.daemon._rpc_client.pending_count
 
+            # Count RNS interfaces
+            interface_count = 0
+            try:
+                import RNS
+
+                if hasattr(RNS.Transport, "interfaces") and RNS.Transport.interfaces:
+                    interface_count = len(RNS.Transport.interfaces)
+            except Exception:
+                pass
+
             status = DaemonStatus(
                 uptime=uptime,
                 daemon_version=__version__,
@@ -262,6 +272,7 @@ class IPCHandlers:
                 device_count=device_count,
                 styrene_node_count=styrene_count,
                 pending_rpc_count=pending_rpc,
+                interface_count=interface_count,
             )
 
             return ResultResponse(data=status.to_dict())

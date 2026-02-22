@@ -53,6 +53,26 @@ class DaemonManager:
         await manager.shutdown()
     """
 
+    @staticmethod
+    async def detect_mode() -> DaemonMode:
+        """Detect the appropriate daemon mode based on system state.
+
+        If a system service is installed (launchd/systemd), returns EXTERNAL.
+        Otherwise returns MANAGED (TUI will spawn the subprocess).
+
+        Returns:
+            DaemonMode indicating how to connect to the daemon.
+        """
+        from styrened.tui.services.service_installer import (
+            ServiceStatus,
+            get_service_status,
+        )
+
+        info = await get_service_status()
+        if info.status in (ServiceStatus.RUNNING, ServiceStatus.INSTALLED_STOPPED):
+            return DaemonMode.EXTERNAL
+        return DaemonMode.MANAGED
+
     def __init__(
         self,
         mode: DaemonMode = DaemonMode.MANAGED,
