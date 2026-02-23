@@ -9,17 +9,17 @@ These tests verify the complete user journey:
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
-from styrened.tui.app import StyreneApp
+from textual.widgets import DataTable
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
+from styrened.tui.app import StyreneApp
 from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-from styrened.tui.services.app_lifecycle import LifecycleMode
-from textual.widgets import DataTable
 
 
 @pytest.fixture(autouse=True)

@@ -37,6 +37,8 @@ from styrened.ipc.messages import (
     CmdDeviceStatusRequest,
     CmdExecRequest,
     CmdMarkReadRequest,
+    CmdPageDisconnectRequest,
+    CmdRebootDeviceRequest,
     CmdRemoveContactRequest,
     CmdRetryMessageRequest,
     CmdSendChatRequest,
@@ -55,8 +57,11 @@ from styrened.ipc.messages import (
     QueryConversationsRequest,
     QueryDevicesRequest,
     QueryMessagesRequest,
+    QueryPageRequest,
+    QueryPathInfoRequest,
     QueryResolveNameRequest,
     QuerySearchMessagesRequest,
+    RebootResultInfo,
     RemoteStatusInfo,
     ResultResponse,
 )
@@ -485,6 +490,7 @@ class IPCHandlers:
                 services=result.services,
                 disk_used=result.disk_used,
                 disk_total=result.disk_total,
+                available_commands=result.available_commands or [],
             )
 
             return ResultResponse(data=status_info.to_dict())
@@ -494,6 +500,52 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error querying device status: {e}")
             return ErrorResponse.internal_error(f"Failed to query device status: {e}")
+
+    async def handle_cmd_reboot_device(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_REBOOT_DEVICE request.
+
+        Reboots a specific remote device via RPC.
+
+        Args:
+            request: CmdRebootDeviceRequest instance.
+
+        Returns:
+            ResultResponse with reboot result.
+        """
+        req = (
+            request
+            if isinstance(request, CmdRebootDeviceRequest)
+            else CmdRebootDeviceRequest()
+        )
+
+        if not req.destination:
+            return ErrorResponse.invalid_request("destination is required")
+
+        try:
+            err = self._check_rpc_client()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._rpc_client is not None
+
+            result = await self.daemon._rpc_client.call_reboot(
+                destination=req.destination,
+                delay=req.delay,
+                timeout=req.timeout,
+            )
+
+            reboot_info = RebootResultInfo(
+                success=result.success,
+                message=result.message,
+                scheduled_time=result.scheduled_time,
+            )
+
+            return ResultResponse(data=reboot_info.to_dict())
+
+        except TimeoutError:
+            return ErrorResponse.timeout(f"Reboot request timed out after {req.timeout}s")
+        except Exception as e:
+            logger.exception(f"Error rebooting device: {e}")
+            return ErrorResponse.internal_error(f"Failed to reboot device: {e}")
 
     # -------------------------------------------------------------------------
     # Conversation handlers
@@ -568,6 +620,9 @@ class IPCHandlers:
     async def handle_query_conversations(self, request: IPCRequest) -> IPCResponse:
         """Handle QUERY_CONVERSATIONS request.
 
+        Merges conversations that belong to the same Reticulum identity but
+        use different hash types (operator destination vs LXMF delivery hash).
+
         Args:
             request: QueryConversationsRequest instance.
 
@@ -588,7 +643,59 @@ class IPCHandlers:
             assert self.daemon is not None and self.daemon._conversation_service is not None
 
             conversations = self.daemon._conversation_service.list_conversations()
-            conv_list = [c.to_dict() for c in conversations]
+
+            # Merge conversations from the same identity under different hashes.
+            # Build a mapping from each hash to its canonical peer_hash.
+            canonical: dict[str, str] = {}  # hash -> canonical peer_hash
+            for conv in conversations:
+                if conv.peer_hash in canonical:
+                    continue
+                # Resolve all hashes for this peer
+                additional = self._resolve_peer_hashes(conv.peer_hash)
+                all_hashes = [conv.peer_hash, *additional]
+                # Check if any of these hashes already have a canonical mapping
+                existing_canonical = None
+                for h in all_hashes:
+                    if h in canonical:
+                        existing_canonical = canonical[h]
+                        break
+                if existing_canonical is not None:
+                    # Map all hashes to the existing canonical
+                    for h in all_hashes:
+                        canonical[h] = existing_canonical
+                else:
+                    # New identity — map all hashes to this peer_hash
+                    for h in all_hashes:
+                        canonical[h] = conv.peer_hash
+
+            # Merge conversations by canonical hash
+            merged: dict[str, dict[str, Any]] = {}
+            for conv in conversations:
+                key = canonical.get(conv.peer_hash, conv.peer_hash)
+                if key not in merged:
+                    merged[key] = conv.to_dict()
+                else:
+                    # Merge into existing: sum counts, keep most recent message
+                    existing = merged[key]
+                    existing["message_count"] += conv.message_count
+                    existing["unread_count"] += conv.unread_count
+                    existing["attachment_count"] += conv.attachment_count
+                    # Keep the more recent last_message
+                    conv_time = conv.last_message_time or 0
+                    existing_time = existing.get("last_message_time") or 0
+                    if conv_time > existing_time:
+                        existing["last_message_time"] = conv.last_message_time
+                        existing["last_message_preview"] = conv.last_message_preview
+                        existing["last_message_outgoing"] = conv.last_message_outgoing
+                    # Prefer non-None display name
+                    if not existing.get("display_name") and conv.display_name:
+                        existing["display_name"] = conv.display_name
+
+            conv_list = sorted(
+                merged.values(),
+                key=lambda c: c.get("last_message_time") or 0,
+                reverse=True,
+            )
 
             return ResultResponse(data={"conversations": conv_list})
 
@@ -951,7 +1058,14 @@ class IPCHandlers:
                 return err
             assert self.daemon is not None and self.daemon._conversation_service is not None
 
-            count = self.daemon._conversation_service.mark_read(req.peer_hash)
+            # Resolve additional hashes for the peer so we mark messages
+            # stored under different hash types (operator vs LXMF delivery)
+            additional_hashes = self._resolve_peer_hashes(req.peer_hash)
+
+            count = self.daemon._conversation_service.mark_read(
+                req.peer_hash,
+                additional_peer_hashes=additional_hashes,
+            )
 
             # Send read receipts to peer for ecosystem compatibility
             # This is fire-and-forget; don't fail the mark_read if receipts fail
@@ -998,7 +1112,14 @@ class IPCHandlers:
                 return err
             assert self.daemon is not None and self.daemon._conversation_service is not None
 
-            count = self.daemon._conversation_service.delete_conversation(req.peer_hash)
+            # Resolve additional hashes so we delete messages stored
+            # under different hash types (operator vs LXMF delivery)
+            additional_hashes = self._resolve_peer_hashes(req.peer_hash)
+            all_hashes = [req.peer_hash, *additional_hashes]
+
+            count = 0
+            for h in all_hashes:
+                count += self.daemon._conversation_service.delete_conversation(h)
 
             return ResultResponse(data={"deleted": count})
 
@@ -1350,3 +1471,175 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error setting auto-reply: {e}")
             return ErrorResponse.internal_error(f"Failed to set auto-reply: {e}")
+
+    async def handle_cmd_sync_messages(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SYNC_MESSAGES request.
+
+        Triggers LXMF propagation node sync to pull pending messages.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            lxmf = get_lxmf_service()
+            if not lxmf.is_initialized:
+                return ErrorResponse.internal_error("LXMF service not initialized")
+
+            success = lxmf.request_messages_from_propagation_node()
+            return ResultResponse(data={"synced": success})
+
+        except Exception as e:
+            logger.exception(f"Error syncing messages: {e}")
+            return ErrorResponse.internal_error(f"Failed to sync messages: {e}")
+
+    async def handle_query_path_info(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_PATH_INFO request.
+
+        Returns path information (hops, interface, etc.) for a destination.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, QueryPathInfoRequest)
+            else QueryPathInfoRequest()
+        )
+
+        destination_hash = req.destination_hash.strip()
+        if not destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            from styrened.services.node_store import get_node_store
+
+            store = get_node_store()
+            path = store.get_path(destination_hash)
+
+            if path is None:
+                return ResultResponse(data={"found": False})
+
+            return ResultResponse(
+                data={
+                    "found": True,
+                    "hops": path.get("hops", 0),
+                    "next_hop": path.get("next_hop"),
+                    "interface_type": path.get("interface_type"),
+                    "interface_name": path.get("interface_name"),
+                    "bitrate": path.get("bitrate"),
+                    "expires": path.get("expires"),
+                    "updated_at": path.get("updated_at"),
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error querying path info: {e}")
+            return ErrorResponse.internal_error(f"Failed to query path info: {e}")
+
+    # -------------------------------------------------------------------------
+    # Page browser handlers
+    # -------------------------------------------------------------------------
+
+    def _check_page_browser(self) -> ErrorResponse | None:
+        """Check if page browser service is available."""
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not getattr(self.daemon, "_page_browser_service", None):
+            return ErrorResponse.internal_error("Page browser service not initialized")
+        return None
+
+    async def handle_query_page(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_PAGE request.
+
+        Fetches a page from a NomadNet node via the PageBrowserService.
+
+        Args:
+            request: QueryPageRequest instance.
+
+        Returns:
+            ResultResponse with page content and metadata.
+        """
+        err = self._check_page_browser()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = request if isinstance(request, QueryPageRequest) else QueryPageRequest()
+
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        if not HASH_PATTERN.match(req.destination_hash):
+            return ErrorResponse.invalid_request(
+                f"destination_hash must be 16-32 hex characters, got {len(req.destination_hash)} chars"
+            )
+
+        try:
+            response = await self.daemon._page_browser_service.fetch_page(
+                destination_hash=req.destination_hash,
+                path=req.path,
+                form_data=req.form_data,
+                timeout=req.timeout,
+            )
+
+            data: dict[str, object] = {
+                "content": response.content,
+                "status": response.status.value,
+                "destination_hash": response.destination_hash,
+                "path": response.path,
+                "transfer_time": response.transfer_time,
+                "content_length": response.content_length,
+                "cache_ttl": response.cache_ttl,
+            }
+            if response.error_message:
+                data["error_message"] = response.error_message
+
+            return ResultResponse(data=data)
+
+        except Exception as e:
+            logger.exception(f"Error fetching page: {e}")
+            return ErrorResponse.internal_error(f"Failed to fetch page: {e}")
+
+    async def handle_cmd_page_disconnect(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_PAGE_DISCONNECT request.
+
+        Disconnects a cached link to a NomadNet node.
+
+        Args:
+            request: CmdPageDisconnectRequest instance.
+
+        Returns:
+            ResultResponse with disconnect status.
+        """
+        err = self._check_page_browser()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, CmdPageDisconnectRequest)
+            else CmdPageDisconnectRequest()
+        )
+
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            disconnected = await self.daemon._page_browser_service.disconnect(
+                req.destination_hash
+            )
+
+            return ResultResponse(data={"disconnected": disconnected})
+
+        except Exception as e:
+            logger.exception(f"Error disconnecting page link: {e}")
+            return ErrorResponse.internal_error(f"Failed to disconnect page link: {e}")

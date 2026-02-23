@@ -233,7 +233,7 @@ class TestRPCErrorHandling:
 
         await asyncio.sleep(3)
 
-        logger.info(f"Sending request to non-existent destination...")
+        logger.info("Sending request to non-existent destination...")
         start = time.time()
 
         with pytest.raises(RPCTimeoutError):

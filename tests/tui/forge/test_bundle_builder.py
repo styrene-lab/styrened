@@ -3,22 +3,17 @@
 All subprocess and filesystem operations are mocked where necessary.
 """
 
-import shutil
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from styrened.tui.forge.bundle_builder import (
     _assemble_styrene_files,
-    _build_nix_bundle,
-    _build_stock_bundle,
     build_bundle,
 )
 from styrened.tui.forge.models import (
     Bundle,
-    FlashTarget,
-    MediaEvent,
     StageKey,
 )
 from tests.tui.forge.conftest import collect, has_complete, has_error, stages
@@ -114,7 +109,7 @@ class TestBuildBundleStock:
             yield
 
         async def _stub_assemble(*args, **kwargs):
-            from styrened.tui.forge.media_writer import _stage, _log
+            from styrened.tui.forge.media_writer import _log, _stage
             yield _stage(StageKey.STYRENE_FILES, "Assembling...")
             yield _log("Done")
 
@@ -167,7 +162,7 @@ class TestBuildBundleStock:
         bundle = Bundle.create(tmp_path / "bundles", x86_usb_target)
 
         async def _fail_deps(profile):
-            from styrened.tui.forge.media_writer import _stage, _error
+            from styrened.tui.forge.media_writer import _error, _stage
             yield _stage(StageKey.DEPS, "Checking...")
             yield _error("Missing: bsdtar")
 

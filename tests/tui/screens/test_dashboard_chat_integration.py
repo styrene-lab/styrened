@@ -9,13 +9,14 @@ not standalone dashboard bindings.
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from styrened.tui.app import StyreneApp
+from textual.widgets import DataTable
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
-from textual.widgets import DataTable
+from styrened.tui.app import StyreneApp
 
 
 @pytest.fixture

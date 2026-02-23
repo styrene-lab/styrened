@@ -23,6 +23,7 @@ from pathlib import Path
 from styrened.models.config import (
     APIConfig,
     ChatConfig,
+    ConfigFieldError,
     ConfigLoadError,
     ConfigValidationError,
     CoreConfig,
@@ -44,7 +45,7 @@ class ConfigValidationErrors(Exception):
     Defined locally since styrened dropped this class post-v0.3.0.
     """
 
-    def __init__(self, errors: list[ConfigValidationError]) -> None:
+    def __init__(self, errors: list[ConfigFieldError]) -> None:
         self.errors = errors
         messages = [str(e) for e in errors]
         super().__init__(f"Config validation failed: {'; '.join(messages)}")
@@ -54,6 +55,7 @@ __all__ = [
     # Core models (re-exported)
     "APIConfig",
     "ChatConfig",
+    "ConfigFieldError",
     "ConfigLoadError",
     "ConfigValidationError",
     "ConfigValidationErrors",

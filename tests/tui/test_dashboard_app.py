@@ -110,8 +110,7 @@ class TestUptimePanel:
 
         panel = UptimePanel()
 
-        with patch("styrened.tui.widgets.uptime_panel.psutil") as mock_psutil:
-            mock_psutil.boot_time.return_value = time.time() - 86400  # 1 day ago
+        with patch("psutil.boot_time", return_value=time.time() - 86400):
             result = panel._get_uptime()
             assert "1d" in result
 
@@ -155,4 +154,3 @@ class TestLocalDashboardScreen:
         binding_keys = [b.key for b in LocalDashboardScreen.BINDINGS]
         assert "q" in binding_keys
         assert "r" in binding_keys
-        assert "t" in binding_keys

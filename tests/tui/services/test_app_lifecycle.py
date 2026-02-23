@@ -9,13 +9,14 @@ These tests verify:
 """
 
 from pathlib import Path
-from unittest.mock import Mock, call, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from styrened.tui.models.config import DeploymentMode, StyreneConfig
 from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
+from styrened.tui.models.config import DeploymentMode, StyreneConfig
 from styrened.tui.services.app_lifecycle import (
+    LifecycleMode,
     StyreneLifecycle,
     get_service_status,
     initialize_styrene,
@@ -82,43 +83,49 @@ def mock_hub_connection():
 
 @pytest.fixture
 def mock_discovery():
-    """Mock discovery service only."""
-    with patch("styrened.tui.services.app_lifecycle.stop_discovery") as mock_stop:
+    """Mock discovery service (called inside CoreLifecycle.shutdown)."""
+    with patch("styrened.services.reticulum.stop_discovery") as mock_stop:
         yield mock_stop
 
 
 @pytest.fixture
 def mock_dependencies(mock_rns_service, mock_lxmf_service, mock_hub_connection, mock_discovery):
-    """Compose all service mocks for tests that need full mocking."""
+    """Compose all service mocks for tests that need full mocking.
+
+    StyreneLifecycle delegates to CoreLifecycle for init/shutdown, so we mock
+    CoreLifecycle.initialize (returns True) and CoreLifecycle.shutdown (no-op)
+    plus the TUI-layer functions still imported in app_lifecycle.
+    """
     with (
-        patch("styrened.tui.services.app_lifecycle.ensure_operator_identity") as mock_ensure_id,
+        patch(
+            "styrened.services.lifecycle.CoreLifecycle.initialize", return_value=True
+        ) as mock_core_init,
+        patch(
+            "styrened.services.lifecycle.CoreLifecycle.shutdown"
+        ) as mock_core_shutdown,
         patch(
             "styrened.tui.services.app_lifecycle.get_operator_identity_object"
         ) as mock_get_id,
-        patch(
-            "styrened.tui.services.app_lifecycle.initialize_reticulum_with_config"
-        ) as mock_init_rns,
-        patch("styrened.tui.services.app_lifecycle.rns_config_exists") as mock_config_exists,
-        patch("styrened.tui.services.app_lifecycle.save_rns_config") as mock_save_config,
     ):
         # Setup default successful behaviors
         mock_identity = Mock()
         mock_identity.hexhash = "test_identity_hash"
         mock_get_id.return_value = mock_identity
 
-        mock_init_rns.return_value = True
-        mock_config_exists.return_value = True
+        # Mock destination for announce
+        mock_dest = Mock()
+        mock_dest.announce = Mock()
+        mock_rns_service.get_or_create_destination = Mock(return_value=mock_dest)
 
         yield {
-            "ensure_operator_identity": mock_ensure_id,
+            "core_initialize": mock_core_init,
+            "core_shutdown": mock_core_shutdown,
             "get_operator_identity_object": mock_get_id,
-            "initialize_reticulum_with_config": mock_init_rns,
             "rns_service": mock_rns_service,
             "lxmf_service": mock_lxmf_service,
             "hub_connection": mock_hub_connection,
             "stop_discovery": mock_discovery,
-            "rns_config_exists": mock_config_exists,
-            "save_rns_config": mock_save_config,
+            "announce_destination": mock_dest,
         }
 
 
@@ -178,26 +185,27 @@ class TestInitialization:
     def test_styrene_lifecycle_initializes_services_in_order(
         self, mock_config, mock_dependencies
     ):
-        """Test that services initialize in correct order: RNS -> LXMF -> Hub."""
+        """Test that services initialize in correct order: core init -> announce -> hub."""
         lifecycle = StyreneLifecycle(mock_config)
         result = lifecycle.initialize()
 
         assert result is True, f"Initialization failed with error: {lifecycle.rns_error_state}"
         assert lifecycle.is_initialized is True, "Lifecycle not marked as initialized after successful init"
 
-        # Verify call order
-        assert mock_dependencies["ensure_operator_identity"].call_count == 1, "ensure_operator_identity not called exactly once"
-        assert mock_dependencies["initialize_reticulum_with_config"].call_count == 1, "initialize_reticulum_with_config not called exactly once"
-        assert mock_dependencies["lxmf_service"].initialize.call_count == 1, "LXMF initialize not called exactly once"
+        # Verify CoreLifecycle.initialize was called
+        assert mock_dependencies["core_initialize"].call_count == 1, "CoreLifecycle.initialize not called exactly once"
 
     def test_initialization_with_custom_config(self, mock_dependencies):
         """Test initialization accepts custom configuration."""
         custom_config = Mock(spec=StyreneConfig)
+        custom_config.core = Mock()
         custom_config.reticulum = Mock()
         custom_config.reticulum.hub_enabled = False
         custom_config.reticulum.mode = DeploymentMode.PEER
         custom_config.api = Mock()
         custom_config.api.enabled = False
+        custom_config.tui = Mock()
+        custom_config.tui.use_ipc = False
 
         lifecycle = StyreneLifecycle(custom_config)
         result = lifecycle.initialize()
@@ -205,34 +213,35 @@ class TestInitialization:
         assert result is True, "Initialization with custom config failed"
         assert lifecycle.config is custom_config, "Custom config not preserved in lifecycle"
 
-    def test_initialization_creates_required_directories(self, mock_dependencies):
-        """Test initialization creates RNS config if missing."""
-        mock_dependencies["rns_config_exists"].return_value = False
-        mock_dependencies["save_rns_config"].return_value = "/tmp/test_config"
-
-        lifecycle = StyreneLifecycle()
+    def test_initialization_delegates_to_core_lifecycle(self, mock_config, mock_dependencies):
+        """Test initialization delegates to CoreLifecycle which handles config creation."""
+        lifecycle = StyreneLifecycle(mock_config)
         result = lifecycle.initialize()
 
-        assert result is True, "Initialization failed when creating RNS config"
-        mock_dependencies["save_rns_config"].assert_called_once()
+        assert result is True, "Initialization failed"
+        mock_dependencies["core_initialize"].assert_called_once()
 
     def test_initialization_handles_missing_config(self, mock_dependencies):
         """Test initialization uses default config when none provided."""
-        lifecycle = StyreneLifecycle(config=None)
+        lifecycle = StyreneLifecycle(config=None, mode=LifecycleMode.LEGACY)
         result = lifecycle.initialize()
 
         assert result is True, "Initialization with None config failed"
         assert lifecycle.config is not None, "Default config was not created"
 
-    def test_initialization_fails_gracefully_on_rns_error(self, mock_dependencies):
+    def test_initialization_fails_gracefully_on_rns_error(self, mock_config, mock_dependencies):
         """Test initialization handles RNS errors and continues in offline mode."""
-        mock_dependencies["initialize_reticulum_with_config"].return_value = False
+        # Make CoreLifecycle.initialize return False (simulating RNS failure)
+        mock_dependencies["core_initialize"].return_value = False
+
+        lifecycle = StyreneLifecycle(mock_config)
+
+        # Set error state on the core lifecycle to simulate RNS error
         error_state = RNSErrorState(
             category=RNSErrorCategory.CONFIG_PARSE_ERROR, message="Test error"
         )
-        mock_dependencies["rns_service"].error_state = error_state
+        lifecycle._core._rns_error_state = error_state
 
-        lifecycle = StyreneLifecycle()
         result = lifecycle.initialize()
 
         # Should still succeed (offline mode)
@@ -247,102 +256,57 @@ class TestInitialization:
 
 
 class TestIntegrationRNSBehavior:
-    """Integration tests with real RNS initialization."""
+    """Integration tests with CoreLifecycle delegation."""
 
-    @pytest.mark.rns_singleton
-    def test_integration_rns_failure_prevents_lxmf_init(
-        self, tmp_path: Path, mock_lxmf_service, mock_hub_connection, mock_discovery
+    def test_integration_rns_failure_preserves_error_state(
+        self, mock_hub_connection, mock_discovery
     ):
-        """Test that real RNS failure prevents LXMF initialization and preserves error state."""
-        # Create intentionally bad RNS config
-        config_dir = tmp_path / ".reticulum_bad"
-        config_dir.mkdir()
-        (config_dir / "config").write_text("[reticulum\n# Malformed config")
-        storage_dir = config_dir / "storage"
-        storage_dir.mkdir()
-
+        """Test that core init failure preserves error state in offline mode."""
         with (
-            patch("styrened.tui.services.app_lifecycle.rns_config_exists") as mock_config_exists,
-            patch("styrened.tui.services.app_lifecycle.ensure_operator_identity"),
-            patch("styrened.tui.services.app_lifecycle.get_operator_identity_object") as mock_get_id,
+            patch(
+                "styrened.services.lifecycle.CoreLifecycle.initialize", return_value=False
+            ),
+            patch(
+                "styrened.tui.services.app_lifecycle.get_operator_identity_object",
+                return_value=None,
+            ),
         ):
-            import RNS
+            lifecycle = StyreneLifecycle(mode=LifecycleMode.LEGACY)
 
-            # Create identity for testing
-            identity = RNS.Identity(create_keys=True)
-            mock_get_id.return_value = identity
-            mock_config_exists.return_value = True
+            # Simulate error state set by CoreLifecycle during failed init
+            lifecycle._core._rns_error_state = RNSErrorState(
+                category=RNSErrorCategory.CONFIG_PARSE_ERROR,
+                message="Could not parse config file",
+            )
 
-            # Patch RNS initialization to use bad config
-            with patch("styrened.tui.services.reticulum.RNS.Reticulum") as mock_rns_constructor:
-                # Simulate RNS parse error with malformed config
-                mock_rns_constructor.side_effect = Exception("Could not parse config file")
+            result = lifecycle.initialize()
 
-                lifecycle = StyreneLifecycle()
-                result = lifecycle.initialize()
+            # Should succeed in offline mode
+            assert result is True, "Lifecycle should handle RNS failure gracefully"
 
-                # Should succeed in offline mode
-                assert result is True, "Lifecycle should handle RNS failure gracefully"
+            # Error state should be preserved
+            assert lifecycle.rns_error_state.is_error, \
+                "Error state should indicate RNS failure"
+            assert lifecycle.rns_error_state.category != RNSErrorCategory.NONE, \
+                f"Error category should not be NONE, got {lifecycle.rns_error_state.category}"
 
-                # Error state should be preserved from real RNS failure
-                assert lifecycle.rns_error_state.is_error, \
-                    "Error state should indicate RNS failure"
-                assert lifecycle.rns_error_state.category != RNSErrorCategory.NONE, \
-                    f"Error category should not be NONE, got {lifecycle.rns_error_state.category}"
-
-                # LXMF should NOT be initialized when RNS fails
-                assert mock_lxmf_service.initialize.call_count == 0, \
-                    "LXMF should not initialize when RNS fails"
-
-    @pytest.mark.rns_singleton
     def test_integration_shutdown_releases_resources(
-        self, tmp_path: Path, mock_hub_connection, mock_discovery
+        self, mock_hub_connection, mock_discovery
     ):
-        """Test that shutdown actually releases resources with real or minimally mocked services."""
-        import RNS
-        from unittest.mock import MagicMock
-
-        # Create valid RNS config
-        config_dir = tmp_path / ".reticulum_shutdown"
-        config_dir.mkdir()
-        config_content = """[reticulum]
-enable_transport = false
-share_instance = false
-
-[interfaces]
-
-[[Test Interface]]
-type = AutoInterface
-enabled = true
-"""
-        (config_dir / "config").write_text(config_content)
-        storage_dir = config_dir / "storage"
-        storage_dir.mkdir()
-        identity = RNS.Identity(create_keys=True)
-        identity.to_file(str(storage_dir / "identity"))
-
+        """Test that shutdown delegates to CoreLifecycle.shutdown and disconnects hub."""
         with (
-            patch("styrened.tui.services.app_lifecycle.rns_config_exists", return_value=True),
-            patch("styrened.tui.services.app_lifecycle.ensure_operator_identity"),
-            patch("styrened.tui.services.app_lifecycle.get_operator_identity_object", return_value=identity),
-            patch("styrened.services.lxmf_service.get_lxmf_service") as mock_get_lxmf,
-            patch("styrened.tui.services.app_lifecycle.get_rns_service") as mock_get_rns,
+            patch(
+                "styrened.services.lifecycle.CoreLifecycle.initialize", return_value=True
+            ),
+            patch(
+                "styrened.services.lifecycle.CoreLifecycle.shutdown"
+            ) as mock_core_shutdown,
+            patch(
+                "styrened.tui.services.app_lifecycle.get_operator_identity_object",
+                return_value=None,
+            ),
         ):
-            # Use minimally mocked services to verify cleanup
-            mock_rns_service = MagicMock()
-            mock_rns_service.is_initialized = True
-            mock_rns_service.error_state = RNSErrorState.none()
-            mock_rns_service.shutdown = Mock()
-            mock_get_rns.return_value = mock_rns_service
-
-            mock_lxmf = MagicMock()
-            mock_lxmf.initialize = Mock(return_value=True)
-            mock_lxmf.shutdown = Mock()
-            mock_lxmf.is_initialized = True
-            mock_lxmf.delivery_destination = None
-            mock_get_lxmf.return_value = mock_lxmf
-
-            lifecycle = StyreneLifecycle()
+            lifecycle = StyreneLifecycle(mode=LifecycleMode.LEGACY)
             init_result = lifecycle.initialize()
 
             assert init_result is True, "Initialization failed"
@@ -351,11 +315,9 @@ enabled = true
             # Perform shutdown
             lifecycle.shutdown()
 
-            # Verify all shutdown methods were called
-            assert mock_discovery.call_count == 1, "Discovery stop not called during shutdown"
+            # Verify shutdown methods were called
+            assert mock_core_shutdown.call_count == 1, "CoreLifecycle.shutdown not called during shutdown"
             assert mock_hub_connection.disconnect.call_count == 1, "Hub disconnect not called during shutdown"
-            assert mock_lxmf.shutdown.call_count == 1, "LXMF shutdown not called"
-            assert mock_rns_service.shutdown.call_count == 1, "RNS shutdown not called"
 
             # Verify lifecycle state is cleared
             assert lifecycle.is_initialized is False, "Lifecycle still marked as initialized after shutdown"
@@ -369,100 +331,85 @@ enabled = true
 class TestServiceStartupShutdown:
     """Test service startup and shutdown order."""
 
-    def test_startup_order_rns_before_lxmf(self, mock_config, mock_dependencies):
-        """Test RNS initializes before LXMF."""
+    def test_startup_core_init_before_announce(self, mock_config, mock_dependencies):
+        """Test CoreLifecycle.initialize runs before TUI-layer announce."""
         call_order = []
 
-        def track_rns(*args, **kwargs):
-            call_order.append("rns")
+        def track_core_init(*args, **kwargs):
+            call_order.append("core_init")
             return True
 
-        def track_lxmf(*args, **kwargs):
-            call_order.append("lxmf")
-            return True
+        def track_announce(*args, **kwargs):
+            call_order.append("announce")
 
-        mock_dependencies["initialize_reticulum_with_config"].side_effect = track_rns
-        mock_dependencies["lxmf_service"].initialize.side_effect = track_lxmf
+        mock_dependencies["core_initialize"].side_effect = track_core_init
+        mock_dependencies["announce_destination"].announce = Mock(side_effect=track_announce)
 
         lifecycle = StyreneLifecycle(mock_config)
         lifecycle.initialize()
 
-        assert call_order == ["rns", "lxmf"], \
-            f"Services did not initialize in correct order: {call_order}"
+        assert "core_init" in call_order, "CoreLifecycle.initialize not called"
+        assert "announce" in call_order, "Announce not called"
+        assert call_order.index("core_init") < call_order.index("announce"), \
+            f"Core init did not run before announce: {call_order}"
 
-    def test_startup_order_lxmf_before_discovery(self, mock_config, mock_dependencies):
-        """Test LXMF initializes before discovery announcements."""
+    def test_startup_order_core_init_before_announce(self, mock_config, mock_dependencies):
+        """Test core initialization happens before Styrene node announcement."""
         call_order = []
 
-        def track_lxmf(*args, **kwargs):
-            call_order.append("lxmf")
+        def track_core_init(*args, **kwargs):
+            call_order.append("core_init")
             return True
 
-        mock_lxmf_service = mock_dependencies["lxmf_service"]
-        mock_lxmf_service.initialize.side_effect = track_lxmf
-        mock_lxmf_service.is_initialized = True
-        mock_lxmf_service.delivery_destination = Mock()
-        mock_lxmf_service.delivery_destination.hash = Mock()
-        mock_lxmf_service.delivery_destination.hash.hex = Mock(
-            return_value="test_lxmf_dest_hash"
-        )
+        mock_dependencies["core_initialize"].side_effect = track_core_init
 
-        # Mock destination announce
-        mock_dest = Mock()
-        mock_dest.hash = Mock()
-        mock_dest.hash.hex = Mock(return_value="test_dest_hash")
+        # Track announce via the destination mock
+        mock_dest = mock_dependencies["announce_destination"]
 
         def track_announce(*args, **kwargs):
             call_order.append("announce")
 
         mock_dest.announce = Mock(side_effect=track_announce)
 
-        mock_dependencies["rns_service"].create_operator_destination.return_value = mock_dest
-
         lifecycle = StyreneLifecycle(mock_config)
         lifecycle.initialize()
 
-        # LXMF should initialize before announce
-        assert "lxmf" in call_order, "LXMF not initialized"
+        # Core init should happen before announce
+        assert "core_init" in call_order, "Core init not called"
         assert "announce" in call_order, "Announce not called"
-        assert call_order.index("lxmf") < call_order.index("announce"), \
-            f"LXMF did not initialize before announce: {call_order}"
+        assert call_order.index("core_init") < call_order.index("announce"), \
+            f"Core init did not run before announce: {call_order}"
 
-    def test_shutdown_order_reverse_of_startup(self, mock_config, mock_dependencies):
-        """Test shutdown happens in reverse order of startup with actual cleanup verification."""
+    def test_shutdown_calls_core_and_hub(self, mock_config, mock_dependencies):
+        """Test shutdown delegates to CoreLifecycle.shutdown and disconnects hub."""
         lifecycle = StyreneLifecycle(mock_config)
         lifecycle.initialize()
 
-        # Reset call counts to verify shutdown order
-        mock_dependencies["stop_discovery"].reset_mock()
+        # Reset call counts to verify shutdown
+        mock_dependencies["core_shutdown"].reset_mock()
         mock_dependencies["hub_connection"].disconnect.reset_mock()
-        mock_dependencies["lxmf_service"].shutdown.reset_mock()
-        mock_dependencies["rns_service"].shutdown.reset_mock()
 
         lifecycle.shutdown()
 
         # Verify shutdown methods were called
-        assert mock_dependencies["stop_discovery"].call_count == 1, "Discovery not stopped during shutdown"
+        assert mock_dependencies["core_shutdown"].call_count == 1, "CoreLifecycle.shutdown not called"
         assert mock_dependencies["hub_connection"].disconnect.call_count == 1, "Hub not disconnected during shutdown"
-        assert mock_dependencies["lxmf_service"].shutdown.call_count == 1, "LXMF not shut down"
-        assert mock_dependencies["rns_service"].shutdown.call_count == 1, "RNS not shut down"
 
         # Verify lifecycle state cleared
         assert lifecycle.is_initialized is False, "Lifecycle still initialized after shutdown"
 
-    def test_partial_startup_rolls_back_on_error(self, mock_config, mock_dependencies):
-        """Test partial startup cleans up on error."""
-        # Make LXMF initialization fail
-        mock_dependencies["lxmf_service"].initialize.return_value = False
+    def test_partial_startup_continues_on_core_failure(self, mock_config, mock_dependencies):
+        """Test initialization enters offline mode when core init fails."""
+        # Make CoreLifecycle.initialize return False
+        mock_dependencies["core_initialize"].return_value = False
 
         lifecycle = StyreneLifecycle(mock_config)
         result = lifecycle.initialize()
 
-        # Should still succeed (LXMF is optional)
-        assert result is True, "Initialization should succeed even if LXMF fails (LXMF is optional)"
-        # But LXMF should have been attempted
-        assert mock_dependencies["lxmf_service"].initialize.call_count == 1, \
-            "LXMF initialization should have been attempted"
+        # Should still succeed (offline mode)
+        assert result is True, "Initialization should succeed in offline mode even if core init fails"
+        assert mock_dependencies["core_initialize"].call_count == 1, \
+            "CoreLifecycle.initialize should have been attempted"
 
     def test_shutdown_is_idempotent(self, mock_config, mock_dependencies):
         """Test multiple shutdown calls don't cause errors."""
@@ -471,10 +418,10 @@ class TestServiceStartupShutdown:
 
         # Shutdown twice
         lifecycle.shutdown()
-        shutdown_calls_after_first = mock_dependencies["rns_service"].shutdown.call_count
+        shutdown_calls_after_first = mock_dependencies["core_shutdown"].call_count
 
         lifecycle.shutdown()
-        shutdown_calls_after_second = mock_dependencies["rns_service"].shutdown.call_count
+        shutdown_calls_after_second = mock_dependencies["core_shutdown"].call_count
 
         # No errors should occur
         assert lifecycle.is_initialized is False, "Lifecycle should be marked as not initialized"
@@ -494,33 +441,24 @@ class TestErrorPropagation:
     def test_rns_initialization_failure_propagates(self, mock_config, mock_lxmf_service, mock_hub_connection, mock_discovery):
         """Test RNS initialization failure is captured with real error state propagation."""
         with (
-            patch("styrened.tui.services.app_lifecycle.ensure_operator_identity"),
-            patch("styrened.tui.services.app_lifecycle.get_operator_identity_object") as mock_get_id,
-            patch("styrened.tui.services.app_lifecycle.initialize_reticulum_with_config") as mock_init_rns,
-            patch("styrened.tui.services.app_lifecycle.rns_config_exists", return_value=True),
-            patch("styrened.tui.services.app_lifecycle.get_rns_service") as mock_get_rns,
+            patch(
+                "styrened.services.lifecycle.CoreLifecycle.initialize", return_value=False
+            ),
+            patch(
+                "styrened.tui.services.app_lifecycle.get_operator_identity_object",
+                return_value=None,
+            ),
         ):
-            import RNS
+            lifecycle = StyreneLifecycle(mock_config)
 
-            # Setup identity
-            identity = RNS.Identity(create_keys=True)
-            mock_get_id.return_value = identity
-
-            # Make RNS initialization fail
-            mock_init_rns.return_value = False
-
-            # Create real error state (not just mock configuration)
+            # Simulate error state set by CoreLifecycle during failed init
             real_error = RNSErrorState(
                 category=RNSErrorCategory.INTERFACE_FAILURE,
                 exception_type="RuntimeError",
                 message="No interfaces could be initialized"
             )
+            lifecycle._core._rns_error_state = real_error
 
-            mock_rns_service = Mock()
-            mock_rns_service.error_state = real_error
-            mock_get_rns.return_value = mock_rns_service
-
-            lifecycle = StyreneLifecycle(mock_config)
             result = lifecycle.initialize()
 
             # Should succeed but preserve error state
@@ -531,91 +469,66 @@ class TestErrorPropagation:
             assert lifecycle.rns_error_state.message == "No interfaces could be initialized", \
                 "Error message not preserved from RNS service"
 
-    def test_lxmf_initialization_failure_propagates(self, mock_config, mock_dependencies):
-        """Test LXMF initialization failure is logged but doesn't fail startup."""
-        mock_dependencies["lxmf_service"].initialize.return_value = False
+    def test_core_init_failure_does_not_crash_startup(self, mock_config, mock_dependencies):
+        """Test core initialization failure enters offline mode without crashing."""
+        mock_dependencies["core_initialize"].return_value = False
 
         lifecycle = StyreneLifecycle(mock_config)
         result = lifecycle.initialize()
 
-        # Should still succeed (LXMF is not critical)
-        assert result is True, "Initialization should succeed even when LXMF fails (LXMF is optional)"
+        # Should still succeed (offline mode)
+        assert result is True, "Initialization should succeed in offline mode even when core init fails"
 
-    def test_error_state_preserved_after_failure(self, mock_config, mock_lxmf_service, mock_hub_connection, mock_discovery):
-        """Test error state is preserved for inspection with real error categorization."""
-        with (
-            patch("styrened.tui.services.app_lifecycle.ensure_operator_identity") as mock_ensure_id,
-            patch("styrened.tui.services.app_lifecycle.get_operator_identity_object"),
-            patch("styrened.tui.services.app_lifecycle.initialize_reticulum_with_config"),
-            patch("styrened.tui.services.app_lifecycle.rns_config_exists", return_value=True),
-            patch("styrened.tui.services.app_lifecycle.get_rns_service"),
-        ):
-            # Create a real exception that will be categorized
-            identity_error = PermissionError("Cannot read operator identity file")
-            mock_ensure_id.side_effect = identity_error
+    def test_error_state_preserved_after_failure(self, mock_config, mock_dependencies):
+        """Test error state is preserved for inspection after core init failure."""
+        # Make CoreLifecycle.initialize return False
+        mock_dependencies["core_initialize"].return_value = False
 
-            lifecycle = StyreneLifecycle(mock_config)
-            result = lifecycle.initialize()
+        lifecycle = StyreneLifecycle(mock_config)
 
-            # Should fail on identity error but continue in offline mode
-            assert result is True, "Should succeed in offline mode despite identity error"
-            assert lifecycle.rns_error_state.is_error, "Error state should indicate failure"
-            # Verify actual error categorization happened (not just mock return value)
-            assert lifecycle.rns_error_state.category in [
-                RNSErrorCategory.IDENTITY_PERMISSION,
-                RNSErrorCategory.IDENTITY_CORRUPT,
-                RNSErrorCategory.UNKNOWN
-            ], f"Unexpected error category: {lifecycle.rns_error_state.category}"
+        # Simulate RNS error state set by CoreLifecycle during failed init
+        error_state = RNSErrorState(
+            category=RNSErrorCategory.IDENTITY_PERMISSION,
+            message="Cannot read operator identity file",
+        )
+        lifecycle._core._rns_error_state = error_state
 
-    def test_recovery_after_transient_failure(self, mock_config, mock_lxmf_service, mock_hub_connection, mock_discovery):
-        """Test recovery from transient failures with real failure/recovery cycle."""
-        with (
-            patch("styrened.tui.services.app_lifecycle.ensure_operator_identity") as mock_ensure_id,
-            patch("styrened.tui.services.app_lifecycle.get_operator_identity_object") as mock_get_id,
-            patch("styrened.tui.services.app_lifecycle.initialize_reticulum_with_config") as mock_init_rns,
-            patch("styrened.tui.services.app_lifecycle.rns_config_exists", return_value=True),
-            patch("styrened.tui.services.app_lifecycle.get_rns_service") as mock_get_rns,
-        ):
-            import RNS
+        result = lifecycle.initialize()
 
-            # First call fails, second succeeds
-            mock_ensure_id.side_effect = [
-                RuntimeError("Transient network error"),
-                None,
-            ]
+        # Should succeed in offline mode but preserve error state
+        assert result is True, "Should succeed in offline mode despite core failure"
+        assert lifecycle.rns_error_state.is_error, "Error state should indicate failure"
+        assert lifecycle.rns_error_state.category == RNSErrorCategory.IDENTITY_PERMISSION, \
+            f"Unexpected error category: {lifecycle.rns_error_state.category}"
 
-            identity = RNS.Identity(create_keys=True)
-            mock_get_id.return_value = identity
-            # First init fails, second succeeds
-            mock_init_rns.side_effect = [False, True]
+    def test_recovery_after_transient_failure(self, mock_config, mock_dependencies):
+        """Test recovery from transient failures with failure/recovery cycle."""
+        # First call fails, second succeeds
+        mock_dependencies["core_initialize"].side_effect = [False, True]
 
-            # Mock RNS service with proper mock structure
-            mock_rns_service = Mock()
-            mock_rns_service.is_initialized = True
-            mock_rns_service.error_state = RNSErrorState.none()
-            mock_dest = Mock()
-            mock_dest.hash = Mock()
-            mock_dest.hash.hex = Mock(return_value="test_dest_hash")
-            mock_dest.announce = Mock()
-            mock_rns_service.create_operator_destination = Mock(return_value=mock_dest)
-            mock_get_rns.return_value = mock_rns_service
+        lifecycle = StyreneLifecycle(mock_config)
 
-            lifecycle = StyreneLifecycle(mock_config)
+        # Simulate error state from first failure
+        error_state = RNSErrorState(
+            category=RNSErrorCategory.INTERFACE_FAILURE,
+            message="Transient network error",
+        )
+        lifecycle._core._rns_error_state = error_state
 
-            # First attempt fails
-            result1 = lifecycle.initialize()
-            assert result1 is True, "First initialization should succeed in offline mode"
-            assert lifecycle.rns_error_state.is_error, "First attempt should have error state"
+        # First attempt enters offline mode
+        result1 = lifecycle.initialize()
+        assert result1 is True, "First initialization should succeed in offline mode"
+        assert lifecycle.rns_error_state.is_error, "First attempt should have error state"
 
-            # Reset for second attempt
-            lifecycle._initialized = False
-            lifecycle._rns_error_state = RNSErrorState.none()
+        # Reset for second attempt
+        lifecycle._initialized = False
+        lifecycle._core._rns_error_state = RNSErrorState.none()
 
-            # Second attempt should succeed
-            result2 = lifecycle.initialize()
-            assert result2 is True, "Second initialization should succeed"
-            assert not lifecycle.rns_error_state.is_error, \
-                f"Second attempt should clear error state, got {lifecycle.rns_error_state.category}"
+        # Second attempt should succeed
+        result2 = lifecycle.initialize()
+        assert result2 is True, "Second initialization should succeed"
+        assert not lifecycle.rns_error_state.is_error, \
+            f"Second attempt should clear error state, got {lifecycle.rns_error_state.category}"
 
     def test_concurrent_initialization_attempts_rejected(
         self, mock_config, mock_dependencies
@@ -626,15 +539,15 @@ class TestErrorPropagation:
         # First initialization
         result1 = lifecycle.initialize()
         assert result1 is True, "First initialization failed"
-        first_init_count = mock_dependencies["initialize_reticulum_with_config"].call_count
+        first_init_count = mock_dependencies["core_initialize"].call_count
 
         # Second initialization should be rejected
         result2 = lifecycle.initialize()
         assert result2 is True, "Second initialization should return True (already initialized)"
-        second_init_count = mock_dependencies["initialize_reticulum_with_config"].call_count
+        second_init_count = mock_dependencies["core_initialize"].call_count
 
         # Should only initialize once
-        assert first_init_count == 1, "First initialization should call RNS init once"
+        assert first_init_count == 1, "First initialization should call core init once"
         assert second_init_count == 1, \
             f"Concurrent initialization should not re-initialize (call count: {second_init_count})"
 
@@ -685,9 +598,9 @@ class TestHubConnection:
 class TestUtilityFunctions:
     """Test module-level utility functions."""
 
-    def test_initialize_styrene_convenience_function(self, mock_dependencies):
+    def test_initialize_styrene_convenience_function(self, mock_config, mock_dependencies):
         """Test initialize_styrene creates and initializes lifecycle."""
-        lifecycle = initialize_styrene()
+        lifecycle = initialize_styrene(mock_config)
 
         assert isinstance(lifecycle, StyreneLifecycle), \
             f"Expected StyreneLifecycle instance, got {type(lifecycle)}"
@@ -699,13 +612,11 @@ class TestUtilityFunctions:
             "styrened.tui.services.reticulum.get_reticulum_status"
         ) as mock_get_status:
             mock_get_status.return_value = {
+                "running": True,
                 "identity": "test_identity",
                 "transport_enabled": True,
                 "interfaces": 2,
             }
-
-            mock_rns_service = mock_dependencies["rns_service"]
-            mock_rns_service.is_initialized = True
 
             mock_hub = mock_dependencies["hub_connection"]
             mock_hub.is_connected = False
@@ -732,14 +643,8 @@ class TestAnnounce:
 
     def test_announce_includes_hostname(self, mock_config, mock_dependencies):
         """Test that node announces itself on initialization."""
-        mock_dest = Mock()
-        mock_dest.hash = Mock()
-        mock_dest.hash.hex = Mock(return_value="test_dest_hash")
+        mock_dest = mock_dependencies["announce_destination"]
         mock_dest.announce = Mock()
-
-        mock_dependencies[
-            "rns_service"
-        ].create_operator_destination.return_value = mock_dest
 
         # Configure LXMF mock
         mock_lxmf_service = mock_dependencies["lxmf_service"]
@@ -752,25 +657,25 @@ class TestAnnounce:
         # Verify announce was called
         mock_dest.announce.assert_called_once()
 
-        # Verify app_data was provided (format details tested elsewhere)
+        # Verify announce data is bytes (app_data passed as positional arg)
         call_args = mock_dest.announce.call_args
-        assert "app_data" in call_args.kwargs, "app_data not provided to announce"
-        assert isinstance(call_args.kwargs["app_data"], bytes), \
-            f"app_data should be bytes, got {type(call_args.kwargs['app_data'])}"
+        assert len(call_args.args) > 0 or "app_data" in call_args.kwargs, \
+            "announce data not provided to announce"
+        announce_data = call_args.args[0] if call_args.args else call_args.kwargs.get("app_data")
+        assert isinstance(announce_data, bytes), \
+            f"announce data should be bytes, got {type(announce_data)}"
 
     def test_announce_includes_capabilities(self, mock_config, mock_dependencies):
         """Test that node announces with capabilities when in hub mode."""
         mock_config.reticulum.mode = DeploymentMode.HUB
         mock_config.api.enabled = True
+        mock_config.rpc = Mock()
+        mock_config.rpc.enabled = True
+        mock_config.discovery = Mock()
+        mock_config.discovery.enabled = True
 
-        mock_dest = Mock()
-        mock_dest.hash = Mock()
-        mock_dest.hash.hex = Mock(return_value="test_dest_hash")
+        mock_dest = mock_dependencies["announce_destination"]
         mock_dest.announce = Mock()
-
-        mock_dependencies[
-            "rns_service"
-        ].create_operator_destination.return_value = mock_dest
 
         # Configure LXMF mock
         mock_lxmf_service = mock_dependencies["lxmf_service"]
@@ -783,21 +688,16 @@ class TestAnnounce:
         # Verify announce was called (hub mode still announces)
         mock_dest.announce.assert_called_once()
 
-        # Verify app_data was provided (capability format tested elsewhere)
+        # Verify announce data contains capability keywords
         call_args = mock_dest.announce.call_args
-        app_data = call_args.kwargs.get("app_data", b"")
-        # Just check it contains hub/api keywords
-        assert b"hub" in app_data, "Announce should include 'hub' capability"
-        assert b"api" in app_data, "Announce should include 'api' capability"
+        announce_data = call_args.args[0] if call_args.args else call_args.kwargs.get("app_data", b"")
+        assert b"rpc" in announce_data, "Announce should include 'rpc' capability"
+        assert b"discovery" in announce_data, "Announce should include 'discovery' capability"
 
 
 # =============================================================================
 # IPC Mode Tests
 # =============================================================================
-
-
-from unittest.mock import AsyncMock
-from styrened.tui.services.app_lifecycle import LifecycleMode
 
 
 @pytest.fixture

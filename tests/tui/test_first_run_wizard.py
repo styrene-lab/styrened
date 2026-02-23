@@ -50,16 +50,20 @@ class TestConfigGeneration:
 
     def test_create_default_config(self, tmp_path: Path):
         """Test creating default config file."""
-        with patch(
-            "styrened.tui.services.reticulum._get_default_config_dir", return_value=tmp_path
-        ):
+        # create_default_reticulum_config uses Path.home() / ".reticulum" directly,
+        # so we mock Path.home to redirect to our tmp_path
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        expected_config_dir = fake_home / ".reticulum"
+
+        with patch.object(Path, "home", return_value=fake_home):
             config_file = create_default_reticulum_config("auto")
 
             assert config_file.exists()
-            assert config_file == tmp_path / "config"
+            assert config_file == expected_config_dir / "config"
 
             # Verify storage directory created
-            storage_dir = tmp_path / "storage"
+            storage_dir = expected_config_dir / "storage"
             assert storage_dir.exists()
             assert storage_dir.is_dir()
 

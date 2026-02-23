@@ -1,135 +1,343 @@
-"""Command execution widget for running commands on devices via RPC."""
+"""Command execution widget for running commands on devices via RPC.
+
+Features:
+- Ping: Measures RTT and populates available_commands
+- Available commands: Displayed as clickable labels, filtered via shutil.which()
+- Presets: Common command combos filtered against available_commands
+- Command history: Up/down arrow cycles through in-session history
+- Reboot: Double-tap confirmation with 3s auto-cancel
+- Session log: Scrollable output with color-coded exit codes
+- Dual-mode routing: IPCBridge first, falls back to app.rpc_client
+"""
+
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
+from textual.binding import Binding, BindingType
+from textual.containers import Horizontal, VerticalScroll
 from textual.reactive import reactive
+from textual.timer import Timer
+from textual.widget import Widget
 from textual.widgets import Button, Input, Static
 
-from styrened.rpc import ExecResult, RPCTimeoutError
+logger = logging.getLogger(__name__)
+
+# Reboot confirmation timeout (seconds)
+_REBOOT_CONFIRM_TIMEOUT = 3.0
+
+# Preset command combos
+COMMAND_PRESETS: list[tuple[str, str]] = [
+    ("uptime", "uptime"),
+    ("df -h", "df -h"),
+    ("free -h", "free -h"),
+    ("uname -a", "uname -a"),
+    ("failed units", "systemctl list-units --failed"),
+    ("styrened logs", "journalctl -u styrened --no-pager -n 20"),
+    ("rnstatus", "rnstatus"),
+    ("ps aux", "ps aux"),
+]
 
 
-class CommandWidget(Static):
+@dataclass
+class OutputEntry:
+    """A single entry in the session log."""
+
+    command: str
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    rtt_ms: float | None = None
+    entry_type: str = "exec"  # exec, ping, reboot, system
+
+
+class CommandWidget(Widget):
     """Widget for executing commands on device via RPC.
+
+    Provides a toolbar, available command display, presets, session log,
+    and command input with history navigation.
 
     Attributes:
         device_identity: Reticulum identity hash of target device.
-        result: Last command execution result (or None).
-        executing: Whether command is currently executing.
     """
 
-    result: reactive[ExecResult | None] = reactive(None)
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("up", "history_prev", "Previous", show=False),
+        Binding("down", "history_next", "Next", show=False),
+    ]
+
     executing: reactive[bool] = reactive(False)
 
-    def __init__(self, device_identity: str, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        """Initialize command widget.
-
-        Args:
-            device_identity: Device identity hash.
-            **kwargs: Additional widget arguments.
-        """
+    def __init__(
+        self,
+        device_identity: str,
+        initial_available_commands: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.device_identity = device_identity
+        self._available_commands: list[str] = initial_available_commands or []
+        self._command_history: list[str] = []
+        self._history_index: int = -1
+        self._output_entries: list[OutputEntry] = []
+        self._reboot_armed: bool = False
+        self._reboot_confirm_timer: Timer | None = None
+
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge from app lifecycle."""
+        try:
+            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
+    @property
+    def _rpc_client(self) -> Any:
+        """Get RPC client from app (legacy mode)."""
+        try:
+            return self.app.rpc_client  # type: ignore[attr-defined]
+        except Exception:
+            return None
 
     def compose(self) -> ComposeResult:
-        """Compose widget content."""
-        # Command input row
-        with Horizontal(classes="command-input-row"):
+        """Compose widget layout."""
+        # Toolbar
+        with Horizontal(id="cmd-toolbar"):
+            yield Button("Ping", id="cmd-ping", variant="default")
+            yield Button("Reboot...", id="cmd-reboot", classes="-danger")
+            yield Button("Clear", id="cmd-clear", variant="default")
+            yield Static("", id="cmd-status", classes="cmd-status-text")
+
+        # Available commands
+        yield Static("", id="cmd-available", classes="cmd-available-bar")
+
+        # Presets
+        with Horizontal(id="cmd-presets"):
+            pass  # Populated dynamically
+
+        # Session log
+        with VerticalScroll(id="cmd-session-log"):
+            yield Static("", id="cmd-log-content", classes="cmd-log-content")
+
+        # Input row (docked bottom)
+        with Horizontal(id="cmd-input-row"):
             yield Input(placeholder="Enter command...", id="cmd-input")
             yield Button("Execute", id="cmd-execute", variant="primary")
 
-        # Executing state
-        if self.executing:
-            yield Static("[dim]Executing...[/]", classes="command-executing")
+    def on_mount(self) -> None:
+        """Populate available commands and presets on mount."""
+        self._refresh_available_display()
+        self._refresh_presets()
+        if not self._available_commands:
+            # Auto-ping to populate available commands
+            self.run_worker(self._do_ping(), name="auto-ping")
 
-        # Result display
-        if self.result and not self.executing:
-            with Container(classes="command-result"):
-                # Exit code
-                if self.result.success:
-                    yield Static(
-                        f"[bold green]Exit Code:[/] {self.result.exit_code}",
-                        classes="exit-code-success",
-                    )
+    def _refresh_available_display(self) -> None:
+        """Update the available commands display."""
+        try:
+            label = self.query_one("#cmd-available", Static)
+        except Exception:
+            return
+
+        if not self._available_commands:
+            label.update("[dim]No available commands yet — ping to discover[/]")
+        else:
+            tags = "  ".join(
+                f"[@click=cmd_fill('{cmd}')]{cmd}[/]"
+                for cmd in self._available_commands
+            )
+            label.update(f"[bold]Available:[/] {tags}")
+
+    def _refresh_presets(self) -> None:
+        """Refresh preset buttons filtered by available commands."""
+        try:
+            container = self.query_one("#cmd-presets", Horizontal)
+        except Exception:
+            return
+
+        # Remove existing preset buttons
+        for child in list(container.children):
+            child.remove()
+
+        # Filter presets by available commands
+        for label, cmd_string in COMMAND_PRESETS:
+            base_cmd = cmd_string.split()[0]
+            if not self._available_commands or base_cmd in self._available_commands:
+                btn = Button(
+                    label,
+                    classes="cmd-preset-btn",
+                    name=cmd_string,
+                )
+                container.mount(btn)
+
+    def _set_status(self, text: str) -> None:
+        """Update the status text in the toolbar."""
+        try:
+            status = self.query_one("#cmd-status", Static)
+            status.update(text)
+        except Exception:
+            pass
+
+    def _append_output(self, entry: OutputEntry) -> None:
+        """Add an entry to the session log and refresh display."""
+        self._output_entries.append(entry)
+        self._refresh_log()
+
+    def _refresh_log(self) -> None:
+        """Re-render the session log from entries."""
+        try:
+            log_widget = self.query_one("#cmd-log-content", Static)
+            scroll = self.query_one("#cmd-session-log", VerticalScroll)
+        except Exception:
+            return
+
+        lines: list[str] = []
+        for entry in self._output_entries:
+            if entry.entry_type == "ping":
+                if entry.rtt_ms is not None:
+                    lines.append(f"[bold]PING[/] → [green]OK[/] ({entry.rtt_ms:.0f}ms)")
                 else:
-                    yield Static(
-                        f"[bold red]Exit Code:[/] {self.result.exit_code}",
-                        classes="exit-code-error",
-                    )
+                    lines.append(f"[bold]PING[/] → [red]FAILED[/]: {entry.stderr}")
+            elif entry.entry_type == "reboot":
+                if entry.exit_code == 0:
+                    lines.append(f"[bold]REBOOT[/] → [green]{entry.stdout}[/]")
+                else:
+                    lines.append(f"[bold]REBOOT[/] → [red]{entry.stderr}[/]")
+            elif entry.entry_type == "system":
+                lines.append(f"[dim]{entry.stdout}[/]")
+            else:
+                # exec
+                lines.append(f"[bold]$ {entry.command}[/]")
+                if entry.stdout:
+                    lines.append(entry.stdout.rstrip())
+                if entry.stderr:
+                    lines.append(f"[red]{entry.stderr.rstrip()}[/]")
+                if entry.exit_code is not None:
+                    if entry.exit_code == 0:
+                        lines.append(f"[green][exit {entry.exit_code}][/]")
+                    else:
+                        lines.append(f"[red][exit {entry.exit_code}][/]")
+                lines.append("")  # blank separator
 
-                # Output
-                if self.result.stdout:
-                    with Container(classes="command-output"):
-                        yield Static("[bold]Output:[/]", classes="output-label")
-                        yield Static(self.result.stdout, classes="stdout")
+        log_widget.update("\n".join(lines) if lines else "[dim]No commands executed yet[/]")
+        # Auto-scroll to bottom
+        scroll.scroll_end(animate=False)
 
-                if self.result.stderr:
-                    with Container(classes="command-error"):
-                        yield Static("[bold]Error:[/]", classes="error-label")
-                        yield Static(self.result.stderr, classes="stderr")
-
-    def watch_result(self, result: ExecResult | None) -> None:
-        """React to result changes.
-
-        Args:
-            result: New result value.
-        """
-        # Only recompose if widget is already mounted
-        if self.is_mounted:
-            self._recompose()
-
-    def watch_executing(self, executing: bool) -> None:
-        """React to executing state changes.
-
-        Args:
-            executing: New executing state.
-        """
-        # Only recompose if widget is already mounted
-        if self.is_mounted:
-            self._recompose()
-
-    def _recompose(self) -> None:
-        """Re-compose widget with current state."""
-        # Get current input value before removing children
-        current_value = ""
-        try:
-            cmd_input = self.query_one("#cmd-input", Input)
-            current_value = cmd_input.value
-        except Exception:
-            pass
-
-        # Remove all children except input row
-        for child in list(self.children):
-            if not any(child.query("#cmd-input")):
-                child.remove()
-
-        # Re-compose dynamic content
-        new_children = []
-        for child in self.compose():
-            # Skip the input row since it's already mounted
-            if not any(child.query("#cmd-input")):
-                new_children.append(child)
-
-        if new_children:
-            self.mount(*new_children)
-
-        # Restore input value
-        try:
-            cmd_input = self.query_one("#cmd-input", Input)
-            cmd_input.value = current_value
-        except Exception:
-            pass
+    # -------------------------------------------------------------------------
+    # Actions / Handlers
+    # -------------------------------------------------------------------------
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button press events.
+        """Handle button press events."""
+        button_id = str(event.button.id)
 
-        Args:
-            event: Button pressed event.
-        """
-        if str(event.button.id) == "cmd-execute":
-            await self._execute_command()
+        if button_id == "cmd-execute":
+            await self._execute_from_input()
+        elif button_id == "cmd-ping":
+            self.run_worker(self._do_ping(), name="ping")
+        elif button_id == "cmd-reboot":
+            await self._handle_reboot()
+        elif button_id == "cmd-clear":
+            self._output_entries.clear()
+            self._refresh_log()
 
-    async def _execute_command(self) -> None:
-        """Execute command from input field."""
+        # Preset buttons have no id, use name
+        if event.button.name and event.button.has_class("cmd-preset-btn"):
+            self.run_worker(
+                self._execute_command_string(event.button.name),
+                name="preset-exec",
+            )
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in the input field."""
+        if str(event.input.id) == "cmd-input":
+            await self._execute_from_input()
+
+    def action_cmd_fill(self, command: str) -> None:
+        """Fill the input field with a command (from clickable labels)."""
+        try:
+            cmd_input = self.query_one("#cmd-input", Input)
+            cmd_input.value = command
+            cmd_input.focus()
+        except Exception:
+            pass
+
+    def action_history_prev(self) -> None:
+        """Navigate to previous command in history."""
+        if not self._command_history:
+            return
+        try:
+            cmd_input = self.query_one("#cmd-input", Input)
+        except Exception:
+            return
+
+        if self._history_index == -1:
+            self._history_index = len(self._command_history) - 1
+        elif self._history_index > 0:
+            self._history_index -= 1
+
+        cmd_input.value = self._command_history[self._history_index]
+
+    def action_history_next(self) -> None:
+        """Navigate to next command in history."""
+        if not self._command_history or self._history_index == -1:
+            return
+        try:
+            cmd_input = self.query_one("#cmd-input", Input)
+        except Exception:
+            return
+
+        if self._history_index < len(self._command_history) - 1:
+            self._history_index += 1
+            cmd_input.value = self._command_history[self._history_index]
+        else:
+            self._history_index = -1
+            cmd_input.value = ""
+
+    # -------------------------------------------------------------------------
+    # Reboot double-tap confirmation
+    # -------------------------------------------------------------------------
+
+    async def _handle_reboot(self) -> None:
+        """Handle reboot button — requires double-tap within timeout."""
+        if self._reboot_armed:
+            # Second tap — execute reboot
+            self._disarm_reboot()
+            self.run_worker(self._do_reboot(), name="reboot")
+        else:
+            # First tap — arm
+            self._reboot_armed = True
+            try:
+                btn = self.query_one("#cmd-reboot", Button)
+                btn.label = "CONFIRM?"
+            except Exception:
+                pass
+            self._set_status("[bold red]Press Reboot again within 3s to confirm[/]")
+            self._reboot_confirm_timer = self.set_timer(
+                _REBOOT_CONFIRM_TIMEOUT, self._disarm_reboot
+            )
+
+    def _disarm_reboot(self) -> None:
+        """Cancel reboot confirmation state."""
+        self._reboot_armed = False
+        if self._reboot_confirm_timer is not None:
+            self._reboot_confirm_timer.stop()
+            self._reboot_confirm_timer = None
+        try:
+            btn = self.query_one("#cmd-reboot", Button)
+            btn.label = "Reboot..."
+        except Exception:
+            pass
+        self._set_status("")
+
+    # -------------------------------------------------------------------------
+    # Command execution
+    # -------------------------------------------------------------------------
+
+    async def _execute_from_input(self) -> None:
+        """Execute command from the input field."""
         try:
             cmd_input = self.query_one("#cmd-input", Input)
             command_string = cmd_input.value.strip()
@@ -139,61 +347,194 @@ class CommandWidget(Static):
         if not command_string:
             return
 
-        await self._execute_command_string(command_string)
+        # Add to history
+        if not self._command_history or self._command_history[-1] != command_string:
+            self._command_history.append(command_string)
+        self._history_index = -1
+
+        # Clear input
+        cmd_input.value = ""
+
+        self.run_worker(
+            self._execute_command_string(command_string),
+            name="exec-cmd",
+        )
 
     async def _execute_command_string(self, command_string: str) -> None:
-        """Execute command string via RPC.
-
-        Args:
-            command_string: Full command string (e.g., "systemctl status reticulum").
-        """
+        """Execute a command string via RPC (IPC bridge or legacy client)."""
         if not command_string.strip():
             return
 
-        # Parse command and args
         parts = command_string.split()
         command = parts[0]
         args = parts[1:] if len(parts) > 1 else []
 
-        # Set executing state
         self.executing = True
-        self.result = None
+        self._set_status(f"[dim]Executing: {command_string}[/]")
 
         try:
-            # Execute via RPC client
-            # Note: self.app is StyreneApp which has rpc_client attribute
-            result = await self.app.rpc_client.call_exec(  # type: ignore[attr-defined]
-                self.device_identity,
-                command,
-                args,
-                timeout=60.0,
-            )
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                result = await bridge.send_rpc(
+                    destination=self.device_identity,
+                    command=command,
+                    args=args,
+                    timeout=60.0,
+                )
+                entry = OutputEntry(
+                    command=command_string,
+                    exit_code=result.exit_code,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    entry_type="exec",
+                )
+            else:
+                rpc = self._rpc_client
+                if rpc is None:
+                    self._append_output(OutputEntry(
+                        command=command_string,
+                        stderr="No RPC client available",
+                        entry_type="system",
+                    ))
+                    return
+                result = await rpc.call_exec(
+                    self.device_identity, command, args, timeout=60.0,
+                )
+                entry = OutputEntry(
+                    command=command_string,
+                    exit_code=result.exit_code,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    entry_type="exec",
+                )
 
-            self.result = result
-
-        except RPCTimeoutError:
-            self.notify(
-                "Command timed out - device may be slow or offline",
-                title="Timeout",
-                severity="warning",
-            )
-            self.result = ExecResult(
-                exit_code=-1,
-                stdout="",
-                stderr="Command timed out",
-            )
+            self._append_output(entry)
+            self._set_status("")
 
         except Exception as e:
-            self.notify(
-                f"Error executing command: {e}",
-                title="Error",
-                severity="error",
-            )
-            self.result = ExecResult(
+            self._append_output(OutputEntry(
+                command=command_string,
                 exit_code=-1,
-                stdout="",
                 stderr=str(e),
-            )
+                entry_type="exec",
+            ))
+            self._set_status(f"[red]Error: {e}[/]")
 
         finally:
             self.executing = False
+
+    async def _do_ping(self) -> None:
+        """Ping the device — measures RTT and populates available_commands."""
+        self._set_status("[dim]Pinging...[/]")
+        start = time.monotonic()
+
+        try:
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                status = await bridge.query_device_status(
+                    destination=self.device_identity,
+                    timeout=10.0,
+                )
+                rtt_ms = (time.monotonic() - start) * 1000
+                self._available_commands = status.available_commands or []
+                self._append_output(OutputEntry(
+                    command="ping",
+                    rtt_ms=rtt_ms,
+                    entry_type="ping",
+                ))
+            else:
+                rpc = self._rpc_client
+                if rpc is None:
+                    self._append_output(OutputEntry(
+                        command="ping",
+                        stderr="No RPC client available",
+                        entry_type="ping",
+                    ))
+                    return
+                status = await rpc.call_status(
+                    self.device_identity, timeout=10.0,
+                )
+                rtt_ms = (time.monotonic() - start) * 1000
+                self._available_commands = status.available_commands or []
+                self._append_output(OutputEntry(
+                    command="ping",
+                    rtt_ms=rtt_ms,
+                    entry_type="ping",
+                ))
+
+            self._refresh_available_display()
+            self._refresh_presets()
+            self._set_status("")
+
+        except Exception as e:
+            self._append_output(OutputEntry(
+                command="ping",
+                stderr=str(e),
+                entry_type="ping",
+            ))
+            self._set_status("[red]Ping failed[/]")
+
+    async def _do_reboot(self) -> None:
+        """Send reboot command to the device."""
+        self._set_status("[dim]Sending reboot...[/]")
+
+        try:
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                result = await bridge.reboot_device(
+                    destination=self.device_identity,
+                    delay=0,
+                    timeout=10.0,
+                )
+                if result.success:
+                    self._append_output(OutputEntry(
+                        command="reboot",
+                        exit_code=0,
+                        stdout=result.message,
+                        entry_type="reboot",
+                    ))
+                else:
+                    self._append_output(OutputEntry(
+                        command="reboot",
+                        exit_code=1,
+                        stderr=result.message,
+                        entry_type="reboot",
+                    ))
+            else:
+                rpc = self._rpc_client
+                if rpc is None:
+                    self._append_output(OutputEntry(
+                        command="reboot",
+                        exit_code=1,
+                        stderr="No RPC client available",
+                        entry_type="reboot",
+                    ))
+                    return
+                result = await rpc.call_reboot(
+                    self.device_identity, delay=0, timeout=10.0,
+                )
+                if result.success:
+                    self._append_output(OutputEntry(
+                        command="reboot",
+                        exit_code=0,
+                        stdout=result.message,
+                        entry_type="reboot",
+                    ))
+                else:
+                    self._append_output(OutputEntry(
+                        command="reboot",
+                        exit_code=1,
+                        stderr=result.message,
+                        entry_type="reboot",
+                    ))
+
+            self._set_status("")
+
+        except Exception as e:
+            self._append_output(OutputEntry(
+                command="reboot",
+                exit_code=1,
+                stderr=str(e),
+                entry_type="reboot",
+            ))
+            self._set_status(f"[red]Reboot failed: {e}[/]")

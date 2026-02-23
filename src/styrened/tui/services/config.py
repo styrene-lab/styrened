@@ -28,9 +28,9 @@ from typing import Any
 
 import yaml
 
+from styrened.models.config import ConfigFieldError
 from styrened.tui.models.config import (
     ConfigLoadError,
-    ConfigValidationError,
     ConfigValidationErrors,
     DeploymentMode,
     GatewayMode,
@@ -433,7 +433,7 @@ def _config_to_dict(config: StyreneConfig) -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
-def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
+def validate_config(config: StyreneConfig) -> list[ConfigFieldError]:
     """Validate a configuration and return any errors.
 
     Checks for:
@@ -448,13 +448,13 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
     Returns:
         List of validation errors (empty if valid).
     """
-    errors: list[ConfigValidationError] = []
+    errors: list[ConfigFieldError] = []
 
     # Validate edge_fleet_path if set
     if config.fleet.edge_fleet_path:
         if not config.fleet.edge_fleet_path.exists():
             errors.append(
-                ConfigValidationError(
+                ConfigFieldError(
                     field="fleet.edge_fleet_path",
                     message="Directory does not exist",
                     value=str(config.fleet.edge_fleet_path),
@@ -462,7 +462,7 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
             )
         elif not config.fleet.edge_fleet_path.is_dir():
             errors.append(
-                ConfigValidationError(
+                ConfigFieldError(
                     field="fleet.edge_fleet_path",
                     message="Path is not a directory",
                     value=str(config.fleet.edge_fleet_path),
@@ -473,7 +473,7 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
     for i, key_path in enumerate(config.provisioning.ssh_key_paths):
         if not key_path.exists():
             errors.append(
-                ConfigValidationError(
+                ConfigFieldError(
                     field=f"provisioning.ssh_key_paths[{i}]",
                     message="SSH key file does not exist",
                     value=str(key_path),
@@ -483,7 +483,7 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
     # Validate mesh channel (standard 2.4GHz channels)
     if not 1 <= config.mesh.channel <= 14:
         errors.append(
-            ConfigValidationError(
+            ConfigFieldError(
                 field="mesh.channel",
                 message="Channel must be between 1 and 14",
                 value=str(config.mesh.channel),
@@ -493,7 +493,7 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
     # Validate reticulum config path override if set
     if config.reticulum.config_path_override and not config.reticulum.config_path_override.exists():
         errors.append(
-            ConfigValidationError(
+            ConfigFieldError(
                 field="reticulum.config_path_override",
                 message="Directory does not exist",
                 value=str(config.reticulum.config_path_override),
@@ -505,7 +505,7 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
         addr = config.reticulum.hub_address
         if len(addr) != 32:
             errors.append(
-                ConfigValidationError(
+                ConfigFieldError(
                     field="reticulum.hub_address",
                     message="LXMF address must be 32 hexadecimal characters",
                     value=addr[:8] + "..." if len(addr) > 8 else addr,
@@ -513,7 +513,7 @@ def validate_config(config: StyreneConfig) -> list[ConfigValidationError]:
             )
         elif not all(c in "0123456789abcdefABCDEF" for c in addr):
             errors.append(
-                ConfigValidationError(
+                ConfigFieldError(
                     field="reticulum.hub_address",
                     message="LXMF address must contain only hexadecimal characters",
                     value=addr[:8] + "...",

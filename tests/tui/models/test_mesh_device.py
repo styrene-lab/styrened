@@ -1,11 +1,9 @@
 """Tests for mesh device models and announce parsing."""
 
-import pytest
 
 from styrened.models.mesh_device import (
     DeviceType,
     MeshDevice,
-    NodeStatus,
     create_mesh_device,
     parse_announce_data,
 )

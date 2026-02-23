@@ -405,6 +405,73 @@ class CmdSetAutoReplyRequest(IPCRequest):
         }
 
 
+@dataclass
+class CmdSyncMessagesRequest(IPCRequest):
+    """Request message sync from propagation node."""
+
+    MSG_TYPE = IPCMessageType.CMD_SYNC_MESSAGES
+
+
+@dataclass
+class QueryPathInfoRequest(IPCRequest):
+    """Query path info for a destination."""
+
+    MSG_TYPE = IPCMessageType.QUERY_PATH_INFO
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class QueryPageRequest(IPCRequest):
+    """Fetch a page from a NomadNet node."""
+
+    MSG_TYPE = IPCMessageType.QUERY_PAGE
+    destination_hash: str = ""
+    path: str = "/page/index.mu"
+    form_data: dict[str, Any] | None = None
+    timeout: float = 30.0
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "destination_hash": self.destination_hash,
+            "path": self.path,
+            "timeout": self.timeout,
+        }
+        if self.form_data is not None:
+            payload["form_data"] = self.form_data
+        return payload
+
+
+@dataclass
+class CmdPageDisconnectRequest(IPCRequest):
+    """Disconnect link to a NomadNet node."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_DISCONNECT
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class CmdRebootDeviceRequest(IPCRequest):
+    """Reboot a remote device via RPC."""
+
+    MSG_TYPE = IPCMessageType.CMD_REBOOT_DEVICE
+    destination: str = ""
+    delay: int = 0
+    timeout: float = 10.0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination": self.destination,
+            "delay": self.delay,
+            "timeout": self.timeout,
+        }
+
+
 # -----------------------------------------------------------------------------
 # Subscription requests
 # -----------------------------------------------------------------------------
@@ -718,6 +785,7 @@ class RemoteStatusInfo:
     services: list[str]
     disk_used: int
     disk_total: int
+    available_commands: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -726,6 +794,7 @@ class RemoteStatusInfo:
             "services": self.services,
             "disk_used": self.disk_used,
             "disk_total": self.disk_total,
+            "available_commands": self.available_commands,
         }
 
     @classmethod
@@ -736,6 +805,31 @@ class RemoteStatusInfo:
             services=data.get("services", []),
             disk_used=data.get("disk_used", 0),
             disk_total=data.get("disk_total", 0),
+            available_commands=data.get("available_commands", []),
+        )
+
+
+@dataclass
+class RebootResultInfo:
+    """Remote reboot result."""
+
+    success: bool
+    message: str
+    scheduled_time: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "message": self.message,
+            "scheduled_time": self.scheduled_time,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RebootResultInfo":
+        return cls(
+            success=data.get("success", False),
+            message=data.get("message", ""),
+            scheduled_time=data.get("scheduled_time"),
         )
 
 
@@ -890,6 +984,29 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             enabled=payload.get("enabled", False),
             message=payload.get("message", ""),
             cooldown=payload.get("cooldown", 300),
+        )
+    elif msg_type == IPCMessageType.CMD_SYNC_MESSAGES:
+        return CmdSyncMessagesRequest()
+    elif msg_type == IPCMessageType.QUERY_PATH_INFO:
+        return QueryPathInfoRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.QUERY_PAGE:
+        return QueryPageRequest(
+            destination_hash=payload.get("destination_hash", ""),
+            path=payload.get("path", "/page/index.mu"),
+            form_data=payload.get("form_data"),
+            timeout=payload.get("timeout", 30.0),
+        )
+    elif msg_type == IPCMessageType.CMD_PAGE_DISCONNECT:
+        return CmdPageDisconnectRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_REBOOT_DEVICE:
+        return CmdRebootDeviceRequest(
+            destination=payload.get("destination", ""),
+            delay=payload.get("delay", 0),
+            timeout=payload.get("timeout", 10.0),
         )
     elif msg_type == IPCMessageType.SUB_MESSAGES:
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))

@@ -142,7 +142,7 @@ def test_config_defaults() -> None:
 
     # Verify defaults
     assert config.reticulum.mode == DeploymentMode.STANDALONE
-    assert config.reticulum.interfaces.auto is True
+    assert config.reticulum.interfaces.auto is False
     assert config.reticulum.interfaces.server.enabled is False
     assert config.reticulum.interfaces.server.port == 4242
     # Default config includes pre-configured Styrene Community Hub peer

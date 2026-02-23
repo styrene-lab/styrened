@@ -12,13 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from styrened.ipc.client import ControlClient, IPCConnectionError
 from styrened.ipc.messages import DaemonStatus
 from styrened.ipc.server import ControlServer
-
 from styrened.tui.services.daemon_manager import DaemonManager, DaemonMode
 from styrened.tui.services.ipc_bridge import IPCBridge
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -199,8 +196,9 @@ class TestLifecycleIPCIntegration:
     ):
         """Full IPC lifecycle init succeeds with real server."""
         from unittest.mock import Mock
+
         from styrened.tui.models.config import DeploymentMode, StyreneConfig
-        from styrened.tui.services.app_lifecycle import StyreneLifecycle, LifecycleMode
+        from styrened.tui.services.app_lifecycle import LifecycleMode, StyreneLifecycle
 
         config = Mock(spec=StyreneConfig)
         config.core = Mock()
