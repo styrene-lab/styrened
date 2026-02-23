@@ -3,12 +3,11 @@
 Ported from styrene-edge with updated imports.
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from styrened.tui.forge.nix_build import resolve_nix_image, _diagnose_nix_error
+from styrened.tui.forge.nix_build import _diagnose_nix_error, resolve_nix_image
 from tests.tui.forge.conftest import collect_nix, has_error
 
 

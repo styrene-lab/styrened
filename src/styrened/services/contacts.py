@@ -193,7 +193,7 @@ class ContactService:
                     if n.lxmf_destination_hash
                 ]
                 if len(sn_matches) == 1:
-                    return sn_matches[0].lxmf_destination_hash
+                    return str(sn_matches[0].lxmf_destination_hash)
 
             # 4. Prefix short_name match (must be unique)
             if prefix_match and hasattr(self._node_store, "get_nodes_by_short_name_prefix"):
@@ -203,7 +203,7 @@ class ContactService:
                     if n.lxmf_destination_hash
                 ]
                 if len(sn_prefix_matches) == 1:
-                    return sn_prefix_matches[0].lxmf_destination_hash
+                    return str(sn_prefix_matches[0].lxmf_destination_hash)
 
             # 5. NodeStore exact announce name match
             nodes = self._node_store.get_all_nodes()

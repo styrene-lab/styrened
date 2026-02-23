@@ -3,17 +3,16 @@
 All ControlClient interactions are mocked. No real socket connections.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from styrened.tui.services.ipc_bridge import (
-    IPCBridge,
     _MAX_RECONNECT_ATTEMPTS,
     _RECONNECT_BACKOFF_FACTOR,
     _RECONNECT_DELAY_INITIAL,
     _RECONNECT_DELAY_MAX,
+    IPCBridge,
 )
 
 
@@ -50,6 +49,10 @@ def mock_client():
         client.set_contact = AsyncMock(return_value={"alias": "test"})
         client.remove_contact = AsyncMock(return_value=True)
         client.resolve_name = AsyncMock(return_value="abc123")
+        client.sync_messages = AsyncMock(return_value={"synced": True})
+        client.query_path_info = AsyncMock(
+            return_value={"found": True, "hops": 2, "interface_name": "TCPClient"}
+        )
 
         # Subscription methods
         client.subscribe_messages = AsyncMock(return_value=True)
@@ -700,3 +703,24 @@ class TestContactMethods:
         mock_client.search_messages.assert_called_once_with(
             query="hello", peer_hash="abc", limit=50,
         )
+
+    @pytest.mark.asyncio
+    async def test_sync_messages(self, mock_client):
+        bridge = IPCBridge()
+        await bridge.connect()
+
+        result = await bridge.sync_messages()
+        mock_client.sync_messages.assert_called_once()
+        assert result == {"synced": True}
+
+    @pytest.mark.asyncio
+    async def test_get_path_info(self, mock_client):
+        bridge = IPCBridge()
+        await bridge.connect()
+
+        result = await bridge.get_path_info("abcd1234" * 4)
+        mock_client.query_path_info.assert_called_once_with(
+            destination_hash="abcd1234" * 4,
+        )
+        assert result["found"] is True
+        assert result["hops"] == 2

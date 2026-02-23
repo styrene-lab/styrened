@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from styrened.models.config import ReticulumConfig
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.reticulum import (
     ReticulumIdentity,
     ReticulumInterface,
     ReticulumNotConfiguredError,
+    ReticulumState,
 )
 from styrened.tui.services.reticulum import (
     get_reticulum_config,
@@ -77,25 +78,25 @@ class TestReticulumModels:
         )
         assert interface.enabled is False
 
-    def test_reticulum_config_creation(self) -> None:
-        """Test ReticulumConfig can be created with all components."""
+    def test_reticulum_state_creation(self) -> None:
+        """Test ReticulumState can be created with all components."""
         identity = ReticulumIdentity(address="abc123")
         interfaces = [
             ReticulumInterface(
                 name="Auto", interface_type="AutoInterface", enabled=True
             ),
         ]
-        config = ReticulumConfig(
+        state = ReticulumState(
             identity=identity,
             interfaces=interfaces,
             config_path=Path("/home/user/.reticulum"),
         )
-        assert config.identity == identity
-        assert len(config.interfaces) == 1
-        assert config.config_path == Path("/home/user/.reticulum")
+        assert state.identity == identity
+        assert len(state.interfaces) == 1
+        assert state.config_path == Path("/home/user/.reticulum")
 
-    def test_reticulum_config_interface_count(self) -> None:
-        """Test ReticulumConfig reports interface counts correctly."""
+    def test_reticulum_state_interface_count(self) -> None:
+        """Test ReticulumState reports interface counts correctly."""
         identity = ReticulumIdentity(address="abc123")
         interfaces = [
             ReticulumInterface(
@@ -108,13 +109,13 @@ class TestReticulumModels:
                 name="UDP", interface_type="UDPInterface", enabled=False
             ),
         ]
-        config = ReticulumConfig(
+        state = ReticulumState(
             identity=identity,
             interfaces=interfaces,
             config_path=Path("/home/user/.reticulum"),
         )
-        assert config.enabled_interface_count == 2
-        assert config.total_interface_count == 3
+        assert state.enabled_interface_count == 2
+        assert state.total_interface_count == 3
 
 
 class TestReticulumNotConfiguredError:
@@ -373,13 +374,14 @@ class TestOperatorIdentity:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test ensure_operator_identity creates new RNS.Identity if none exists."""
-        from styrened.tui.services import reticulum
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Ensure identity
-        identity_hash = reticulum.ensure_operator_identity()
+        identity_hash = core_reticulum.ensure_operator_identity()
 
         # Should create the file
         assert operator_key.exists()
@@ -392,16 +394,17 @@ class TestOperatorIdentity:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test ensure_operator_identity loads existing RNS.Identity."""
-        from styrened.tui.services import reticulum
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity first time
-        first_hash = reticulum.ensure_operator_identity()
+        first_hash = core_reticulum.ensure_operator_identity()
 
         # Load it again - should return same hash
-        second_hash = reticulum.ensure_operator_identity()
+        second_hash = core_reticulum.ensure_operator_identity()
 
         assert first_hash == second_hash
 
@@ -410,13 +413,15 @@ class TestOperatorIdentity:
     ) -> None:
         """Test ensure_operator_identity creates a valid RNS.Identity that can be loaded."""
         import RNS
-        from styrened.tui.services import reticulum
+
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity
-        identity_hash = reticulum.ensure_operator_identity()
+        identity_hash = core_reticulum.ensure_operator_identity()
 
         # Should be loadable with RNS.Identity.from_file
         identity = RNS.Identity.from_file(str(operator_key))
@@ -427,12 +432,13 @@ class TestOperatorIdentity:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_operator_identity_object returns None if identity doesn't exist."""
-        from styrened.tui.services import reticulum
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
-        identity = reticulum.get_operator_identity_object()
+        identity = core_reticulum.get_operator_identity_object()
         assert identity is None
 
     def test_get_operator_identity_object_returns_rns_identity(
@@ -440,16 +446,18 @@ class TestOperatorIdentity:
     ) -> None:
         """Test get_operator_identity_object returns RNS.Identity object."""
         import RNS
-        from styrened.tui.services import reticulum
+
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity first
-        reticulum.ensure_operator_identity()
+        core_reticulum.ensure_operator_identity()
 
         # Get identity object
-        identity = reticulum.get_operator_identity_object()
+        identity = core_reticulum.get_operator_identity_object()
 
         assert identity is not None
         assert isinstance(identity, RNS.Identity)
@@ -458,28 +466,30 @@ class TestOperatorIdentity:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_operator_identity returns None if identity doesn't exist."""
-        from styrened.tui.services import reticulum
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
-        identity = reticulum.get_operator_identity()
+        identity = core_reticulum.get_operator_identity()
         assert identity is None
 
     def test_get_operator_identity_returns_existing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_operator_identity returns existing identity hash."""
-        from styrened.tui.services import reticulum
+        import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity
-        created_hash = reticulum.ensure_operator_identity()
+        created_hash = core_reticulum.ensure_operator_identity()
 
         # Get identity should return same hash
-        identity = reticulum.get_operator_identity()
+        identity = core_reticulum.get_operator_identity()
         assert identity == created_hash
 
 
@@ -491,10 +501,12 @@ class TestReticulumStatus:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status when no operator identity exists."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
 
@@ -507,18 +519,24 @@ class TestReticulumStatus:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status with operator identity."""
+        import RNS
+
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
-        # Create identity
-        operator_key.write_bytes(bytes.fromhex("c" * 64))
+        # Create a real RNS identity file (not just raw bytes)
+        identity = RNS.Identity(create_keys=True)
+        identity.to_file(str(operator_key))
+        expected_hash = identity.hash.hex()
 
         status = reticulum.get_reticulum_status()
 
         assert status["running"] is False
-        assert status["identity"] == "c" * 64
+        assert status["identity"] == expected_hash
 
 
 class TestDeviceDiscovery:
@@ -859,6 +877,7 @@ class TestDiscoveryFunctions:
 
     def test_discover_devices_returns_all_devices(self) -> None:
         """Test discover_devices returns all discovered devices."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services.reticulum import (
             discover_devices,
             start_discovery,
@@ -869,10 +888,8 @@ class TestDiscoveryFunctions:
         start_discovery()
 
         # Manually add some devices to the handler for testing
-        from styrened.tui.services import reticulum
-
-        if reticulum._announce_handler:
-            reticulum._announce_handler.discovered_devices = {
+        if core_reticulum._announce_handler:
+            core_reticulum._announce_handler.discovered_devices = {
                 "aaa": {"name": "device-1", "is_styrene": False},
                 "bbb": {"name": "device-2", "is_styrene": True},
                 "ccc": {"name": "device-3", "is_styrene": False},
@@ -885,6 +902,7 @@ class TestDiscoveryFunctions:
 
     def test_get_styrene_devices_filters_correctly(self) -> None:
         """Test get_styrene_devices returns only styrene devices."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services.reticulum import (
             get_styrene_devices,
             start_discovery,
@@ -895,12 +913,10 @@ class TestDiscoveryFunctions:
         start_discovery()
 
         # Manually add mixed devices as MeshDevice objects
-        from styrened.tui.services import reticulum
-
-        if reticulum._announce_handler:
+        if core_reticulum._announce_handler:
             from datetime import datetime
 
-            reticulum._announce_handler.discovered_devices = {
+            core_reticulum._announce_handler.discovered_devices = {
                 "aaa": MeshDevice(
                     destination_hash="aaa",
                     identity_hash="aaa",
@@ -953,10 +969,12 @@ class TestUpdatedReticulumStatus:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status returns correct structure."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
 
@@ -977,10 +995,12 @@ class TestUpdatedReticulumStatus:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status when RNS service is not initialized."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
 
@@ -992,23 +1012,29 @@ class TestUpdatedReticulumStatus:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status includes operator identity when present."""
+        import RNS
+
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
-        # Create identity
-        identity_bytes = bytes.fromhex("a" * 64)
-        operator_key.write_bytes(identity_bytes)
+        # Create a real RNS identity file
+        identity = RNS.Identity(create_keys=True)
+        identity.to_file(str(operator_key))
+        expected_hash = identity.hash.hex()
 
         status = reticulum.get_reticulum_status()
 
-        assert status["identity"] == "a" * 64
+        assert status["identity"] == expected_hash
 
     def test_get_reticulum_status_with_configured_reticulum(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status counts interfaces from config."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         # Setup Reticulum config
@@ -1033,13 +1059,14 @@ enabled = true
         storage_dir.mkdir()
         (storage_dir / "identity").write_bytes(bytes(32))
 
-        # Mock find_reticulum_config to return our test dir
+        # Mock find_reticulum_config on both modules
         monkeypatch.setattr(
-            reticulum, "find_reticulum_config", lambda override=None: reticulum_dir
+            core_reticulum, "find_reticulum_config", lambda override=None: reticulum_dir
         )
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
 
@@ -1050,15 +1077,17 @@ enabled = true
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test get_reticulum_status handles ReticulumNotConfiguredError gracefully."""
+        import styrened.services.reticulum as core_reticulum
         from styrened.tui.services import reticulum
 
         # Mock find_reticulum_config to return None
         monkeypatch.setattr(
-            reticulum, "find_reticulum_config", lambda override=None: None
+            core_reticulum, "find_reticulum_config", lambda override=None: None
         )
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
 

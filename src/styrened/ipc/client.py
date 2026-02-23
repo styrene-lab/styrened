@@ -24,12 +24,15 @@ from styrened.ipc.messages import (
     CmdDeviceStatusRequest,
     CmdExecRequest,
     CmdMarkReadRequest,
+    CmdPageDisconnectRequest,
+    CmdRebootDeviceRequest,
     CmdRemoveContactRequest,
     CmdRetryMessageRequest,
     CmdSendChatRequest,
     CmdSendRequest,
     CmdSetAutoReplyRequest,
     CmdSetContactRequest,
+    CmdSyncMessagesRequest,
     DaemonStatus,
     DeviceInfo,
     ErrorResponse,
@@ -44,9 +47,12 @@ from styrened.ipc.messages import (
     QueryDevicesRequest,
     QueryIdentityRequest,
     QueryMessagesRequest,
+    QueryPageRequest,
+    QueryPathInfoRequest,
     QueryResolveNameRequest,
     QuerySearchMessagesRequest,
     QueryStatusRequest,
+    RebootResultInfo,
     RemoteStatusInfo,
     SubDevicesRequest,
     SubMessagesRequest,
@@ -545,6 +551,30 @@ class ControlClient:
         data = await self._request(request, timeout=timeout + 5)
         return RemoteStatusInfo.from_dict(data)
 
+    async def reboot_device(
+        self,
+        destination: str,
+        delay: int = 0,
+        timeout: float = 10.0,
+    ) -> RebootResultInfo:
+        """Reboot a remote device.
+
+        Args:
+            destination: Destination hash.
+            delay: Seconds to delay reboot (0 = immediate).
+            timeout: Timeout in seconds.
+
+        Returns:
+            RebootResultInfo with result.
+        """
+        request = CmdRebootDeviceRequest(
+            destination=destination,
+            delay=delay,
+            timeout=timeout,
+        )
+        data = await self._request(request, timeout=timeout + 5)
+        return RebootResultInfo.from_dict(data)
+
     # -------------------------------------------------------------------------
     # Chat methods
     # -------------------------------------------------------------------------
@@ -795,6 +825,71 @@ class ControlClient:
                 cooldown=cooldown,
             )
         )
+
+    async def sync_messages(self) -> dict[str, Any]:
+        """Request message sync from propagation node.
+
+        Returns:
+            Dict with 'synced' boolean.
+        """
+        return await self._request(CmdSyncMessagesRequest())
+
+    async def query_path_info(self, destination_hash: str) -> dict[str, Any]:
+        """Query path info for a destination.
+
+        Args:
+            destination_hash: Hex-encoded destination hash.
+
+        Returns:
+            Dict with path info (hops, interface, etc.) or {'found': False}.
+        """
+        return await self._request(
+            QueryPathInfoRequest(destination_hash=destination_hash)
+        )
+
+    # -------------------------------------------------------------------------
+    # Page browser methods
+    # -------------------------------------------------------------------------
+
+    async def fetch_page(
+        self,
+        destination_hash: str,
+        path: str = "/page/index.mu",
+        form_data: dict[str, Any] | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Fetch a page from a NomadNet node.
+
+        Args:
+            destination_hash: Hex-encoded destination hash of the NomadNet node.
+            path: Page path to request.
+            form_data: Optional form data to submit.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Dict with content, status, transfer_time, etc.
+        """
+        request = QueryPageRequest(
+            destination_hash=destination_hash,
+            path=path,
+            form_data=form_data,
+            timeout=timeout,
+        )
+        return await self._request(request, timeout=timeout + 20)
+
+    async def page_disconnect(self, destination_hash: str) -> bool:
+        """Disconnect a cached link to a NomadNet node.
+
+        Args:
+            destination_hash: Hex-encoded destination hash.
+
+        Returns:
+            True if a link was disconnected.
+        """
+        data = await self._request(
+            CmdPageDisconnectRequest(destination_hash=destination_hash)
+        )
+        return cast(bool, data.get("disconnected", False))
 
 
 async def get_daemon_client() -> ControlClient | None:

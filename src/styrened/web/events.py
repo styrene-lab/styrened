@@ -128,7 +128,7 @@ def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:
                             if event_type not in _PUBLIC_EVENTS:
                                 continue
                         yield msg
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         if time.monotonic() - last_keepalive >= KEEPALIVE_INTERVAL:
                             yield ": keepalive\n\n"
                             last_keepalive = time.monotonic()

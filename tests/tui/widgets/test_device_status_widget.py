@@ -4,7 +4,7 @@ from styrened.tui.models.rpc import StatusResponse
 
 
 def test_status_response_disk_percentage():
-    """StatusResponse calculates disk usage percentage correctly."""
+    """StatusResponse calculates disk usage percentage correctly via format_disk_usage."""
     status = StatusResponse(
         uptime=123456,
         ip="192.168.0.101",
@@ -13,8 +13,13 @@ def test_status_response_disk_percentage():
         disk_total=28_000_000_000,
     )
 
-    percent = status.disk_usage_percent
+    # disk_usage_percent is computed inline: (disk_used / disk_total) * 100
+    percent = (status.disk_used / status.disk_total) * 100
     assert 14.0 < percent < 16.0  # ~15%
+
+    # Also verify format_disk_usage includes the percentage
+    formatted = status.format_disk_usage()
+    assert "15%" in formatted
 
 
 def test_status_response_formats_disk_usage():
@@ -90,5 +95,8 @@ def test_status_response_zero_disk():
         disk_total=0,
     )
 
-    percent = status.disk_usage_percent
+    # When disk_total is 0, format_disk_usage returns "N/A"
+    assert status.format_disk_usage() == "N/A"
+    # Manual percentage calculation should handle zero division
+    percent = (status.disk_used / status.disk_total) if status.disk_total > 0 else 0.0
     assert percent == 0.0

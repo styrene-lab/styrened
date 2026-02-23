@@ -267,6 +267,75 @@ class TestInfoDataclasses:
         assert restored.ip == "192.168.1.100"
         assert restored.services == ["styrened", "sshd"]
 
+    def test_remote_status_info_with_available_commands(self):
+        """RemoteStatusInfo should round-trip available_commands."""
+        status = RemoteStatusInfo(
+            uptime=100.0,
+            ip="10.0.0.1",
+            services=[],
+            disk_used=0,
+            disk_total=0,
+            available_commands=["df", "ls", "uptime"],
+        )
+
+        data = status.to_dict()
+        assert data["available_commands"] == ["df", "ls", "uptime"]
+
+        restored = RemoteStatusInfo.from_dict(data)
+        assert restored.available_commands == ["df", "ls", "uptime"]
+
+    def test_remote_status_info_available_commands_defaults_empty(self):
+        """RemoteStatusInfo.available_commands defaults to empty list."""
+        status = RemoteStatusInfo(
+            uptime=0, ip="", services=[], disk_used=0, disk_total=0,
+        )
+        assert status.available_commands == []
+
+        # Also works from legacy dicts without the key
+        restored = RemoteStatusInfo.from_dict({"uptime": 0, "ip": ""})
+        assert restored.available_commands == []
+
+    def test_reboot_result_info_round_trip(self):
+        """RebootResultInfo should serialize and deserialize correctly."""
+        from styrened.ipc.messages import RebootResultInfo
+
+        info = RebootResultInfo(
+            success=True,
+            message="Rebooting in 5 seconds",
+            scheduled_time=1234567890.0,
+        )
+
+        data = info.to_dict()
+        assert data["success"] is True
+        assert data["message"] == "Rebooting in 5 seconds"
+        assert data["scheduled_time"] == 1234567890.0
+
+        restored = RebootResultInfo.from_dict(data)
+        assert restored.success is True
+        assert restored.message == "Rebooting in 5 seconds"
+        assert restored.scheduled_time == 1234567890.0
+
+    def test_reboot_result_info_defaults(self):
+        """RebootResultInfo defaults for missing fields."""
+        from styrened.ipc.messages import RebootResultInfo
+
+        restored = RebootResultInfo.from_dict({})
+        assert restored.success is False
+        assert restored.message == ""
+        assert restored.scheduled_time is None
+
+    def test_cmd_reboot_device_request(self):
+        """CmdRebootDeviceRequest should serialize correctly."""
+        from styrened.ipc.messages import CmdRebootDeviceRequest
+
+        req = CmdRebootDeviceRequest(destination="abc123", delay=5, timeout=15.0)
+        msg_type, payload = req.to_wire()
+
+        assert msg_type == IPCMessageType.CMD_REBOOT_DEVICE
+        assert payload["destination"] == "abc123"
+        assert payload["delay"] == 5
+        assert payload["timeout"] == 15.0
+
 
 class TestCreateRequest:
     """Tests for create_request() factory function."""
@@ -302,6 +371,37 @@ class TestCreateRequest:
         assert isinstance(req, CmdExecRequest)
         assert req.command == "ls"
         assert req.args == ["-la"]
+
+    def test_create_cmd_sync_messages(self):
+        """Should create CmdSyncMessagesRequest."""
+        from styrened.ipc.messages import CmdSyncMessagesRequest
+
+        req = create_request(IPCMessageType.CMD_SYNC_MESSAGES, {})
+        assert isinstance(req, CmdSyncMessagesRequest)
+
+    def test_create_query_path_info(self):
+        """Should create QueryPathInfoRequest."""
+        from styrened.ipc.messages import QueryPathInfoRequest
+
+        req = create_request(
+            IPCMessageType.QUERY_PATH_INFO,
+            {"destination_hash": "abcd1234" * 4},
+        )
+        assert isinstance(req, QueryPathInfoRequest)
+        assert req.destination_hash == "abcd1234" * 4
+
+    def test_create_cmd_reboot_device(self):
+        """Should create CmdRebootDeviceRequest."""
+        from styrened.ipc.messages import CmdRebootDeviceRequest
+
+        req = create_request(
+            IPCMessageType.CMD_REBOOT_DEVICE,
+            {"destination": "abc", "delay": 5, "timeout": 15.0},
+        )
+        assert isinstance(req, CmdRebootDeviceRequest)
+        assert req.destination == "abc"
+        assert req.delay == 5
+        assert req.timeout == 15.0
 
     def test_unknown_type_raises(self):
         """Should raise ValueError for unknown types."""

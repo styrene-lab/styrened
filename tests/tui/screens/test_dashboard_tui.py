@@ -5,11 +5,12 @@ using Textual's app.run_test() and pilot.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from styrened.tui.app import StyreneApp
+
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
+from styrened.tui.app import StyreneApp
 from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTable
 
 
@@ -21,6 +22,15 @@ def mock_reticulum(tmp_path):
     fake_config.mkdir()
     (fake_config / "config").write_text("")  # Empty config file
 
+    mock_store = MagicMock()
+    mock_store.get_styrene_nodes.return_value = []
+
+    # Reset the NodeStore singleton to prevent pollution from earlier tests
+    import styrened.services.node_store as _ns_mod
+
+    old_singleton = _ns_mod._node_store
+    _ns_mod._node_store = None
+
     with (
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
         patch(
@@ -28,8 +38,11 @@ def mock_reticulum(tmp_path):
         ),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
+        patch("styrened.services.node_store.get_node_store", return_value=mock_store),
     ):
         yield
+
+    _ns_mod._node_store = old_singleton
 
 
 @pytest.fixture
@@ -49,7 +62,7 @@ def mock_devices():
         destination_hash="f6e5d4c3b2a1",
         identity_hash="f6e5d4c3b2a1",
         name="Test Device 2",
-        device_type=DeviceType.RNODE,
+        device_type=DeviceType.STYRENE_NODE,
         last_announce=now - 300,  # 5 minutes ago
         announce_count=2,
     )
@@ -187,11 +200,12 @@ class TestDashboardKeyboardBindings:
         assert len(s_bindings) == 0, "Standalone 's' binding should be removed"
 
     @pytest.mark.asyncio
-    async def test_no_standalone_chat_binding(self):
-        """Dashboard should not have standalone 'c' (chat) binding."""
+    async def test_chat_binding_exists(self):
+        """Dashboard should have 'c' (chat) binding for opening chat with selected device."""
         screen = DashboardScreen()
         c_bindings = [b for b in screen.BINDINGS if b.key == "c"]
-        assert len(c_bindings) == 0, "Standalone 'c' binding should be removed"
+        assert len(c_bindings) == 1, "Dashboard should have a 'c' binding for chat"
+        assert c_bindings[0].action == "open_chat"
 
 
 class TestDashboardDeviceSelection:

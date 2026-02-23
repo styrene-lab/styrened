@@ -43,6 +43,7 @@ import asyncio
 import logging
 import os
 import platform
+import shutil
 import socket
 import subprocess
 import time
@@ -928,11 +929,22 @@ class RPCServer:
 
     # System information helpers
 
+    def _get_available_commands(self) -> list[str]:
+        """Filter allowed_commands to only those installed on this system.
+
+        Uses shutil.which() to check each command in the whitelist.
+
+        Returns:
+            Sorted list of commands that are actually available.
+        """
+        return sorted(cmd for cmd in self.allowed_commands if shutil.which(cmd))
+
     def _gather_status(self) -> dict[str, Any]:
         """Gather system status information.
 
         Returns:
-            Dictionary with uptime, ip, services, disk info, and system identity.
+            Dictionary with uptime, ip, services, disk info, system identity,
+            and available commands.
         """
         os_info = get_os_info()
         disk_used, disk_total = self._get_disk_usage()
@@ -948,6 +960,7 @@ class RPCServer:
             "os_id": os_info["os_id"],
             "os_version": os_info["os_version"],
             "nixos_generation": os_info["nixos_generation"],
+            "available_commands": self._get_available_commands(),
         }
 
     def _get_uptime(self) -> int:

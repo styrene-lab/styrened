@@ -447,9 +447,8 @@ class TestOutboundPacketErrorFilter:
 
     def test_filter_installed_on_initialize(self) -> None:
         """Test that RNS.log is monkey-patched during initialize."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
-        import RNS
 
         service = RNSService()
 
@@ -660,9 +659,8 @@ class TestOutboundPacketErrorFilter:
 
     def test_filter_idempotent(self) -> None:
         """Test that installing filter twice doesn't break."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
-        import RNS
 
         service = RNSService()
 
@@ -680,9 +678,8 @@ class TestOutboundPacketErrorFilter:
 
     def test_shutdown_does_not_remove_filter(self) -> None:
         """Test that filter remains after shutdown (permanent)."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
-        import RNS
 
         service = RNSService()
 

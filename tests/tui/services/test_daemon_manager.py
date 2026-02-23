@@ -5,18 +5,13 @@ All subprocess and IPC calls are mocked. No real daemon is spawned.
 
 import asyncio
 import signal
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from styrened.tui.services.daemon_manager import (
     DaemonManager,
     DaemonMode,
-    _HEALTH_CHECK_INTERVAL,
-    _SHUTDOWN_GRACE_SECONDS,
-    _SOCKET_POLL_INTERVAL,
-    _SOCKET_POLL_TIMEOUT,
 )
 
 

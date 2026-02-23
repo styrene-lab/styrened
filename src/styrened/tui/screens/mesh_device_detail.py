@@ -4,7 +4,7 @@ Central hub for all peer-to-peer interactions with a node: status, chat,
 command execution, and future capabilities.
 """
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -20,6 +20,7 @@ from styrened.tui.widgets.chat_widget import ChatWidget
 from styrened.tui.widgets.command_widget import CommandWidget
 from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
+from styrened.tui.widgets.page_browser import PageBrowserWidget
 
 if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
@@ -54,14 +55,18 @@ class MeshInfoWidget(Static):
         type_display = {
             DeviceType.STYRENE_NODE: f"[{cascade.bright} bold]STYRENE NODE[/]",
             DeviceType.RNODE: f"[{cascade.medium} bold]RNODE[/]",
+            DeviceType.HUB: f"[{cascade.bright} bold]HUB[/]",
+            DeviceType.LXMF_PEER: f"[{cascade.medium}]LXMF PEER[/]",
+            DeviceType.PROPAGATION_NODE: f"[{cascade.medium} bold]PROPAGATION[/]",
+            DeviceType.NOMADNET_NODE: f"[{cascade.medium} bold]NOMADNET NODE[/]",
             DeviceType.GENERIC: f"[{cascade.dim}]GENERIC[/]",
             DeviceType.UNKNOWN: f"[{cascade.dim}]UNKNOWN[/]",
         }
         type_text = type_display.get(self.device.device_type, f"[{cascade.dim}]?[/]")
         yield Static(f"[bold]Type:[/] {type_text}", classes="info-field")
 
-        # Identity
-        yield Static(f"[bold]Identity:[/] {self.device.identity[:16]}...", classes="info-field")
+        # Identity (full hash — not truncated)
+        yield Static(f"[bold]Identity:[/] {self.device.identity}", classes="info-field")
 
         # Last seen
         yield Static(f"[bold]Last Seen:[/] {self.device.last_seen_display}", classes="info-field")
@@ -93,6 +98,8 @@ class MeshDeviceDetailScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back"),
         Binding("r", "refresh_status", "Refresh"),
+        Binding("a", "add_contact", "Add Contact"),
+        Binding("y", "copy_hash", "Copy Hash"),
     ]
 
     def __init__(
@@ -167,11 +174,24 @@ class MeshDeviceDetailScreen(Screen[None]):
                     id="mesh-info-panel",
                 )
 
+                # Default to pages tab for NomadNet nodes
+                default_tab = self.initial_tab
+                if not default_tab and self.device.is_nomadnet_node:
+                    default_tab = "pages"
+
                 # Tabbed content
                 with TabbedContent(
-                    initial=self.initial_tab or "status",
+                    initial=default_tab or "status",
                     id="device-tabs",
                 ):
+                    # Pages tab (NomadNet nodes only)
+                    if self.device.is_nomadnet_node:
+                        with TabPane("Pages", id="pages"):
+                            yield PageBrowserWidget(
+                                destination_hash=self.device.destination_hash,
+                                id="page-browser-widget",
+                            )
+
                     # Status tab
                     with TabPane("Status", id="status"):
                         status_widget = DeviceStatusWidget(id="status-widget")
@@ -196,8 +216,15 @@ class MeshDeviceDetailScreen(Screen[None]):
 
                     # Command tab
                     with TabPane("Command", id="command"):
+                        initial_cmds = (
+                            self.initial_status.available_commands
+                            if self.initial_status
+                            and self.initial_status.available_commands
+                            else None
+                        )
                         yield CommandWidget(
                             device_identity=self.device_identity,
+                            initial_available_commands=initial_cmds,
                             id="command-widget",
                         )
 
@@ -277,3 +304,40 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         finally:
             status_widget.loading = False
+
+    def action_add_contact(self) -> None:
+        """Add this device as a contact."""
+        if not self.device:
+            return
+
+        try:
+            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            self.notify("Contacts require daemon mode", severity="warning")
+            return
+
+        if bridge is None:
+            self.notify("Contacts require daemon mode", severity="warning")
+            return
+
+        name = self.device.name or self.device_identity[:8]
+        self.run_worker(self._save_contact(bridge, name))
+
+    async def _save_contact(self, bridge: Any, default_name: str) -> None:
+        """Save device as contact via IPCBridge."""
+        try:
+            await bridge.set_contact(
+                peer_hash=self.device_identity,
+                alias=default_name,
+            )
+            self.notify(f"Contact saved: {default_name}", severity="information")
+        except Exception as e:
+            self.notify(f"Failed to save contact: {e}", severity="error")
+
+    def action_copy_hash(self) -> None:
+        """Copy the device identity hash to the clipboard."""
+        try:
+            self.app.copy_to_clipboard(self.device_identity)
+            self.notify("Hash copied to clipboard", severity="information")
+        except Exception:
+            self.notify("Copy failed", severity="warning")

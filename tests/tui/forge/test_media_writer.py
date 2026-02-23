@@ -10,14 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from styrened.tui.forge.models import (
-    DeviceProfile,
-    FlashTarget,
-    MediaEvent,
-    StageKey,
-    STAGE_NAMES,
-    STAGE_ORDER,
-)
 from styrened.tui.forge import media_writer as mw
 from styrened.tui.forge.media_writer import (
     _copy_styrene_files,
@@ -26,12 +18,19 @@ from styrened.tui.forge.media_writer import (
     _sbc_dir,
     run_media_writer,
 )
+from styrened.tui.forge.models import (
+    STAGE_NAMES,
+    STAGE_ORDER,
+    DeviceProfile,
+    FlashTarget,
+    MediaEvent,
+    StageKey,
+)
 from tests.tui.forge.conftest import (
     _specs,
     collect,
     has_complete,
     has_error,
-    kinds,
     stages,
 )
 

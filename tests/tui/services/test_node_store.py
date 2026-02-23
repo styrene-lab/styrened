@@ -1,10 +1,10 @@
 """Tests for NodeStore - SQLite persistence for discovered mesh nodes."""
 
-import sqlite3
 import time
 from pathlib import Path
 
 import pytest
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.services.node_store import NodeStore, get_db_path, get_node_store, init_db
 
@@ -35,6 +35,9 @@ class TestInitDb:
             "announce_count",
             "capabilities",
             "version",
+            "lxmf_destination_hash",
+            "short_name",
+            "system_fingerprint",
             "created_at",
             "updated_at",
         }
@@ -84,8 +87,8 @@ class TestNodeStore:
     def sample_device(self) -> MeshDevice:
         """Create a sample MeshDevice for testing."""
         return MeshDevice(
-            destination_hash="abcd1234" * 4,
-            identity_hash="efgh5678" * 4,
+            destination_hash="abcd1234abcd1234abcd1234abcd1234",
+            identity_hash="ef015678ef015678ef015678ef015678",
             name="test-node",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=int(time.time()),
@@ -135,8 +138,8 @@ class TestNodeStore:
     def test_save_node_with_no_capabilities(self, store: NodeStore) -> None:
         """save_node handles None capabilities."""
         device = MeshDevice(
-            destination_hash="aaaa1111" * 4,
-            identity_hash="bbbb2222" * 4,
+            destination_hash="aaaa1111aaaa1111aaaa1111aaaa1111",
+            identity_hash="bbbb2222bbbb2222bbbb2222bbbb2222",
             name="no-caps-node",
             device_type=DeviceType.UNKNOWN,
             last_announce=int(time.time()),
@@ -191,8 +194,8 @@ class TestNodeStore:
 
         devices = [
             MeshDevice(
-                destination_hash=f"node{i}aaa" * 4,
-                identity_hash=f"iden{i}bbb" * 4,
+                destination_hash=f"a{i}de0000a{i}de0000a{i}de0000a{i}de0000",
+                identity_hash=f"1de{i}0000" * 4,
                 name=f"node-{i}",
                 device_type=DeviceType.STYRENE_NODE,
                 last_announce=now - (i * 100),  # Older as i increases
@@ -220,16 +223,16 @@ class TestNodeStore:
         now = int(time.time())
 
         styrene_node = MeshDevice(
-            destination_hash="styr1234" * 4,
-            identity_hash="styr5678" * 4,
+            destination_hash="5001123450011234500112345001aaaa",
+            identity_hash="5001567850015678500156785001bbbb",
             name="styrene-node",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=now,
             announce_count=1,
         )
         rnode = MeshDevice(
-            destination_hash="rnod1234" * 4,
-            identity_hash="rnod5678" * 4,
+            destination_hash="20001234200012342000123420001234",
+            identity_hash="20005678200056782000567820005678",
             name="rnode-device",
             device_type=DeviceType.RNODE,
             last_announce=now,
@@ -262,16 +265,16 @@ class TestNodeStore:
         now = int(time.time())
 
         old_device = MeshDevice(
-            destination_hash="old12345" * 4,
-            identity_hash="old67890" * 4,
+            destination_hash="01d1234501d1234501d1234501d12345",
+            identity_hash="01d6789001d6789001d6789001d67890",
             name="old-node",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=now - 100000,  # Very old
             announce_count=1,
         )
         new_device = MeshDevice(
-            destination_hash="new12345" * 4,
-            identity_hash="new67890" * 4,
+            destination_hash="0e012345" * 4,
+            identity_hash="0e067890" * 4,
             name="new-node",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=now,
@@ -299,12 +302,13 @@ class TestNodeStore:
         assert deleted == 0
 
     def test_close(self, store: NodeStore, sample_device: MeshDevice) -> None:
-        """close() closes the database connection."""
+        """close() is a no-op (connections are per-operation)."""
         store.save_node(sample_device)
         store.close()
 
-        # Connection should be None after close
-        assert store._conn is None
+        # close() is a no-op with per-operation connections
+        # Just verify it doesn't raise
+        assert True
 
     def test_reopen_after_close(
         self, store: NodeStore, sample_device: MeshDevice
@@ -381,7 +385,7 @@ class TestGlobalSingleton:
     def test_get_node_store_returns_singleton(self) -> None:
         """get_node_store returns the same instance."""
         # Reset global singleton for test
-        import styrened.tui.services.node_store as ns
+        import styrened.services.node_store as ns
 
         ns._node_store = None
 

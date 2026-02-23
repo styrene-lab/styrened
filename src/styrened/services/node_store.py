@@ -813,13 +813,16 @@ class NodeStore:
         except (KeyError, IndexError):
             pass
 
+        try:
+            device_type = DeviceType(row["device_type"]) if row["device_type"] else DeviceType.UNKNOWN
+        except ValueError:
+            device_type = DeviceType.UNKNOWN
+
         return MeshDevice(
             destination_hash=row["destination_hash"],
             identity_hash=row["identity_hash"],
             name=row["name"] or f"device-{row['destination_hash'][:8]}",
-            device_type=DeviceType(row["device_type"])
-            if row["device_type"]
-            else DeviceType.UNKNOWN,
+            device_type=device_type,
             last_announce=row["last_announce"] or 0,
             announce_count=row["announce_count"] or 1,
             capabilities=caps,

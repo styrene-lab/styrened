@@ -139,7 +139,7 @@ def require_q502(q502_config: dict[str, Any] | None) -> dict[str, Any]:
 
 
 @pytest.fixture
-def styrene_config():
+def styrene_config(e2e_config):
     """Create Styrene configuration for e2e tests."""
     from styrened.tui.services.config import load_config
 
@@ -156,9 +156,9 @@ async def styrene_lifecycle(styrene_config):
     Yields:
         Initialized StyreneLifecycle instance.
     """
-    from styrened.tui.services.app_lifecycle import StyreneLifecycle
+    from styrened.tui.services.app_lifecycle import LifecycleMode, StyreneLifecycle
 
-    lifecycle = StyreneLifecycle(styrene_config)
+    lifecycle = StyreneLifecycle(styrene_config, mode=LifecycleMode.LEGACY)
 
     if not lifecycle.initialize():
         pytest.fail("Failed to initialize Styrene services")
