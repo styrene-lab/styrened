@@ -12,9 +12,13 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static, Switch
+from textual.timer import Timer
+from textual.widgets import DataTable, Footer, Header, Input, Static, Switch
 
 logger = logging.getLogger(__name__)
+
+# Delete confirmation timeout (seconds)
+_DELETE_CONFIRM_TIMEOUT = 3.0
 
 
 class InboxScreen(Screen[None]):
@@ -33,6 +37,8 @@ class InboxScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back"),
         Binding("enter", "open_conversation", "Open"),
+        Binding("d", "delete_conversation", "Delete", show=True),
+        Binding("slash", "search_messages", "Search", show=True),
     ]
 
     CSS = """
@@ -75,6 +81,12 @@ class InboxScreen(Screen[None]):
     }
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._delete_pending: str | None = None
+        self._delete_timer: Timer | None = None
+        self._search_active: bool = False
+
     def compose(self) -> ComposeResult:
         """Compose inbox UI."""
         yield Header()
@@ -84,6 +96,13 @@ class InboxScreen(Screen[None]):
                 Static("Auto-Reply (OOO): "),
                 Switch(value=False, id="ooo-switch"),
                 id="ooo-bar",
+            ),
+            # Search bar (hidden by default)
+            Horizontal(
+                Input(placeholder="Search all messages...", id="inbox-search-input"),
+                Static("", id="inbox-search-count"),
+                id="inbox-search-bar",
+                classes="hidden",
             ),
             Vertical(
                 DataTable(id="conversation-table"),
@@ -196,8 +215,8 @@ class InboxScreen(Screen[None]):
             logger.warning(f"Failed to toggle auto-reply: {e}")
             self.notify(f"Failed to toggle auto-reply: {e}", severity="error")
 
-    def action_open_conversation(self) -> None:
-        """Open conversation screen for selected row."""
+    def _get_selected_peer_hash(self) -> str | None:
+        """Get the peer_hash of the currently selected conversation row."""
         table = self.query_one("#conversation-table", DataTable)
 
         cursor_row = table.cursor_row
@@ -206,13 +225,19 @@ class InboxScreen(Screen[None]):
                 table.move_cursor(row=0)
                 cursor_row = 0
             else:
-                return
+                return None
 
         cell_key = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
         if not cell_key or not cell_key.row_key or cell_key.row_key.value == "-":
-            return
+            return None
 
-        peer_hash = str(cell_key.row_key.value)
+        return str(cell_key.row_key.value)
+
+    def action_open_conversation(self) -> None:
+        """Open conversation screen for selected row."""
+        peer_hash = self._get_selected_peer_hash()
+        if peer_hash is None:
+            return
 
         if self._ipc_bridge is None:
             self.notify("Chat requires daemon mode", severity="warning")
@@ -221,3 +246,149 @@ class InboxScreen(Screen[None]):
         from styrened.tui.screens.conversation import ConversationScreen
 
         self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
+
+    # -------------------------------------------------------------------------
+    # Delete conversation (double-tap)
+    # -------------------------------------------------------------------------
+
+    def action_delete_conversation(self) -> None:
+        """Delete selected conversation with double-tap confirmation."""
+        peer_hash = self._get_selected_peer_hash()
+        if peer_hash is None:
+            return
+
+        if self._delete_pending == peer_hash:
+            # Second press — execute
+            self._cancel_delete_timer()
+            self.run_worker(self._execute_delete_conversation(peer_hash), group="inbox-delete")
+        else:
+            # First press — set pending
+            self._delete_pending = peer_hash
+            self.notify("Press d again to delete conversation", severity="warning")
+            self._cancel_delete_timer()
+            self._delete_timer = self.set_timer(
+                _DELETE_CONFIRM_TIMEOUT, self._cancel_delete_pending
+            )
+
+    def _cancel_delete_timer(self) -> None:
+        """Cancel delete confirmation timer."""
+        if self._delete_timer is not None:
+            self._delete_timer.stop()
+            self._delete_timer = None
+
+    def _cancel_delete_pending(self) -> None:
+        """Cancel delete pending state."""
+        self._delete_pending = None
+        self._cancel_delete_timer()
+
+    async def _execute_delete_conversation(self, peer_hash: str) -> None:
+        """Execute conversation deletion and remove row."""
+        self._delete_pending = None
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        try:
+            count = await bridge.delete_conversation(peer_hash)
+            self.notify(f"Deleted {count} messages", severity="information")
+            # Refresh conversation list
+            await self._load_conversations()
+        except Exception as e:
+            logger.error(f"Failed to delete conversation: {e}")
+            self.notify(f"Delete failed: {e}", severity="error")
+
+    # -------------------------------------------------------------------------
+    # Cross-conversation search
+    # -------------------------------------------------------------------------
+
+    def action_search_messages(self) -> None:
+        """Toggle cross-conversation search bar."""
+        if self._search_active:
+            self._close_search()
+        else:
+            self._open_search()
+
+    def _open_search(self) -> None:
+        """Show search bar."""
+        self._search_active = True
+        try:
+            bar = self.query_one("#inbox-search-bar")
+            bar.remove_class("hidden")
+            search_input = self.query_one("#inbox-search-input", Input)
+            search_input.focus()
+        except Exception:
+            pass
+
+    def _close_search(self) -> None:
+        """Hide search bar and restore conversation view."""
+        self._search_active = False
+        try:
+            bar = self.query_one("#inbox-search-bar")
+            bar.add_class("hidden")
+            search_input = self.query_one("#inbox-search-input", Input)
+            search_input.value = ""
+            count = self.query_one("#inbox-search-count", Static)
+            count.update("")
+        except Exception:
+            pass
+
+        # Restore conversation list
+        self.run_worker(self._load_conversations())
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle search input submission."""
+        if event.input.id != "inbox-search-input":
+            return
+
+        query = event.value.strip()
+        if len(query) < 2:
+            return
+
+        self.run_worker(self._execute_search(query), group="inbox-search")
+
+    async def _execute_search(self, query: str) -> None:
+        """Execute cross-conversation search."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        try:
+            results = await bridge.search_messages(query=query)
+        except Exception as e:
+            logger.warning(f"Search failed: {e}")
+            self.notify(f"Search failed: {e}", severity="error")
+            return
+
+        try:
+            count_widget = self.query_one("#inbox-search-count", Static)
+            count_widget.update(f"{len(results)} results")
+        except Exception:
+            pass
+
+        # Display results in the conversation table
+        table = self.query_one("#conversation-table", DataTable)
+        table.clear()
+
+        if not results:
+            table.add_row("-", f"[dim]No results for '{query}'[/]", "-", "-")
+            return
+
+        for msg in results:
+            peer_hash = msg.get("source_hash", "") or msg.get("destination_hash", "")
+            content = msg.get("content", "") or "[dim]No content[/]"
+            if len(content) > 40:
+                content = content[:37] + "..."
+
+            is_outgoing = msg.get("is_outgoing", False)
+            direction = "\u2192" if is_outgoing else "\u2190"
+
+            timestamp = msg.get("timestamp")
+            ts_text = f"{int(timestamp)}" if timestamp else "-"
+
+            table.add_row(
+                f"{direction} {peer_hash[:8]}...",
+                content,
+                "-",
+                ts_text,
+                key=peer_hash,
+            )

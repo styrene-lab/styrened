@@ -7,8 +7,9 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from styrened.tui.app import StyreneApp
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
+from styrened.tui.app import StyreneApp
 from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTable
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
@@ -295,10 +296,19 @@ class TestUserWorkflows:
             announce_count=1,
         )
 
-        # Mock discover to return devices
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices",
-            return_value=[discovered_device, discovered_device_2],
+        # Mock both discover_devices and NodeStore to control exact device list
+        mock_node_store = Mock()
+        mock_node_store.get_styrene_nodes.return_value = []
+
+        with (
+            patch(
+                "styrened.tui.screens.dashboard.discover_devices",
+                return_value=[discovered_device, discovered_device_2],
+            ),
+            patch(
+                "styrened.services.node_store.get_node_store",
+                return_value=mock_node_store,
+            ),
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
@@ -540,7 +550,8 @@ class TestPerformance:
         # Create 100 devices
         devices = [
             MeshDevice(
-                identity=f"device_{i:03d}",
+                destination_hash=f"device_{i:03d}",
+                identity_hash=f"device_{i:03d}",
                 name=f"Device {i}",
                 device_type=DeviceType.STYRENE_NODE,
                 last_announce=int(datetime.now().timestamp()),
@@ -549,7 +560,13 @@ class TestPerformance:
             for i in range(100)
         ]
 
-        with patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices):
+        mock_node_store = Mock()
+        mock_node_store.get_styrene_nodes.return_value = []
+
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
+            patch("styrened.services.node_store.get_node_store", return_value=mock_node_store),
+        ):
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()

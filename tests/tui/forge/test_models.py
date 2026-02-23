@@ -4,12 +4,13 @@ Covers DeviceSpecs, DeviceProfile, FlashTarget, Bundle, StageKey,
 DiskInfo, MediaEvent, ForgeConfig, and catalog loading functions.
 """
 
-from pathlib import Path
 
 import pytest
 import yaml
 
 from styrened.tui.forge.models import (
+    STAGE_NAMES,
+    STAGE_ORDER,
     Bundle,
     DeviceProfile,
     DeviceSpecs,
@@ -18,15 +19,11 @@ from styrened.tui.forge.models import (
     ForgeConfig,
     MediaEvent,
     StageKey,
-    STAGE_NAMES,
-    STAGE_ORDER,
+    _parse_device,
     load_device_catalog,
     load_forge_config,
-    _parse_device,
 )
-
 from tests.tui.forge.conftest import _specs
-
 
 # ===================================================================
 # DeviceSpecs

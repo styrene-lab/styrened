@@ -1,8 +1,6 @@
 """Tests for ConversationScreen - message thread display via ChatWidget."""
 
-from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.widgets.chat_widget import STATUS_ICONS

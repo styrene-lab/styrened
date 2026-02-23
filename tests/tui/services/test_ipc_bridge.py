@@ -3,17 +3,16 @@
 All ControlClient interactions are mocked. No real socket connections.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from styrened.tui.services.ipc_bridge import (
-    IPCBridge,
     _MAX_RECONNECT_ATTEMPTS,
     _RECONNECT_BACKOFF_FACTOR,
     _RECONNECT_DELAY_INITIAL,
     _RECONNECT_DELAY_MAX,
+    IPCBridge,
 )
 
 

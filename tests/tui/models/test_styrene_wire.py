@@ -6,7 +6,6 @@ from styrened.models.styrene_wire import (
     MAX_MSGPACK_ARRAY_LEN,
     MAX_MSGPACK_MAP_LEN,
     MAX_PAYLOAD_SIZE,
-    MIN_MESSAGE_LENGTH,
     STYRENE_PREFIX,
     STYRENE_VERSION,
     InvalidMessageTypeError,
@@ -80,7 +79,7 @@ class TestStyreneEnvelope:
         assert encoded[type_offset] == StyreneMessageType.CHAT
 
     def test_encode_includes_payload(self):
-        """Encoded message should include payload bytes."""
+        """Encoded message should include payload bytes after request_id (v2)."""
         payload = b"test payload data"
         envelope = StyreneEnvelope(
             version=STYRENE_VERSION,
@@ -88,7 +87,9 @@ class TestStyreneEnvelope:
             payload=payload,
         )
         encoded = envelope.encode()
-        payload_offset = len(STYRENE_PREFIX) + 2
+        # v2: prefix + version(1) + type(1) + request_id(16) + payload
+        from styrened.models.styrene_wire import REQUEST_ID_LENGTH
+        payload_offset = len(STYRENE_PREFIX) + 2 + REQUEST_ID_LENGTH
         assert encoded[payload_offset:] == payload
 
     def test_decode_roundtrip(self):
@@ -137,7 +138,8 @@ class TestStyreneEnvelope:
 
     def test_decode_invalid_message_type_raises(self):
         """Decode should raise InvalidMessageTypeError for unknown type."""
-        bad_type = STYRENE_PREFIX + bytes([1, 0xFF])  # Type 0xFF not defined
+        # Use a supported version (1 or 2) with an invalid message type
+        bad_type = STYRENE_PREFIX + bytes([1, 0xFE])  # Version 1, type 0xFE not defined
         with pytest.raises(InvalidMessageTypeError):
             StyreneEnvelope.decode(bad_type)
 
@@ -350,10 +352,12 @@ class TestWireFormatIntegration:
         assert len(binary_part) >= 2
 
     def test_minimum_message_length(self):
-        """Minimum valid message should be prefix + version + type."""
+        """Minimum valid message should be prefix + version + type + request_id (v2)."""
+        from styrened.models.styrene_wire import MIN_MESSAGE_LENGTH_V2
         envelope = create_ping()
         encoded = envelope.encode()
-        assert len(encoded) == MIN_MESSAGE_LENGTH
+        # create_ping() creates a v2 message with request_id (16 bytes)
+        assert len(encoded) == MIN_MESSAGE_LENGTH_V2
 
     def test_non_styrene_client_sees_prefix(self):
         """Non-Styrene client receiving message sees identifiable prefix.

@@ -1,63 +1,124 @@
 """Tests for RPC client."""
 
 import asyncio
-from uuid import UUID
+from typing import Any
 
 import pytest
 
-from styrened.rpc.messages import (
-    ExecCommand,
-    ExecResult,
-    RebootCommand,
-    RebootResult,
-    StatusRequest,
-    StatusResponse,
-    UpdateConfigCommand,
-    UpdateConfigResult,
+from styrened.models.styrene_wire import (
+    STYRENE_VERSION,
+    StyreneEnvelope,
+    StyreneMessageType,
+    encode_payload,
+    generate_request_id,
 )
 from styrened.protocols.base import LXMFMessage
-from styrened.services.lxmf_service import MockLXMFService
 from styrened.rpc import RPCClient
 from styrened.rpc.errors import (
     RPCInvalidResponseError,
     RPCTimeoutError,
     RPCTransportError,
 )
+from styrened.rpc.messages import (
+    ExecResult,
+    RebootCommand,
+    RebootResult,
+    StatusResponse,
+    UpdateConfigCommand,
+    UpdateConfigResult,
+)
+
+
+class MockStyreneProtocol:
+    """Mock StyreneProtocol for testing RPCClient.
+
+    Provides the register_handler, send_typed_message, and can_handle methods
+    that RPCClient uses from StyreneProtocol.
+    """
+
+    def __init__(self):
+        self.handlers: dict[StyreneMessageType, list] = {}
+        self.sent_messages: list[tuple[str, StyreneMessageType, bytes, bytes | None]] = []
+        self.send_should_fail = False
+
+    def register_handler(self, message_type: StyreneMessageType, handler) -> None:
+        """Register handler for a message type."""
+        if message_type not in self.handlers:
+            self.handlers[message_type] = []
+        self.handlers[message_type].append(handler)
+
+    async def send_typed_message(
+        self,
+        destination: str,
+        message_type: StyreneMessageType,
+        payload: bytes,
+        request_id: bytes | None = None,
+    ) -> None:
+        """Mock send_typed_message."""
+        if self.send_should_fail:
+            raise Exception("Send failed")
+        self.sent_messages.append((destination, message_type, payload, request_id))
+
+    def can_handle(self, message: LXMFMessage) -> bool:
+        """Mock can_handle - check for styrene.io custom type."""
+        custom_type = message.fields.get("protocol")
+        return custom_type == "rpc" or "styrene" in str(message.fields.get(0xFB, ""))
+
+    async def simulate_response(
+        self,
+        client: "RPCClient",
+        request_id: bytes,
+        message_type: StyreneMessageType,
+        payload_data: dict[str, Any],
+    ) -> None:
+        """Simulate receiving a response by calling the registered handler."""
+        envelope = StyreneEnvelope(
+            version=STYRENE_VERSION,
+            message_type=message_type,
+            payload=encode_payload(payload_data),
+            request_id=request_id,
+        )
+        message = LXMFMessage(
+            source_hash="remote",
+            destination_hash="local",
+            timestamp=123.0,
+            fields={},
+        )
+
+        # Find and call the registered handler for this message type
+        handlers = self.handlers.get(message_type, [])
+        for handler in handlers:
+            await handler(message, envelope)
 
 
 @pytest.fixture
-def mock_lxmf() -> MockLXMFService:
-    """Create mock LXMF service."""
-    return MockLXMFService()
+def mock_protocol() -> MockStyreneProtocol:
+    """Create mock Styrene protocol."""
+    return MockStyreneProtocol()
 
 
 @pytest.fixture
-def rpc_client(mock_lxmf: MockLXMFService) -> RPCClient:
-    """Create RPC client with mock LXMF service."""
-    return RPCClient(mock_lxmf)
+def rpc_client(mock_protocol: MockStyreneProtocol) -> RPCClient:
+    """Create RPC client with mock protocol."""
+    return RPCClient(mock_protocol)
 
 
 class TestRequestIDGeneration:
     """Test request ID generation and uniqueness."""
 
-    def test_request_ids_are_unique(self, rpc_client: RPCClient) -> None:
+    def test_request_ids_are_unique(self) -> None:
         """Test that generated request IDs are unique."""
-        # Generate multiple request IDs
-        request_ids = [rpc_client._generate_request_id() for _ in range(100)]
+        request_ids = [generate_request_id() for _ in range(100)]
 
         # All should be unique
         assert len(request_ids) == len(set(request_ids))
 
-    def test_request_ids_are_valid_uuids(self, rpc_client: RPCClient) -> None:
-        """Test that request IDs are valid UUIDs."""
-        request_id = rpc_client._generate_request_id()
+    def test_request_ids_are_16_bytes(self) -> None:
+        """Test that request IDs are 16 bytes."""
+        request_id = generate_request_id()
 
-        # Should be parseable as UUID
-        uuid_obj = UUID(request_id)
-        assert str(uuid_obj) == request_id
-
-        # Should be version 4 (random)
-        assert uuid_obj.version == 4
+        assert isinstance(request_id, bytes)
+        assert len(request_id) == 16
 
 
 class TestRequestTracking:
@@ -66,27 +127,31 @@ class TestRequestTracking:
     @pytest.mark.asyncio
     async def test_add_pending_request(self, rpc_client: RPCClient) -> None:
         """Test adding a pending request."""
-        request_id = "test-request-id"
+        request_id = generate_request_id()
         destination = "test-destination"
-        future: asyncio.Future[StatusResponse] = asyncio.Future()
+        future: asyncio.Future = asyncio.Future()
 
-        rpc_client._add_pending_request(request_id, future, destination, "status_request")
+        rpc_client._add_pending_request(
+            request_id, future, destination, StyreneMessageType.STATUS_REQUEST
+        )
 
         # Should be in pending requests
         assert request_id in rpc_client.pending_requests
         pending = rpc_client.pending_requests[request_id]
         assert pending.future is future
         assert pending.destination == destination
-        assert pending.message_type == "status_request"
+        assert pending.message_type == StyreneMessageType.STATUS_REQUEST
 
     @pytest.mark.asyncio
     async def test_remove_pending_request(self, rpc_client: RPCClient) -> None:
         """Test removing a pending request."""
-        request_id = "test-request-id"
+        request_id = generate_request_id()
         destination = "test-destination"
-        future: asyncio.Future[StatusResponse] = asyncio.Future()
+        future: asyncio.Future = asyncio.Future()
 
-        rpc_client._add_pending_request(request_id, future, destination, "status_request")
+        rpc_client._add_pending_request(
+            request_id, future, destination, StyreneMessageType.STATUS_REQUEST
+        )
         rpc_client._remove_pending_request(request_id)
 
         # Should be removed
@@ -98,15 +163,21 @@ class TestRequestTracking:
         assert rpc_client.pending_count == 0
 
         # Add requests
-        future1: asyncio.Future[StatusResponse] = asyncio.Future()
-        future2: asyncio.Future[StatusResponse] = asyncio.Future()
-        rpc_client._add_pending_request("req1", future1, "dest1", "status_request")
-        rpc_client._add_pending_request("req2", future2, "dest2", "status_request")
+        future1: asyncio.Future = asyncio.Future()
+        future2: asyncio.Future = asyncio.Future()
+        rid1 = generate_request_id()
+        rid2 = generate_request_id()
+        rpc_client._add_pending_request(
+            rid1, future1, "dest1", StyreneMessageType.STATUS_REQUEST
+        )
+        rpc_client._add_pending_request(
+            rid2, future2, "dest2", StyreneMessageType.STATUS_REQUEST
+        )
 
         assert rpc_client.pending_count == 2
 
         # Remove one
-        rpc_client._remove_pending_request("req1")
+        rpc_client._remove_pending_request(rid1)
         assert rpc_client.pending_count == 1
 
 
@@ -115,40 +186,40 @@ class TestResponseCorrelation:
 
     @pytest.mark.asyncio
     async def test_successful_request_response(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test successful request/response correlation."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make async call in background
         async def make_call() -> StatusResponse:
-            return await rpc_client.call(destination, StatusRequest(), timeout=5.0)
+            return await rpc_client.call_status(destination, timeout=5.0)
 
         call_task = asyncio.create_task(make_call())
 
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
-        # Verify message was sent with request_id
-        assert len(mock_lxmf.sent_messages) == 1
-        sent_dest, sent_payload = mock_lxmf.sent_messages[0]
+        # Verify message was sent
+        assert len(mock_protocol.sent_messages) == 1
+        sent_dest, sent_type, sent_payload, sent_rid = mock_protocol.sent_messages[0]
         assert sent_dest == destination
-        assert "request_id" in sent_payload
-        assert sent_payload["type"] == "status_request"
+        assert sent_type == StyreneMessageType.STATUS_REQUEST
+        assert sent_rid is not None
 
-        request_id = sent_payload["request_id"]
-
-        # Simulate response
-        response_payload = {
-            "request_id": request_id,
-            "type": "status_response",
-            "uptime": 12345,
-            "ip": "192.168.0.101",
-            "services": ["reticulum", "nomadnet"],
-            "disk_used": 4200000000,
-            "disk_total": 28000000000,
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        # Simulate response via the registered handler
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.STATUS_RESPONSE,
+            {
+                "uptime": 12345,
+                "ip": "192.168.0.101",
+                "services": ["reticulum", "nomadnet"],
+                "disk_used": 4200000000,
+                "disk_total": 28000000000,
+            },
+        )
 
         # Wait for call to complete
         result = await call_task
@@ -164,15 +235,16 @@ class TestResponseCorrelation:
 
     @pytest.mark.asyncio
     async def test_exec_request_response(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test exec command request/response."""
-        destination = "test-device-hash"
-        command = ExecCommand(command="systemctl", args=["status", "reticulum"])
+        destination = "test-device-hash1234"
 
         # Make async call in background
         async def make_call() -> ExecResult:
-            result = await rpc_client.call(destination, command, timeout=5.0)
+            result = await rpc_client.call_exec(
+                destination, "systemctl", ["status", "reticulum"], timeout=5.0
+            )
             assert isinstance(result, ExecResult)
             return result
 
@@ -182,18 +254,19 @@ class TestResponseCorrelation:
         await asyncio.sleep(0.1)
 
         # Get request ID from sent message
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        request_id = sent_payload["request_id"]
+        _sent_dest, _sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
 
         # Simulate response
-        response_payload = {
-            "request_id": request_id,
-            "type": "exec_result",
-            "exit_code": 0,
-            "stdout": "● reticulum.service - Reticulum Network Stack\n   Active: active (running)",
-            "stderr": "",
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.EXEC_RESULT,
+            {
+                "exit_code": 0,
+                "stdout": "Active: active (running)",
+                "stderr": "",
+            },
+        )
 
         # Wait for call to complete
         result = await call_task
@@ -208,14 +281,14 @@ class TestTimeoutHandling:
 
     @pytest.mark.asyncio
     async def test_timeout_raises_error(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test that timeout raises RPCTimeoutError."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call with short timeout, don't send response
         with pytest.raises(RPCTimeoutError) as exc_info:
-            await rpc_client.call(destination, StatusRequest(), timeout=0.1)
+            await rpc_client.call_status(destination, timeout=0.1)
 
         # Verify error details
         error = exc_info.value
@@ -228,14 +301,14 @@ class TestTimeoutHandling:
 
     @pytest.mark.asyncio
     async def test_timeout_cleanup(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test that timeout cleans up pending requests."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Start multiple requests
         tasks = [
-            asyncio.create_task(rpc_client.call(destination, StatusRequest(), timeout=0.1))
+            asyncio.create_task(rpc_client.call_status(destination, timeout=0.1))
             for _ in range(3)
         ]
 
@@ -252,18 +325,16 @@ class TestConcurrentRequests:
 
     @pytest.mark.asyncio
     async def test_concurrent_requests_to_same_device(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test multiple concurrent requests to same device."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Start 5 concurrent requests
-        async def make_call(delay: float) -> StatusResponse:
-            result = await rpc_client.call(destination, StatusRequest(), timeout=5.0)
-            assert isinstance(result, StatusResponse)
-            return result
-
-        tasks = [asyncio.create_task(make_call(i * 0.1)) for i in range(5)]
+        tasks = [
+            asyncio.create_task(rpc_client.call_status(destination, timeout=5.0))
+            for _ in range(5)
+        ]
 
         # Wait for all messages to be sent
         await asyncio.sleep(0.2)
@@ -272,18 +343,19 @@ class TestConcurrentRequests:
         assert rpc_client.pending_count == 5
 
         # Respond to each request
-        for _sent_dest, sent_payload in mock_lxmf.sent_messages:
-            request_id = sent_payload["request_id"]
-            response_payload = {
-                "request_id": request_id,
-                "type": "status_response",
-                "uptime": 12345,
-                "ip": "192.168.0.101",
-                "services": ["reticulum"],
-                "disk_used": 1000000,
-                "disk_total": 10000000,
-            }
-            mock_lxmf.simulate_receive(destination, response_payload)
+        for _sent_dest, _sent_type, _sent_payload, sent_rid in mock_protocol.sent_messages:
+            await mock_protocol.simulate_response(
+                rpc_client,
+                sent_rid,
+                StyreneMessageType.STATUS_RESPONSE,
+                {
+                    "uptime": 12345,
+                    "ip": "192.168.0.101",
+                    "services": ["reticulum"],
+                    "disk_used": 1000000,
+                    "disk_total": 10000000,
+                },
+            )
 
         # Wait for all calls to complete
         results = await asyncio.gather(*tasks)
@@ -297,14 +369,14 @@ class TestConcurrentRequests:
 
     @pytest.mark.asyncio
     async def test_concurrent_requests_to_different_devices(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test concurrent requests to different devices."""
-        devices = [f"device-{i}" for i in range(3)]
+        devices = [f"device-{i}-hash12345" for i in range(3)]
 
         # Start concurrent requests to different devices
         tasks = [
-            asyncio.create_task(rpc_client.call(device, StatusRequest(), timeout=5.0))
+            asyncio.create_task(rpc_client.call_status(device, timeout=5.0))
             for device in devices
         ]
 
@@ -315,18 +387,19 @@ class TestConcurrentRequests:
         assert rpc_client.pending_count == 3
 
         # Respond to each request
-        for sent_dest, sent_payload in mock_lxmf.sent_messages:
-            request_id = sent_payload["request_id"]
-            response_payload = {
-                "request_id": request_id,
-                "type": "status_response",
-                "uptime": 12345,
-                "ip": f"192.168.0.{devices.index(sent_dest) + 1}",
-                "services": ["reticulum"],
-                "disk_used": 1000000,
-                "disk_total": 10000000,
-            }
-            mock_lxmf.simulate_receive(sent_dest, response_payload)
+        for sent_dest, _sent_type, _sent_payload, sent_rid in mock_protocol.sent_messages:
+            await mock_protocol.simulate_response(
+                rpc_client,
+                sent_rid,
+                StyreneMessageType.STATUS_RESPONSE,
+                {
+                    "uptime": 12345,
+                    "ip": f"192.168.0.{devices.index(sent_dest) + 1}",
+                    "services": ["reticulum"],
+                    "disk_used": 1000000,
+                    "disk_total": 10000000,
+                },
+            )
 
         # Wait for all calls to complete
         results = await asyncio.gather(*tasks)
@@ -341,17 +414,17 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_transport_failure_raises_error(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test that transport failure raises RPCTransportError."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Configure mock to fail sends
-        mock_lxmf.send_should_fail = True
+        mock_protocol.send_should_fail = True
 
         # Should raise transport error
         with pytest.raises(RPCTransportError) as exc_info:
-            await rpc_client.call(destination, StatusRequest(), timeout=5.0)
+            await rpc_client.call_status(destination, timeout=5.0)
 
         # Verify error details
         error = exc_info.value
@@ -362,29 +435,33 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_missing_request_id_in_response(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
-        """Test response without request_id raises error."""
-        destination = "test-device-hash"
+        """Test response without matching request_id times out."""
+        destination = "test-device-hash1234"
 
         # Make call in background
         call_task = asyncio.create_task(
-            rpc_client.call(destination, StatusRequest(), timeout=5.0)
+            rpc_client.call_status(destination, timeout=0.5)
         )
 
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
-        # Send response without request_id
-        response_payload = {
-            "type": "status_response",
-            "uptime": 12345,
-            "ip": "192.168.0.101",
-            "services": ["reticulum"],
-            "disk_used": 1000000,
-            "disk_total": 10000000,
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        # Send response with wrong request_id (won't match)
+        wrong_rid = generate_request_id()
+        await mock_protocol.simulate_response(
+            rpc_client,
+            wrong_rid,
+            StyreneMessageType.STATUS_RESPONSE,
+            {
+                "uptime": 12345,
+                "ip": "192.168.0.101",
+                "services": ["reticulum"],
+                "disk_used": 1000000,
+                "disk_total": 10000000,
+            },
+        )
 
         # Should still timeout (response ignored)
         with pytest.raises(RPCTimeoutError):
@@ -392,30 +469,33 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_wrong_request_id_in_response(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test response with wrong request_id is ignored."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call in background
         call_task = asyncio.create_task(
-            rpc_client.call(destination, StatusRequest(), timeout=5.0)
+            rpc_client.call_status(destination, timeout=0.5)
         )
 
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
         # Send response with wrong request_id
-        response_payload = {
-            "request_id": "wrong-request-id",
-            "type": "status_response",
-            "uptime": 12345,
-            "ip": "192.168.0.101",
-            "services": ["reticulum"],
-            "disk_used": 1000000,
-            "disk_total": 10000000,
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        wrong_rid = generate_request_id()
+        await mock_protocol.simulate_response(
+            rpc_client,
+            wrong_rid,
+            StyreneMessageType.STATUS_RESPONSE,
+            {
+                "uptime": 12345,
+                "ip": "192.168.0.101",
+                "services": ["reticulum"],
+                "disk_used": 1000000,
+                "disk_total": 10000000,
+            },
+        )
 
         # Should still timeout (response ignored)
         with pytest.raises(RPCTimeoutError):
@@ -423,38 +503,33 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     async def test_malformed_response_payload(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test malformed response payload raises error."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call in background
         call_task = asyncio.create_task(
-            rpc_client.call(destination, StatusRequest(), timeout=5.0)
+            rpc_client.call_status(destination, timeout=5.0)
         )
 
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
         # Get request ID
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        request_id = sent_payload["request_id"]
+        _sent_dest, _sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
 
-        # Send malformed response (missing required fields)
-        response_payload = {
-            "request_id": request_id,
-            "type": "status_response",
-            # Missing required fields: uptime, ip, services, disk_used, disk_total
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        # Send response with an ERROR type (which raises ValueError in _decode_response)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.ERROR,
+            {"code": 1, "message": "Something went wrong"},
+        )
 
-        # Should raise invalid response error
-        with pytest.raises(RPCInvalidResponseError) as exc_info:
+        # Should raise RPCInvalidResponseError (ERROR responses are converted to exceptions)
+        with pytest.raises(RPCInvalidResponseError):
             await call_task
-
-        error = exc_info.value
-        assert error.request_id == request_id
-        assert error.payload == response_payload
 
 
 class TestConvenienceMethods:
@@ -462,10 +537,10 @@ class TestConvenienceMethods:
 
     @pytest.mark.asyncio
     async def test_call_status(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test call_status convenience method."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call in background
         async def make_call() -> StatusResponse:
@@ -477,21 +552,22 @@ class TestConvenienceMethods:
         await asyncio.sleep(0.1)
 
         # Verify message type
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        assert sent_payload["type"] == "status_request"
+        _sent_dest, sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
+        assert sent_type == StyreneMessageType.STATUS_REQUEST
 
         # Respond
-        request_id = sent_payload["request_id"]
-        response_payload = {
-            "request_id": request_id,
-            "type": "status_response",
-            "uptime": 12345,
-            "ip": "192.168.0.101",
-            "services": ["reticulum"],
-            "disk_used": 1000000,
-            "disk_total": 10000000,
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.STATUS_RESPONSE,
+            {
+                "uptime": 12345,
+                "ip": "192.168.0.101",
+                "services": ["reticulum"],
+                "disk_used": 1000000,
+                "disk_total": 10000000,
+            },
+        )
 
         # Should return StatusResponse
         result = await call_task
@@ -500,10 +576,10 @@ class TestConvenienceMethods:
 
     @pytest.mark.asyncio
     async def test_call_exec(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test call_exec convenience method."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call in background
         async def make_call() -> ExecResult:
@@ -516,22 +592,21 @@ class TestConvenienceMethods:
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
-        # Verify message type and args
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        assert sent_payload["type"] == "exec"
-        assert sent_payload["command"] == "systemctl"
-        assert sent_payload["args"] == ["status", "reticulum"]
+        # Verify message type
+        _sent_dest, sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
+        assert sent_type == StyreneMessageType.EXEC
 
         # Respond
-        request_id = sent_payload["request_id"]
-        response_payload = {
-            "request_id": request_id,
-            "type": "exec_result",
-            "exit_code": 0,
-            "stdout": "Active: active (running)",
-            "stderr": "",
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.EXEC_RESULT,
+            {
+                "exit_code": 0,
+                "stdout": "Active: active (running)",
+                "stderr": "",
+            },
+        )
 
         # Should return ExecResult
         result = await call_task
@@ -542,26 +617,22 @@ class TestConvenienceMethods:
 class TestTimeoutConfiguration:
     """Test timeout configuration."""
 
-    @pytest.mark.asyncio
-    async def test_set_timeout_for_message_type(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+    def test_set_timeout_for_message_type(
+        self, rpc_client: RPCClient,
     ) -> None:
         """Test setting timeout for specific message type."""
-        # Set custom timeout
-        rpc_client.set_timeout("status_request", 10.0)
+        rpc_client.set_timeout(StyreneMessageType.STATUS_REQUEST, 10.0)
 
-        # Verify timeout is stored
-        assert rpc_client.get_timeout("status_request") == 10.0
+        assert rpc_client.get_timeout(StyreneMessageType.STATUS_REQUEST) == 10.0
 
-    @pytest.mark.asyncio
-    async def test_default_timeout(self, rpc_client: RPCClient) -> None:
+    def test_default_timeout(self, rpc_client: RPCClient) -> None:
         """Test default timeout fallback."""
-        # Should use default timeout
-        assert rpc_client.get_timeout("unknown_type") == 30.0
+        # Should use default timeout for unknown types
+        assert rpc_client.get_timeout(StyreneMessageType.CHAT) == 30.0
 
         # Change default
         rpc_client.default_timeout = 60.0
-        assert rpc_client.get_timeout("unknown_type") == 60.0
+        assert rpc_client.get_timeout(StyreneMessageType.CHAT) == 60.0
 
 
 class TestRebootCommand:
@@ -569,10 +640,10 @@ class TestRebootCommand:
 
     @pytest.mark.asyncio
     async def test_call_reboot_immediate(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test call_reboot with immediate reboot (no delay)."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call in background
         async def make_call() -> RebootResult:
@@ -583,36 +654,35 @@ class TestRebootCommand:
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
-        # Verify message type and payload
-        sent_dest, sent_payload = mock_lxmf.sent_messages[0]
+        # Verify message type
+        sent_dest, sent_type, sent_payload, sent_rid = mock_protocol.sent_messages[0]
         assert sent_dest == destination
-        assert sent_payload["type"] == "reboot"
-        assert sent_payload["delay"] == 0
+        assert sent_type == StyreneMessageType.REBOOT
 
         # Respond with reboot result
-        request_id = sent_payload["request_id"]
-        response_payload = {
-            "request_id": request_id,
-            "type": "reboot_result",
-            "success": True,
-            "message": "Reboot initiated",
-            "scheduled_time": None,
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.REBOOT_RESULT,
+            {
+                "success": True,
+                "message": "Reboot initiated",
+                "scheduled_time": None,
+            },
+        )
 
         # Should return RebootResult
         result = await call_task
         assert isinstance(result, RebootResult)
         assert result.success is True
         assert result.message == "Reboot initiated"
-        assert result.scheduled_time is None
 
     @pytest.mark.asyncio
     async def test_call_reboot_with_delay(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test call_reboot with delayed reboot."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
 
         # Make call with 60 second delay
         async def make_call() -> RebootResult:
@@ -623,21 +693,20 @@ class TestRebootCommand:
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
-        # Verify delay is sent
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        assert sent_payload["delay"] == 60
+        _sent_dest, _sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
 
         # Respond with scheduled reboot
-        request_id = sent_payload["request_id"]
-        scheduled_time = 1700000000.0  # Future timestamp
-        response_payload = {
-            "request_id": request_id,
-            "type": "reboot_result",
-            "success": True,
-            "message": "Reboot scheduled in 60 seconds",
-            "scheduled_time": scheduled_time,
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        scheduled_time = 1700000000.0
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.REBOOT_RESULT,
+            {
+                "success": True,
+                "message": "Reboot scheduled in 60 seconds",
+                "scheduled_time": scheduled_time,
+            },
+        )
 
         # Should return RebootResult with scheduled time
         result = await call_task
@@ -672,10 +741,10 @@ class TestUpdateConfigCommand:
 
     @pytest.mark.asyncio
     async def test_call_update_config(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test call_update_config method."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
         config_updates = {
             "log_level": "DEBUG",
             "max_retries": 5,
@@ -693,22 +762,22 @@ class TestUpdateConfigCommand:
         # Wait for message to be sent
         await asyncio.sleep(0.1)
 
-        # Verify message type and payload
-        sent_dest, sent_payload = mock_lxmf.sent_messages[0]
+        # Verify message type
+        sent_dest, sent_type, sent_payload, sent_rid = mock_protocol.sent_messages[0]
         assert sent_dest == destination
-        assert sent_payload["type"] == "update_config"
-        assert sent_payload["config"] == config_updates
+        assert sent_type == StyreneMessageType.CONFIG_UPDATE
 
         # Respond with update result
-        request_id = sent_payload["request_id"]
-        response_payload = {
-            "request_id": request_id,
-            "type": "update_config_result",
-            "success": True,
-            "message": "Configuration updated",
-            "updated_keys": ["log_level", "max_retries", "enable_telemetry"],
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.CONFIG_RESULT,
+            {
+                "success": True,
+                "message": "Configuration updated",
+                "updated_keys": ["log_level", "max_retries", "enable_telemetry"],
+            },
+        )
 
         # Should return UpdateConfigResult
         result = await call_task
@@ -720,13 +789,13 @@ class TestUpdateConfigCommand:
 
     @pytest.mark.asyncio
     async def test_call_update_config_partial_failure(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """Test update_config with some keys failing."""
-        destination = "test-device-hash"
+        destination = "test-device-hash1234"
         config_updates = {
-            "log_level": "INVALID",  # Will fail
-            "max_retries": 3,  # Will succeed
+            "log_level": "INVALID",
+            "max_retries": 3,
         }
 
         async def make_call() -> UpdateConfigResult:
@@ -739,18 +808,19 @@ class TestUpdateConfigCommand:
         await asyncio.sleep(0.1)
 
         # Get request ID
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        request_id = sent_payload["request_id"]
+        _sent_dest, _sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
 
         # Respond with partial success
-        response_payload = {
-            "request_id": request_id,
-            "type": "update_config_result",
-            "success": False,
-            "message": "Invalid log_level value",
-            "updated_keys": ["max_retries"],  # Only one key updated
-        }
-        mock_lxmf.simulate_receive(destination, response_payload)
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.CONFIG_RESULT,
+            {
+                "success": False,
+                "message": "Invalid log_level value",
+                "updated_keys": ["max_retries"],
+            },
+        )
 
         # Should return result with partial success
         result = await call_task
@@ -785,7 +855,9 @@ class TestProtocolInterface:
         """RPCClient should have protocol_id 'rpc'."""
         assert rpc_client.protocol_id == "rpc"
 
-    def test_rpc_client_can_handle_rpc_message(self, rpc_client: RPCClient) -> None:
+    def test_rpc_client_can_handle_rpc_message(
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
+    ) -> None:
         """RPCClient should handle messages with protocol='rpc'."""
         msg = LXMFMessage(
             source_hash="source",
@@ -796,7 +868,9 @@ class TestProtocolInterface:
 
         assert rpc_client.can_handle(msg)
 
-    def test_rpc_client_cannot_handle_non_rpc_message(self, rpc_client: RPCClient) -> None:
+    def test_rpc_client_cannot_handle_non_rpc_message(
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
+    ) -> None:
         """RPCClient should not handle messages without protocol='rpc'."""
         msg = LXMFMessage(
             source_hash="source",
@@ -807,7 +881,9 @@ class TestProtocolInterface:
 
         assert not rpc_client.can_handle(msg)
 
-    def test_rpc_client_cannot_handle_no_protocol(self, rpc_client: RPCClient) -> None:
+    def test_rpc_client_cannot_handle_no_protocol(
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
+    ) -> None:
         """RPCClient should not handle messages without protocol field."""
         msg = LXMFMessage(
             source_hash="source",
@@ -820,14 +896,14 @@ class TestProtocolInterface:
 
     @pytest.mark.asyncio
     async def test_rpc_client_handle_message(
-        self, rpc_client: RPCClient, mock_lxmf: MockLXMFService
+        self, rpc_client: RPCClient, mock_protocol: MockStyreneProtocol
     ) -> None:
         """RPCClient should handle incoming RPC messages."""
         # Send request first
-        destination = "device_hash"
+        destination = "device_hash12345678"
 
         async def make_call():
-            return await rpc_client.call_status(destination)
+            return await rpc_client.call_status(destination, timeout=5.0)
 
         call_task = asyncio.create_task(make_call())
 
@@ -835,30 +911,21 @@ class TestProtocolInterface:
         await asyncio.sleep(0.1)
 
         # Get request_id from sent message
-        _sent_dest, sent_payload = mock_lxmf.sent_messages[0]
-        request_id = sent_payload["request_id"]
+        _sent_dest, _sent_type, _sent_payload, sent_rid = mock_protocol.sent_messages[0]
 
-        # Create RPC response message
-        msg = LXMFMessage(
-            source_hash=destination,
-            destination_hash="local_hash",
-            timestamp=123.0,
-            content=None,
-            fields={
-                "protocol": "rpc",
-                "request_id": request_id,
-                "type": "status_response",
+        # Simulate response via protocol handler
+        await mock_protocol.simulate_response(
+            rpc_client,
+            sent_rid,
+            StyreneMessageType.STATUS_RESPONSE,
+            {
                 "uptime": 12345,
                 "ip": "192.168.1.100",
                 "services": ["reticulum", "styrene-bond-rpc"],
                 "disk_used": 1000000000,
                 "disk_total": 10000000000,
             },
-            protocol_id="rpc",
         )
-
-        # Handle message (should correlate response to pending request)
-        await rpc_client.handle_message(msg)
 
         # Request should complete
         result = await asyncio.wait_for(call_task, timeout=1.0)

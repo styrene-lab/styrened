@@ -7,11 +7,12 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from styrened.tui.app import StyreneApp
+from textual.widgets import Button, Static, TabbedContent
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.rpc.messages import ExecResult, StatusResponse
+from styrened.tui.app import StyreneApp
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-from textual.widgets import Button, Static, TabbedContent
 
 
 @pytest.fixture(autouse=True)

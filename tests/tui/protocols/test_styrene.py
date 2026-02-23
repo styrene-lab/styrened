@@ -1,6 +1,6 @@
 """Tests for StyreneProtocol implementation."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -47,7 +47,7 @@ def mock_router():
 def mock_identity():
     """Create mock RNS identity."""
     identity = Mock()
-    identity.hash = b"test_identity_hash"
+    identity.hash = b"\x74\x65\x73\x74\x69\x64\x65\x6e\x74\x69\x74\x79\x68\x61\x73\x68"
     identity.hexhash = "746573745f6964656e746974795f68617368"
     return identity
 
@@ -217,8 +217,9 @@ class TestStyreneProtocolSendMessage:
         mock_lxmf.LXMessage.return_value = mock_message
         mock_lxmf.APP_NAME = "lxmf"
 
-        # Mock RNS.Identity.recall to return a mock identity
+        # Mock RNS.Identity.recall to return a mock identity with real bytes hash
         mock_dest_identity = Mock()
+        mock_dest_identity.hash = b"\xab\xcd\xef\x01\x23\x45\x67\x89" * 2
         mock_rns.Identity.recall.return_value = mock_dest_identity
         mock_rns.Destination.OUT = 2
         mock_rns.Destination.SINGLE = 1
@@ -282,7 +283,9 @@ class TestStyreneProtocolSendMessage:
         mock_message = Mock()
         mock_lxmf.LXMessage.return_value = mock_message
         mock_lxmf.APP_NAME = "lxmf"
-        mock_rns.Identity.recall.return_value = Mock()
+        mock_dest_identity = Mock()
+        mock_dest_identity.hash = b"\xab\xcd\xef\x01\x23\x45\x67\x89" * 2
+        mock_rns.Identity.recall.return_value = mock_dest_identity
         mock_rns.Destination.OUT = 2
         mock_rns.Destination.SINGLE = 1
 
@@ -309,7 +312,9 @@ class TestStyreneProtocolSendMessage:
         mock_message = Mock()
         mock_lxmf.LXMessage.return_value = mock_message
         mock_lxmf.APP_NAME = "lxmf"
-        mock_rns.Identity.recall.return_value = Mock()
+        mock_dest_identity = Mock()
+        mock_dest_identity.hash = b"\xab\xcd\xef\x01\x23\x45\x67\x89" * 2
+        mock_rns.Identity.recall.return_value = mock_dest_identity
         mock_rns.Destination.OUT = 2
         mock_rns.Destination.SINGLE = 1
 
@@ -328,7 +333,9 @@ class TestStyreneProtocolSendMessage:
         mock_message = Mock()
         mock_lxmf.LXMessage.return_value = mock_message
         mock_lxmf.APP_NAME = "lxmf"
-        mock_rns.Identity.recall.return_value = Mock()
+        mock_dest_identity = Mock()
+        mock_dest_identity.hash = b"\xab\xcd\xef\x01\x23\x45\x67\x89" * 2
+        mock_rns.Identity.recall.return_value = mock_dest_identity
         mock_rns.Destination.OUT = 2
         mock_rns.Destination.SINGLE = 1
 
@@ -353,7 +360,9 @@ class TestStyreneProtocolSendMessage:
         mock_message = Mock()
         mock_lxmf.LXMessage.return_value = mock_message
         mock_lxmf.APP_NAME = "lxmf"
-        mock_rns.Identity.recall.return_value = Mock()
+        mock_dest_identity = Mock()
+        mock_dest_identity.hash = b"\xab\xcd\xef\x01\x23\x45\x67\x89" * 2
+        mock_rns.Identity.recall.return_value = mock_dest_identity
         mock_rns.Destination.OUT = 2
         mock_rns.Destination.SINGLE = 1
 
