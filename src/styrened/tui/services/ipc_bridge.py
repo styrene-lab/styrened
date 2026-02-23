@@ -406,14 +406,14 @@ class IPCBridge:
 
     async def set_auto_reply(
         self,
-        enabled: bool,
+        mode: str = "disabled",
         message: str = "",
         cooldown: int = 300,
     ) -> dict[str, Any]:
         """Set auto-reply configuration."""
         return await self._call(
             "set_auto_reply",
-            enabled=enabled,
+            mode=mode,
             message=message,
             cooldown=cooldown,
         )

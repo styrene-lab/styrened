@@ -149,7 +149,7 @@ class TestEnsureOperatorIdentityWithDetection:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             result = ensure_operator_identity()
             assert result == "a" * 32
@@ -171,7 +171,7 @@ class TestEnsureOperatorIdentityWithDetection:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
             result = ensure_operator_identity(use_existing=True)
@@ -197,7 +197,7 @@ class TestEnsureOperatorIdentityWithDetection:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
             result = ensure_operator_identity(use_existing=False)
@@ -217,7 +217,7 @@ class TestEnsureOperatorIdentityWithDetection:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
             result = ensure_operator_identity(use_existing=True)
@@ -244,7 +244,7 @@ class TestEnsureOperatorIdentityWithDetection:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
             patch("styrened.services.reticulum.KNOWN_LXMF_IDENTITY_PATHS", fake_paths),
         ):
             result = ensure_operator_identity(use_existing=True)
@@ -276,7 +276,7 @@ class TestEnsureOperatorIdentityCorruptRecovery:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", identity_file),
+            patch("styrened.paths.identity_file", return_value=identity_file),
         ):
             result = ensure_operator_identity(use_existing=False)
 
@@ -303,7 +303,7 @@ class TestEnsureOperatorIdentityCorruptRecovery:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", identity_file),
+            patch("styrened.paths.identity_file", return_value=identity_file),
         ):
             result = ensure_operator_identity(use_existing=False)
 
@@ -321,7 +321,7 @@ class TestEnsureOperatorIdentityCorruptRecovery:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", identity_file),
+            patch("styrened.paths.identity_file", return_value=identity_file),
             patch.object(type(identity_file), "rename", side_effect=OSError("Permission denied")),
         ):
             with pytest.raises(ValueError, match="corrupt and could not be backed up"):
@@ -407,7 +407,7 @@ class TestEnsureOperatorIdentityYubiKey:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             result = ensure_operator_identity(identity_config=identity_config)
             assert result == "y" * 32
@@ -426,7 +426,7 @@ class TestEnsureOperatorIdentityYubiKey:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             result = ensure_operator_identity(identity_config=None)
             assert result == "a" * 32
@@ -496,7 +496,7 @@ class TestGetIdentitySharingStatus:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             status = get_identity_sharing_status()
             assert status["testapp"]["exists"] is True
@@ -512,7 +512,7 @@ class TestShareIdentityWithApps:
         styrened_identity = tmp_path / "nonexistent" / "operator.key"
         with (
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             with pytest.raises(FileNotFoundError):
                 share_identity_with_apps()
@@ -529,7 +529,7 @@ class TestShareIdentityWithApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"])
             assert len(results) == 1
@@ -551,7 +551,7 @@ class TestShareIdentityWithApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"], force=False)
             assert len(results) == 1
@@ -574,7 +574,7 @@ class TestShareIdentityWithApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"], force=True, backup=True)
             assert len(results) == 1
@@ -600,7 +600,7 @@ class TestShareIdentityWithApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = share_identity_with_apps(apps=["testapp"])
             assert len(results) == 1
@@ -615,7 +615,7 @@ class TestShareIdentityWithApps:
 
         with (
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = share_identity_with_apps(apps=["unknownapp"])
             assert len(results) == 1
@@ -640,7 +640,7 @@ class TestUnshareIdentityFromApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
             assert len(results) == 1
@@ -665,7 +665,7 @@ class TestUnshareIdentityFromApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"], restore_backup=True)
             assert len(results) == 1
@@ -695,7 +695,7 @@ class TestUnshareIdentityFromApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
             assert len(results) == 1
@@ -716,7 +716,7 @@ class TestUnshareIdentityFromApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
             assert len(results) == 1
@@ -743,7 +743,7 @@ class TestUnshareIdentityFromApps:
         with (
             patch("styrened.services.reticulum.LXMF_SYMLINK_TARGETS", fake_targets),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", styrened_identity),
+            patch("styrened.paths.identity_file", return_value=styrened_identity),
         ):
             results = unshare_identity_from_apps(apps=["testapp"])
             assert len(results) == 1
@@ -777,7 +777,7 @@ class TestSystemIdentityPath:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", user_identity),
+            patch("styrened.paths.identity_file", return_value=user_identity),
         ):
             result = ensure_operator_identity()
             assert result == "b" * 32
@@ -792,7 +792,7 @@ class TestSystemIdentityPath:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", user_identity),
+            patch("styrened.paths.identity_file", return_value=user_identity),
         ):
             result = ensure_operator_identity()
             assert result == "b" * 32
@@ -811,7 +811,7 @@ class TestSystemIdentityPath:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.paths.identity_file", return_value=_NO_SYSTEM_IDENTITY),
         ):
             result = ensure_operator_identity(config_path=config_identity)
             assert result == "b" * 32
@@ -839,7 +839,7 @@ class TestGetOperatorIdentity:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.paths.identity_file", return_value=_NO_SYSTEM_IDENTITY),
         ):
             result = get_operator_identity()
             assert result == "c" * 32
@@ -854,7 +854,7 @@ class TestGetOperatorIdentity:
         with (
             patch("styrened.services.reticulum.RNS", None),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.paths.identity_file", return_value=_NO_SYSTEM_IDENTITY),
         ):
             result = get_operator_identity()
             assert result is None
@@ -870,7 +870,7 @@ class TestGetOperatorIdentity:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.paths.identity_file", return_value=_NO_SYSTEM_IDENTITY),
         ):
             result = get_operator_identity()
             assert result is None
@@ -879,7 +879,7 @@ class TestGetOperatorIdentity:
         """Should return None when no identity file exists anywhere."""
         with (
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.paths.identity_file", return_value=_NO_SYSTEM_IDENTITY),
         ):
             result = get_operator_identity()
             assert result is None
@@ -895,7 +895,7 @@ class TestGetOperatorIdentity:
         with (
             patch("styrened.services.reticulum.RNS", mock_rns),
             patch("styrened.services.reticulum.SYSTEM_IDENTITY_PATH", system_identity),
-            patch("styrened.services.reticulum.OPERATOR_IDENTITY_PATH", _NO_SYSTEM_IDENTITY),
+            patch("styrened.paths.identity_file", return_value=_NO_SYSTEM_IDENTITY),
         ):
             result = get_operator_identity()
             assert result is None

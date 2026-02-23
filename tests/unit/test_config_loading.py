@@ -9,6 +9,7 @@ Also tests config_path_override parsing for RNS configuration.
 import tempfile
 from pathlib import Path
 
+from styrened.models.config import AutoReplyMode
 from styrened.services.config import _parse_bool, load_core_config, save_core_config
 
 
@@ -123,7 +124,7 @@ discovery:
         yaml_content = """
 chat:
   enabled: "no"
-  auto_reply_enabled: "no"
+  auto_reply_mode: "disabled"
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -131,7 +132,7 @@ chat:
             config = load_core_config(Path(f.name))
 
         assert config.chat.enabled is False
-        assert config.chat.auto_reply_enabled is False
+        assert config.chat.auto_reply_mode == AutoReplyMode.DISABLED
 
     def test_load_config_with_string_yes_for_enabled(self) -> None:
         """Config with string 'yes' should enable feature."""
@@ -159,7 +160,7 @@ api:
         # Check operator profile defaults are preserved
         assert config.rpc.enabled is True
         assert config.discovery.enabled is True
-        assert config.chat.auto_reply_enabled is False  # Operator profile: human is present
+        assert config.chat.auto_reply_mode == AutoReplyMode.DISABLED  # Operator profile: human is present
 
     def test_load_config_with_all_string_bools(self) -> None:
         """Comprehensive test with all boolean fields as strings."""
@@ -179,7 +180,7 @@ discovery:
   auto_announce: "false"
 chat:
   enabled: "true"
-  auto_reply_enabled: "false"
+  auto_reply_mode: "disabled"
   persist_messages: "false"
 api:
   enabled: "false"
@@ -198,7 +199,7 @@ api:
         assert config.discovery.enabled is True
         assert config.discovery.auto_announce is False
         assert config.chat.enabled is True
-        assert config.chat.auto_reply_enabled is False
+        assert config.chat.auto_reply_mode == AutoReplyMode.DISABLED
         assert config.chat.persist_messages is False
         assert config.api.enabled is False
 

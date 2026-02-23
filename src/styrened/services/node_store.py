@@ -35,8 +35,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-import platformdirs
-
+from styrened import paths
 from styrened.models.mesh_device import DeviceType, MeshDevice
 
 logger = logging.getLogger(__name__)
@@ -94,11 +93,11 @@ def get_db_path() -> Path:
     """Get path to the nodes database.
 
     Returns:
-        Path to ~/.styrene/nodes.db
+        Path to the nodes database file.
     """
-    config_dir = Path(platformdirs.user_config_dir("styrene"))
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "nodes.db"
+    db = paths.nodes_db()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    return db
 
 
 def init_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -814,7 +813,11 @@ class NodeStore:
             pass
 
         try:
-            device_type = DeviceType(row["device_type"]) if row["device_type"] else DeviceType.UNKNOWN
+            raw_type = row["device_type"]
+            # Handle legacy "styrene_node" values from pre-0.10 databases
+            if raw_type == "styrene_node":
+                raw_type = "styrene"
+            device_type = DeviceType(raw_type) if raw_type else DeviceType.UNKNOWN
         except ValueError:
             device_type = DeviceType.UNKNOWN
 

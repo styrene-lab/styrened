@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from styrened.services.config import get_config_dir
+from styrened import paths
 from styrened.services.reticulum import get_operator_identity, is_reticulum_configured
 
 
@@ -51,8 +51,7 @@ def get_setup_status() -> SetupStatus:
     identity_configured = identity_hash is not None
 
     # Config file check
-    config_path = get_config_dir() / "core-config.yaml"
-    config_file_exists = config_path.exists()
+    config_file_exists = paths.config_file().exists()
 
     # Display name check — load config to see if customized
     config = load_core_config()

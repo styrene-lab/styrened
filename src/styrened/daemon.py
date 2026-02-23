@@ -92,6 +92,14 @@ class StyreneDaemon:
     async def start(self) -> None:
         """Start the daemon services."""
         logger.info("Starting Styrene daemon...")
+        self._event_loop = asyncio.get_running_loop()
+
+        # Migrate legacy paths (copies files, idempotent)
+        from styrened import paths
+
+        actions = paths.migrate_legacy_paths()
+        for action in actions:
+            logger.info(f"[paths] {action}")
 
         # Initialize Styrene services
         if not self.lifecycle.initialize():
@@ -885,7 +893,7 @@ class StyreneDaemon:
 
         The handler is always created (even when disabled) so it can be
         toggled at runtime without a daemon restart. The handler itself
-        gates on config.auto_reply_enabled in handle_message().
+        gates on config.auto_reply_mode in handle_message().
         """
         if not self.config.chat.enabled:
             logger.info("Chat disabled in configuration")
@@ -911,15 +919,18 @@ class StyreneDaemon:
                 identity=identity,
                 router=lxmf_service.router,
                 start_time=self._start_time,
+                conversation_service=self._conversation_service,
+                broadcast_callback=self._broadcast_chat_event,
+                event_loop=getattr(self, "_event_loop", None),
             )
 
             # Register the handler with LXMF service (not directly with router)
             # Use raw_mode=True since AutoReplyHandler expects LXMF.LXMessage
             lxmf_service.register_callback(self._auto_reply_handler.handle_message, raw_mode=True)
 
-            state = "enabled" if self.config.chat.auto_reply_enabled else "disabled"
+            state = self.config.chat.auto_reply_mode.value
             logger.info(
-                f"Auto-reply handler registered ({state}, "
+                f"Auto-reply handler registered (mode={state}, "
                 f"cooldown: {self.config.chat.auto_reply_cooldown}s)"
             )
 
@@ -1158,7 +1169,9 @@ class StyreneDaemon:
             capabilities.append("hub")
         if self.config.api.enabled:
             capabilities.append("api")
-        if self.config.chat.auto_reply_enabled:
+        from styrened.models.config import AutoReplyMode
+
+        if self.config.chat.auto_reply_mode != AutoReplyMode.DISABLED:
             capabilities.append("autoreply")
 
         caps_str = ",".join(capabilities) if capabilities else "node"

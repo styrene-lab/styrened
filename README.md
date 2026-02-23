@@ -169,7 +169,7 @@ discovery:
   announce_interval: 300
 
 chat:
-  auto_reply_enabled: true
+  auto_reply_mode: template
   auto_reply_message: "This is an automated system"
 
 api:

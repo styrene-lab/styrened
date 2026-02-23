@@ -60,12 +60,12 @@ RNS_ERROR_INFO: dict[RNSErrorCategory, dict[str, str]] = {
     RNSErrorCategory.IDENTITY_CORRUPT: {
         "title": "Identity Corrupt",
         "description": "Operator identity file is invalid.",
-        "recovery": "Delete ~/.styrene/operator.key to regenerate identity.",
+        "recovery": "Delete ~/.config/styrene/operator.key to regenerate identity.",
     },
     RNSErrorCategory.IDENTITY_PERMISSION: {
         "title": "Identity Permission",
         "description": "Cannot read operator identity file.",
-        "recovery": "Check permissions on ~/.styrene/operator.key",
+        "recovery": "Check permissions on ~/.config/styrene/operator.key",
     },
     RNSErrorCategory.PORT_CONFLICT: {
         "title": "Port Conflict",

@@ -147,7 +147,7 @@ rpc:
 
 chat:
   enabled: true
-  auto_reply_enabled: true
+  auto_reply_mode: template
   auto_reply_cooldown: 60
   auto_reply_message: |
     Test node: {hostname}

@@ -12,10 +12,8 @@ Design decisions:
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
-from platformdirs import user_data_dir
 from sqlalchemy import Index, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -268,9 +266,11 @@ def init_db(db_path: str | None = None) -> Engine:
         SQLAlchemy engine
     """
     if db_path is None:
-        data_dir = Path(user_data_dir("styrene", "styrene-lab"))
-        data_dir.mkdir(parents=True, exist_ok=True)
-        db_path = str(data_dir / "messages.db")
+        from styrened import paths
+
+        db = paths.messages_db()
+        db.parent.mkdir(parents=True, exist_ok=True)
+        db_path = str(db)
 
     logger.info(f"Initializing message database: {db_path}")
     engine = create_engine(f"sqlite:///{db_path}")

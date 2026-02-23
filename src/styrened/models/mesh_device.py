@@ -24,7 +24,7 @@ from enum import Enum
 class DeviceType(Enum):
     """Type of device discovered on the mesh."""
 
-    STYRENE_NODE = "styrene_node"  # Node running Styrene endpoint
+    STYRENE_NODE = "styrene"  # Node running Styrene endpoint
     RNODE = "rnode"  # RNode hardware device
     GENERIC = "generic"  # Generic Reticulum announce
     UNKNOWN = "unknown"  # Unable to determine type
@@ -246,8 +246,8 @@ def parse_announce_data(
         dtype = aspect_hint or DeviceType.UNKNOWN
         return ("binary-data", dtype, None, None, None, None, None)
 
-    # Check for Styrene node
-    if decoded.lower().startswith("styrene"):
+    # Check for Styrene node (wire format: "styrene" or "styrene:host:ver:caps:...")
+    if decoded.lower() == "styrene" or decoded.lower().startswith("styrene:"):
         # Handle formats:
         # - "styrene" (minimal)
         # - "styrene:hostname:version:caps" (legacy 4-field)

@@ -40,7 +40,8 @@ def mock_daemon():
     daemon.config.discovery.enabled = True
     daemon.config.discovery.auto_announce = True
     daemon.config.chat.enabled = True
-    daemon.config.chat.auto_reply_enabled = False
+    daemon.config.chat.auto_reply_mode = MagicMock()
+    daemon.config.chat.auto_reply_mode.value = "disabled"
     daemon.config.chat.auto_reply_cooldown = 60
     daemon.config.chat.persist_messages = True
     daemon.config.api.enabled = False
@@ -223,7 +224,7 @@ class TestQueryDevices:
         mock_device.destination_hash = "dest123"
         mock_device.identity_hash = "id456"
         mock_device.name = "test-node"
-        mock_device.device_type.value = "styrene_node"
+        mock_device.device_type.value = "styrene"
         mock_device.status.value = "active"
         mock_device.is_styrene_node = True
         mock_device.lxmf_destination_hash = "lxmf789"
@@ -261,7 +262,7 @@ class TestQueryDevices:
         styrene_device.destination_hash = "styrene1"
         styrene_device.identity_hash = "id1"
         styrene_device.name = "styrene-node"
-        styrene_device.device_type.value = "styrene_node"
+        styrene_device.device_type.value = "styrene"
         styrene_device.status.value = "active"
         styrene_device.is_styrene_node = True
         styrene_device.lxmf_destination_hash = "lxmf1"

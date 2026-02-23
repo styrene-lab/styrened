@@ -18,7 +18,7 @@ data:
       announce_interval: {{ .Values.styrene.discovery.announce_interval }}
 
     chat:
-      auto_reply_enabled: {{ .Values.styrene.chat.auto_reply_enabled }}
+      auto_reply_mode: {{ .Values.styrene.chat.auto_reply_mode }}
 
 ---
 apiVersion: v1

@@ -18,7 +18,7 @@ def test_save_and_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     """Test saving and loading configuration."""
     # Mock config directory
     config_dir = tmp_path / ".styrene"
-    monkeypatch.setattr("styrened.tui.services.config.get_config_dir", lambda: config_dir)
+    monkeypatch.setattr("styrened.paths.config_dir", lambda: config_dir)
 
     # Create config
     config = get_default_config()
@@ -33,7 +33,7 @@ def test_save_and_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     save_config(config)
 
     # Verify file exists
-    config_file = config_dir / "config.yaml"
+    config_file = config_dir / "tui.yaml"
     assert config_file.exists()
 
     # Load
@@ -52,7 +52,7 @@ def test_cli_overrides_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """Test that CLI overrides are persisted to config."""
     # Mock config directory
     config_dir = tmp_path / ".styrene"
-    monkeypatch.setattr("styrened.tui.services.config.get_config_dir", lambda: config_dir)
+    monkeypatch.setattr("styrened.paths.config_dir", lambda: config_dir)
 
     # Start with defaults
     config = get_default_config()
@@ -80,7 +80,7 @@ def test_cli_overrides_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert updated_config.advanced.headless is True
 
     # Verify persisted to disk
-    config_file = config_dir / "config.yaml"
+    config_file = config_dir / "tui.yaml"
     assert config_file.exists()
 
     # Load from disk and verify
@@ -165,7 +165,7 @@ def test_auto_enable_server_in_hub_mode(tmp_path: Path, monkeypatch: pytest.Monk
     """Test that server interface is auto-enabled in hub mode."""
     # Mock config directory
     config_dir = tmp_path / ".styrene"
-    monkeypatch.setattr("styrened.tui.services.config.get_config_dir", lambda: config_dir)
+    monkeypatch.setattr("styrened.paths.config_dir", lambda: config_dir)
 
     # Start with standalone
     config = get_default_config()

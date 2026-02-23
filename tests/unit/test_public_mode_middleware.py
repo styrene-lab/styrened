@@ -58,7 +58,7 @@ class TestPublicModeBlocks:
         """PUT /api/config returns 403 in public mode."""
         response = self.client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         assert response.status_code == 403
         assert "read-only" in response.json()["detail"].lower()
@@ -213,7 +213,7 @@ class TestPublicModeBypass:
         """
         response = self.client.put(
             "/api/../api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         assert response.status_code == 403
         assert "read-only" in response.json()["detail"].lower()
@@ -222,7 +222,7 @@ class TestPublicModeBypass:
         """PUT /api/./config must still be blocked (dot is normalized)."""
         response = self.client.put(
             "/api/./config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         assert response.status_code == 403
 
@@ -236,7 +236,7 @@ class TestPublicModeBypass:
         """
         response = self.client.put(
             "/API/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         # Must not succeed — either 403 (blocked) or 404/405 (no route)
         assert response.status_code != 200
@@ -247,7 +247,7 @@ class TestPublicModeBypass:
         for path in ["/Api/config", "/aPi/config", "/ApI/config"]:
             response = self.client.put(
                 path,
-                json={"chat": {"auto_reply_enabled": True}},
+                json={"chat": {"auto_reply_mode": "template"}},
             )
             assert response.status_code != 200, f"{path} returned 200"
             assert response.status_code in {403, 404, 405}, (
@@ -262,7 +262,7 @@ class TestPublicModeBypass:
         """PATCH is not in the allow-list and must be blocked."""
         response = self.client.patch(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         assert response.status_code == 403
 
@@ -298,7 +298,7 @@ class TestPublicModeBypass:
         """
         response = self.client.put(
             "/api/config/",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         # Must be blocked (403) or not found (404) — never 200
         assert response.status_code in {403, 404, 405}
@@ -312,11 +312,11 @@ class TestPublicModeBypass:
         """Trailing-slash and non-trailing-slash produce same gate behavior."""
         r_no_slash = self.client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         r_with_slash = self.client.put(
             "/api/config/",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         # Both must be denied — neither should return 200
         assert r_no_slash.status_code != 200
@@ -364,7 +364,7 @@ class TestPublicModeBypass:
         """
         response = self.client.put(
             "/api/config?_method=GET",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         assert response.status_code == 403
 
@@ -375,7 +375,7 @@ class TestPublicModeBypass:
         """
         response = self.client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
             headers={"X-HTTP-Method-Override": "GET"},
         )
         assert response.status_code == 403
@@ -384,7 +384,7 @@ class TestPublicModeBypass:
         """PUT with X-Method-Override header must still be blocked."""
         response = self.client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
             headers={"X-Method-Override": "GET"},
         )
         assert response.status_code == 403
@@ -441,7 +441,7 @@ class TestPublicModeBypass:
         """
         response = self.client.put(
             "/api%2Fconfig",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         # Must not succeed — blocked or no route
         assert response.status_code != 200

@@ -74,6 +74,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from styrened import paths
 from styrened.models.config import CoreConfig, DeploymentMode
 from styrened.models.mesh_device import DeviceType, MeshDevice, create_mesh_device
 from styrened.models.reticulum import (
@@ -97,7 +98,6 @@ logger = logging.getLogger(__name__)
 
 # Operator identity storage
 SYSTEM_IDENTITY_PATH = Path("/etc/styrene/identity")
-OPERATOR_IDENTITY_PATH = Path.home() / ".styrene" / "operator.key"
 
 # Known LXMF application identity paths (in priority order)
 # TODO(2026-04): Review identity detection paths - the LXMF ecosystem may have
@@ -395,7 +395,7 @@ def get_identity_sharing_status() -> dict[str, dict[str, Any]]:
     status: dict[str, dict[str, Any]] = {}
 
     # Build known paths once (not per-app)
-    known_paths: set[Path] = {SYSTEM_IDENTITY_PATH, OPERATOR_IDENTITY_PATH}
+    known_paths: set[Path] = {SYSTEM_IDENTITY_PATH, paths.identity_file()}
     active = _resolve_identity_path()
     if active:
         known_paths.add(active.resolve())
@@ -607,7 +607,7 @@ def unshare_identity_from_apps(
     results: list[SymlinkResult] = []
 
     # Build known paths once (not per-app)
-    known_paths: set[Path] = {SYSTEM_IDENTITY_PATH, OPERATOR_IDENTITY_PATH}
+    known_paths: set[Path] = {SYSTEM_IDENTITY_PATH, paths.identity_file()}
     active = _resolve_identity_path()
     if active:
         known_paths.add(active.resolve())
@@ -726,7 +726,7 @@ def _resolve_identity_path(config_path: Path | None = None) -> Path | None:
     Resolution order:
     1. Config override (explicit operator_identity_path)
     2. /etc/styrene/identity (OS-level, generated at NixOS activation)
-    3. ~/.styrene/operator.key (user-level, legacy default)
+    3. paths.identity_file() (user-level canonical path)
 
     Args:
         config_path: Explicit path from config override, or None.
@@ -738,7 +738,7 @@ def _resolve_identity_path(config_path: Path | None = None) -> Path | None:
     if config_path:
         candidates.append(config_path)
     candidates.append(SYSTEM_IDENTITY_PATH)
-    candidates.append(OPERATOR_IDENTITY_PATH)
+    candidates.append(paths.identity_file())
 
     for path in candidates:
         if path.exists() and path.is_file():
@@ -757,7 +757,7 @@ def ensure_operator_identity(
     0. YubiKey derivation (if identity_config.provider == "yubikey")
     1. Config override (explicit operator_identity_path)
     2. /etc/styrene/identity (OS-level, generated at NixOS activation)
-    3. ~/.styrene/operator.key (user-level)
+    3. ~/.config/styrene/operator.key (user-level)
     4. Detect from LXMF apps (NomadNet, Sideband, MeshChat)
     5. Generate new at user-level path
 
@@ -828,17 +828,17 @@ def ensure_operator_identity(
             app_name, source_path = existing
             logger.info(
                 f"Found existing identity from {app_name} at {source_path}, "
-                f"copying to {OPERATOR_IDENTITY_PATH}"
+                f"copying to {paths.identity_file()}"
             )
 
             # Load and verify the existing identity
             identity = RNS.Identity.from_file(str(source_path))
             if identity is not None:
                 # Ensure parent directory exists
-                OPERATOR_IDENTITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+                paths.identity_file().parent.mkdir(parents=True, exist_ok=True)
 
                 # Save a copy for styrened
-                identity.to_file(str(OPERATOR_IDENTITY_PATH))
+                identity.to_file(str(paths.identity_file()))
 
                 logger.info(f"Identity imported from {app_name}: {identity.hash.hex()[:16]}...")
                 return str(identity.hash.hex())
@@ -849,10 +849,10 @@ def ensure_operator_identity(
     identity = RNS.Identity(create_keys=True)
 
     # Ensure parent directory exists
-    OPERATOR_IDENTITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    paths.identity_file().parent.mkdir(parents=True, exist_ok=True)
 
     # Save identity to file
-    identity.to_file(str(OPERATOR_IDENTITY_PATH))
+    identity.to_file(str(paths.identity_file()))
 
     logger.info(f"Created new operator identity: {identity.hash.hex()[:16]}...")
     return str(identity.hash.hex())

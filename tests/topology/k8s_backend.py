@@ -98,7 +98,7 @@ def generate_node_values(
             },
             "rpc": {"enabled": True},
             "discovery": {"announce_interval": 30},
-            "chat": {"auto_reply_enabled": False},
+            "chat": {"auto_reply_mode": "disabled"},
         },
         "rns": {
             "enable_transport": node.enable_transport,

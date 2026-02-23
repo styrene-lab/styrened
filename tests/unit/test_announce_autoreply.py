@@ -6,17 +6,17 @@ is included/excluded based on config.
 
 from unittest.mock import MagicMock, patch
 
-from styrened.models.config import CoreConfig
+from styrened.models.config import AutoReplyMode, CoreConfig
 
 
 class TestBuildAnnounceData:
     """Verify _build_announce_data includes autoreply capability."""
 
-    def _make_daemon(self, auto_reply_enabled: bool = False):  # noqa: ANN202
+    def _make_daemon(self, auto_reply_mode: AutoReplyMode = AutoReplyMode.DISABLED):  # noqa: ANN202
         from styrened.daemon import StyreneDaemon
 
         config = CoreConfig()
-        config.chat.auto_reply_enabled = auto_reply_enabled
+        config.chat.auto_reply_mode = auto_reply_mode
         config.identity.display_name = "test-node"
         config.identity.icon = ""
         config.identity.short_name = "tnode"
@@ -33,7 +33,7 @@ class TestBuildAnnounceData:
         lxmf_svc.delivery_destination.hash.hex.return_value = "deadbeef" * 4
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=True)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.TEMPLATE)
         data = daemon._build_announce_data()
         decoded = data.decode("utf-8")
 
@@ -48,7 +48,7 @@ class TestBuildAnnounceData:
         lxmf_svc.delivery_destination.hash.hex.return_value = "deadbeef" * 4
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=False)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.DISABLED)
         data = daemon._build_announce_data()
         decoded = data.decode("utf-8")
 
@@ -63,7 +63,7 @@ class TestBuildAnnounceData:
         lxmf_svc.delivery_destination.hash.hex.return_value = "deadbeef" * 4
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=True)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.TEMPLATE)
         daemon.config.api.enabled = True
 
         data = daemon._build_announce_data()
@@ -83,7 +83,7 @@ class TestBuildAnnounceData:
         lxmf_svc.delivery_destination.hash.hex.return_value = "deadbeef" * 4
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=False)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.DISABLED)
         data = daemon._build_announce_data()
         decoded = data.decode("utf-8")
         parts = decoded.split(":")

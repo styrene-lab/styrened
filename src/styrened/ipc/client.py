@@ -804,23 +804,23 @@ class ControlClient:
 
     async def set_auto_reply(
         self,
-        enabled: bool,
+        mode: str = "disabled",
         message: str = "",
         cooldown: int = 300,
     ) -> dict[str, Any]:
         """Set auto-reply configuration.
 
         Args:
-            enabled: Whether auto-reply is enabled.
+            mode: Auto-reply mode ("disabled", "template", "chatbot").
             message: Auto-reply message text.
             cooldown: Cooldown between replies in seconds.
 
         Returns:
-            Dict with updated enabled, message, cooldown fields.
+            Dict with updated mode, message, cooldown fields.
         """
         return await self._request(
             CmdSetAutoReplyRequest(
-                enabled=enabled,
+                mode=mode,
                 message=message,
                 cooldown=cooldown,
             )

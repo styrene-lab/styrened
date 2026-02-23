@@ -21,9 +21,6 @@ from styrened.models.mesh_device import MeshDevice
 
 # Re-export core functions (use 'as' pattern for mypy export visibility)
 from styrened.services.reticulum import (
-    OPERATOR_IDENTITY_PATH as OPERATOR_IDENTITY_PATH,
-)
-from styrened.services.reticulum import (
     StyreneAnnounceHandler as StyreneAnnounceHandler,
 )
 from styrened.services.reticulum import (

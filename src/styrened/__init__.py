@@ -16,6 +16,9 @@ Daemon usage:
 
 __version__ = "0.10.4"
 
+# Path resolution
+from styrened import paths  # noqa: F401
+
 # Daemon exports
 from styrened.daemon import StyreneDaemon, main
 
@@ -92,7 +95,7 @@ from styrened.rpc import (
     get_rpc_server,
 )
 
-# Service exports
+# Service exports (path helpers are deprecated — use paths module directly)
 from styrened.services import (
     ensure_directories,
     get_cache_dir,
@@ -164,6 +167,8 @@ __all__ = [
     "create_status_response",
     "encode_payload",
     "decode_payload",
+    # Path resolution
+    "paths",
     # Config services
     "load_core_config",
     "save_core_config",

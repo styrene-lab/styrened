@@ -52,7 +52,7 @@ styrene:
     announce_interval: 300
 
   chat:
-    auto_reply_enabled: false
+    auto_reply_mode: disabled
 
 # IPC relay (test-only) — exposes daemon Unix socket over TCP for
 # MeshControlClient access from outside the cluster via kubectl port-forward.

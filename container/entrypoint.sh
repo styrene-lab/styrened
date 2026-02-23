@@ -7,9 +7,15 @@ set -e
 HOME="${HOME:-/app}"
 export HOME
 
-# Configuration directory (STYRENE_CONFIG_DIR or XDG_CONFIG_HOME fallback)
-CONFIG_DIR="${STYRENE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}}"
+# Configuration directory
+CONFIG_DIR="${STYRENE_CONFIG_DIR:-/config}"
+export STYRENE_CONFIG_DIR="$CONFIG_DIR"
 mkdir -p "$CONFIG_DIR"
+
+# Data directory
+DATA_DIR="${STYRENE_DATA_DIR:-/data}"
+export STYRENE_DATA_DIR="$DATA_DIR"
+mkdir -p "$DATA_DIR"
 
 # RNS config directory (follows Path.home() / ".reticulum")
 RNS_DIR="${HOME}/.reticulum"
@@ -43,6 +49,7 @@ fi
 echo "[entrypoint] Starting styrened..."
 echo "[entrypoint] HOME=$HOME"
 echo "[entrypoint] Config dir: $CONFIG_DIR"
+echo "[entrypoint] Data dir: $DATA_DIR"
 echo "[entrypoint] RNS dir: $RNS_DIR"
 echo "[entrypoint] RNS log level: ${RNS_LOGLEVEL:-4}"
 echo "[entrypoint] Command: $*"

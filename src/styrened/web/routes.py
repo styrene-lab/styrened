@@ -232,17 +232,18 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
     async def get_auto_reply():
         """Return current auto-reply state."""
         return {
-            "enabled": daemon.config.chat.auto_reply_enabled,
+            "mode": daemon.config.chat.auto_reply_mode.value,
             "message": daemon.config.chat.auto_reply_message,
             "cooldown": daemon.config.chat.auto_reply_cooldown,
         }
 
     @router.post("/api/auto-reply")
     async def toggle_auto_reply(body: AutoReplyToggleRequest):
-        """Toggle auto-reply and optionally update the message."""
+        """Set auto-reply mode and optionally update the message."""
+        from styrened.models.config import AutoReplyMode
         from styrened.services.config import save_core_config
 
-        daemon.config.chat.auto_reply_enabled = body.enabled
+        daemon.config.chat.auto_reply_mode = AutoReplyMode(body.mode)
         if body.message is not None:
             daemon.config.chat.auto_reply_message = body.message
 
@@ -254,12 +255,12 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
 
         # Broadcast SSE event
         broadcaster.broadcast_auto_reply_event(
-            daemon.config.chat.auto_reply_enabled,
+            daemon.config.chat.auto_reply_mode.value,
             daemon.config.chat.auto_reply_message,
         )
 
         return {
-            "enabled": daemon.config.chat.auto_reply_enabled,
+            "mode": daemon.config.chat.auto_reply_mode.value,
             "message": daemon.config.chat.auto_reply_message,
             "cooldown": daemon.config.chat.auto_reply_cooldown,
         }
@@ -387,7 +388,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
             all_devices = node_store.get_all_nodes()
             device_count = len(all_devices)
             for d in all_devices:
-                if d.device_type.value == "styrene_node":
+                if d.device_type.value == "styrene":
                     styrene_count += 1
                 s = d.status.value
                 if s == "active":

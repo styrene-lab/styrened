@@ -61,6 +61,18 @@ class Profile(Enum):
     HUB = "hub"  # Public infrastructure: routes, propagates, read-only web dashboard
 
 
+class AutoReplyMode(Enum):
+    """Auto-reply operating mode.
+
+    Controls how the node responds to incoming chat messages when no
+    operator is available.
+    """
+
+    DISABLED = "disabled"  # No automatic responses
+    TEMPLATE = "template"  # Static template with {hostname}, {uptime}, etc.
+    CHATBOT = "chatbot"  # LLM-backed conversational responses
+
+
 # -----------------------------------------------------------------------------
 # Configuration validation errors
 # -----------------------------------------------------------------------------
@@ -332,21 +344,53 @@ class DiscoveryConfig:
 
 
 @dataclass
+class ChatbotConfig:
+    """LLM chatbot configuration for auto-reply chatbot mode.
+
+    Used when auto_reply_mode is CHATBOT. Connects to any OpenAI-compatible
+    chat completions endpoint (ollama, OpenRouter, vLLM, etc.).
+
+    Attributes:
+        endpoint: Base URL of the OpenAI-compatible API.
+        model: Model name to use for chat completions.
+        api_key: API key for authentication. Falls back to
+            $STYRENED_CHATBOT_API_KEY environment variable.
+        system_prompt: System prompt template. Supports same placeholders
+            as auto_reply_message: {hostname}, {identity}, {uptime}, {version}.
+        max_tokens: Maximum tokens in the LLM response.
+        temperature: Sampling temperature (0.0-2.0).
+        max_context_messages: Maximum conversation history messages to include.
+    """
+
+    endpoint: str = "http://localhost:11434/v1"
+    model: str = "llama3"
+    api_key: str = ""
+    system_prompt: str = (
+        "You are a helpful assistant on mesh node {hostname}. "
+        "Keep responses concise — this is a low-bandwidth mesh network."
+    )
+    max_tokens: int = 256
+    temperature: float = 0.7
+    max_context_messages: int = 10
+
+
+@dataclass
 class ChatConfig:
     """Chat and messaging configuration.
 
     Attributes:
         enabled: Whether to enable chat/LXMF messaging.
-        auto_reply_enabled: Send automatic replies when running headless.
-        auto_reply_message: Message to send as auto-reply.
+        auto_reply_mode: How the node handles incoming messages automatically.
+        auto_reply_message: Message to send as auto-reply in template mode.
             Supports placeholders: {hostname}, {identity}, {uptime}, {version}
         auto_reply_cooldown: Minimum seconds between auto-replies to same sender.
             Prevents spam loops with other auto-reply bots.
         persist_messages: Store messages in database (requires SQLite).
+        chatbot: LLM chatbot configuration (used when mode is CHATBOT).
     """
 
     enabled: bool = True
-    auto_reply_enabled: bool = False
+    auto_reply_mode: AutoReplyMode = AutoReplyMode.DISABLED
     auto_reply_message: str = (
         "This is {hostname}, a Styrene mesh node running in headless mode. "
         "No operator is currently available to respond. "
@@ -354,6 +398,7 @@ class ChatConfig:
     )
     auto_reply_cooldown: int = 300  # 5 minutes between replies to same sender
     persist_messages: bool = True
+    chatbot: ChatbotConfig = field(default_factory=ChatbotConfig)
 
 
 @dataclass

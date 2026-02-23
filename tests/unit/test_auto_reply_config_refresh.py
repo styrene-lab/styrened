@@ -7,6 +7,7 @@ direct reference, enabling hot-reload when the daemon config is replaced.
 import time
 from unittest.mock import MagicMock
 
+from styrened.models.config import AutoReplyMode, ChatbotConfig
 from styrened.services.auto_reply import AutoReplyHandler
 
 
@@ -15,13 +16,14 @@ class MockChatConfig:
 
     def __init__(
         self,
-        auto_reply_enabled: bool = True,
+        auto_reply_mode: AutoReplyMode = AutoReplyMode.TEMPLATE,
         auto_reply_message: str = "Auto-reply: {hostname}",
         auto_reply_cooldown: int = 60,
     ):
-        self.auto_reply_enabled = auto_reply_enabled
+        self.auto_reply_mode = auto_reply_mode
         self.auto_reply_message = auto_reply_message
         self.auto_reply_cooldown = auto_reply_cooldown
+        self.chatbot = ChatbotConfig()
 
 
 class MockIdentity:
@@ -46,8 +48,8 @@ class TestConfigAccessorPattern:
 
     def test_handler_reflects_config_change(self):
         """Swapping the accessor return value should be visible to the handler."""
-        config_a = MockChatConfig(auto_reply_enabled=True, auto_reply_cooldown=60)
-        config_b = MockChatConfig(auto_reply_enabled=True, auto_reply_cooldown=120)
+        config_a = MockChatConfig(auto_reply_mode=AutoReplyMode.TEMPLATE, auto_reply_cooldown=60)
+        config_b = MockChatConfig(auto_reply_mode=AutoReplyMode.TEMPLATE, auto_reply_cooldown=120)
 
         current = {"cfg": config_a}
 
@@ -64,8 +66,8 @@ class TestConfigAccessorPattern:
         assert handler.config.auto_reply_cooldown == 120
 
     def test_handler_respects_toggled_enabled(self):
-        """Disabling auto_reply_enabled via config swap should suppress replies."""
-        config = MockChatConfig(auto_reply_enabled=True)
+        """Disabling auto_reply_mode via config swap should suppress replies."""
+        config = MockChatConfig(auto_reply_mode=AutoReplyMode.TEMPLATE)
         handler = AutoReplyHandler(
             config_accessor=lambda: config,
             identity=MockIdentity(),
@@ -78,11 +80,11 @@ class TestConfigAccessorPattern:
         msg.content = b"hello"
 
         # Enabled: handler should proceed (cooldown check etc.)
-        assert handler.config.auto_reply_enabled is True
+        assert handler.config.auto_reply_mode == AutoReplyMode.TEMPLATE
 
         # Disable at runtime
-        config.auto_reply_enabled = False
-        assert handler.config.auto_reply_enabled is False
+        config.auto_reply_mode = AutoReplyMode.DISABLED
+        assert handler.config.auto_reply_mode == AutoReplyMode.DISABLED
 
         # handle_message should return early without recording cooldown
         handler.handle_message(msg)

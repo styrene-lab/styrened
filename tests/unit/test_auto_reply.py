@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from styrened.models.config import AutoReplyMode, ChatbotConfig
 from styrened.services.auto_reply import MAX_COOLDOWN_ENTRIES, AutoReplyHandler
 
 
@@ -17,13 +18,14 @@ class MockChatConfig:
 
     def __init__(
         self,
-        auto_reply_enabled: bool = True,
+        auto_reply_mode: AutoReplyMode = AutoReplyMode.TEMPLATE,
         auto_reply_message: str = "Auto-reply: {hostname}",
         auto_reply_cooldown: int = 60,
     ):
-        self.auto_reply_enabled = auto_reply_enabled
+        self.auto_reply_mode = auto_reply_mode
         self.auto_reply_message = auto_reply_message
         self.auto_reply_cooldown = auto_reply_cooldown
+        self.chatbot = ChatbotConfig()
 
 
 class MockIdentity:
@@ -270,8 +272,8 @@ class TestMessageHandling:
     """Tests for handle_message() method."""
 
     def test_handle_message_respects_disabled_config(self, handler):
-        """Should not reply when auto_reply_enabled is False."""
-        handler.config.auto_reply_enabled = False
+        """Should not reply when auto_reply_mode is DISABLED."""
+        handler.config.auto_reply_mode = AutoReplyMode.DISABLED
 
         mock_message = MagicMock()
         mock_message.source_hash = b"\x01\x02\x03\x04\x05\x06\x07\x08"
