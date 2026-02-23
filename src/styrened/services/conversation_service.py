@@ -23,6 +23,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from styrened.models.messages import Message
+from styrened.services.conversation_log import log_conversation_event
 
 if TYPE_CHECKING:
     pass
@@ -724,6 +725,7 @@ class ConversationService:
             self._unread_counts[source_hash] = self._unread_counts.get(source_hash, 0) + 1
 
         logger.debug(f"Saved incoming message from {source_hash[:16]}..., id={msg_id}")
+        log_conversation_event(direction="incoming", source_hash=source_hash, destination_hash=self._local_identity_hash, content_length=len(content), display_name=self._get_display_name(source_hash), message_id=msg_id)
         return msg_id
 
     def save_outgoing_message(
@@ -795,6 +797,7 @@ class ConversationService:
                 )
 
         logger.debug(f"Saved outgoing message to {destination_hash[:16]}..., id={msg_id}")
+        log_conversation_event(direction="outgoing", source_hash=self._local_identity_hash, destination_hash=destination_hash, content_length=len(content), display_name=self._get_display_name(destination_hash), message_id=msg_id)
         return msg_id
 
     def update_message_status(self, message_id: int, status: str) -> bool:
@@ -830,6 +833,7 @@ class ConversationService:
         if tracker is not None:
             self.update_message_status(tracker.message_id, MessageStatus.DELIVERED)
             logger.info(f"Message {tracker.message_id} delivered")
+            log_conversation_event(direction="delivery", source_hash=self._local_identity_hash, destination_hash="", content_length=0, message_id=tracker.message_id)
 
     def on_failed_callback(self, lxmf_hash: bytes) -> None:
         """Handle LXMF delivery failure callback.
@@ -843,6 +847,7 @@ class ConversationService:
         if tracker is not None:
             self.update_message_status(tracker.message_id, MessageStatus.FAILED)
             logger.warning(f"Message {tracker.message_id} delivery failed")
+            log_conversation_event(direction="failure", source_hash=self._local_identity_hash, destination_hash="", content_length=0, message_id=tracker.message_id)
 
     def mark_sent(self, message_id: int) -> None:
         """Mark a message as sent (handed off to network).
