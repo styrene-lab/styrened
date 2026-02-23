@@ -10,14 +10,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from platformdirs import user_config_dir
 
+from styrened import paths
 from styrened.tui.models.fleet import Device, DeviceStatus
 
 # Default inventory location
-DEFAULT_INVENTORY_PATH = (
-    Path(user_config_dir("styrene", ensure_exists=True)) / "fleet-inventory.yaml"
-)
+DEFAULT_INVENTORY_PATH = paths.fleet_inventory()
 
 
 class FleetInventoryError(Exception):

@@ -37,11 +37,10 @@ in
       cmd = [ "${styrened}/bin/styrened" ];
       env = [
         "HOME=/app"
-        "XDG_CONFIG_HOME=/config"
-        "XDG_DATA_HOME=/data"
         "PYTHONUNBUFFERED=1"
         "RNS_LOGLEVEL=4"
         "STYRENE_CONFIG_DIR=/config"
+        "STYRENE_DATA_DIR=/data"
         "STYRENE_VERSION=${version}"
       ];
       labels = {
@@ -75,11 +74,10 @@ in
       cmd = [ "${styrened}/bin/styrened" ];
       env = [
         "HOME=/app"
-        "XDG_CONFIG_HOME=/config"
-        "XDG_DATA_HOME=/data"
         "PYTHONUNBUFFERED=1"
         "RNS_LOGLEVEL=4"
         "STYRENE_CONFIG_DIR=/config"
+        "STYRENE_DATA_DIR=/data"
         "STYRENE_VERSION=${version}"
       ];
       labels = {

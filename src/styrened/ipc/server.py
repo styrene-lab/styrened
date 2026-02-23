@@ -49,32 +49,15 @@ HandlerFunc = Callable[[IPCRequest], Coroutine[Any, Any, IPCResponse]]
 def get_default_socket_path() -> Path:
     """Determine the default socket path.
 
-    Checks in order:
-    1. $STYRENED_SOCKET environment variable
-    2. /run/styrened/control.sock (system daemon)
-    3. $XDG_RUNTIME_DIR/styrened/control.sock (user session)
-    4. ~/.local/run/styrened/control.sock (fallback)
+    Delegates to the central ``paths`` module. Respects ``STYRENED_SOCKET``
+    env var, then mode-dependent defaults.
 
     Returns:
         Path to use for the control socket.
     """
-    # Environment override
-    env_socket = os.environ.get("STYRENED_SOCKET")
-    if env_socket:
-        return Path(env_socket)
+    from styrened import paths
 
-    # System daemon path (requires root)
-    system_path = Path("/run/styrened/control.sock")
-    if system_path.parent.exists() and os.access(system_path.parent, os.W_OK):
-        return system_path
-
-    # XDG runtime directory (user session)
-    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg_runtime:
-        return Path(xdg_runtime) / "styrened" / "control.sock"
-
-    # Fallback to home directory
-    return Path.home() / ".local" / "run" / "styrened" / "control.sock"
+    return paths.control_socket()
 
 
 class ClientConnection:

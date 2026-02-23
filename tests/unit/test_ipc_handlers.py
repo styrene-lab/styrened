@@ -4,6 +4,8 @@ Tests null checks and error handling for IPC request handlers,
 ensuring proper error responses when daemon or dependencies are unavailable.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from styrened.ipc.handlers import IPCHandlers
@@ -76,7 +78,8 @@ class MockDiscoveryConfig:
 class MockChatConfig:
     def __init__(self):
         self.enabled = True
-        self.auto_reply_enabled = False
+        self.auto_reply_mode = MagicMock()
+        self.auto_reply_mode.value = "disabled"
         self.auto_reply_cooldown = 60
         self.persist_messages = False
 

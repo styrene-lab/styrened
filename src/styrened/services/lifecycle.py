@@ -144,7 +144,7 @@ class CoreLifecycle:
         try:
             # Pass only the explicit config override (None if not set).
             # _resolve_identity_path handles the full resolution chain:
-            # config override -> /etc/styrene/identity -> ~/.styrene/operator.key
+            # config override -> /etc/styrene/identity -> ~/.config/styrene/operator.key
             ensure_operator_identity(
                 config_path=self.config.reticulum.operator_identity_path,
                 identity_config=self.config.identity,
@@ -167,7 +167,7 @@ class CoreLifecycle:
             )
 
             # Config precedence:
-            # 1. Explicit override from core-config.yaml (config_path_override)
+            # 1. Explicit override from config.yaml (config_path_override)
             # 2. Standard RNS paths: /etc/reticulum, ~/.config/reticulum, ~/.reticulum
             # 3. Generate temp config if none found
             override = self.config.reticulum.config_path_override
@@ -186,7 +186,7 @@ class CoreLifecycle:
                     searched_paths.append(str(override))
                 searched_paths.extend(str(p) for p in get_reticulum_config_paths())
                 logger.info(f"No existing RNS config found (searched: {', '.join(searched_paths)})")
-                logger.info("Generating temporary RNS config from core-config.yaml interfaces")
+                logger.info("Generating temporary RNS config from config.yaml interfaces")
 
                 # Generate RNS config from CoreConfig
                 config_content = generate_rns_config(self.config, client_only=self._client_only)

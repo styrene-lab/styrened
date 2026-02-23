@@ -52,17 +52,17 @@ class TestGetSetupStatus:
 
     @patch("styrened.services.setup.get_operator_identity", return_value=None)
     @patch("styrened.services.setup.is_reticulum_configured", return_value=False)
-    @patch("styrened.services.setup.get_config_dir")
+    @patch("styrened.services.setup.paths")
     @patch("styrened.services.config.load_core_config")
     def test_fresh_state_all_false(
-        self, mock_load_config, mock_config_dir, mock_rns, mock_identity, tmp_path
+        self, mock_load_config, mock_paths, mock_rns, mock_identity, tmp_path
     ) -> None:
         """Fresh state with no identity, no config file → all False."""
         from styrened.models.config import CoreConfig
 
         mock_identity.return_value = None
         mock_rns.return_value = False
-        mock_config_dir.return_value = tmp_path  # No core-config.yaml here
+        mock_paths.config_file.return_value = tmp_path / "config.yaml"  # Does not exist
         mock_load_config.return_value = CoreConfig()  # Default display_name
 
         status = get_setup_status()
@@ -75,18 +75,18 @@ class TestGetSetupStatus:
 
     @patch("styrened.services.setup.get_operator_identity", return_value="a" * 32)
     @patch("styrened.services.setup.is_reticulum_configured", return_value=True)
-    @patch("styrened.services.setup.get_config_dir")
+    @patch("styrened.services.setup.paths")
     @patch("styrened.services.config.load_core_config")
     def test_configured_state_all_true(
-        self, mock_load_config, mock_config_dir, mock_rns, mock_identity, tmp_path
+        self, mock_load_config, mock_paths, mock_rns, mock_identity, tmp_path
     ) -> None:
         """Fully configured state → all True."""
         from styrened.models.config import CoreConfig
 
         # Create config file
-        config_file = tmp_path / "core-config.yaml"
+        config_file = tmp_path / "config.yaml"
         config_file.write_text("reticulum:\n  mode: standalone\n")
-        mock_config_dir.return_value = tmp_path
+        mock_paths.config_file.return_value = config_file
 
         # Custom display name
         config = CoreConfig()
@@ -103,17 +103,17 @@ class TestGetSetupStatus:
 
     @patch("styrened.services.setup.get_operator_identity", return_value="b" * 32)
     @patch("styrened.services.setup.is_reticulum_configured", return_value=True)
-    @patch("styrened.services.setup.get_config_dir")
+    @patch("styrened.services.setup.paths")
     @patch("styrened.services.config.load_core_config")
     def test_partial_state_identity_exists_default_name(
-        self, mock_load_config, mock_config_dir, mock_rns, mock_identity, tmp_path
+        self, mock_load_config, mock_paths, mock_rns, mock_identity, tmp_path
     ) -> None:
         """Identity exists but display_name still default → partial."""
         from styrened.models.config import CoreConfig
 
-        config_file = tmp_path / "core-config.yaml"
+        config_file = tmp_path / "config.yaml"
         config_file.write_text("identity:\n  display_name: Anonymous Styrene\n")
-        mock_config_dir.return_value = tmp_path
+        mock_paths.config_file.return_value = config_file
 
         mock_load_config.return_value = CoreConfig()  # Default display_name
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from styrened.models.config import CoreConfig, DeploymentMode, Profile
+from styrened.models.config import AutoReplyMode, CoreConfig, DeploymentMode, Profile
 from styrened.services.config import (
     _parse_bool,
     _serialize_config,
@@ -44,7 +44,7 @@ class TestOperatorProfileDefaults:
         """Human reads/sends messages, no auto-reply needed."""
         config = get_profile_defaults(Profile.OPERATOR)
         assert config.chat.enabled is True
-        assert config.chat.auto_reply_enabled is False
+        assert config.chat.auto_reply_mode == AutoReplyMode.DISABLED
 
     def test_operator_discovery_enabled(self) -> None:
         """Operator tracks fleet."""
@@ -91,7 +91,7 @@ class TestEndpointProfileDefaults:
         """Receives messages, auto-replies when unattended."""
         config = get_profile_defaults(Profile.ENDPOINT)
         assert config.chat.enabled is True
-        assert config.chat.auto_reply_enabled is True
+        assert config.chat.auto_reply_mode == AutoReplyMode.TEMPLATE
 
     def test_endpoint_discovery_enabled(self) -> None:
         """Must be discoverable."""
@@ -138,7 +138,7 @@ class TestProfileFromYAML:
         assert config.rpc.allow_command_execution is True
         assert config.terminal.enabled is True
         assert config.ipc.enabled is False
-        assert config.chat.auto_reply_enabled is True
+        assert config.chat.auto_reply_mode == AutoReplyMode.TEMPLATE
         assert config.reticulum.announce_interval == 600
 
     def test_profile_operator_from_yaml(self, tmp_path: Path) -> None:
@@ -151,7 +151,7 @@ class TestProfileFromYAML:
         assert config.rpc.allow_command_execution is False
         assert config.terminal.enabled is False
         assert config.ipc.enabled is True
-        assert config.chat.auto_reply_enabled is False
+        assert config.chat.auto_reply_mode == AutoReplyMode.DISABLED
         assert config.reticulum.announce_interval == 300
 
 
@@ -314,7 +314,7 @@ class TestHubProfileDefaults:
         """Hub auto-replies with 10-minute cooldown."""
         config = get_profile_defaults(Profile.HUB)
         assert config.chat.enabled is True
-        assert config.chat.auto_reply_enabled is True
+        assert config.chat.auto_reply_mode == AutoReplyMode.TEMPLATE
         assert config.chat.auto_reply_cooldown == 600
 
     def test_hub_ipc_disabled(self) -> None:

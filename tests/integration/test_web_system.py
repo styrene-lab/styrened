@@ -205,13 +205,13 @@ class TestSetupStatus:
 
     @patch("styrened.services.setup.get_operator_identity", return_value=None)
     @patch("styrened.services.setup.is_reticulum_configured", return_value=False)
-    @patch("styrened.services.setup.get_config_dir")
+    @patch("styrened.services.setup.paths")
     @patch("styrened.services.config.load_core_config")
     def test_returns_setup_status(
-        self, mock_load, mock_dir, mock_rns, mock_identity, client, tmp_path
+        self, mock_load, mock_paths, mock_rns, mock_identity, client, tmp_path
     ) -> None:
         """GET /api/system/setup-status returns expected fields."""
-        mock_dir.return_value = tmp_path
+        mock_paths.config_file.return_value = tmp_path / "config.yaml"
         mock_load.return_value = CoreConfig()
 
         response = client.get("/api/system/setup-status")

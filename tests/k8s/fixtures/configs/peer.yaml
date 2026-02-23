@@ -13,4 +13,4 @@ discovery:
   announce_interval: 300
 
 chat:
-  auto_reply_enabled: false
+  auto_reply_mode: disabled

@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from platformdirs import user_config_dir
 
+from styrened import paths
 from styrened.models.config import (
+    AutoReplyMode,
+    ChatbotConfig,
     ConfigFieldError,
     ConfigLoadError,
     ConfigValidationError,
@@ -55,49 +57,46 @@ def _parse_bool(value: Any) -> bool:
 def get_config_dir() -> Path:
     """Return the configuration directory path.
 
-    Returns:
-        Path to configuration directory (~/.styrene/).
+    .. deprecated::
+        Use ``paths.config_dir()`` directly.
     """
-    return Path(user_config_dir("styrene"))
+    return paths.config_dir()
 
 
 def get_data_dir() -> Path:
     """Return the data directory path.
 
-    Returns:
-        Path to data directory (~/.local/share/styrene/).
+    .. deprecated::
+        Use ``paths.data_dir()`` directly.
     """
-    from platformdirs import user_data_dir
-
-    return Path(user_data_dir("styrene", "styrene-lab"))
+    return paths.data_dir()
 
 
 def get_cache_dir() -> Path:
     """Return the cache directory path.
 
-    Returns:
-        Path to cache directory (~/.cache/styrene/).
+    .. deprecated::
+        Use ``paths.cache_dir()`` directly.
     """
-    from platformdirs import user_cache_dir
-
-    return Path(user_cache_dir("styrene", "styrene-lab"))
+    return paths.cache_dir()
 
 
 def get_log_dir() -> Path:
     """Return the log directory path.
 
-    Returns:
-        Path to log directory (~/.local/share/styrene/logs/).
+    .. deprecated::
+        Use ``paths.log_dir()`` directly.
     """
-    return get_data_dir() / "logs"
+    return paths.log_dir()
 
 
 def ensure_directories() -> None:
-    """Create necessary directories if they don't exist."""
-    get_config_dir().mkdir(parents=True, exist_ok=True)
-    get_data_dir().mkdir(parents=True, exist_ok=True)
-    get_cache_dir().mkdir(parents=True, exist_ok=True)
-    get_log_dir().mkdir(parents=True, exist_ok=True)
+    """Create necessary directories if they don't exist.
+
+    .. deprecated::
+        Use ``paths.ensure_directories()`` directly.
+    """
+    paths.ensure_directories()
 
 
 def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
@@ -121,7 +120,7 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
         config.rpc.enabled = True
         config.rpc.allow_command_execution = False
         config.chat.enabled = True
-        config.chat.auto_reply_enabled = False
+        config.chat.auto_reply_mode = AutoReplyMode.DISABLED
         config.discovery.enabled = True
         config.discovery.auto_announce = True
         config.ipc.enabled = True
@@ -133,7 +132,7 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
         config.rpc.enabled = True
         config.rpc.allow_command_execution = True
         config.chat.enabled = True
-        config.chat.auto_reply_enabled = True
+        config.chat.auto_reply_mode = AutoReplyMode.TEMPLATE
         config.discovery.enabled = True
         config.discovery.auto_announce = True
         config.api.enabled = False
@@ -150,7 +149,7 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
         config.rpc.relay_mode = True
         config.rpc.allow_command_execution = False
         config.chat.enabled = True
-        config.chat.auto_reply_enabled = True
+        config.chat.auto_reply_mode = AutoReplyMode.TEMPLATE
         config.chat.auto_reply_cooldown = 600
         config.discovery.enabled = True
         config.discovery.auto_announce = True
@@ -180,7 +179,7 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     Looks for config in this order:
     1. Explicit config_path argument
     2. STYRENE_CONFIG_DIR env var + "config.yaml"
-    3. Default location: ~/.config/styrene/core-config.yaml
+    3. Default location via paths.config_file()
 
     Args:
         config_path: Optional path to config file. If None, uses default location.
@@ -191,20 +190,13 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     Raises:
         ConfigLoadError: If config file exists but cannot be parsed.
     """
-    import os
-
     from styrened.models.config import (
         PeerConfig,
         ServerInterfaceConfig,
     )
 
     if config_path is None:
-        # Check for STYRENE_CONFIG_DIR env var (used in K8s deployments)
-        env_config_dir = os.environ.get("STYRENE_CONFIG_DIR")
-        if env_config_dir:
-            config_path = Path(env_config_dir) / "config.yaml"
-        else:
-            config_path = get_config_dir() / "core-config.yaml"
+        config_path = paths.config_file()
 
     if not config_path.exists():
         return get_default_core_config()
@@ -330,14 +322,30 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         chat = data["chat"]
         if "enabled" in chat:
             config.chat.enabled = _parse_bool(chat["enabled"])
-        if "auto_reply_enabled" in chat:
-            config.chat.auto_reply_enabled = _parse_bool(chat["auto_reply_enabled"])
+        if "auto_reply_mode" in chat:
+            try:
+                config.chat.auto_reply_mode = AutoReplyMode(chat["auto_reply_mode"])
+            except ValueError:
+                pass  # Keep default
         if "auto_reply_message" in chat:
             config.chat.auto_reply_message = str(chat["auto_reply_message"])
         if "auto_reply_cooldown" in chat:
             config.chat.auto_reply_cooldown = int(chat["auto_reply_cooldown"])
         if "persist_messages" in chat:
             config.chat.persist_messages = _parse_bool(chat["persist_messages"])
+
+        # Parse chatbot subsection
+        if "chatbot" in chat and isinstance(chat["chatbot"], dict):
+            cb = chat["chatbot"]
+            config.chat.chatbot = ChatbotConfig(
+                endpoint=str(cb.get("endpoint", "http://localhost:11434/v1")),
+                model=str(cb.get("model", "llama3")),
+                api_key=str(cb.get("api_key", "")),
+                system_prompt=str(cb.get("system_prompt", config.chat.chatbot.system_prompt)),
+                max_tokens=int(cb.get("max_tokens", 256)),
+                temperature=float(cb.get("temperature", 0.7)),
+                max_context_messages=int(cb.get("max_context_messages", 10)),
+            )
 
     # Parse api section
     if "api" in data and isinstance(data["api"], dict):
@@ -522,9 +530,9 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
         ConfigLoadError: If config cannot be written.
     """
     if config_path is None:
-        config_path = get_config_dir() / "core-config.yaml"
+        config_path = paths.config_file()
 
-    ensure_directories()
+    paths.ensure_directories()
 
     config_dict = _serialize_config(config)
 
@@ -609,11 +617,23 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     # Chat section
     chat_dict: dict[str, Any] = {
         "enabled": config.chat.enabled,
-        "auto_reply_enabled": config.chat.auto_reply_enabled,
+        "auto_reply_mode": config.chat.auto_reply_mode.value,
         "auto_reply_message": config.chat.auto_reply_message,
         "auto_reply_cooldown": config.chat.auto_reply_cooldown,
         "persist_messages": config.chat.persist_messages,
     }
+    # Include chatbot config
+    chatbot_dict: dict[str, Any] = {
+        "endpoint": config.chat.chatbot.endpoint,
+        "model": config.chat.chatbot.model,
+        "system_prompt": config.chat.chatbot.system_prompt,
+        "max_tokens": config.chat.chatbot.max_tokens,
+        "temperature": config.chat.chatbot.temperature,
+        "max_context_messages": config.chat.chatbot.max_context_messages,
+    }
+    if config.chat.chatbot.api_key:
+        chatbot_dict["api_key"] = config.chat.chatbot.api_key
+    chat_dict["chatbot"] = chatbot_dict
 
     # API section
     api_dict: dict[str, Any] = {
@@ -837,6 +857,32 @@ def validate_core_config(
                 "chat.auto_reply_cooldown",
                 "Must be >= 0",
                 str(config.chat.auto_reply_cooldown),
+            )
+        )
+
+    # Chatbot validation (only when chatbot mode is active)
+    if config.chat.auto_reply_mode == AutoReplyMode.CHATBOT:
+        if not config.chat.chatbot.endpoint:
+            errors.append(
+                ConfigFieldError(
+                    "chat.chatbot.endpoint",
+                    "Endpoint is required when auto_reply_mode is 'chatbot'",
+                )
+            )
+    if not 0.0 <= config.chat.chatbot.temperature <= 2.0:
+        errors.append(
+            ConfigFieldError(
+                "chat.chatbot.temperature",
+                "Must be between 0.0 and 2.0",
+                str(config.chat.chatbot.temperature),
+            )
+        )
+    if config.chat.chatbot.max_tokens < 1:
+        errors.append(
+            ConfigFieldError(
+                "chat.chatbot.max_tokens",
+                "Must be >= 1",
+                str(config.chat.chatbot.max_tokens),
             )
         )
 

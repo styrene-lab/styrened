@@ -12,6 +12,7 @@ import pytest
 
 from styrened.models.config import (
     APIConfig,
+    AutoReplyMode,
     ChatConfig,
     CoreConfig,
     DeploymentMode,
@@ -38,7 +39,7 @@ class TestSaveCoreConfigRoundTrip:
     def test_default_config_round_trip(self, tmp_path: Path) -> None:
         """Default CoreConfig survives save → load unchanged."""
         config = CoreConfig()
-        config_path = tmp_path / "core-config.yaml"
+        config_path = tmp_path / "config.yaml"
 
         save_core_config(config, config_path)
         loaded = load_core_config(config_path)
@@ -65,7 +66,7 @@ class TestSaveCoreConfigRoundTrip:
 
         # Chat
         assert loaded.chat.enabled == config.chat.enabled
-        assert loaded.chat.auto_reply_enabled == config.chat.auto_reply_enabled
+        assert loaded.chat.auto_reply_mode == config.chat.auto_reply_mode
         assert loaded.chat.auto_reply_message == config.chat.auto_reply_message
         assert loaded.chat.auto_reply_cooldown == config.chat.auto_reply_cooldown
         assert loaded.chat.persist_messages == config.chat.persist_messages
@@ -126,7 +127,7 @@ class TestSaveCoreConfigRoundTrip:
             ),
             chat=ChatConfig(
                 enabled=False,
-                auto_reply_enabled=False,
+                auto_reply_mode=AutoReplyMode.DISABLED,
                 auto_reply_message="Custom auto-reply",
                 auto_reply_cooldown=600,
                 persist_messages=False,
@@ -175,7 +176,7 @@ class TestSaveCoreConfigRoundTrip:
                 rate_limit_requests=20,
             ),
         )
-        config_path = tmp_path / "core-config.yaml"
+        config_path = tmp_path / "config.yaml"
 
         save_core_config(config, config_path)
         loaded = load_core_config(config_path)
@@ -262,7 +263,7 @@ class TestSaveCoreConfigRoundTrip:
             PeerConfig(host="10.0.0.1", port=4242, name="Hub Alpha"),
             PeerConfig(host="10.0.0.2", port=4243),
         ]
-        config_path = tmp_path / "core-config.yaml"
+        config_path = tmp_path / "config.yaml"
 
         save_core_config(config, config_path)
         loaded = load_core_config(config_path)
@@ -286,7 +287,7 @@ class TestSaveCoreConfigRoundTrip:
             rp_id="custom.mesh.org",
             require_touch=True,
         )
-        config_path = tmp_path / "core-config.yaml"
+        config_path = tmp_path / "config.yaml"
 
         save_core_config(config, config_path)
         loaded = load_core_config(config_path)
@@ -302,7 +303,7 @@ class TestSaveCoreConfigRoundTrip:
         config.lxmf.propagation_node = PropagationNodeConfig(
             enabled=True, name="Relay Node Alpha"
         )
-        config_path = tmp_path / "core-config.yaml"
+        config_path = tmp_path / "config.yaml"
 
         save_core_config(config, config_path)
         loaded = load_core_config(config_path)
@@ -313,7 +314,7 @@ class TestSaveCoreConfigRoundTrip:
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
         """save_core_config creates parent directories if needed."""
         config = CoreConfig()
-        config_path = tmp_path / "subdir" / "nested" / "core-config.yaml"
+        config_path = tmp_path / "subdir" / "nested" / "config.yaml"
 
         save_core_config(config, config_path)
 
@@ -324,7 +325,7 @@ class TestSaveCoreConfigRoundTrip:
     def test_optional_none_fields_omitted(self, tmp_path: Path) -> None:
         """Fields with None values are omitted from YAML (not written as null)."""
         config = CoreConfig()
-        config_path = tmp_path / "core-config.yaml"
+        config_path = tmp_path / "config.yaml"
 
         save_core_config(config, config_path)
 

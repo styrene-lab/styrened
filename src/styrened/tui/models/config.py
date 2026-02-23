@@ -22,6 +22,8 @@ from pathlib import Path
 # Import core config models from styrene-core
 from styrened.models.config import (
     APIConfig,
+    AutoReplyMode,
+    ChatbotConfig,
     ChatConfig,
     ConfigFieldError,
     ConfigLoadError,
@@ -54,6 +56,8 @@ class ConfigValidationErrors(Exception):
 __all__ = [
     # Core models (re-exported)
     "APIConfig",
+    "AutoReplyMode",
+    "ChatbotConfig",
     "ChatConfig",
     "ConfigFieldError",
     "ConfigLoadError",

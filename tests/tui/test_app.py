@@ -2,8 +2,8 @@
 
 import pytest
 
+from styrened import paths
 from styrened.tui.app import StyreneApp
-from styrened.tui.services.reticulum import OPERATOR_IDENTITY_PATH
 
 
 def test_app_instantiation():
@@ -46,14 +46,14 @@ async def test_app_initializes_reticulum_on_startup():
     async with app.run_test():
         # After mount, operator identity should exist if RNS initialized.
         # Skip assertion if RNS could not initialize (CI / offline environments).
-        if not OPERATOR_IDENTITY_PATH.exists():
+        if not paths.identity_file().exists():
             pytest.skip(
                 "Operator identity not created (RNS initialization likely failed; "
                 "this is expected in environments without network interfaces)"
             )
 
         # Identity should be a valid hex string
-        identity = OPERATOR_IDENTITY_PATH.read_bytes().hex()
+        identity = paths.identity_file().read_bytes().hex()
         assert len(identity) > 0
         assert all(c in "0123456789abcdef" for c in identity)
 
@@ -62,13 +62,13 @@ def test_app_uses_existing_operator_identity():
     """Verify app reuses existing operator identity if present."""
     # Create a known identity
     test_identity = b"test_identity_123456789012345678"
-    OPERATOR_IDENTITY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OPERATOR_IDENTITY_PATH.write_bytes(test_identity)
+    paths.identity_file().parent.mkdir(parents=True, exist_ok=True)
+    paths.identity_file().write_bytes(test_identity)
 
     StyreneApp()
 
     # Identity should be unchanged
-    assert OPERATOR_IDENTITY_PATH.read_bytes() == test_identity
+    assert paths.identity_file().read_bytes() == test_identity
 
 
 def test_app_rns_initialization_graceful_failure():

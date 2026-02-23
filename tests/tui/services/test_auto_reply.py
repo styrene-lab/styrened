@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from styrened.models.config import AutoReplyMode
 from styrened.services.auto_reply import MAX_COOLDOWN_ENTRIES, AutoReplyHandler
 from styrened.tui.models.config import ChatConfig
 
@@ -23,7 +24,7 @@ def chat_config() -> ChatConfig:
     """Provide default chat config with auto-reply enabled."""
     return ChatConfig(
         enabled=True,
-        auto_reply_enabled=True,
+        auto_reply_mode=AutoReplyMode.TEMPLATE,
         auto_reply_message="Test reply from {hostname}",
         auto_reply_cooldown=300,
     )
@@ -100,7 +101,7 @@ class TestAutoReplyHandlerDisabled:
         self, mock_identity: Mock, mock_router: Mock
     ) -> None:
         """Test disabled auto-reply doesn't send messages."""
-        config = ChatConfig(auto_reply_enabled=False)
+        config = ChatConfig(auto_reply_mode=AutoReplyMode.DISABLED)
         handler = AutoReplyHandler(config, mock_identity, mock_router)
 
         message = Mock()

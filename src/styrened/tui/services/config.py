@@ -1,8 +1,7 @@
 """Configuration management service for Styrene TUI.
 
 This module provides functions to load, save, and validate the TUI
-configuration. Configuration is stored in YAML format following
-XDG Base Directory standards via the platformdirs library.
+configuration. Configuration is stored in YAML format.
 
 Typical usage:
     from styrened.tui.services.config import load_config, save_config
@@ -13,13 +12,6 @@ Typical usage:
     # Modify and save
     config.tui.log_level = LogLevel.DEBUG
     save_config(config)
-
-Directory structure created:
-    ~/.styrene/config.yaml            - User configuration
-    ~/.styrene/operator.key           - Operator identity
-    ~/.styrene/data/                  - Application data (device specs)
-    ~/.styrene/cache/                 - Temporary files, image cache
-    ~/.styrene/logs/                  - Application logs
 """
 
 import contextlib
@@ -28,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from styrened import paths
 from styrened.models.config import ConfigFieldError
 from styrened.tui.models.config import (
     ConfigLoadError,
@@ -56,67 +49,56 @@ CURRENT_CONFIG_VERSION = 1
 def get_config_dir() -> Path:
     """Return the configuration directory path.
 
-    All Styrene config stored in ~/.styrene/
-
-    Returns:
-        Path to configuration directory (~/.styrene/).
+    .. deprecated::
+        Use ``paths.config_dir()`` directly.
     """
-    return Path.home() / ".styrene"
+    return paths.config_dir()
 
 
 def get_data_dir() -> Path:
     """Return the data directory path.
 
-    Returns:
-        Path to data directory for device specs, identity, etc. (~/.styrene/data/).
+    .. deprecated::
+        Use ``paths.data_dir()`` directly.
     """
-    return get_config_dir() / "data"
+    return paths.data_dir()
 
 
 def get_cache_dir() -> Path:
     """Return the cache directory path.
 
-    Returns:
-        Path to cache directory for temp files, image cache (~/.styrene/cache/).
+    .. deprecated::
+        Use ``paths.cache_dir()`` directly.
     """
-    return get_config_dir() / "cache"
+    return paths.cache_dir()
 
 
 def get_log_dir() -> Path:
     """Return the log directory path.
 
-    Returns:
-        Path to log directory for application logs (~/.styrene/logs/).
+    .. deprecated::
+        Use ``paths.log_dir()`` directly.
     """
-    return get_config_dir() / "logs"
+    return paths.log_dir()
 
 
 def get_config_path() -> Path:
-    """Return the full path to the configuration file.
-
-    Returns:
-        Path to config.yaml (e.g., ~/.config/styrene/config.yaml).
-    """
-    return get_config_dir() / "config.yaml"
+    """Return the full path to the TUI configuration file."""
+    return paths.tui_config_file()
 
 
 def config_exists() -> bool:
-    """Check if a configuration file exists.
-
-    Returns:
-        True if config.yaml exists at the expected location.
-    """
+    """Check if a TUI configuration file exists."""
     return get_config_path().exists()
 
 
 def ensure_directories() -> None:
     """Ensure all application directories exist.
 
-    Creates config, data, cache, and log directories if needed.
-    This is safe to call multiple times.
+    .. deprecated::
+        Use ``paths.ensure_directories()`` directly.
     """
-    for dir_path in [get_config_dir(), get_data_dir(), get_cache_dir(), get_log_dir()]:
-        dir_path.mkdir(parents=True, exist_ok=True)
+    paths.ensure_directories()
 
 
 # -----------------------------------------------------------------------------

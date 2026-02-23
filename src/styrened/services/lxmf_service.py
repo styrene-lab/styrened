@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 if TYPE_CHECKING:
     from styrened.models.config import LXMFConfig
 
-import platformdirs
+from styrened import paths
 
 try:
     import LXMF
@@ -173,8 +173,7 @@ class LXMFService:
 
         try:
             # Get LXMF storage path
-            data_dir = platformdirs.user_data_dir("styrene", "styrene-lab")
-            lxmf_storage = Path(data_dir) / "lxmf"
+            lxmf_storage = paths.lxmf_storage()
             lxmf_storage.mkdir(parents=True, exist_ok=True)
 
             logger.info(f"Initializing LXMF with storage: {lxmf_storage}")

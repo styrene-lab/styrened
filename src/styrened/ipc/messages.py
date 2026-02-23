@@ -393,13 +393,13 @@ class CmdSetAutoReplyRequest(IPCRequest):
     """Set auto-reply configuration."""
 
     MSG_TYPE = IPCMessageType.CMD_SET_AUTO_REPLY
-    enabled: bool = False
+    mode: str = "disabled"
     message: str = ""
     cooldown: int = 300
 
     def to_payload(self) -> dict[str, Any]:
         return {
-            "enabled": self.enabled,
+            "mode": self.mode,
             "message": self.message,
             "cooldown": self.cooldown,
         }
@@ -981,7 +981,7 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return QueryAutoReplyRequest()
     elif msg_type == IPCMessageType.CMD_SET_AUTO_REPLY:
         return CmdSetAutoReplyRequest(
-            enabled=payload.get("enabled", False),
+            mode=payload.get("mode", "disabled"),
             message=payload.get("message", ""),
             cooldown=payload.get("cooldown", 300),
         )

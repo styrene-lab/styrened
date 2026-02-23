@@ -98,10 +98,10 @@ class TestGetConfig:
 class TestPutConfig:
     """Tests for PUT /api/config."""
 
-    @patch("styrened.services.config.get_config_dir")
-    def test_partial_update_returns_updated_config(self, mock_config_dir, tmp_path) -> None:
+    @patch("styrened.paths.config_file")
+    def test_partial_update_returns_updated_config(self, mock_config_file, tmp_path) -> None:
         """PUT /api/config with partial update returns updated config."""
-        mock_config_dir.return_value = tmp_path
+        mock_config_file.return_value = tmp_path / "config.yaml"
 
         config = CoreConfig()
         daemon = _make_mock_daemon(config)
@@ -113,16 +113,16 @@ class TestPutConfig:
 
         response = test_client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": False}},
+            json={"chat": {"auto_reply_mode": "disabled"}},
         )
         assert response.status_code == 200
         result = response.json()["config"]
-        assert result["chat"]["auto_reply_enabled"] is False
+        assert result["chat"]["auto_reply_mode"] == "disabled"
 
-    @patch("styrened.services.config.get_config_dir")
-    def test_invalid_values_return_422(self, mock_config_dir, tmp_path) -> None:
+    @patch("styrened.paths.config_file")
+    def test_invalid_values_return_422(self, mock_config_file, tmp_path) -> None:
         """PUT /api/config with invalid values returns 422."""
-        mock_config_dir.return_value = tmp_path
+        mock_config_file.return_value = tmp_path / "config.yaml"
 
         config = CoreConfig()
         daemon = _make_mock_daemon(config)

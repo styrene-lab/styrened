@@ -16,7 +16,7 @@ def _make_mock_lifecycle(contacts=None):
     bridge.set_contact = AsyncMock(return_value={"peer_hash": "abc123", "alias": "Test"})
     bridge.remove_contact = AsyncMock(return_value=True)
     bridge.resolve_name = AsyncMock(return_value="abc123def456")
-    bridge.get_auto_reply = AsyncMock(return_value={"enabled": False, "message": "", "cooldown": 300})
+    bridge.get_auto_reply = AsyncMock(return_value={"mode": "disabled", "message": "", "cooldown": 300})
     lifecycle = MagicMock()
     lifecycle.ipc_bridge = bridge
     lifecycle.initialize_async = AsyncMock(return_value=True)

@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from styrened.models.config import CoreConfig, DeploymentMode, Profile
+from styrened.models.config import AutoReplyMode, CoreConfig, DeploymentMode, Profile
 from styrened.services.config import (
     get_default_core_config,
     load_core_config,
@@ -19,7 +19,7 @@ def test_default_config() -> None:
     assert config.rpc.enabled is True
     assert config.rpc.allow_command_execution is False
     assert config.discovery.enabled is True
-    assert config.chat.auto_reply_enabled is False
+    assert config.chat.auto_reply_mode == AutoReplyMode.DISABLED
 
 
 def test_config_roundtrip() -> None:
@@ -31,7 +31,7 @@ def test_config_roundtrip() -> None:
         original = get_default_core_config()
         original.reticulum.announce_interval = 600
         original.rpc.enabled = False
-        original.chat.auto_reply_enabled = False
+        original.chat.auto_reply_mode = AutoReplyMode.DISABLED
 
         # Save
         save_core_config(original, config_path)
@@ -45,7 +45,7 @@ def test_config_roundtrip() -> None:
         assert isinstance(loaded, CoreConfig)
         assert loaded.reticulum.announce_interval == 600
         assert loaded.rpc.enabled is False
-        assert loaded.chat.auto_reply_enabled is False
+        assert loaded.chat.auto_reply_mode == AutoReplyMode.DISABLED
 
 
 def test_load_missing_config() -> None:

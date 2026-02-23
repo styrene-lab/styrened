@@ -74,7 +74,7 @@ styrene:
 
   # Auto-reply to chat messages
   chat:
-    auto_reply_enabled: false
+    auto_reply_mode: disabled
     # auto_reply_message: "This is an automated Styrene node"
 
   # HTTP API (optional - for monitoring/control)

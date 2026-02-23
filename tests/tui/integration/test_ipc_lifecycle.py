@@ -54,7 +54,8 @@ def mock_daemon():
     daemon.config.discovery.enabled = True
     daemon.config.discovery.auto_announce = True
     daemon.config.chat.enabled = True
-    daemon.config.chat.auto_reply_enabled = False
+    daemon.config.chat.auto_reply_mode = MagicMock()
+    daemon.config.chat.auto_reply_mode.value = "disabled"
     daemon.config.chat.auto_reply_cooldown = 60
     daemon.config.chat.persist_messages = True
     daemon.config.api.enabled = False

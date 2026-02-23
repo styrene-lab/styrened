@@ -59,9 +59,9 @@ def mock_rns_service():
 
 @pytest.fixture
 def mock_platformdirs(tmp_path: Path):
-    """Provide a mock platformdirs pointing to tmp_path."""
-    with patch("styrened.services.lxmf_service.platformdirs") as mock:
-        mock.user_data_dir.return_value = str(tmp_path)
+    """Provide a mock paths module pointing to tmp_path."""
+    with patch("styrened.services.lxmf_service.paths") as mock:
+        mock.lxmf_storage.return_value = tmp_path / "lxmf"
         yield mock
 
 

@@ -91,9 +91,9 @@ class SSEBroadcaster:
         """Broadcast config change notification."""
         self._broadcast_sync("config-updated", {})
 
-    def broadcast_auto_reply_event(self, enabled: bool, message: str) -> None:
+    def broadcast_auto_reply_event(self, mode: str, message: str) -> None:
         """Broadcast auto-reply state change."""
-        data = {"enabled": enabled, "message": message}
+        data = {"mode": mode, "message": message}
         self._broadcast_sync("auto-reply-updated", data)
 
 

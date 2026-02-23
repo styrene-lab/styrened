@@ -51,7 +51,7 @@ class TestPublicModeBlocksWrites:
 
         response = client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         assert response.status_code == 403
         assert "read-only" in response.json()["detail"].lower()
@@ -104,7 +104,7 @@ class TestPrivateModeAllowsWrites:
 
         response = client.put(
             "/api/config",
-            json={"chat": {"auto_reply_enabled": True}},
+            json={"chat": {"auto_reply_mode": "template"}},
         )
         # The route handler runs (may error for other reasons), but not 403
         assert response.status_code != 403

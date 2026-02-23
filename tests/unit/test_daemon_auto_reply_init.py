@@ -6,19 +6,19 @@ enabling runtime toggle without daemon restart.
 
 from unittest.mock import MagicMock, patch
 
-from styrened.models.config import CoreConfig
+from styrened.models.config import AutoReplyMode, CoreConfig
 
 
 class TestAlwaysCreateHandler:
-    """Verify handler is created regardless of auto_reply_enabled."""
+    """Verify handler is created regardless of auto_reply_mode."""
 
-    def _make_daemon(self, auto_reply_enabled: bool):  # noqa: ANN202
+    def _make_daemon(self, auto_reply_mode: AutoReplyMode):  # noqa: ANN202
         """Create a StyreneDaemon with mocked dependencies."""
         from styrened.daemon import StyreneDaemon
 
         config = CoreConfig()
         config.chat.enabled = True
-        config.chat.auto_reply_enabled = auto_reply_enabled
+        config.chat.auto_reply_mode = auto_reply_mode
         daemon = StyreneDaemon(config)
         return daemon
 
@@ -27,14 +27,14 @@ class TestAlwaysCreateHandler:
     def test_handler_created_when_disabled(
         self, mock_identity, mock_lxmf
     ):
-        """Handler should exist even when auto_reply_enabled=False."""
+        """Handler should exist even when auto_reply_mode=DISABLED."""
         mock_identity.return_value = MagicMock(hexhash="abcd1234")
         lxmf_svc = MagicMock()
         lxmf_svc.is_initialized = True
         lxmf_svc.router = MagicMock()
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=False)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.DISABLED)
         daemon._start_auto_reply()
 
         assert daemon._auto_reply_handler is not None
@@ -51,7 +51,7 @@ class TestAlwaysCreateHandler:
         lxmf_svc.router = MagicMock()
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=False)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.DISABLED)
         daemon._start_auto_reply()
 
         handler = daemon._auto_reply_handler
@@ -77,16 +77,16 @@ class TestAlwaysCreateHandler:
         lxmf_svc.router = MagicMock()
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=False)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.DISABLED)
         daemon._start_auto_reply()
 
         handler = daemon._auto_reply_handler
         assert handler is not None
-        assert handler.config.auto_reply_enabled is False
+        assert handler.config.auto_reply_mode == AutoReplyMode.DISABLED
 
         # Enable at runtime (simulating API toggle)
-        daemon.config.chat.auto_reply_enabled = True
-        assert handler.config.auto_reply_enabled is True
+        daemon.config.chat.auto_reply_mode = AutoReplyMode.TEMPLATE
+        assert handler.config.auto_reply_mode == AutoReplyMode.TEMPLATE
 
     @patch("styrened.services.lxmf_service.get_lxmf_service")
     @patch("styrened.services.reticulum.get_operator_identity_object")
@@ -100,7 +100,7 @@ class TestAlwaysCreateHandler:
         lxmf_svc.router = MagicMock()
         mock_lxmf.return_value = lxmf_svc
 
-        daemon = self._make_daemon(auto_reply_enabled=True)
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.TEMPLATE)
         daemon._start_auto_reply()
 
         handler = daemon._auto_reply_handler

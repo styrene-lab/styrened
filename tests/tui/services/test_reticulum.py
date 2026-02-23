@@ -377,7 +377,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Ensure identity
@@ -397,7 +397,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity first time
@@ -417,7 +417,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity
@@ -435,7 +435,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         identity = core_reticulum.get_operator_identity_object()
@@ -450,7 +450,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity first
@@ -469,7 +469,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         identity = core_reticulum.get_operator_identity()
@@ -482,7 +482,7 @@ class TestOperatorIdentity:
         import styrened.services.reticulum as core_reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create identity
@@ -505,7 +505,7 @@ class TestReticulumStatus:
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
@@ -525,7 +525,7 @@ class TestReticulumStatus:
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create a real RNS identity file (not just raw bytes)
@@ -973,7 +973,7 @@ class TestUpdatedReticulumStatus:
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
@@ -999,7 +999,7 @@ class TestUpdatedReticulumStatus:
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
@@ -1018,7 +1018,7 @@ class TestUpdatedReticulumStatus:
         from styrened.tui.services import reticulum
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         # Create a real RNS identity file
@@ -1065,7 +1065,7 @@ enabled = true
         )
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()
@@ -1086,7 +1086,7 @@ enabled = true
         )
 
         operator_key = tmp_path / "operator.key"
-        monkeypatch.setattr(core_reticulum, "OPERATOR_IDENTITY_PATH", operator_key)
+        monkeypatch.setattr("styrened.paths.identity_file", lambda: operator_key)
         monkeypatch.setattr(core_reticulum, "SYSTEM_IDENTITY_PATH", tmp_path / "nonexistent_system")
 
         status = reticulum.get_reticulum_status()

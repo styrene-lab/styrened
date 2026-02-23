@@ -318,7 +318,7 @@ class IPCHandlers:
                 },
                 "chat": {
                     "enabled": config.chat.enabled,
-                    "auto_reply_enabled": config.chat.auto_reply_enabled,
+                    "auto_reply_mode": config.chat.auto_reply_mode.value,
                     "auto_reply_cooldown": config.chat.auto_reply_cooldown,
                     "persist_messages": config.chat.persist_messages,
                 },
@@ -1420,7 +1420,7 @@ class IPCHandlers:
         try:
             return ResultResponse(
                 data={
-                    "enabled": self.daemon.config.chat.auto_reply_enabled,
+                    "mode": self.daemon.config.chat.auto_reply_mode.value,
                     "message": self.daemon.config.chat.auto_reply_message,
                     "cooldown": self.daemon.config.chat.auto_reply_cooldown,
                 }
@@ -1447,9 +1447,15 @@ class IPCHandlers:
         )
 
         try:
+            from styrened.models.config import AutoReplyMode
             from styrened.services.config import save_core_config
 
-            self.daemon.config.chat.auto_reply_enabled = req.enabled
+            try:
+                self.daemon.config.chat.auto_reply_mode = AutoReplyMode(req.mode)
+            except ValueError:
+                return ErrorResponse.invalid_request(
+                    f"Invalid auto_reply_mode: {req.mode}"
+                )
             if req.message:
                 self.daemon.config.chat.auto_reply_message = req.message
             if req.cooldown > 0:
@@ -1463,7 +1469,7 @@ class IPCHandlers:
 
             return ResultResponse(
                 data={
-                    "enabled": self.daemon.config.chat.auto_reply_enabled,
+                    "mode": self.daemon.config.chat.auto_reply_mode.value,
                     "message": self.daemon.config.chat.auto_reply_message,
                     "cooldown": self.daemon.config.chat.auto_reply_cooldown,
                 }

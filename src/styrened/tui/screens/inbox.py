@@ -308,7 +308,8 @@ class InboxScreen(Screen[None]):
         try:
             data = await bridge.get_auto_reply()
             switch = self.query_one("#ooo-switch", Switch)
-            switch.value = data.get("enabled", False)
+            mode = data.get("mode", "disabled")
+            switch.value = mode != "disabled"
         except Exception as e:
             logger.warning(f"Failed to load auto-reply state: {e}")
 
@@ -325,9 +326,9 @@ class InboxScreen(Screen[None]):
             return
 
         try:
-            await bridge.set_auto_reply(enabled=enabled)
-            state = "enabled" if enabled else "disabled"
-            self.notify(f"Auto-reply {state}", severity="information")
+            mode = "template" if enabled else "disabled"
+            await bridge.set_auto_reply(mode=mode)
+            self.notify(f"Auto-reply {mode}", severity="information")
         except Exception as e:
             logger.warning(f"Failed to toggle auto-reply: {e}")
             self.notify(f"Failed to toggle auto-reply: {e}", severity="error")

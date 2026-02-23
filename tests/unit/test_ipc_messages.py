@@ -189,7 +189,7 @@ class TestInfoDataclasses:
             destination_hash="abc123",
             identity_hash="def456",
             name="test-node",
-            device_type="styrene_node",
+            device_type="styrene",
             status="active",
             is_styrene_node=True,
             lxmf_destination_hash="ghi789",
@@ -203,7 +203,7 @@ class TestInfoDataclasses:
         assert restored.destination_hash == "abc123"
         assert restored.identity_hash == "def456"
         assert restored.name == "test-node"
-        assert restored.device_type == "styrene_node"
+        assert restored.device_type == "styrene"
         assert restored.is_styrene_node is True
         assert restored.announce_count == 5
 

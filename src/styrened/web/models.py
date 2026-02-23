@@ -48,9 +48,9 @@ class ConfigUpdateRequest(BaseModel):
 
 
 class AutoReplyToggleRequest(BaseModel):
-    """Request body for toggling auto-reply (out-of-office) mode."""
+    """Request body for setting auto-reply mode."""
 
-    enabled: bool
+    mode: str = Field(..., pattern=r"^(disabled|template|chatbot)$")
     message: str | None = Field(None, max_length=1024)
 
 
