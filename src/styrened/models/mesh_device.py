@@ -29,6 +29,9 @@ class DeviceType(Enum):
     GENERIC = "generic"  # Generic Reticulum announce
     UNKNOWN = "unknown"  # Unable to determine type
     HUB = "hub"  # Hub/transport node
+    LXMF_PEER = "lxmf_peer"  # LXMF delivery destination (Sideband/NomadNet/MeshChat)
+    PROPAGATION_NODE = "propagation_node"  # LXMF propagation node
+    NOMADNET_NODE = "nomadnet_node"  # NomadNet page/node service
 
 
 class NodeStatus(Enum):
@@ -121,6 +124,21 @@ class MeshDevice:
         return self.device_type == DeviceType.RNODE
 
     @property
+    def is_lxmf_peer(self) -> bool:
+        """Check if this is an LXMF delivery peer."""
+        return self.device_type == DeviceType.LXMF_PEER
+
+    @property
+    def is_propagation_node(self) -> bool:
+        """Check if this is an LXMF propagation node."""
+        return self.device_type == DeviceType.PROPAGATION_NODE
+
+    @property
+    def is_nomadnet_node(self) -> bool:
+        """Check if this is a NomadNet node."""
+        return self.device_type == DeviceType.NOMADNET_NODE
+
+    @property
     def identity_short(self) -> str:
         """Short form of destination hash (first 8 chars)."""
         return self.destination_hash[:8] if self.destination_hash else "unknown"
@@ -149,32 +167,84 @@ def _sanitize_fingerprint(raw: str | None) -> str | None:
     return raw
 
 
+def _try_lxmf_parse(
+    app_data: bytes,
+    aspect_hint: DeviceType | None = None,
+) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None] | None:
+    """Try to parse app_data using LXMF library helpers.
+
+    Handles msgpack-encoded LXMF delivery announces (v0.5.0+) and
+    propagation node announces. Returns None if LXMF is not installed
+    or the data doesn't match LXMF formats.
+    """
+    try:
+        import LXMF  # type: ignore[import-untyped]
+    except ImportError:
+        return None
+
+    # Check propagation node format first (more specific)
+    try:
+        if LXMF.pn_announce_data_is_valid(app_data):
+            pn_name = LXMF.pn_name_from_app_data(app_data)
+            name = pn_name[:32] if pn_name and len(pn_name) > 32 else (pn_name or "propagation-node")
+            dtype = aspect_hint or DeviceType.PROPAGATION_NODE
+            return (name, dtype, None, None, None, None, None)
+    except Exception:
+        pass
+
+    # Try LXMF delivery announce format (display_name from msgpack)
+    try:
+        display_name = LXMF.display_name_from_app_data(app_data)
+        if display_name:
+            name = display_name[:32] if len(display_name) > 32 else display_name
+            dtype = aspect_hint or DeviceType.LXMF_PEER
+            return (name, dtype, None, None, None, None, None)
+    except Exception:
+        pass
+
+    return None
+
+
 def parse_announce_data(
     app_data: bytes | None,
+    aspect_hint: DeviceType | None = None,
 ) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None]:
     """Parse announce app_data to extract device information.
 
     Styrene nodes announce with format:
         "styrene:<hostname>:<version>:<caps>:<lxmf_dest>:<short_name>:<sys_fingerprint>"
     RNodes announce with: "rnode:<device_name>"
-    LXMF clients announce with JSON containing "display_name".
+    LXMF clients announce with msgpack or JSON containing display name.
     Generic announces may contain any UTF-8 string.
 
     Args:
         app_data: Raw app_data bytes from announce.
+        aspect_hint: Optional DeviceType detected via aspect matching in the
+                     announce handler. When set, overrides the type inferred
+                     from app_data content alone.
 
     Returns:
         Tuple of (name, device_type, capabilities, version,
                   lxmf_destination_hash, short_name, system_fingerprint).
     """
     if not app_data:
-        return ("unknown", DeviceType.UNKNOWN, None, None, None, None, None)
+        dtype = aspect_hint or DeviceType.UNKNOWN
+        return ("unknown", dtype, None, None, None, None, None)
+
+    # Try LXMF library parsers for msgpack-encoded announces.
+    # LXMF 0.5.0+ peers and propagation nodes use msgpack (first byte 0x90-0x9f or 0xDC).
+    # Only try this for msgpack-looking data to avoid catching plain text/JSON.
+    if app_data and len(app_data) > 0 and ((app_data[0] & 0xF0) == 0x90 or app_data[0] == 0xDC):
+        parsed = _try_lxmf_parse(app_data, aspect_hint)
+        if parsed is not None:
+            return parsed
 
     try:
         decoded = app_data.decode("utf-8").strip()
     except UnicodeDecodeError:
-        # Binary app_data - can't parse
-        return ("binary-data", DeviceType.UNKNOWN, None, None, None, None, None)
+        # Binary app_data that wasn't LXMF msgpack
+        dtype = aspect_hint or DeviceType.UNKNOWN
+        return ("binary-data", dtype, None, None, None, None, None)
 
     # Check for Styrene node
     if decoded.lower().startswith("styrene"):
@@ -220,11 +290,13 @@ def parse_announce_data(
                 if display_name and isinstance(display_name, str):
                     # Truncate long names
                     name = display_name[:32] if len(display_name) > 32 else display_name
-                    return (name, DeviceType.GENERIC, None, None, None, None, None)
+                    dtype = aspect_hint or DeviceType.GENERIC
+                    return (name, dtype, None, None, None, None, None)
         except (json.JSONDecodeError, TypeError):
             pass
         # JSON but no usable name - treat as unknown
-        return ("unknown", DeviceType.UNKNOWN, None, None, None, None, None)
+        dtype = aspect_hint or DeviceType.UNKNOWN
+        return ("unknown", dtype, None, None, None, None, None)
 
     # Generic announce with custom name (simple string, not JSON/hex)
     # Sanitize: only allow reasonable name characters, reject serialized data
@@ -234,10 +306,13 @@ def parse_announce_data(
         and len(decoded) <= 64
         and not any(c in decoded for c in "{}[]()<>")
     ):
-        return (decoded, DeviceType.GENERIC, None, None, None, None, None)
+        # NomadNet nodes announce plain UTF-8 node name
+        dtype = aspect_hint or DeviceType.GENERIC
+        return (decoded, dtype, None, None, None, None, None)
 
     # Unknown or unparseable
-    return ("unknown", DeviceType.UNKNOWN, None, None, None, None, None)
+    dtype = aspect_hint or DeviceType.UNKNOWN
+    return ("unknown", dtype, None, None, None, None, None)
 
 
 def create_mesh_device(
@@ -245,6 +320,7 @@ def create_mesh_device(
     identity_hash: str,
     app_data: bytes | None,
     announce_count: int = 1,
+    aspect_hint: DeviceType | None = None,
 ) -> MeshDevice:
     """Create a MeshDevice from announce data.
 
@@ -253,12 +329,13 @@ def create_mesh_device(
         identity_hash: Hex-encoded identity hash (for Identity.recall).
         app_data: Raw app_data from announce.
         announce_count: Number of announces received.
+        aspect_hint: Optional DeviceType from aspect-based detection.
 
     Returns:
         MeshDevice instance.
     """
     name, device_type, capabilities, version, lxmf_dest, short_name, fingerprint = (
-        parse_announce_data(app_data)
+        parse_announce_data(app_data, aspect_hint=aspect_hint)
     )
 
     # Generate fallback name if needed

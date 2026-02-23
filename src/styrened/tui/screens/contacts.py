@@ -30,6 +30,8 @@ class ContactsScreen(Screen[None]):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "go_back", "Back"),
+        Binding("enter", "open_chat", "Chat"),
+        Binding("c", "open_chat", "Chat", show=False),
         Binding("a", "add_contact", "Add"),
         Binding("e", "edit_contact", "Edit"),
         Binding("delete", "delete_contact", "Delete"),
@@ -181,6 +183,53 @@ class ContactsScreen(Screen[None]):
                 notes,
                 key=peer_hash,
             )
+
+    def _get_selected_peer_hash(self) -> str | None:
+        """Get the peer_hash of the currently selected contact row."""
+        table = self.query_one("#contacts-table", DataTable)
+        if table.cursor_row is None or table.row_count == 0:
+            return None
+
+        cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
+        if not cell_key or not cell_key.row_key or cell_key.row_key.value == "-":
+            return None
+
+        return str(cell_key.row_key.value)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle DataTable enter key - open chat with selected contact.
+
+        The DataTable consumes enter key events when cursor_type="row",
+        emitting RowSelected instead of letting the screen binding fire.
+        """
+        if event.row_key and event.row_key.value and event.row_key.value != "-":
+            peer_hash = str(event.row_key.value)
+
+            if self._ipc_bridge is None:
+                self.notify("Chat requires daemon mode", severity="warning")
+                return
+
+            from styrened.tui.screens.conversation import ConversationScreen
+
+            self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
+
+    def action_open_chat(self) -> None:
+        """Open chat with the selected contact.
+
+        Fallback action for the enter/c bindings. When DataTable is focused,
+        on_data_table_row_selected handles it instead.
+        """
+        peer_hash = self._get_selected_peer_hash()
+        if peer_hash is None:
+            return
+
+        if self._ipc_bridge is None:
+            self.notify("Chat requires daemon mode", severity="warning")
+            return
+
+        from styrened.tui.screens.conversation import ConversationScreen
+
+        self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
 
     def action_go_back(self) -> None:
         """Go back, hiding forms first if visible."""

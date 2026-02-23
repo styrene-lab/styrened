@@ -219,6 +219,7 @@ class DashboardScreen(Screen[None]):
     # Note: 'p' for Provision is inherited from App, listed here for footer display
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("enter", "select_device", "Details"),
+        Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
         Binding("e", "open_exploration", "Explore", show=True),
     ]
@@ -376,22 +377,36 @@ class DashboardScreen(Screen[None]):
 
             self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
 
+    def _get_selected_identity(self) -> str | None:
+        """Get the identity of the currently selected row."""
+        table = self.query_one("#mesh-device-table", DataTable)
+        if table.cursor_row is not None:
+            cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
+            if cell_key and cell_key.row_key and cell_key.row_key.value != "-":
+                return str(cell_key.row_key.value)
+        return None
+
     def action_select_device(self) -> None:
         """Handle device selection - navigate to device detail screen.
 
         Fallback action for the enter binding. When DataTable is focused,
         on_data_table_row_selected handles it instead.
         """
-        table = self.query_one("#mesh-device-table", DataTable)
-        if table.cursor_row is not None:
-            # Get device identity from the row key
-            cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
-            if cell_key and cell_key.row_key and cell_key.row_key.value != "-":
-                device_identity = str(cell_key.row_key.value)
-                # Navigate to mesh device detail screen
-                from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+        device_identity = self._get_selected_identity()
+        if device_identity:
+            from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
-                self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+
+    def action_open_chat(self) -> None:
+        """Open chat tab directly for the selected device."""
+        device_identity = self._get_selected_identity()
+        if device_identity:
+            from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+            self.app.push_screen(
+                MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
+            )
 
     def action_open_exploration(self) -> None:
         """Open exploration screen for all Reticulum announces."""

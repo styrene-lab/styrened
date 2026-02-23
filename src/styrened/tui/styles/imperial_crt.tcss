@@ -649,7 +649,20 @@ ChatWidget .chat-no-messages {
 
 /* === MessageBubble Styles === */
 .message-bubble {
-    padding: 0 1;
+    padding: 0 2;
+    margin: 0 0 0 0;
+    width: 100%;
+}
+
+.message-bubble.--outgoing {
+    margin-left: 20;
+    text-align: right;
+    padding: 0 2;
+}
+
+.message-bubble.--incoming {
+    margin-right: 20;
+    padding: 0 2;
 }
 
 .message-bubble.--selected {
@@ -659,14 +672,6 @@ ChatWidget .chat-no-messages {
 
 .message-bubble.--failed {
     text-style: italic;
-}
-
-.message-bubble.--outgoing {
-    padding: 0 1;
-}
-
-.message-bubble.--incoming {
-    padding: 0 1;
 }
 
 /* === Chat Search Bar === */
@@ -684,6 +689,20 @@ ChatWidget #chat-reply-bar {
     color: $primary;
 }
 
+/* === Exploration Search Bar === */
+ExplorationScreen #explore-search-bar {
+    height: auto;
+    max-height: 3;
+    padding: 0 1;
+    background: $surface;
+}
+
+ExplorationScreen #explore-count {
+    height: 1;
+    padding: 0 1;
+    color: $panel;
+}
+
 /* === Inbox Search Bar === */
 InboxScreen #inbox-search-bar {
     height: auto;
@@ -692,8 +711,108 @@ InboxScreen #inbox-search-bar {
     background: $surface;
 }
 
+/* === PageBrowserWidget === */
+PageBrowserWidget #page-url-bar {
+    height: 1;
+    background: $surface;
+    padding: 0 1;
+    color: $primary;
+}
+
+PageBrowserWidget #page-content {
+    height: 1fr;
+    overflow-y: scroll;
+    padding: 0 1;
+}
+
+PageBrowserWidget #page-status {
+    height: 1;
+    padding: 0 1;
+    color: $panel;
+    dock: bottom;
+}
+
+.micron-heading-1 {
+    text-style: bold;
+    padding: 1 0 0 0;
+}
+
+.micron-heading-2 {
+    text-style: bold;
+    padding: 1 0 0 0;
+}
+
+.micron-heading-3 {
+    text-style: bold italic;
+}
+
+.micron-literal {
+    background: $surface;
+    padding: 0 1;
+}
+
+.micron-link {
+    color: $primary;
+    text-style: underline;
+}
+
+.micron-divider {
+    color: $panel;
+}
+
 .placeholder-text {
     color: $panel;
     text-style: italic;
     padding: 1;
+}
+
+/* === CommandWidget Layout === */
+CommandWidget {
+    height: 1fr;
+}
+
+CommandWidget #cmd-toolbar {
+    height: 3;
+    padding: 0 1;
+}
+
+CommandWidget .cmd-status-text {
+    width: 1fr;
+    padding: 1 1;
+    color: $panel;
+}
+
+CommandWidget #cmd-available {
+    height: auto;
+    max-height: 2;
+    padding: 0 1;
+    color: $primary;
+}
+
+CommandWidget #cmd-presets {
+    height: auto;
+    max-height: 3;
+    padding: 0 1;
+}
+
+CommandWidget .cmd-preset-btn {
+    height: 3;
+    min-width: 8;
+    margin-right: 1;
+}
+
+CommandWidget #cmd-session-log {
+    height: 1fr;
+    min-height: 4;
+    padding: 0 1;
+}
+
+CommandWidget .cmd-log-content {
+    width: 100%;
+}
+
+CommandWidget #cmd-input-row {
+    height: 3;
+    dock: bottom;
+    padding: 0 1;
 }

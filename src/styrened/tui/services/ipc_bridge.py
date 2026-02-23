@@ -35,6 +35,7 @@ from styrened.ipc.messages import (
     DeviceInfo,
     ExecResultInfo,
     IdentityInfo,
+    RebootResultInfo,
     RemoteStatusInfo,
 )
 
@@ -313,6 +314,20 @@ class IPCBridge:
             timeout=timeout,
         )
 
+    async def reboot_device(
+        self,
+        destination: str,
+        delay: int = 0,
+        timeout: float = 10.0,
+    ) -> RebootResultInfo:
+        """Reboot a remote device."""
+        return await self._call(
+            "reboot_device",
+            destination=destination,
+            delay=delay,
+            timeout=timeout,
+        )
+
     # -------------------------------------------------------------------------
     # Mesh operations
     # -------------------------------------------------------------------------
@@ -401,6 +416,52 @@ class IPCBridge:
             enabled=enabled,
             message=message,
             cooldown=cooldown,
+        )
+
+    # -------------------------------------------------------------------------
+    # Propagation sync
+    # -------------------------------------------------------------------------
+
+    async def sync_messages(self) -> dict[str, Any]:
+        """Request message sync from propagation node."""
+        return await self._call("sync_messages")
+
+    # -------------------------------------------------------------------------
+    # Path info
+    # -------------------------------------------------------------------------
+
+    async def get_path_info(self, destination_hash: str) -> dict[str, Any]:
+        """Get path info for a destination (hops, interface, etc.)."""
+        return await self._call(
+            "query_path_info",
+            destination_hash=destination_hash,
+        )
+
+    # -------------------------------------------------------------------------
+    # Page browser
+    # -------------------------------------------------------------------------
+
+    async def fetch_page(
+        self,
+        destination_hash: str,
+        path: str = "/page/index.mu",
+        form_data: dict[str, Any] | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Fetch a page from a NomadNet node."""
+        return await self._call(
+            "fetch_page",
+            destination_hash=destination_hash,
+            path=path,
+            form_data=form_data,
+            timeout=timeout,
+        )
+
+    async def page_disconnect(self, destination_hash: str) -> bool:
+        """Disconnect a cached link to a NomadNet node."""
+        return await self._call(
+            "page_disconnect",
+            destination_hash=destination_hash,
         )
 
     # -------------------------------------------------------------------------

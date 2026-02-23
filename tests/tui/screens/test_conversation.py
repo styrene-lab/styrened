@@ -54,3 +54,16 @@ class TestStatusIcons:
     def test_failed_icon(self) -> None:
         """Failed should show cross."""
         assert STATUS_ICONS["failed"] == "\u2717"
+
+
+class TestConversationPathInfo:
+    """Tests for path info display in ConversationScreen."""
+
+    def test_path_info_widget_in_css(self) -> None:
+        """ConversationScreen CSS should include path info styling."""
+        assert "#conv-path-info" in ConversationScreen.CSS
+
+    def test_delete_binding_exists(self) -> None:
+        """ConversationScreen should have ctrl+d binding for delete."""
+        binding_keys = [b.key for b in ConversationScreen.BINDINGS]
+        assert "ctrl+d" in binding_keys

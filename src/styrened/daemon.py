@@ -87,6 +87,7 @@ class StyreneDaemon:
         self._contact_service: Any = None  # Contact address book service
         self._notification_service: Any = None  # Notification dispatch service
         self._callback_backend: Any = None  # For TUI/GUI callback registration
+        self._page_browser_service: Any = None  # NomadNet page browsing service
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -133,6 +134,9 @@ class StyreneDaemon:
         # Start terminal service if enabled
         if self.config.terminal.enabled:
             self._start_terminal_service()
+
+        # Start page browser service for NomadNet page fetching
+        await self._start_page_browser()
 
         self._running = True
         logger.info("Styrene daemon running")
@@ -797,7 +801,10 @@ class StyreneDaemon:
                 raw_mode=True,
             )
 
-            self._rpc_server = RPCServer(self._styrene_protocol)
+            self._rpc_server = RPCServer(
+                self._styrene_protocol,
+                enable_dangerous_commands=self.config.rpc.allow_command_execution,
+            )
 
             # Create RPC client for outgoing requests (used by IPC handlers)
             from styrened.rpc import RPCClient
@@ -920,6 +927,22 @@ class StyreneDaemon:
             logger.warning(f"Auto-reply not available: {e}")
         except Exception as e:
             logger.error(f"Failed to start auto-reply: {e}")
+
+    async def _start_page_browser(self) -> None:
+        """Start the page browser service for NomadNet page fetching.
+
+        Creates the PageBrowserService which manages outgoing RNS.Links
+        to NomadNet nodes for browsing their served pages.
+        """
+        try:
+            from styrened.services.page_browser import PageBrowserService
+
+            self._page_browser_service = PageBrowserService()
+            await self._page_browser_service.start()
+            logger.info("Page browser service started")
+
+        except Exception as e:
+            logger.error(f"Failed to start page browser service: {e}")
 
     def _start_terminal_service(self) -> None:
         """Start the terminal session service.
@@ -1261,6 +1284,14 @@ class StyreneDaemon:
 
         # Stop terminal service (closes all sessions)
         self._stop_terminal_service()
+
+        # Stop page browser service
+        if self._page_browser_service:
+            try:
+                await self._page_browser_service.stop()
+            except Exception as e:
+                logger.error(f"Error stopping page browser service: {e}")
+            self._page_browser_service = None
 
         # Stop IPC control server
         if self._control_server:

@@ -141,6 +141,7 @@ class StatusResponse:
     os_id: str | None = None
     os_version: str | None = None
     nixos_generation: str | None = None
+    available_commands: list[str] | None = None
     type: str = "status_response"
 
     def to_dict(self) -> dict[str, Any]:
@@ -188,6 +189,7 @@ class StatusResponse:
             os_id=data.get("os_id"),
             os_version=data.get("os_version"),
             nixos_generation=data.get("nixos_generation"),
+            available_commands=data.get("available_commands"),
         )
 
 

@@ -200,11 +200,12 @@ class TestDashboardKeyboardBindings:
         assert len(s_bindings) == 0, "Standalone 's' binding should be removed"
 
     @pytest.mark.asyncio
-    async def test_no_standalone_chat_binding(self):
-        """Dashboard should not have standalone 'c' (chat) binding."""
+    async def test_chat_binding_exists(self):
+        """Dashboard should have 'c' (chat) binding for opening chat with selected device."""
         screen = DashboardScreen()
         c_bindings = [b for b in screen.BINDINGS if b.key == "c"]
-        assert len(c_bindings) == 0, "Standalone 'c' binding should be removed"
+        assert len(c_bindings) == 1, "Dashboard should have a 'c' binding for chat"
+        assert c_bindings[0].action == "open_chat"
 
 
 class TestDashboardDeviceSelection:

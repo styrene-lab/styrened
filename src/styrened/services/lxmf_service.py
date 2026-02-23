@@ -897,6 +897,35 @@ class LXMFService:
             except Exception as e:
                 logger.error(f"Error in message callback: {e}")
 
+    def request_messages_from_propagation_node(self, identity: "RNS.Identity | None" = None) -> bool:
+        """Request pending messages from the configured propagation node.
+
+        Triggers the LXMF router to sync with the outbound propagation node,
+        pulling any messages stored for us.
+
+        Args:
+            identity: Identity to request messages for. Defaults to our own.
+
+        Returns:
+            True if the sync request was sent, False on error.
+        """
+        if not self.is_initialized or self._router is None:
+            logger.warning("Cannot sync: LXMF not initialized")
+            return False
+
+        try:
+            request_identity = identity or self._identity
+            if request_identity is None:
+                logger.warning("Cannot sync: no identity available")
+                return False
+
+            self._router.request_messages_from_propagation_node(request_identity)
+            logger.info("Requested messages from propagation node")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to request messages from propagation node: {e}")
+            return False
+
     def shutdown(self) -> None:
         """Shutdown the LXMF instance and clean up resources.
 
