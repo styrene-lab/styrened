@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+import datetime
 import logging
 import time
 from typing import Any, ClassVar
@@ -69,6 +70,7 @@ class ChatWidget(Widget):
         Binding("d", "delete_message", "Delete", show=True),
         Binding("slash", "open_search", "Search", show=True),
         Binding("r", "reply_to_message", "Reply", show=True),
+        Binding("y", "copy_message", "Copy", show=True),
     ]
 
     loading: reactive[bool] = reactive(False)
@@ -137,12 +139,15 @@ class ChatWidget(Widget):
         padding: 1;
     }
 
-    ChatWidget .chat-msg-outgoing {
-        padding: 0 1;
+    ChatWidget .message-bubble.--outgoing {
+        margin-left: 20;
+        text-align: right;
+        padding: 0 2;
     }
 
-    ChatWidget .chat-msg-incoming {
-        padding: 0 1;
+    ChatWidget .message-bubble.--incoming {
+        margin-right: 20;
+        padding: 0 2;
     }
 
     ChatWidget .message-bubble.--selected {
@@ -320,7 +325,8 @@ class ChatWidget(Widget):
                         icon = f"[{cascade.bright}]{STATUS_ICONS['read']}[/]"
                     elif new_status == "delivered":
                         icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
-                    msg_text = f"[{cascade.medium} bold]ME[/]: {child.content} {icon}"
+                    ts_str = datetime.datetime.fromtimestamp(child.timestamp).strftime("%H:%M") if child.timestamp else ""
+                    msg_text = f"[{cascade.medium} bold]ME[/]: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
                     child.update(msg_text)
                 return
 
@@ -407,6 +413,11 @@ class ChatWidget(Widget):
 
         parts: list[str] = []
 
+        # Format inline timestamp
+        ts_str = ""
+        if timestamp:
+            ts_str = datetime.datetime.fromtimestamp(timestamp).strftime("%H:%M")
+
         # Phase 6: Reply context
         if reply_to_hash:
             replied_preview = self._find_reply_preview(reply_to_hash)
@@ -419,12 +430,10 @@ class ChatWidget(Widget):
             elif status == "delivered":
                 status_icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
 
-            parts.append(f"[{cascade.medium} bold]ME[/]: {content} {status_icon}")
-            css_class = "chat-msg-outgoing"
+            parts.append(f"[{cascade.medium} bold]ME[/]: {content} {status_icon} [{cascade.dim}]{ts_str}[/]")
         else:
             sender = self.display_name or self.peer_hash[:8]
-            parts.append(f"[{cascade.dim}]{sender}[/]: {content}")
-            css_class = "chat-msg-incoming"
+            parts.append(f"[{cascade.dim}]{sender}[/]: {content} [{cascade.dim}]{ts_str}[/]")
 
         msg_text = "\n".join(parts)
 
@@ -435,10 +444,9 @@ class ChatWidget(Widget):
             status=status,
             lxmf_hash=lxmf_hash,
             reply_to_hash=reply_to_hash,
-            content=content,
+            raw_content=content,
             timestamp=timestamp,
             read_by_recipient=read_by_recipient,
-            classes=css_class,
         )
 
     def _find_reply_preview(self, lxmf_hash: str) -> str:
@@ -522,8 +530,7 @@ class ChatWidget(Widget):
             message_id=0,
             is_outgoing=True,
             status="pending",
-            content=content,
-            classes="chat-msg-outgoing",
+            raw_content=content,
         )
         container.mount(bubble)
         container.scroll_end(animate=False)
@@ -579,12 +586,11 @@ class ChatWidget(Widget):
         cascade = get_color_cascade()
         icon = STATUS_ICONS.get(status, "")
 
-        for child in reversed(list(container.query(".chat-msg-outgoing"))):
-            if isinstance(child, (Static, MessageBubble)):
+        for child in reversed(list(container.query(".--outgoing"))):
+            if isinstance(child, MessageBubble):
                 msg_text = f"[{cascade.medium} bold]ME[/]: {content} {icon}"
                 child.update(msg_text)
-                if isinstance(child, MessageBubble):
-                    child.update_status(status)
+                child.update_status(status)
                 return
 
     # -------------------------------------------------------------------------
@@ -617,8 +623,6 @@ class ChatWidget(Widget):
         if bubble is not None:
             bubble.select()
             self._selected_message_id = bubble.message_id
-            import datetime
-
             ts = datetime.datetime.fromtimestamp(bubble.timestamp).strftime("%H:%M:%S")
             method = f" [{bubble.status}]" if bubble.status else ""
             self._set_status(f"[dim]#{bubble.message_id} {ts}{method}[/]")
@@ -882,12 +886,12 @@ class ChatWidget(Widget):
 
         self._reply_to = {
             "lxmf_hash": bubble.lxmf_hash,
-            "content": bubble.content,
+            "content": bubble.raw_content,
             "message_id": bubble.message_id,
         }
 
-        preview = bubble.content[:40]
-        if len(bubble.content) > 40:
+        preview = bubble.raw_content[:40]
+        if len(bubble.raw_content) > 40:
             preview += "..."
 
         try:
@@ -911,6 +915,22 @@ class ChatWidget(Widget):
             reply_bar.add_class("hidden")
         except Exception:
             pass
+
+    # -------------------------------------------------------------------------
+    # Copy to clipboard
+    # -------------------------------------------------------------------------
+
+    def action_copy_message(self) -> None:
+        """Copy selected message content to system clipboard (y key)."""
+        bubble = self._get_selected_bubble()
+        if bubble is None:
+            return
+
+        try:
+            self.app.copy_to_clipboard(bubble.raw_content)
+            self._set_status("[dim]Copied to clipboard[/]")
+        except Exception:
+            self._set_status("[red]Copy failed[/]")
 
     # -------------------------------------------------------------------------
     # Worker error handling

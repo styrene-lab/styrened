@@ -270,6 +270,11 @@ class ControlServer:
             IPCMessageType.CMD_REMOVE_CONTACT: self._handlers.handle_cmd_remove_contact,
             IPCMessageType.QUERY_AUTO_REPLY: self._handlers.handle_query_auto_reply,
             IPCMessageType.CMD_SET_AUTO_REPLY: self._handlers.handle_cmd_set_auto_reply,
+            IPCMessageType.CMD_SYNC_MESSAGES: self._handlers.handle_cmd_sync_messages,
+            IPCMessageType.QUERY_PATH_INFO: self._handlers.handle_query_path_info,
+            IPCMessageType.QUERY_PAGE: self._handlers.handle_query_page,
+            IPCMessageType.CMD_PAGE_DISCONNECT: self._handlers.handle_cmd_page_disconnect,
+            IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
         }
 
     async def _handle_client(

@@ -331,14 +331,14 @@ class TestMessageBubble:
             status="delivered",
             lxmf_hash="abc123",
             reply_to_hash="def456",
-            content="test content",
+            raw_content="test content",
             timestamp=1700000000.0,
             read_by_recipient=True,
         )
         assert bubble.message_id == 42
         assert bubble.lxmf_hash == "abc123"
         assert bubble.reply_to_hash == "def456"
-        assert bubble.content == "test content"
+        assert bubble.raw_content == "test content"
         assert bubble.timestamp == 1700000000.0
         assert bubble.read_by_recipient is True
 
@@ -1084,3 +1084,80 @@ class TestStatusIcons:
     def test_failed_icon(self):
         """Failed should show cross."""
         assert STATUS_ICONS["failed"] == "\u2717"
+
+
+# -------------------------------------------------------------------------
+# Feature: Inline timestamps
+# -------------------------------------------------------------------------
+
+
+class TestInlineTimestamps:
+    """Tests for inline timestamp display on message bubbles."""
+
+    def test_create_bubble_includes_timestamp(self):
+        """_create_bubble should include HH:MM timestamp in message text."""
+        import datetime
+
+        widget = ChatWidget(peer_hash="test_hash")
+        # Use a known timestamp
+        ts = datetime.datetime(2024, 1, 15, 14, 32, 0).timestamp()
+        msg = {
+            "id": 1,
+            "content": "Hello",
+            "is_outgoing": True,
+            "status": "sent",
+            "lxmf_hash": "a" * 64,
+            "reply_to_hash": None,
+            "read_by_recipient": False,
+            "timestamp": ts,
+        }
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
+
+        cascade = get_color_cascade()
+        bubble = widget._create_bubble(msg, cascade)
+        # After rename from content to raw_content, Static.content holds rendered markup
+        markup = str(bubble.content)
+        assert "14:32" in markup
+
+    def test_incoming_message_has_timestamp(self):
+        """Incoming messages should also have timestamps."""
+        import datetime
+
+        widget = ChatWidget(peer_hash="test_hash", display_name="Alice")
+        ts = datetime.datetime(2024, 1, 15, 9, 5, 0).timestamp()
+        msg = {
+            "id": 2,
+            "content": "Hey",
+            "is_outgoing": False,
+            "status": "read",
+            "lxmf_hash": "b" * 64,
+            "reply_to_hash": None,
+            "read_by_recipient": False,
+            "timestamp": ts,
+        }
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
+
+        cascade = get_color_cascade()
+        bubble = widget._create_bubble(msg, cascade)
+        markup = str(bubble.content)
+        assert "09:05" in markup
+
+
+# -------------------------------------------------------------------------
+# Feature: Copy to clipboard
+# -------------------------------------------------------------------------
+
+
+class TestCopyToClipboard:
+    """Tests for copy message to clipboard."""
+
+    def test_copy_binding_exists(self):
+        """ChatWidget should have a 'y' binding for copy."""
+        binding_keys = [b.key for b in ChatWidget.BINDINGS]
+        assert "y" in binding_keys
+
+    def test_copy_noop_without_selection(self):
+        """Copy action should do nothing when no message is selected."""
+        widget = ChatWidget(peer_hash="test_hash")
+        # Should not raise
+        widget.action_copy_message()

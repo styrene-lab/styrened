@@ -41,6 +41,7 @@ class ConversationInfo:
     last_message_preview: str | None
     last_message_outgoing: bool | None
     message_count: int
+    attachment_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for IPC."""
@@ -52,6 +53,7 @@ class ConversationInfo:
             "last_message_preview": self.last_message_preview,
             "last_message_outgoing": self.last_message_outgoing,
             "message_count": self.message_count,
+            "attachment_count": self.attachment_count,
         }
 
     @classmethod
@@ -65,6 +67,7 @@ class ConversationInfo:
             last_message_preview=data.get("last_message_preview"),
             last_message_outgoing=data.get("last_message_outgoing"),
             message_count=data.get("message_count", 0),
+            attachment_count=data.get("attachment_count", 0),
         )
 
 
@@ -405,9 +408,12 @@ class ConversationService:
                         last_message_preview=preview,
                         last_message_outgoing=is_outgoing,
                         message_count=1,
+                        attachment_count=1 if msg.has_attachment else 0,
                     )
                 else:
                     conversations[peer_hash].message_count += 1
+                    if msg.has_attachment:
+                        conversations[peer_hash].attachment_count += 1
 
             # Sort by last message time (most recent first)
             result = sorted(
@@ -953,32 +959,50 @@ class ConversationService:
         logger.info(f"Prepared message {message_id} for retry to {dest_hash[:16]}...")
         return (dest_hash, content, fields)
 
-    def mark_read(self, peer_hash: str) -> int:
+    def mark_read(
+        self,
+        peer_hash: str,
+        additional_peer_hashes: list[str] | None = None,
+    ) -> int:
         """Mark all messages in a conversation as read.
 
         Args:
             peer_hash: LXMF destination hash of the peer
+            additional_peer_hashes: Additional hashes for the same peer (e.g.
+                LXMF delivery hash when peer_hash is operator hash). Messages
+                from ANY of these hashes are marked as read.
 
         Returns:
             Number of messages marked as read
         """
+        # Build list of all hashes that identify this peer
+        all_hashes = [peer_hash]
+        if additional_peer_hashes:
+            all_hashes.extend(h for h in additional_peer_hashes if h != peer_hash)
+
         with Session(self._db_engine) as session:
+            if len(all_hashes) == 1:
+                source_filter = Message.source_hash == peer_hash
+            else:
+                source_filter = Message.source_hash.in_(all_hashes)
+
             # Update all unread received messages from this peer
             count = (
                 session.query(Message)
                 .filter(
                     Message.protocol_id == "chat",
-                    Message.source_hash == peer_hash,
+                    source_filter,
                     Message.destination_hash == self._local_identity_hash,
                     Message.status == MessageStatus.RECEIVED,
                 )
-                .update({Message.status: "read"})
+                .update({Message.status: "read"}, synchronize_session=False)
             )
             session.commit()
 
-        # Clear unread count
+        # Clear unread count for all hashes
         with self._lock:
-            self._unread_counts.pop(peer_hash, None)
+            for h in all_hashes:
+                self._unread_counts.pop(h, None)
 
         logger.debug(f"Marked {count} messages as read from {peer_hash[:16]}...")
         return count

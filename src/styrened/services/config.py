@@ -869,13 +869,13 @@ def validate_core_config(
                 )
             )
 
-    for peer in config.lxmf.static_peers:
-        if len(peer) != 32:
+    for peer_hash in config.lxmf.static_peers:
+        if len(peer_hash) != 32:
             errors.append(
                 ConfigFieldError(
                     "lxmf.static_peers",
                     "Each peer must be a 32-character hex hash",
-                    peer,
+                    peer_hash,
                 )
             )
 

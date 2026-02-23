@@ -33,7 +33,7 @@ class MessageBubble(Static):
         status: Delivery status string.
         lxmf_hash: LXMF message hash (hex) for reply threading.
         reply_to_hash: Hash of the message being replied to.
-        content: Raw message content text.
+        raw_content: Raw message content text (avoids shadowing Static.content).
         timestamp: Message timestamp.
         read_by_recipient: Whether the recipient has read this message.
     """
@@ -47,7 +47,7 @@ class MessageBubble(Static):
         status: str = "",
         lxmf_hash: str | None = None,
         reply_to_hash: str | None = None,
-        content: str = "",
+        raw_content: str = "",
         timestamp: float = 0.0,
         read_by_recipient: bool = False,
         **kwargs: Any,
@@ -58,7 +58,7 @@ class MessageBubble(Static):
         self.status = status
         self.lxmf_hash = lxmf_hash
         self.reply_to_hash = reply_to_hash
-        self.content = content
+        self.raw_content = raw_content
         self.timestamp = timestamp
         self.read_by_recipient = read_by_recipient
 

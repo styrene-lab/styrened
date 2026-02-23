@@ -341,6 +341,7 @@ class RPCClient(Protocol):
                 os_id=payload_data.get("os_id"),
                 os_version=payload_data.get("os_version"),
                 nixos_generation=payload_data.get("nixos_generation"),
+                available_commands=payload_data.get("available_commands"),
             )
         elif envelope.message_type == StyreneMessageType.EXEC_RESULT:
             return ExecResult(

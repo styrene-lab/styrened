@@ -616,3 +616,36 @@ class TestLXMFServiceShutdown:
         service.shutdown()
 
         assert service.is_initialized is False
+
+
+class TestLXMFServicePropagationSync:
+    """Tests for propagation node message sync."""
+
+    def test_sync_when_not_initialized(self) -> None:
+        """Sync should return False when service not initialized."""
+        service = LXMFService()
+        assert service.request_messages_from_propagation_node() is False
+
+    def test_sync_calls_router(self) -> None:
+        """Sync should call router.request_messages_from_propagation_node."""
+        service = LXMFService()
+
+        mock_router = Mock()
+        mock_identity = Mock()
+
+        # Set internal state directly to avoid full init complexity
+        service._initialized = True
+        service._router = mock_router
+        service._identity = mock_identity
+
+        result = service.request_messages_from_propagation_node()
+
+        assert result is True
+        mock_router.request_messages_from_propagation_node.assert_called_once_with(
+            mock_identity
+        )
+
+        # Cleanup
+        service._initialized = False
+        service._router = None
+        service._identity = None

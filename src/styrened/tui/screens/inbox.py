@@ -4,6 +4,7 @@ This screen displays a list of conversations with unread counts and message prev
 Uses IPCBridge for daemon communication and theme variables for styling.
 """
 
+import datetime
 import logging
 from typing import Any, ClassVar
 
@@ -21,6 +22,31 @@ logger = logging.getLogger(__name__)
 _DELETE_CONFIRM_TIMEOUT = 3.0
 
 
+def _format_timestamp(ts: float | int | None) -> str:
+    """Format a Unix timestamp as a human-readable string.
+
+    - Today: "14:32"
+    - This week: "Mon 14:32"
+    - This year: "Feb 22 14:32"
+    - Older: "2025-12-01"
+    """
+    if ts is None:
+        return "-"
+
+    dt = datetime.datetime.fromtimestamp(float(ts))
+    now = datetime.datetime.now()
+    delta = now - dt
+
+    if delta.days == 0:
+        return dt.strftime("%H:%M")
+    elif delta.days < 7:
+        return dt.strftime("%a %H:%M")
+    elif dt.year == now.year:
+        return dt.strftime("%b %d %H:%M")
+    else:
+        return dt.strftime("%Y-%m-%d")
+
+
 class InboxScreen(Screen[None]):
     """Inbox screen showing conversation list.
 
@@ -35,11 +61,17 @@ class InboxScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "app.pop_screen", "Back"),
+        Binding("escape", "go_back", "Back"),
         Binding("enter", "open_conversation", "Open"),
+        Binding("n", "compose_new", "New", show=True),
         Binding("d", "delete_conversation", "Delete", show=True),
         Binding("slash", "search_messages", "Search", show=True),
+        Binding("s", "sync_messages", "Sync", show=True),
+        Binding("o", "cycle_sort", "Sort", show=True),
     ]
+
+    # Sort modes: time (default), unread first, name
+    SORT_MODES = ["time", "unread", "name"]
 
     CSS = """
     InboxScreen {
@@ -79,6 +111,24 @@ class InboxScreen(Screen[None]):
     InboxScreen #ooo-bar Switch {
         width: auto;
     }
+
+    InboxScreen #compose-bar {
+        height: auto;
+        padding: 0 1;
+        display: none;
+    }
+
+    InboxScreen #compose-bar.visible {
+        display: block;
+    }
+
+    InboxScreen #compose-bar Input {
+        width: 1fr;
+    }
+
+    InboxScreen #compose-bar Static {
+        width: auto;
+    }
     """
 
     def __init__(self) -> None:
@@ -86,6 +136,9 @@ class InboxScreen(Screen[None]):
         self._delete_pending: str | None = None
         self._delete_timer: Timer | None = None
         self._search_active: bool = False
+        self._compose_active: bool = False
+        self._sort_mode: str = "time"
+        self._conversations: list[dict[str, Any]] = []
 
     def compose(self) -> ComposeResult:
         """Compose inbox UI."""
@@ -96,6 +149,15 @@ class InboxScreen(Screen[None]):
                 Static("Auto-Reply (OOO): "),
                 Switch(value=False, id="ooo-switch"),
                 id="ooo-bar",
+            ),
+            # Compose bar (hidden by default)
+            Horizontal(
+                Input(
+                    placeholder="Destination hash or contact name...",
+                    id="compose-input",
+                ),
+                Static("[dim]Enter hash or name, then press Enter[/]", id="compose-hint"),
+                id="compose-bar",
             ),
             # Search bar (hidden by default)
             Horizontal(
@@ -123,14 +185,19 @@ class InboxScreen(Screen[None]):
         """Load conversations on mount."""
         table = self.query_one("#conversation-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("DESTINATION", "LAST MESSAGE", "UNREAD", "TIMESTAMP")
+        table.add_columns("DESTINATION", "LAST MESSAGE", "UNREAD", "ATTACH", "TIMESTAMP")
 
         if self._ipc_bridge is None:
-            table.add_row("-", "[dim]Chat requires daemon mode[/]", "-", "-")
+            table.add_row("-", "[dim]Chat requires daemon mode[/]", "-", "-", "-")
             return
 
         self.run_worker(self._load_conversations())
         self.run_worker(self._load_auto_reply_state())
+
+    def on_screen_resume(self) -> None:
+        """Refresh conversations when returning from another screen."""
+        if self._ipc_bridge is not None:
+            self.run_worker(self._load_conversations())
 
     async def _load_conversations(self) -> None:
         """Load conversations via IPCBridge."""
@@ -139,21 +206,33 @@ class InboxScreen(Screen[None]):
             return
 
         try:
-            conversations = await bridge.get_conversations()
+            self._conversations = await bridge.get_conversations()
         except Exception as e:
             logger.warning(f"Failed to load conversations: {e}")
-            conversations = []
+            self._conversations = []
+
+        self._render_conversations()
+
+    def _render_conversations(self) -> None:
+        """Render conversation table with current sort and styling."""
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
         table = self.query_one("#conversation-table", DataTable)
         table.clear()
 
+        conversations = self._sorted_conversations()
+
         if not conversations:
-            table.add_row("-", "[dim]No conversations yet[/]", "-", "-")
+            table.add_row("-", "[dim]No conversations yet[/]", "-", "-", "-")
             return
+
+        cascade = get_color_cascade()
 
         for conv in conversations:
             peer_hash = conv.get("peer_hash", "")
             display_name = conv.get("display_name")
+            unread = conv.get("unread_count", 0)
+            is_unread = unread > 0
 
             # Use display_name when present, fall back to short hash
             if display_name:
@@ -162,25 +241,63 @@ class InboxScreen(Screen[None]):
                 dest_display = peer_hash[:8] + "..." if peer_hash else "unknown"
 
             # Format last message (truncate to 40 chars)
-            last_msg = conv.get("last_message_preview") or "[dim]No content[/]"
+            last_msg = conv.get("last_message_preview") or "No content"
             if len(last_msg) > 40:
                 last_msg = last_msg[:37] + "..."
 
             # Format unread count
-            unread = conv.get("unread_count", 0)
-            unread_text = f"[bold]{unread}[/]" if unread > 0 else "-"
+            if is_unread:
+                unread_text = f"[{cascade.bright} bold]{unread}[/]"
+            else:
+                unread_text = f"[{cascade.dim}]-[/]"
+
+            # Format attachment count
+            attach_count = conv.get("attachment_count", 0)
+            if attach_count > 0:
+                attach_text = f"\U0001f4ce {attach_count}"
+            else:
+                attach_text = f"[{cascade.dim}]-[/]"
 
             # Format timestamp
             last_time = conv.get("last_message_time")
-            timestamp_text = f"{int(last_time)}" if last_time else "-"
+            timestamp_text = _format_timestamp(last_time) if last_time else "-"
+
+            # Dim read conversations, keep unread bright
+            if is_unread:
+                dest_display = f"[{cascade.bright} bold]{dest_display}[/]"
+                last_msg = f"[{cascade.medium}]{last_msg}[/]"
+                timestamp_text = f"[{cascade.medium}]{timestamp_text}[/]"
+            else:
+                dest_display = f"[{cascade.dim}]{dest_display}[/]"
+                last_msg = f"[{cascade.dim}]{last_msg}[/]"
+                timestamp_text = f"[{cascade.dim}]{timestamp_text}[/]"
 
             table.add_row(
                 dest_display,
                 last_msg,
                 unread_text,
+                attach_text if is_unread else f"[{cascade.dim}]{attach_text}[/]",
                 timestamp_text,
                 key=peer_hash,
             )
+
+    def _sorted_conversations(self) -> list[dict[str, Any]]:
+        """Sort conversations based on current sort mode."""
+        convs = list(self._conversations)
+        if self._sort_mode == "unread":
+            convs.sort(key=lambda c: (c.get("unread_count", 0) == 0, -(c.get("last_message_time") or 0)))
+        elif self._sort_mode == "name":
+            convs.sort(key=lambda c: (c.get("display_name") or c.get("peer_hash", "")).lower())
+        else:  # time (default)
+            convs.sort(key=lambda c: c.get("last_message_time") or 0, reverse=True)
+        return convs
+
+    def action_cycle_sort(self) -> None:
+        """Cycle through sort modes: time -> unread -> name."""
+        idx = self.SORT_MODES.index(self._sort_mode)
+        self._sort_mode = self.SORT_MODES[(idx + 1) % len(self.SORT_MODES)]
+        self.notify(f"Sort: {self._sort_mode}", severity="information")
+        self._render_conversations()
 
     async def _load_auto_reply_state(self) -> None:
         """Load auto-reply state from IPCBridge."""
@@ -233,8 +350,74 @@ class InboxScreen(Screen[None]):
 
         return str(cell_key.row_key.value)
 
+    def action_go_back(self) -> None:
+        """Layered escape: close compose -> close search -> pop screen."""
+        if self._compose_active:
+            self._close_compose()
+            return
+        if self._search_active:
+            self._close_search()
+            return
+        self.app.pop_screen()
+
+    # -------------------------------------------------------------------------
+    # Compose new conversation
+    # -------------------------------------------------------------------------
+
+    def action_compose_new(self) -> None:
+        """Show compose bar for entering a destination hash or contact name."""
+        if self._ipc_bridge is None:
+            self.notify("Chat requires daemon mode", severity="warning")
+            return
+
+        if self._compose_active:
+            self._close_compose()
+            return
+
+        self._compose_active = True
+        try:
+            bar = self.query_one("#compose-bar")
+            bar.add_class("visible")
+            compose_input = self.query_one("#compose-input", Input)
+            compose_input.value = ""
+            compose_input.focus()
+        except Exception:
+            pass
+
+    def _close_compose(self) -> None:
+        """Hide compose bar."""
+        self._compose_active = False
+        try:
+            bar = self.query_one("#compose-bar")
+            bar.remove_class("visible")
+            compose_input = self.query_one("#compose-input", Input)
+            compose_input.value = ""
+        except Exception:
+            pass
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle DataTable enter key - open the selected conversation.
+
+        The DataTable consumes enter key events when cursor_type="row",
+        emitting RowSelected instead of letting the screen binding fire.
+        """
+        if event.row_key and event.row_key.value and event.row_key.value != "-":
+            peer_hash = str(event.row_key.value)
+
+            if self._ipc_bridge is None:
+                self.notify("Chat requires daemon mode", severity="warning")
+                return
+
+            from styrened.tui.screens.conversation import ConversationScreen
+
+            self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
+
     def action_open_conversation(self) -> None:
-        """Open conversation screen for selected row."""
+        """Open conversation screen for selected row.
+
+        Fallback action for the enter binding. When DataTable is focused,
+        on_data_table_row_selected handles it instead.
+        """
         peer_hash = self._get_selected_peer_hash()
         if peer_hash is None:
             return
@@ -336,7 +519,14 @@ class InboxScreen(Screen[None]):
         self.run_worker(self._load_conversations())
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle search input submission."""
+        """Handle compose or search input submission."""
+        if event.input.id == "compose-input":
+            value = event.value.strip()
+            if not value:
+                return
+            self.run_worker(self._resolve_and_open(value), group="inbox-compose")
+            return
+
         if event.input.id != "inbox-search-input":
             return
 
@@ -345,6 +535,45 @@ class InboxScreen(Screen[None]):
             return
 
         self.run_worker(self._execute_search(query), group="inbox-search")
+
+    async def _resolve_and_open(self, value: str) -> None:
+        """Resolve input to a peer hash and open conversation.
+
+        Accepts either a hex destination hash or a contact name.
+        """
+        import re
+
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        peer_hash: str | None = None
+        display_name: str | None = None
+
+        # Check if it looks like a hex hash (16-64 hex chars)
+        if re.match(r"^[0-9a-fA-F]{16,64}$", value):
+            peer_hash = value
+        else:
+            # Try resolving as a contact name
+            try:
+                resolved = await bridge.resolve_name(value)
+                if resolved:
+                    peer_hash = resolved
+                    display_name = value
+                else:
+                    self.notify(f"No contact found for '{value}'", severity="warning")
+                    return
+            except Exception as e:
+                self.notify(f"Resolve failed: {e}", severity="error")
+                return
+
+        self._close_compose()
+
+        from styrened.tui.screens.conversation import ConversationScreen
+
+        self.app.push_screen(
+            ConversationScreen(peer_hash=peer_hash, display_name=display_name)
+        )
 
     async def _execute_search(self, query: str) -> None:
         """Execute cross-conversation search."""
@@ -370,7 +599,7 @@ class InboxScreen(Screen[None]):
         table.clear()
 
         if not results:
-            table.add_row("-", f"[dim]No results for '{query}'[/]", "-", "-")
+            table.add_row("-", f"[dim]No results for '{query}'[/]", "-", "-", "-")
             return
 
         for msg in results:
@@ -383,12 +612,54 @@ class InboxScreen(Screen[None]):
             direction = "\u2192" if is_outgoing else "\u2190"
 
             timestamp = msg.get("timestamp")
-            ts_text = f"{int(timestamp)}" if timestamp else "-"
+            ts_text = _format_timestamp(timestamp) if timestamp else "-"
+
+            has_attach = msg.get("has_attachment", False)
+            attach_text = "\U0001f4ce" if has_attach else "-"
 
             table.add_row(
                 f"{direction} {peer_hash[:8]}...",
                 content,
                 "-",
+                attach_text,
                 ts_text,
                 key=peer_hash,
             )
+
+    # -------------------------------------------------------------------------
+    # Propagation node sync
+    # -------------------------------------------------------------------------
+
+    def action_sync_messages(self) -> None:
+        """Request message sync from propagation node."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            self.notify("Sync requires daemon mode", severity="warning")
+            return
+
+        self.notify("Syncing with propagation node...", severity="information")
+        self.run_worker(self._execute_sync(), group="inbox-sync")
+
+    async def _execute_sync(self) -> None:
+        """Execute propagation node sync via IPCBridge."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        try:
+            result = await bridge.sync_messages()
+            if result.get("synced"):
+                self.notify("Sync requested", severity="information")
+                # Refresh conversation list after a short delay for messages to arrive
+                import asyncio
+
+                await asyncio.sleep(2.0)
+                await self._load_conversations()
+            else:
+                self.notify(
+                    "Sync failed — no propagation node configured?",
+                    severity="warning",
+                )
+        except Exception as e:
+            logger.warning(f"Sync failed: {e}")
+            self.notify(f"Sync failed: {e}", severity="error")

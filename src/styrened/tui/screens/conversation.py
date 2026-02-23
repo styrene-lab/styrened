@@ -50,6 +50,12 @@ class ConversationScreen(Screen[None]):
     ConversationScreen #conv-content {
         height: 1fr;
     }
+
+    ConversationScreen #conv-path-info {
+        height: 1;
+        padding: 0 1;
+        color: $panel;
+    }
     """
 
     def __init__(
@@ -83,12 +89,57 @@ class ConversationScreen(Screen[None]):
         yield Header()
         with Container(id="conv-content"):
             yield Static(f"CONVERSATION - {title}", id="conv-title")
+            yield Static("", id="conv-path-info")
             yield ChatWidget(
                 peer_hash=self.peer_hash,
                 display_name=self.display_name,
                 id="chat-widget",
             )
         yield Footer()
+
+    def on_mount(self) -> None:
+        """Load path info on mount."""
+        if self._ipc_bridge is not None:
+            self.run_worker(self._load_path_info(), group="conv-path")
+
+    async def _load_path_info(self) -> None:
+        """Load path info for the peer and display in header."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        try:
+            info = await bridge.get_path_info(self.peer_hash)
+        except Exception:
+            return
+
+        if not info.get("found"):
+            try:
+                path_widget = self.query_one("#conv-path-info", Static)
+                path_widget.update("[dim]No path info available[/]")
+            except Exception:
+                pass
+            return
+
+        hops = info.get("hops", 0)
+        iface = info.get("interface_name") or info.get("interface_type") or "unknown"
+        bitrate = info.get("bitrate")
+
+        parts = [f"{hops} hop{'s' if hops != 1 else ''}"]
+        parts.append(f"via {iface}")
+        if bitrate:
+            if bitrate >= 1_000_000:
+                parts.append(f"{bitrate / 1_000_000:.1f} Mbps")
+            elif bitrate >= 1_000:
+                parts.append(f"{bitrate / 1_000:.0f} kbps")
+            else:
+                parts.append(f"{bitrate} bps")
+
+        try:
+            path_widget = self.query_one("#conv-path-info", Static)
+            path_widget.update(f"[dim]{' | '.join(parts)}[/]")
+        except Exception:
+            pass
 
     def action_delete_conversation(self) -> None:
         """Delete entire conversation with double-tap confirmation."""

@@ -75,7 +75,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from styrened.models.config import CoreConfig, DeploymentMode
-from styrened.models.mesh_device import MeshDevice, create_mesh_device
+from styrened.models.mesh_device import DeviceType, MeshDevice, create_mesh_device
 from styrened.models.reticulum import (
     ReticulumIdentity,
     ReticulumInterface,
@@ -907,6 +907,16 @@ def get_operator_identity() -> str | None:
 # Device Discovery via RNS Announces
 
 
+# Known RNS application aspects for announce type detection.
+# Each entry maps (app_name, *aspects) to a DeviceType.
+# Used to compute expected destination hashes and match against received announces.
+KNOWN_ASPECTS: list[tuple[tuple[str, ...], DeviceType]] = [
+    (("lxmf", "delivery"), DeviceType.LXMF_PEER),
+    (("lxmf", "propagation"), DeviceType.PROPAGATION_NODE),
+    (("nomadnetwork", "node"), DeviceType.NOMADNET_NODE),
+]
+
+
 class StyreneAnnounceHandler:
     """Handles Reticulum announces for mesh device discovery.
 
@@ -1032,6 +1042,25 @@ class StyreneAnnounceHandler:
             except Exception as e:
                 logger.warning(f"Could not remember identity: {e}")
 
+        # Detect announce type by computing expected destination hashes
+        # for known application aspects and matching against the received hash.
+        detected_type: DeviceType | None = None
+        if announced_identity is not None:
+            for aspect_tuple, dtype in KNOWN_ASPECTS:
+                try:
+                    expected = RNS.Destination.hash(
+                        announced_identity, aspect_tuple[0], *aspect_tuple[1:]
+                    )
+                    if destination_hash == expected:
+                        detected_type = dtype
+                        logger.debug(
+                            f"[ASPECT] Matched {'.'.join(aspect_tuple)} -> {dtype.value} "
+                            f"for {dest_hash_hex[:16]}..."
+                        )
+                        break
+                except Exception:
+                    pass
+
         # Create/update MeshDevice with both hashes
         # The create_mesh_device function extracts LXMF destination from app_data
         device = create_mesh_device(
@@ -1039,6 +1068,7 @@ class StyreneAnnounceHandler:
             identity_hash=identity_hash_hex,
             app_data=app_data,
             announce_count=announce_count,
+            aspect_hint=detected_type,
         )
 
         # Log LXMF destination if present (parsed from app_data by create_mesh_device)

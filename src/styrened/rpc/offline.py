@@ -8,7 +8,7 @@ mesh network.
 import asyncio
 
 from styrened.rpc.errors import RPCTimeoutError
-from styrened.rpc.messages import ExecResult, StatusResponse
+from styrened.rpc.messages import ExecResult, RebootResult, StatusResponse
 
 
 class OfflineRPCClient:
@@ -55,6 +55,7 @@ class OfflineRPCClient:
             services=[],
             disk_used=0,
             disk_total=0,
+            available_commands=[],
         )
 
     async def call_exec(
@@ -84,4 +85,18 @@ class OfflineRPCClient:
             exit_code=1,
             stdout="",
             stderr="offline — no mesh connection",
+        )
+
+    async def call_reboot(
+        self,
+        destination: str,
+        delay: int = 0,
+        timeout: float = 10.0,
+    ) -> RebootResult:
+        """Raise timeout — reboot not available offline."""
+        raise RPCTimeoutError(
+            f"Offline — no mesh connection to {destination[:8]}...",
+            request_id="offline",
+            destination=destination,
+            timeout=timeout,
         )

@@ -41,7 +41,7 @@ class TestMessageBubbleCreation:
             status="delivered",
             lxmf_hash="abc123def456",
             reply_to_hash="789xyz",
-            content="test content",
+            raw_content="test content",
             timestamp=1700000000.0,
             read_by_recipient=True,
         )
@@ -50,7 +50,7 @@ class TestMessageBubbleCreation:
         assert bubble.status == "delivered"
         assert bubble.lxmf_hash == "abc123def456"
         assert bubble.reply_to_hash == "789xyz"
-        assert bubble.content == "test content"
+        assert bubble.raw_content == "test content"
         assert bubble.timestamp == 1700000000.0
         assert bubble.read_by_recipient is True
 
@@ -62,7 +62,7 @@ class TestMessageBubbleCreation:
         assert bubble.status == ""
         assert bubble.lxmf_hash is None
         assert bubble.reply_to_hash is None
-        assert bubble.content == ""
+        assert bubble.raw_content == ""
         assert bubble.timestamp == 0.0
         assert bubble.read_by_recipient is False
 

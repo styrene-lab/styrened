@@ -512,3 +512,122 @@ class TestIPCHandlersChatNullChecks:
         response = await handlers.handle_query_messages(request)
 
         assert isinstance(response, ErrorResponse)
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_sync_messages_returns_error_when_daemon_none(self):
+        """CMD_SYNC_MESSAGES should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import CmdSyncMessagesRequest
+
+        request = CmdSyncMessagesRequest()
+
+        response = await handlers.handle_cmd_sync_messages(request)
+
+        assert isinstance(response, ErrorResponse)
+
+    @pytest.mark.asyncio
+    async def test_handle_query_path_info_returns_error_when_daemon_none(self):
+        """QUERY_PATH_INFO should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryPathInfoRequest
+
+        request = QueryPathInfoRequest(destination_hash="a" * 32)
+
+        response = await handlers.handle_query_path_info(request)
+
+        assert isinstance(response, ErrorResponse)
+
+    @pytest.mark.asyncio
+    async def test_handle_query_path_info_requires_destination_hash(self):
+        """QUERY_PATH_INFO should return error when destination_hash is empty."""
+        handlers = IPCHandlers(daemon=MockDaemon())
+
+        from styrened.ipc.messages import QueryPathInfoRequest
+
+        request = QueryPathInfoRequest(destination_hash="")
+
+        response = await handlers.handle_query_path_info(request)
+
+        assert isinstance(response, ErrorResponse)
+
+
+class TestIPCHandlersPageBrowser:
+    """Tests for page browser handlers."""
+
+    @pytest.mark.asyncio
+    async def test_handle_query_page_returns_error_when_daemon_none(self):
+        """QUERY_PAGE should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryPageRequest
+
+        request = QueryPageRequest(destination_hash="a" * 32)
+
+        response = await handlers.handle_query_page(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_query_page_returns_error_when_service_none(self):
+        """QUERY_PAGE should return error when page browser service is None."""
+        daemon = MockDaemon()
+        daemon._page_browser_service = None
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import QueryPageRequest
+
+        request = QueryPageRequest(destination_hash="a" * 32)
+
+        response = await handlers.handle_query_page(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Page browser service not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_query_page_requires_destination_hash(self):
+        """QUERY_PAGE should require destination_hash."""
+        daemon = MockDaemon()
+        daemon._page_browser_service = True  # truthy
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import QueryPageRequest
+
+        request = QueryPageRequest(destination_hash="")
+
+        response = await handlers.handle_query_page(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "destination_hash is required" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_page_disconnect_returns_error_when_daemon_none(self):
+        """CMD_PAGE_DISCONNECT should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import CmdPageDisconnectRequest
+
+        request = CmdPageDisconnectRequest(destination_hash="a" * 32)
+
+        response = await handlers.handle_cmd_page_disconnect(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_cmd_page_disconnect_requires_destination_hash(self):
+        """CMD_PAGE_DISCONNECT should require destination_hash."""
+        daemon = MockDaemon()
+        daemon._page_browser_service = True
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import CmdPageDisconnectRequest
+
+        request = CmdPageDisconnectRequest(destination_hash="")
+
+        response = await handlers.handle_cmd_page_disconnect(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "destination_hash is required" in response.message
