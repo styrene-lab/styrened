@@ -7,15 +7,12 @@ import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from styrened.tui.forge.disk_detect import (
     _detect_linux,
     _detect_macos,
     detect_external_disks,
 )
 from styrened.tui.forge.models import DiskInfo
-
 
 # ===================================================================
 # macOS detection

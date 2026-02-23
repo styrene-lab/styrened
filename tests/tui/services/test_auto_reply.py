@@ -14,8 +14,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from styrened.tui.models.config import ChatConfig
 from styrened.services.auto_reply import MAX_COOLDOWN_ENTRIES, AutoReplyHandler
+from styrened.tui.models.config import ChatConfig
 
 
 @pytest.fixture
@@ -106,6 +106,7 @@ class TestAutoReplyHandlerDisabled:
         message = Mock()
         message.source_hash = bytes.fromhex("a1b2c3d4e5f67890")
         message.content = b"Hello"
+        message.fields = None
 
         handler.handle_message(message)
 
@@ -339,6 +340,7 @@ class TestAutoReplyHandlerHandleMessage:
         message = Mock()
         message.source_hash = bytes.fromhex("1234567890abcdef")
         message.content = b"Hello there"
+        message.fields = None
 
         handler.handle_message(message)
 
@@ -359,6 +361,7 @@ class TestAutoReplyHandlerHandleMessage:
         message = Mock()
         message.source_hash = bytes.fromhex("1234567890abcdef")
         message.content = b"Hello"
+        message.fields = None
 
         # First message - should reply
         handler.handle_message(message)
@@ -374,6 +377,7 @@ class TestAutoReplyHandlerHandleMessage:
         """Test errors in handle_message don't propagate."""
         message = Mock()
         message.source_hash = None  # Will cause error
+        message.fields = None
 
         # Should not raise
         handler.handle_message(message)
@@ -401,6 +405,7 @@ class TestAutoReplyHandlerPathHandling:
         message = Mock()
         message.source_hash = bytes.fromhex("1234567890abcdef")
         message.content = b"Hello"
+        message.fields = None
 
         handler.handle_message(message)
 
@@ -432,6 +437,7 @@ class TestAutoReplyHandlerPathHandling:
         message = Mock()
         message.source_hash = bytes.fromhex("1234567890abcdef")
         message.content = b"Hello"
+        message.fields = None
 
         handler.handle_message(message)
 
@@ -458,6 +464,7 @@ class TestAutoReplyHandlerPathHandling:
         message = Mock()
         message.source_hash = bytes.fromhex("1234567890abcdef")
         message.content = b"Hello"
+        message.fields = None
 
         import logging
 
@@ -489,6 +496,7 @@ class TestAutoReplyHandlerPathHandling:
         message = Mock()
         message.source_hash = bytes.fromhex("1234567890abcdef")
         message.content = b"Hello"
+        message.fields = None
 
         handler.handle_message(message)
 

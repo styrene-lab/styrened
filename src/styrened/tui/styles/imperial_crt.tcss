@@ -647,6 +647,51 @@ ChatWidget .chat-no-messages {
     padding: 1;
 }
 
+/* === MessageBubble Styles === */
+.message-bubble {
+    padding: 0 1;
+}
+
+.message-bubble.--selected {
+    background: $surface;
+    text-style: bold;
+}
+
+.message-bubble.--failed {
+    text-style: italic;
+}
+
+.message-bubble.--outgoing {
+    padding: 0 1;
+}
+
+.message-bubble.--incoming {
+    padding: 0 1;
+}
+
+/* === Chat Search Bar === */
+ChatWidget #chat-search-bar {
+    height: auto;
+    max-height: 3;
+    padding: 0 1;
+    background: $surface;
+}
+
+ChatWidget #chat-reply-bar {
+    height: 1;
+    padding: 0 1;
+    background: $surface;
+    color: $primary;
+}
+
+/* === Inbox Search Bar === */
+InboxScreen #inbox-search-bar {
+    height: auto;
+    max-height: 3;
+    padding: 0 1;
+    background: $surface;
+}
+
 .placeholder-text {
     color: $panel;
     text-style: italic;

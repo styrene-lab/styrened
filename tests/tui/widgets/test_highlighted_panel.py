@@ -43,7 +43,7 @@ class TestHighlightedPanelThemeColors:
         app = PanelApp()
 
         # Snapshot comparison - also implicitly tests that theme colors render correctly
-        assert snap_compare(app, "panel_default_theme.svg")
+        assert snap_compare(app)
 
     def test_panel_border_color_matches_theme(self, snap_compare):
         """Verify border uses correct theme color (dim phosphex)."""
@@ -69,7 +69,7 @@ class TestHighlightedPanelThemeColors:
         app = PanelApp()
 
         # Snapshot comparison
-        assert snap_compare(app, "panel_border_styrene_theme.svg")
+        assert snap_compare(app)
 
     def test_panel_corner_highlights_match_theme(self, snap_compare):
         """Verify corner symbols use bright theme color."""
@@ -83,11 +83,11 @@ class TestHighlightedPanelThemeColors:
         assert cascade.dim.startswith("#"), "Dim color should be hex"
 
         # Verify HighlightedPanel has the box-drawing characters defined
-        assert HighlightedPanel.TOP_LEFT == "┌", "Panel should use correct top-left corner char"
-        assert HighlightedPanel.TOP_RIGHT == "┐", "Panel should use correct top-right corner char"
-        assert HighlightedPanel.BOTTOM_LEFT == "└", "Panel should use correct bottom-left corner char"
-        assert HighlightedPanel.BOTTOM_RIGHT == "┘", "Panel should use correct bottom-right corner char"
-        assert HighlightedPanel.HORIZONTAL == "─", "Panel should use correct horizontal line char"
+        assert HighlightedPanel.TOP_LEFT == "\u250c", "Panel should use correct top-left corner char"
+        assert HighlightedPanel.TOP_RIGHT == "\u2510", "Panel should use correct top-right corner char"
+        assert HighlightedPanel.BOTTOM_LEFT == "\u2514", "Panel should use correct bottom-left corner char"
+        assert HighlightedPanel.BOTTOM_RIGHT == "\u2518", "Panel should use correct bottom-right corner char"
+        assert HighlightedPanel.HORIZONTAL == "\u2500", "Panel should use correct horizontal line char"
 
         class PanelApp(App):
             def compose(self):
@@ -98,15 +98,14 @@ class TestHighlightedPanelThemeColors:
 
         app = PanelApp()
 
-        # Snapshot comparison - visual verification that corners render with Ryza theme
-        assert snap_compare(app, "panel_corners_ryza_theme.svg")
+        # Snapshot comparison - visual verification that corners render with theme
+        assert snap_compare(app)
 
 
 class TestHighlightedPanelCornerHighlighting:
     """Test corner highlighting behavior."""
 
-    @pytest.mark.asyncio
-    async def test_panel_shows_corner_symbols_when_enabled(self, snap_compare):
+    def test_panel_shows_corner_symbols_when_enabled(self, snap_compare):
         """Verify corner symbols (box-drawing characters) appear in borders."""
 
         class PanelApp(App):
@@ -117,10 +116,9 @@ class TestHighlightedPanelCornerHighlighting:
                 )
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_with_corners.svg")
+        assert snap_compare(app)
 
-    @pytest.mark.asyncio
-    async def test_panel_hides_corner_symbols_when_disabled(self, snap_compare):
+    def test_panel_hides_corner_symbols_when_disabled(self, snap_compare):
         """Verify panel renders without corner highlights when feature is off.
 
         Note: Current implementation always shows corners. This test documents
@@ -138,10 +136,9 @@ class TestHighlightedPanelCornerHighlighting:
                 yield panel
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_minimal_borders.svg")
+        assert snap_compare(app)
 
-    @pytest.mark.asyncio
-    async def test_panel_corner_position_correct(self, snap_compare):
+    def test_panel_corner_position_correct(self, snap_compare):
         """Verify corner symbols appear at correct positions (4 corners)."""
 
         class PanelApp(App):
@@ -155,14 +152,13 @@ class TestHighlightedPanelCornerHighlighting:
         app = PanelApp()
         # Visual inspection will verify corners at top-left, top-right,
         # bottom-left, and bottom-right positions
-        assert await snap_compare(app, "panel_corner_positions.svg")
+        assert snap_compare(app)
 
 
 class TestHighlightedPanelContentRendering:
     """Test content area and child widget rendering."""
 
-    @pytest.mark.asyncio
-    async def test_panel_renders_child_widgets_correctly(self, snap_compare):
+    def test_panel_renders_child_widgets_correctly(self, snap_compare):
         """Verify content area displays child widgets properly."""
 
         class PanelApp(App):
@@ -175,10 +171,9 @@ class TestHighlightedPanelContentRendering:
                 )
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_multiple_children.svg")
+        assert snap_compare(app)
 
-    @pytest.mark.asyncio
-    async def test_panel_title_renders_correctly(self, snap_compare):
+    def test_panel_title_renders_correctly(self, snap_compare):
         """Verify title positioning and styling in top border."""
 
         class PanelApp(App):
@@ -189,7 +184,7 @@ class TestHighlightedPanelContentRendering:
                 )
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_with_title.svg")
+        assert snap_compare(app)
 
 
 class TestHighlightedPanelBehavior:
@@ -211,9 +206,12 @@ class TestHighlightedPanelBehavior:
         assert panel is not None
         assert len(panel._child_widgets) == 2
 
-    @pytest.mark.asyncio
-    async def test_panel_updates_on_resize(self, snap_compare):
-        """Verify panel borders redraw correctly on terminal resize."""
+    def test_panel_updates_on_resize(self, snap_compare):
+        """Verify panel borders redraw correctly on terminal resize.
+
+        The snap_compare fixture renders the app at a specific terminal size,
+        which triggers on_mount and on_resize in the widget lifecycle.
+        """
 
         class PanelApp(App):
             def compose(self):
@@ -223,19 +221,14 @@ class TestHighlightedPanelBehavior:
                 )
 
         app = PanelApp()
-        async with app.run_test() as pilot:
-            # Initial render
-            await pilot.pause()
 
-            # Verify initial state
+        async def verify_panel(pilot):
+            """Verify the panel exists and has rendered after mount/resize."""
+            await pilot.pause()
             panel = app.query_one(HighlightedPanel)
             assert panel is not None
 
-            # Resize would trigger _update_borders() via on_resize()
-            # Snapshot captures the rendered state
-            pass
-
-        assert await snap_compare(app, "panel_after_resize.svg")
+        assert snap_compare(app, run_before=verify_panel)
 
     @pytest.mark.asyncio
     async def test_panel_refresh_theme(self):
@@ -268,8 +261,7 @@ class TestHighlightedPanelBehavior:
 class TestHighlightedPanelEdgeCases:
     """Test edge cases and boundary conditions."""
 
-    @pytest.mark.asyncio
-    async def test_panel_empty_title(self, snap_compare):
+    def test_panel_empty_title(self, snap_compare):
         """Test panel renders correctly with no title."""
 
         class PanelApp(App):
@@ -279,10 +271,9 @@ class TestHighlightedPanelEdgeCases:
                 )
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_no_title.svg")
+        assert snap_compare(app)
 
-    @pytest.mark.asyncio
-    async def test_panel_very_long_title(self, snap_compare):
+    def test_panel_very_long_title(self, snap_compare):
         """Test panel handles very long titles gracefully."""
 
         class PanelApp(App):
@@ -293,10 +284,9 @@ class TestHighlightedPanelEdgeCases:
                 )
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_long_title.svg")
+        assert snap_compare(app)
 
-    @pytest.mark.asyncio
-    async def test_panel_no_children(self, snap_compare):
+    def test_panel_no_children(self, snap_compare):
         """Test panel renders correctly with no child widgets."""
 
         class PanelApp(App):
@@ -304,7 +294,7 @@ class TestHighlightedPanelEdgeCases:
                 yield HighlightedPanel(title="Empty Panel")
 
         app = PanelApp()
-        assert await snap_compare(app, "panel_empty_content.svg")
+        assert snap_compare(app)
 
     def test_panel_special_characters_in_title(self, snap_compare):
         """Test panel handles special characters in title correctly."""
@@ -326,7 +316,7 @@ class TestHighlightedPanelEdgeCases:
         app = PanelApp()
 
         # Snapshot comparison - visual verification that special chars render correctly
-        assert snap_compare(app, "panel_special_chars_title.svg")
+        assert snap_compare(app)
 
     def test_panel_very_small_terminal(self, snap_compare):
         """Test panel renders gracefully in very small terminal."""
@@ -345,6 +335,5 @@ class TestHighlightedPanelEdgeCases:
 
         app = PanelApp()
 
-        # Snapshot comparison - visual verification that panel renders in small terminal
-        # Note: snap_compare controls terminal size, this documents the edge case
-        assert snap_compare(app, "panel_tiny_terminal.svg")
+        # Snapshot comparison at small terminal size
+        assert snap_compare(app, terminal_size=(40, 10))

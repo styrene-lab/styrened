@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy.orm import Session
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
 

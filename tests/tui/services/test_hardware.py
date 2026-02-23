@@ -5,6 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from styrened.services.hardware import (
+    PlatformNotSupportedError,
+    get_disks,
+    get_network_interfaces,
+    get_system_info,
+)
 from styrened.tui.models.hardware import (
     DiskInfo,
     DiskType,
@@ -13,12 +19,6 @@ from styrened.tui.models.hardware import (
     NetworkInterfaceType,
     SystemInfo,
 )
-from styrened.tui.services.hardware import (
-    PlatformNotSupportedError,
-    get_disks,
-    get_network_interfaces,
-    get_system_info,
-)
 
 
 class TestGetSystemInfo:
@@ -26,13 +26,13 @@ class TestGetSystemInfo:
 
     def test_get_system_info_returns_system_info(self) -> None:
         """Verify get_system_info returns a SystemInfo object."""
-        with patch("styrened.tui.services.hardware._get_system_info_darwin") as mock:
+        with patch("styrened.services.hardware._get_system_info_darwin") as mock:
             mock.return_value = SystemInfo(
                 cpu_model="Apple M1",
                 cpu_cores=8,
                 ram_total_bytes=17179869184,
             )
-            with patch("styrened.tui.services.hardware.sys") as mock_sys:
+            with patch("styrened.services.hardware.sys") as mock_sys:
                 mock_sys.platform = "darwin"
                 info = get_system_info()
                 assert isinstance(info, SystemInfo)
@@ -41,13 +41,13 @@ class TestGetSystemInfo:
 
     def test_get_system_info_linux_dispatches(self) -> None:
         """Verify Linux dispatches to _get_system_info_linux."""
-        with patch("styrened.tui.services.hardware._get_system_info_linux") as mock:
+        with patch("styrened.services.hardware._get_system_info_linux") as mock:
             mock.return_value = SystemInfo(
                 cpu_model="AMD EPYC 7551",
                 cpu_cores=4,
                 ram_total_bytes=8589934592,
             )
-            with patch("styrened.tui.services.hardware.sys") as mock_sys:
+            with patch("styrened.services.hardware.sys") as mock_sys:
                 mock_sys.platform = "linux"
                 info = get_system_info()
                 assert isinstance(info, SystemInfo)
@@ -73,7 +73,7 @@ class TestGetSystemInfoDarwin:
         mock_cpu_cores = "10"
         mock_ram = "34359738368"
 
-        with patch("styrened.tui.services.hardware.subprocess.run") as mock_run:
+        with patch("styrened.services.hardware.subprocess.run") as mock_run:
             # Mock sysctl calls
             def run_side_effect(args: list[str], **kwargs: object) -> MagicMock:
                 result = MagicMock()
@@ -88,7 +88,7 @@ class TestGetSystemInfoDarwin:
 
             mock_run.side_effect = run_side_effect
 
-            from styrened.tui.services.hardware import _get_system_info_darwin
+            from styrened.services.hardware import _get_system_info_darwin
 
             info = _get_system_info_darwin()
             assert info.cpu_model == "Apple M1 Pro"
@@ -101,7 +101,7 @@ class TestGetDisks:
 
     def test_get_disks_returns_list(self) -> None:
         """Verify get_disks returns a list of DiskInfo."""
-        with patch("styrened.tui.services.hardware._get_disks_darwin") as mock:
+        with patch("styrened.services.hardware._get_disks_darwin") as mock:
             mock.return_value = [
                 DiskInfo(
                     name="disk0",
@@ -111,7 +111,7 @@ class TestGetDisks:
                     filesystem="apfs",
                 ),
             ]
-            with patch("styrened.tui.services.hardware.sys") as mock_sys:
+            with patch("styrened.services.hardware.sys") as mock_sys:
                 mock_sys.platform = "darwin"
                 disks = get_disks()
                 assert isinstance(disks, list)
@@ -120,7 +120,7 @@ class TestGetDisks:
 
     def test_get_disks_linux_dispatches(self) -> None:
         """Verify Linux dispatches to _get_disks_linux."""
-        with patch("styrened.tui.services.hardware._get_disks_linux") as mock:
+        with patch("styrened.services.hardware._get_disks_linux") as mock:
             mock.return_value = [
                 DiskInfo(
                     name="sda1",
@@ -130,7 +130,7 @@ class TestGetDisks:
                     filesystem="ext4",
                 ),
             ]
-            with patch("styrened.tui.services.hardware.sys") as mock_sys:
+            with patch("styrened.services.hardware.sys") as mock_sys:
                 mock_sys.platform = "linux"
                 disks = get_disks()
                 assert len(disks) == 1
@@ -190,7 +190,7 @@ class TestGetDisksDarwin:
 </dict>
 </plist>"""
 
-        with patch("styrened.tui.services.hardware.subprocess.run") as mock_run:
+        with patch("styrened.services.hardware.subprocess.run") as mock_run:
 
             def run_side_effect(args: list[str], **kwargs: object) -> MagicMock:
                 result = MagicMock()
@@ -203,7 +203,7 @@ class TestGetDisksDarwin:
 
             mock_run.side_effect = run_side_effect
 
-            from styrened.tui.services.hardware import _get_disks_darwin
+            from styrened.services.hardware import _get_disks_darwin
 
             disks = _get_disks_darwin()
             assert len(disks) >= 1
@@ -250,7 +250,7 @@ class TestGetDisksDarwin:
 </dict>
 </plist>"""
 
-        with patch("styrened.tui.services.hardware.subprocess.run") as mock_run:
+        with patch("styrened.services.hardware.subprocess.run") as mock_run:
 
             def run_side_effect(args: list[str], **kwargs: object) -> MagicMock:
                 result = MagicMock()
@@ -263,7 +263,7 @@ class TestGetDisksDarwin:
 
             mock_run.side_effect = run_side_effect
 
-            from styrened.tui.services.hardware import _get_disks_darwin
+            from styrened.services.hardware import _get_disks_darwin
 
             disks = _get_disks_darwin()
             usb_disk = next((d for d in disks if d.name == "disk2"), None)
@@ -277,7 +277,7 @@ class TestGetNetworkInterfaces:
 
     def test_get_network_interfaces_returns_list(self) -> None:
         """Verify get_network_interfaces returns a list of NetworkInterface."""
-        with patch("styrened.tui.services.hardware._get_network_interfaces_darwin") as mock:
+        with patch("styrened.services.hardware._get_network_interfaces_darwin") as mock:
             mock.return_value = [
                 NetworkInterface(
                     name="en0",
@@ -287,7 +287,7 @@ class TestGetNetworkInterfaces:
                     ip_address="192.168.1.100",
                 ),
             ]
-            with patch("styrened.tui.services.hardware.sys") as mock_sys:
+            with patch("styrened.services.hardware.sys") as mock_sys:
                 mock_sys.platform = "darwin"
                 interfaces = get_network_interfaces()
                 assert isinstance(interfaces, list)
@@ -296,7 +296,7 @@ class TestGetNetworkInterfaces:
 
     def test_get_network_interfaces_linux_dispatches(self) -> None:
         """Verify Linux dispatches to _get_network_interfaces_linux."""
-        with patch("styrened.tui.services.hardware._get_network_interfaces_linux") as mock:
+        with patch("styrened.services.hardware._get_network_interfaces_linux") as mock:
             mock.return_value = [
                 NetworkInterface(
                     name="eth0",
@@ -306,7 +306,7 @@ class TestGetNetworkInterfaces:
                     ip_address="192.168.1.50",
                 ),
             ]
-            with patch("styrened.tui.services.hardware.sys") as mock_sys:
+            with patch("styrened.services.hardware.sys") as mock_sys:
                 mock_sys.platform = "linux"
                 interfaces = get_network_interfaces()
                 assert len(interfaces) == 1
@@ -340,14 +340,14 @@ utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
 \tinet 10.0.0.1 --> 10.0.0.1 netmask 0xffffffff
 """
 
-        with patch("styrened.tui.services.hardware.subprocess.run") as mock_run:
+        with patch("styrened.services.hardware.subprocess.run") as mock_run:
             result = MagicMock()
             result.returncode = 0
             result.stdout = mock_ifconfig
             mock_run.return_value = result
 
             # Mock networksetup for interface type detection
-            with patch("styrened.tui.services.hardware._get_interface_type_darwin") as mock_type:
+            with patch("styrened.services.hardware._get_interface_type_darwin") as mock_type:
 
                 def type_side_effect(name: str) -> NetworkInterfaceType:
                     types = {
@@ -360,7 +360,7 @@ utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
 
                 mock_type.side_effect = type_side_effect
 
-                from styrened.tui.services.hardware import _get_network_interfaces_darwin
+                from styrened.services.hardware import _get_network_interfaces_darwin
 
                 interfaces = _get_network_interfaces_darwin()
 
@@ -385,7 +385,7 @@ utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
     def test_darwin_classifies_interface_types(self) -> None:
         """Verify Darwin correctly classifies interface types by name pattern."""
         # Test interface name patterns
-        from styrened.tui.services.hardware import _classify_interface_name_darwin
+        from styrened.services.hardware import _classify_interface_name_darwin
 
         assert _classify_interface_name_darwin("lo0") == NetworkInterfaceType.LOOPBACK
         # en* interfaces return UNKNOWN from name classification because they
@@ -421,16 +421,18 @@ class TestLinuxSystemInfo:
         mock_vmem = MagicMock()
         mock_vmem.total = 8589934592
 
+        mock_psutil = MagicMock()
+        mock_psutil.cpu_count.return_value = 4
+        mock_psutil.virtual_memory.return_value = mock_vmem
+
         with (
-            patch("styrened.tui.services.hardware.psutil") as mock_psutil,
-            patch("styrened.tui.services.hardware.platform") as mock_platform,
-            patch("styrened.tui.services.hardware.subprocess.run"),
+            patch.dict("sys.modules", {"psutil": mock_psutil}),
+            patch("styrened.services.hardware.platform") as mock_platform,
+            patch("styrened.services.hardware.subprocess.run"),
         ):
-            mock_psutil.cpu_count.return_value = 4
-            mock_psutil.virtual_memory.return_value = mock_vmem
             mock_platform.processor.return_value = "x86_64"
 
-            from styrened.tui.services.hardware import _get_system_info_linux
+            from styrened.services.hardware import _get_system_info_linux
 
             info = _get_system_info_linux()
             assert info.cpu_cores == 4
@@ -441,13 +443,15 @@ class TestLinuxSystemInfo:
         mock_vmem = MagicMock()
         mock_vmem.total = 4294967296
 
+        mock_psutil = MagicMock()
+        mock_psutil.cpu_count.return_value = 2
+        mock_psutil.virtual_memory.return_value = mock_vmem
+
         with (
-            patch("styrened.tui.services.hardware.psutil") as mock_psutil,
-            patch("styrened.tui.services.hardware.platform") as mock_platform,
-            patch("styrened.tui.services.hardware.subprocess.run") as mock_run,
+            patch.dict("sys.modules", {"psutil": mock_psutil}),
+            patch("styrened.services.hardware.platform") as mock_platform,
+            patch("styrened.services.hardware.subprocess.run") as mock_run,
         ):
-            mock_psutil.cpu_count.return_value = 2
-            mock_psutil.virtual_memory.return_value = mock_vmem
             mock_platform.processor.return_value = ""  # Empty on some Linux
             mock_platform.machine.return_value = "aarch64"
 
@@ -456,7 +460,7 @@ class TestLinuxSystemInfo:
             result.stdout = "model name\t: AMD EPYC 7551 32-Core"
             mock_run.return_value = result
 
-            from styrened.tui.services.hardware import _get_system_info_linux
+            from styrened.services.hardware import _get_system_info_linux
 
             info = _get_system_info_linux()
             assert "AMD EPYC 7551" in info.cpu_model
@@ -475,11 +479,12 @@ class TestLinuxDisks:
         mock_usage = MagicMock()
         mock_usage.total = 107374182400
 
-        with patch("styrened.tui.services.hardware.psutil") as mock_psutil:
-            mock_psutil.disk_partitions.return_value = [mock_partition]
-            mock_psutil.disk_usage.return_value = mock_usage
+        mock_psutil = MagicMock()
+        mock_psutil.disk_partitions.return_value = [mock_partition]
+        mock_psutil.disk_usage.return_value = mock_usage
 
-            from styrened.tui.services.hardware import _get_disks_linux
+        with patch.dict("sys.modules", {"psutil": mock_psutil}):
+            from styrened.services.hardware import _get_disks_linux
 
             disks = _get_disks_linux()
             assert len(disks) == 1
@@ -498,11 +503,12 @@ class TestLinuxDisks:
         mock_usage = MagicMock()
         mock_usage.total = 32010928128
 
-        with patch("styrened.tui.services.hardware.psutil") as mock_psutil:
-            mock_psutil.disk_partitions.return_value = [mock_partition]
-            mock_psutil.disk_usage.return_value = mock_usage
+        mock_psutil = MagicMock()
+        mock_psutil.disk_partitions.return_value = [mock_partition]
+        mock_psutil.disk_usage.return_value = mock_usage
 
-            from styrened.tui.services.hardware import _get_disks_linux
+        with patch.dict("sys.modules", {"psutil": mock_psutil}):
+            from styrened.services.hardware import _get_disks_linux
 
             disks = _get_disks_linux()
             assert disks[0].disk_type == DiskType.REMOVABLE
@@ -517,11 +523,12 @@ class TestLinuxDisks:
         mock_usage = MagicMock()
         mock_usage.total = 1099511627776
 
-        with patch("styrened.tui.services.hardware.psutil") as mock_psutil:
-            mock_psutil.disk_partitions.return_value = [mock_partition]
-            mock_psutil.disk_usage.return_value = mock_usage
+        mock_psutil = MagicMock()
+        mock_psutil.disk_partitions.return_value = [mock_partition]
+        mock_psutil.disk_usage.return_value = mock_usage
 
-            from styrened.tui.services.hardware import _get_disks_linux
+        with patch.dict("sys.modules", {"psutil": mock_psutil}):
+            from styrened.services.hardware import _get_disks_linux
 
             disks = _get_disks_linux()
             assert disks[0].disk_type == DiskType.NETWORK
@@ -532,11 +539,11 @@ class TestLinuxNetworkInterfaces:
 
     def test_linux_parses_psutil_interfaces(self) -> None:
         """Verify Linux parses psutil network interfaces."""
-        import socket
+        mock_inet_family = MagicMock()
+        mock_inet_family.name = "AF_INET"
 
         mock_addr_inet = MagicMock()
-        mock_addr_inet.family = socket.AF_INET
-        mock_addr_inet.family.name = "AF_INET"
+        mock_addr_inet.family = mock_inet_family
         mock_addr_inet.address = "192.168.1.50"
 
         mock_addr_packet = MagicMock()
@@ -546,15 +553,16 @@ class TestLinuxNetworkInterfaces:
         mock_stats = MagicMock()
         mock_stats.isup = True
 
-        with patch("styrened.tui.services.hardware.psutil") as mock_psutil:
-            mock_psutil.net_if_addrs.return_value = {
-                "eth0": [mock_addr_packet, mock_addr_inet],
-            }
-            mock_psutil.net_if_stats.return_value = {
-                "eth0": mock_stats,
-            }
+        mock_psutil = MagicMock()
+        mock_psutil.net_if_addrs.return_value = {
+            "eth0": [mock_addr_packet, mock_addr_inet],
+        }
+        mock_psutil.net_if_stats.return_value = {
+            "eth0": mock_stats,
+        }
 
-            from styrened.tui.services.hardware import _get_network_interfaces_linux
+        with patch.dict("sys.modules", {"psutil": mock_psutil}):
+            from styrened.services.hardware import _get_network_interfaces_linux
 
             interfaces = _get_network_interfaces_linux()
             assert len(interfaces) == 1
@@ -565,7 +573,7 @@ class TestLinuxNetworkInterfaces:
 
     def test_linux_classifies_interface_types(self) -> None:
         """Verify Linux correctly classifies interface types by name."""
-        from styrened.tui.services.hardware import _classify_interface_name_linux
+        from styrened.services.hardware import _classify_interface_name_linux
 
         assert _classify_interface_name_linux("lo") == NetworkInterfaceType.LOOPBACK
         assert _classify_interface_name_linux("eth0") == NetworkInterfaceType.ETHERNET

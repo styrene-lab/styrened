@@ -27,6 +27,10 @@ def mock_lxmf():
     """Provide a fresh LXMF mock for each test."""
     with patch("styrened.services.lxmf_service.LXMF") as mock:
         mock.APP_NAME = "lxmf"
+        mock.FIELD_RENDERER = 0x0F
+        mock.RENDERER_PLAIN = 0x00
+        mock.LXMessage.DIRECT = 2
+        mock.LXMessage.PROPAGATED = 3
         yield mock
 
 
@@ -36,6 +40,10 @@ def mock_rns():
     with patch("styrened.services.lxmf_service.RNS") as mock:
         mock.Destination.OUT = 2
         mock.Destination.SINGLE = 1
+        # Provide a default destination mock with proper hash bytes
+        default_dest = Mock()
+        default_dest.hash = bytes.fromhex("b1c2d3e4f5a67890")
+        mock.Destination.return_value = default_dest
         yield mock
 
 
@@ -101,6 +109,10 @@ class TestLXMFServiceInitialization:
     ) -> None:
         """Test initialize creates LXMF router instance."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
         service = LXMFService()
@@ -132,6 +144,10 @@ class TestLXMFServiceInitialization:
     ) -> None:
         """Test multiple initialize calls don't break the service."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
         service = LXMFService()
@@ -150,7 +166,7 @@ class TestLXMFServiceSendMessage:
     """Tests for sending LXMF messages."""
 
     def test_send_message_requires_initialization(self) -> None:
-        """Test send_message returns False if not initialized."""
+        """Test send_message returns None if not initialized."""
         service = LXMFService()
 
         result = service.send_message(
@@ -158,7 +174,7 @@ class TestLXMFServiceSendMessage:
             payload={"type": "status_request"},
         )
 
-        assert result is False
+        assert result is None
 
     def test_send_message_creates_lxmf_message(
         self,
@@ -169,13 +185,19 @@ class TestLXMFServiceSendMessage:
     ) -> None:
         """Test send_message creates and sends LXMF message."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
         mock_message = Mock()
+        mock_message.hash = bytes.fromhex("deadbeef12345678")
         mock_lxmf.LXMessage.return_value = mock_message
 
-        # Mock RNS.Identity.recall to return a valid identity
+        # Mock RNS.Identity.recall to return a valid identity with proper hash
         mock_dest_identity = Mock()
+        mock_dest_identity.hash = bytes.fromhex("c1d2e3f4a5b67890")
         mock_rns.Identity.recall.return_value = mock_dest_identity
 
         # Mock path exists
@@ -188,7 +210,7 @@ class TestLXMFServiceSendMessage:
 
         result = service.send_message("a1b2c3d4", {"type": "test"})
 
-        assert result is True
+        assert result is not None
         mock_router.handle_outbound.assert_called_once_with(mock_message)
 
     def test_send_message_handles_error(
@@ -196,6 +218,10 @@ class TestLXMFServiceSendMessage:
     ) -> None:
         """Test send_message handles errors gracefully."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
         # Make message creation fail
@@ -208,24 +234,33 @@ class TestLXMFServiceSendMessage:
 
         result = service.send_message("a1b2c3d4", {"type": "test"})
 
-        assert result is False
+        assert result is None
 
-    def test_send_message_fails_when_no_path(
+    def test_send_message_sends_even_without_direct_path(
         self,
         mock_lxmf: Mock,
         mock_rns: Mock,
         mock_rns_service: Mock,
         mock_platformdirs: Mock,
     ) -> None:
-        """Test send_message returns False when no path to destination."""
+        """Test send_message sends via propagation when no direct path exists."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
-        # Mock RNS.Identity.recall to return a valid identity
+        mock_message = Mock()
+        mock_message.hash = bytes.fromhex("deadbeef12345678")
+        mock_lxmf.LXMessage.return_value = mock_message
+
+        # Mock RNS.Identity.recall to return a valid identity with proper hash
         mock_dest_identity = Mock()
+        mock_dest_identity.hash = bytes.fromhex("c1d2e3f4a5b67890")
         mock_rns.Identity.recall.return_value = mock_dest_identity
 
-        # Mock no path exists
+        # Mock no direct path exists - service will use propagated delivery
         mock_rns.Transport.has_path.return_value = False
 
         service = LXMFService()
@@ -235,9 +270,9 @@ class TestLXMFServiceSendMessage:
 
         result = service.send_message("a1b2c3d4", {"type": "test"})
 
-        assert result is False
-        # Should not have attempted to send
-        mock_router.handle_outbound.assert_not_called()
+        # With AUTO delivery, message is sent via propagation even without direct path
+        assert result is not None
+        mock_router.handle_outbound.assert_called_once()
 
     def test_send_message_requests_path_when_missing(
         self,
@@ -250,13 +285,20 @@ class TestLXMFServiceSendMessage:
         mock_router = Mock()
         mock_lxmf.LXMRouter.return_value = mock_router
 
-        # Mock RNS.Identity.recall to return a valid identity
+        mock_message = Mock()
+        mock_message.hash = bytes.fromhex("deadbeef12345678")
+        mock_lxmf.LXMessage.return_value = mock_message
+        mock_lxmf.FIELD_RENDERER = 0x0F
+        mock_lxmf.RENDERER_PLAIN = 0x00
+
+        # Mock RNS.Identity.recall to return a valid identity with proper hash
         mock_dest_identity = Mock()
+        mock_dest_identity.hash = bytes.fromhex("a1b2c3d4e5f67890")
         mock_rns.Identity.recall.return_value = mock_dest_identity
 
         # Mock destination with hash attribute
         mock_dest = Mock()
-        mock_dest.hash = b"\xa1\xb2\xc3\xd4"
+        mock_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
         mock_rns.Destination.return_value = mock_dest
 
         # Mock no path exists
@@ -270,7 +312,7 @@ class TestLXMFServiceSendMessage:
 
         service.send_message("a1b2c3d4", {"type": "test"})
 
-        # Should have requested path
+        # Should have requested path (via _ensure_path)
         mock_rns.Transport.request_path.assert_called_once_with(mock_dest.hash)
 
 
@@ -297,14 +339,24 @@ class TestLXMFServiceSendWithRetry:
     ) -> None:
         """Test send_with_retry sends immediately when path exists."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
         mock_message = Mock()
         mock_lxmf.LXMessage.return_value = mock_message
 
-        # Mock RNS.Identity.recall to return a valid identity
+        # Mock RNS.Identity.recall to return a valid identity with proper hash
         mock_dest_identity = Mock()
+        mock_dest_identity.hash = bytes.fromhex("c1d2e3f4a5b67890")
         mock_rns.Identity.recall.return_value = mock_dest_identity
+
+        # Mock destination with hash attribute for _ensure_path
+        mock_dest = Mock()
+        mock_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_rns.Destination.return_value = mock_dest
 
         # Mock path exists immediately
         mock_rns.Transport.has_path.return_value = True
@@ -330,17 +382,27 @@ class TestLXMFServiceSendWithRetry:
     ) -> None:
         """Test send_with_retry waits for path and sends when available."""
         mock_router = Mock()
+        mock_delivery_dest = Mock()
+        mock_delivery_dest.hexhash = "a1b2c3d4e5f67890abcdef1234567890"
+        mock_delivery_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_router.register_delivery_identity.return_value = mock_delivery_dest
         mock_lxmf.LXMRouter.return_value = mock_router
 
         mock_message = Mock()
         mock_lxmf.LXMessage.return_value = mock_message
 
-        # Mock RNS.Identity.recall to return a valid identity
+        # Mock RNS.Identity.recall to return a valid identity with proper hash
         mock_dest_identity = Mock()
+        mock_dest_identity.hash = bytes.fromhex("c1d2e3f4a5b67890")
         mock_rns.Identity.recall.return_value = mock_dest_identity
 
+        # Mock destination with hash attribute for _ensure_path
+        mock_dest = Mock()
+        mock_dest.hash = bytes.fromhex("a1b2c3d4e5f67890")
+        mock_rns.Destination.return_value = mock_dest
+
         # Mock path becomes available after some time
-        # First call (from _ensure_path): False, second call (from loop): True
+        # Calls: _ensure_path(False), loop check(True)
         mock_rns.Transport.has_path.side_effect = [False, True]
 
         # Mock time to simulate passage of time
@@ -452,8 +514,9 @@ class TestLXMFServiceReceiveMessage:
         callback = Mock()
         service.register_callback(callback)
 
-        # Verify callback stored
-        assert service._message_callback == callback
+        # Verify callback stored (callbacks are stored as (callback, raw_mode) tuples)
+        assert len(service._message_callbacks) >= 1
+        assert service._message_callbacks[-1] == (callback, False)
 
     def test_incoming_message_invokes_callback(
         self, mock_lxmf: Mock, mock_rns_service: Mock, mock_platformdirs: Mock

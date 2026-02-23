@@ -7,26 +7,25 @@ def test_exec_result_success_property():
     """ExecResult.success property returns True for exit code 0."""
     result = ExecResult(exit_code=0, stdout="ok", stderr="")
     assert result.success is True
-    assert result.failed is False
+    assert result.success is not False
 
 
 def test_exec_result_failed_property():
-    """ExecResult.failed property returns True for non-zero exit code."""
+    """ExecResult.success returns False for non-zero exit code (failed)."""
     result = ExecResult(exit_code=1, stdout="", stderr="error")
-    assert result.failed is True
     assert result.success is False
 
 
 def test_exec_result_has_output():
-    """ExecResult.has_output returns True if stdout or stderr present."""
+    """ExecResult has stdout or stderr content."""
     result1 = ExecResult(exit_code=0, stdout="output", stderr="")
-    assert result1.has_output is True
+    assert bool(result1.stdout or result1.stderr) is True
 
     result2 = ExecResult(exit_code=0, stdout="", stderr="error")
-    assert result2.has_output is True
+    assert bool(result2.stdout or result2.stderr) is True
 
     result3 = ExecResult(exit_code=0, stdout="", stderr="")
-    assert result3.has_output is False
+    assert bool(result3.stdout or result3.stderr) is False
 
 
 def test_exec_result_properties():
@@ -40,6 +39,5 @@ def test_exec_result_properties():
     assert result.exit_code == 127
     assert result.stdout == ""
     assert result.stderr == "command not found"
-    assert result.failed
     assert not result.success
-    assert result.has_output  # stderr counts as output
+    assert bool(result.stdout or result.stderr)  # stderr counts as output

@@ -5,15 +5,22 @@ and allows sending new messages. Delegates to ChatWidget for all messaging
 logic.
 """
 
-from typing import ClassVar
+import logging
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 
 from styrened.tui.widgets.chat_widget import ChatWidget
+
+logger = logging.getLogger(__name__)
+
+# Delete confirmation timeout (seconds)
+_DELETE_CONFIRM_TIMEOUT = 3.0
 
 
 class ConversationScreen(Screen[None]):
@@ -27,6 +34,7 @@ class ConversationScreen(Screen[None]):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back"),
+        Binding("ctrl+d", "delete_conversation", "Delete All", show=True),
     ]
 
     CSS = """
@@ -58,6 +66,16 @@ class ConversationScreen(Screen[None]):
         super().__init__()
         self.peer_hash = peer_hash
         self.display_name = display_name
+        self._delete_conv_pending: bool = False
+        self._delete_conv_timer: Timer | None = None
+
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge from app lifecycle."""
+        try:
+            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            return None
 
     def compose(self) -> ComposeResult:
         """Compose conversation UI."""
@@ -71,3 +89,47 @@ class ConversationScreen(Screen[None]):
                 id="chat-widget",
             )
         yield Footer()
+
+    def action_delete_conversation(self) -> None:
+        """Delete entire conversation with double-tap confirmation."""
+        if self._delete_conv_pending:
+            # Second press — execute
+            self._cancel_delete_conv_timer()
+            self.run_worker(self._execute_delete_conversation(), group="conv-delete")
+        else:
+            # First press — set pending
+            self._delete_conv_pending = True
+            self.notify(
+                "Press Ctrl+D again to delete entire conversation",
+                severity="warning",
+            )
+            self._cancel_delete_conv_timer()
+            self._delete_conv_timer = self.set_timer(
+                _DELETE_CONFIRM_TIMEOUT, self._cancel_delete_conv_pending
+            )
+
+    def _cancel_delete_conv_timer(self) -> None:
+        """Cancel delete conversation timer."""
+        if self._delete_conv_timer is not None:
+            self._delete_conv_timer.stop()
+            self._delete_conv_timer = None
+
+    def _cancel_delete_conv_pending(self) -> None:
+        """Cancel delete conversation pending state."""
+        self._delete_conv_pending = False
+        self._cancel_delete_conv_timer()
+
+    async def _execute_delete_conversation(self) -> None:
+        """Execute conversation deletion and pop screen."""
+        self._delete_conv_pending = False
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        try:
+            count = await bridge.delete_conversation(self.peer_hash)
+            self.notify(f"Deleted {count} messages", severity="information")
+            self.app.pop_screen()
+        except Exception as e:
+            logger.error(f"Failed to delete conversation: {e}")
+            self.notify(f"Delete failed: {e}", severity="error")

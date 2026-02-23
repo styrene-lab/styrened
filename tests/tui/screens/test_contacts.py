@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.services.app_lifecycle import LifecycleMode

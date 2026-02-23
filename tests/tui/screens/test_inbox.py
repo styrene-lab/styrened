@@ -1,8 +1,6 @@
 """Tests for InboxScreen - conversation list via IPCBridge."""
 
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from styrened.tui.screens.inbox import InboxScreen
 

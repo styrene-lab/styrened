@@ -160,9 +160,9 @@ class TestHubConnectionState:
         timeouts: dict[str, int],
     ) -> None:
         """HubConnection should transition from WAITING to CONNECTED."""
+        from styrened.services.hub_connection import HubStatus, get_hub_connection
         from styrened.tui.services.app_lifecycle import StyreneLifecycle
         from styrened.tui.services.config import load_config
-        from styrened.services.hub_connection import HubStatus, get_hub_connection
 
         # Load config with hub enabled
         config = load_config()
@@ -208,9 +208,9 @@ class TestHubConnectionState:
         timeouts: dict[str, int],
     ) -> None:
         """Connected hub should report the configured address."""
+        from styrened.services.hub_connection import HubStatus, get_hub_connection
         from styrened.tui.services.app_lifecycle import StyreneLifecycle
         from styrened.tui.services.config import load_config
-        from styrened.services.hub_connection import HubStatus, get_hub_connection
 
         config = load_config()
         config.reticulum.hub_enabled = True

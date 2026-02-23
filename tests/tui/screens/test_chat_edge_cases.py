@@ -9,18 +9,18 @@ These tests cover scenarios that might cause issues:
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
-from styrened.tui.app import StyreneApp
+from textual.widgets import DataTable
+
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
+from styrened.tui.app import StyreneApp
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.services.app_lifecycle import LifecycleMode
-from styrened.tui.widgets.chat_widget import ChatWidget
-from textual.widgets import DataTable
 
 
 @pytest.fixture

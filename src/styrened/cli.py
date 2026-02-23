@@ -549,6 +549,7 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
     # Identity recall alone is NOT sufficient — send_message needs a path
     # to select DIRECT mode, otherwise it falls back to PROPAGATED.
     import RNS
+
     from styrened.services.lxmf_service import DeliveryMethod
 
     dest_bytes = bytes.fromhex(destination)
@@ -568,7 +569,7 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
                 dest_bytes, from_identity_hash=True
             ):
                 identity_known = True
-                print(f"Identity known, waiting for path...")
+                print("Identity known, waiting for path...")
         await asyncio.sleep(0.5)
 
     payload = {"type": "chat", "protocol": "chat", "content": message}
@@ -607,7 +608,7 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
         print(f"Waiting for delivery ({int(delivery_timeout)}s timeout)...")
         try:
             await asyncio.wait_for(delivery_event.wait(), timeout=delivery_timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print("Delivery timed out (Link handshake may have failed)")
             return False
 

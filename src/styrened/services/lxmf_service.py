@@ -1009,6 +1009,22 @@ class MockLXMFService:
             destination_hash=full_destination,
         )
 
+    def register_handler(
+        self,
+        message_type: Any,
+        handler: Any,
+    ) -> None:
+        """Register a handler for a message type (no-op for mock).
+
+        This satisfies the StyreneProtocol interface used by RPCServer/RPCClient
+        during initialization. Handlers are silently accepted but not invoked.
+
+        Args:
+            message_type: Message type to handle.
+            handler: Handler function.
+        """
+        pass
+
     def register_callback(self, callback: Callable[[str, dict[str, Any]], None]) -> None:
         """Register message callback.
 
