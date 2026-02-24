@@ -5,16 +5,22 @@ This package provides:
 2. Headless daemon for edge deployments
 
 Library usage:
-    from styrened import CoreConfig, RPCClient, RPCServer
-    from styrened.models import MeshDevice, DeviceType
-    from styrened.services import load_core_config
+
+```python
+from styrened import CoreConfig, RPCClient, RPCServer
+from styrened.models import MeshDevice, DeviceType
+from styrened.services import load_core_config
+```
 
 Daemon usage:
-    from styrened import StyreneDaemon, main
-    # or run via: styrened command
+
+```python
+from styrened import StyreneDaemon, main
+# or run via: styrened command
+```
 """
 
-__version__ = "0.10.5"
+__version__ = "0.10.6"
 
 # Path resolution
 from styrened import paths  # noqa: F401
@@ -89,6 +95,7 @@ from styrened.rpc import (
     RPCServer,
     RPCTimeoutError,
     RPCTransportError,
+    SelfUpdateResult,
     # Response types (for type hints and deserialization)
     StatusResponse,
     UpdateConfigResult,
@@ -121,6 +128,7 @@ __all__ = [
     "StatusResponse",
     "ExecResult",
     "RebootResult",
+    "SelfUpdateResult",
     "UpdateConfigResult",
     # RPC Errors
     "RPCError",

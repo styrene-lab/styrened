@@ -79,7 +79,7 @@ styrene = "styrened.tui.__main__:main"
 [project.urls]
 Homepage = "https://github.com/styrene-lab/styrened"
 Repository = "https://github.com/styrene-lab/styrened"
-Documentation = "https://styrene-lab.github.io/styrened/"
+Documentation = "https://docs.styrene.io/styrened/api/"
 
 [tool.hatch.version]
 path = "src/styrened/__init__.py"
