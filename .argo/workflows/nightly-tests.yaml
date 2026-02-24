@@ -1,4 +1,4 @@
-# Nightly tests: comprehensive test suite against latest edge image
+# Nightly build: test main, build OCI, push :nightly and :nightly-{sha} tags
 # Triggered by CronWorkflow (see cron-nightly.yaml)
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -15,6 +15,10 @@ spec:
   entrypoint: pipeline
   serviceAccountName: ci-workflow-sa
 
+  hooks:
+    exit:
+      template: notify-nightly-result
+
   volumeClaimTemplates:
     - metadata:
         name: workspace
@@ -23,12 +27,15 @@ spec:
         storageClassName: local-path
         resources:
           requests:
-            storage: 5Gi
+            storage: 10Gi
 
   volumes:
     - name: ghcr-auth
       secret:
         secretName: ghcr-secret
+    - name: cachix-auth
+      secret:
+        secretName: cachix-auth-token
 
   templates:
     - name: pipeline
@@ -65,6 +72,13 @@ spec:
                   value: comprehensive
                 - name: timeout
                   value: "3600"
+          # Build + push nightly OCI after tests pass
+          - name: build
+            template: nix-build-oci
+            depends: "smoke.Succeeded"
+          - name: push
+            template: push-ghcr-nightly
+            depends: "build.Succeeded"
 
     - name: git-checkout
       container:
@@ -77,6 +91,8 @@ spec:
             git clone --depth 1 \
               https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
               /workspace/src
+            cd /workspace/src
+            git rev-parse --short HEAD > /workspace/short-sha
         volumeMounts:
           - name: workspace
             mountPath: /workspace
@@ -127,3 +143,135 @@ spec:
           limits:
             cpu: "2"
             memory: 1Gi
+
+    - name: nix-build-oci
+      container:
+        image: nixos/nix:latest
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
+        args:
+          - |
+            set -euo pipefail
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+            echo "max-jobs = auto" >> /etc/nix/nix.conf
+            echo "cores = 0" >> /etc/nix/nix.conf
+
+            # Configure Cachix for faster builds
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
+            export CACHIX_AUTH_TOKEN=$(cat /cachix/token)
+            cachix use styrene
+
+            cd /workspace/src
+            echo "Building OCI image..."
+            nix build .#oci --no-link --print-out-paths > /workspace/oci-path
+            echo "Build complete: $(cat /workspace/oci-path)"
+
+            # Push build results to Cachix for future runs
+            cachix push styrene $(cat /workspace/oci-path)
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: cachix-auth
+            mountPath: /cachix
+            readOnly: true
+        resources:
+          requests:
+            cpu: "4"
+            memory: 8Gi
+          limits:
+            cpu: "16"
+            memory: 32Gi
+
+    - name: push-ghcr-nightly
+      container:
+        image: nixos/nix:latest
+        command: ["/bin/sh", "-c"]
+        env:
+          - name: PATH
+            value: "/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/bin:/usr/bin"
+        args:
+          - |
+            set -euo pipefail
+            mkdir -p /etc/nix
+            echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+            echo "sandbox = false" >> /etc/nix/nix.conf
+
+            # Configure Cachix
+            nix-env -iA cachix -f https://cachix.org/api/v1/install
+            export CACHIX_AUTH_TOKEN=$(cat /cachix/token)
+            cachix use styrene
+
+            cd /workspace/src
+            SHORT_SHA=$(cat /workspace/short-sha | tr -d '\n')
+            VERSION=$(cat VERSION | tr -d '\n')
+
+            # Auth
+            mkdir -p ~/.docker
+            GHCR_USER=$(cat /ghcr/username 2>/dev/null || echo "styrene-lab")
+            GHCR_TOKEN=$(cat /ghcr/password)
+            echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$(echo -n "${GHCR_USER}:${GHCR_TOKEN}" | base64)\"}}}" > ~/.docker/config.json
+
+            # Trust policy for skopeo
+            mkdir -p /etc/containers
+            echo '{"default":[{"type":"insecureAcceptAnything"}]}' > /etc/containers/policy.json
+
+            # Push version tag via nix2container
+            echo "Pushing nightly image..."
+            nix run .#oci.copyToRegistry
+
+            # Tag as nightly and nightly-{sha}
+            nix-env -iA nixpkgs.skopeo 2>/dev/null || true
+            skopeo copy --authfile ~/.docker/config.json \
+              docker://ghcr.io/styrene-lab/styrened:${VERSION} \
+              docker://ghcr.io/styrene-lab/styrened:nightly
+            skopeo copy --authfile ~/.docker/config.json \
+              docker://ghcr.io/styrene-lab/styrened:${VERSION} \
+              docker://ghcr.io/styrene-lab/styrened:nightly-${SHORT_SHA}
+
+            echo "Pushed: nightly, nightly-${SHORT_SHA}, ${VERSION}"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: cachix-auth
+            mountPath: /cachix
+            readOnly: true
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+
+    - name: notify-nightly-result
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            ARGO_URL="https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}"
+            if [ "{{workflow.status}}" = "Succeeded" ]; then
+              curl -sf \
+                -H "Title: Nightly passed" \
+                -H "Priority: 2" \
+                -H "Tags: white_check_mark" \
+                -H "Click: ${ARGO_URL}" \
+                -d "Tests passed, OCI pushed as :nightly" \
+                http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
+            else
+              curl -sf \
+                -H "Title: Nightly FAILED" \
+                -H "Priority: 4" \
+                -H "Tags: warning" \
+                -H "Click: ${ARGO_URL}" \
+                -d "Workflow {{workflow.name}} failed — check Argo for details" \
+                http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
+            fi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 32Mi
