@@ -63,6 +63,7 @@ class IPCMessageType(IntEnum):
     QUERY_AUTO_REPLY = 0x19
     QUERY_PATH_INFO = 0x1A
     QUERY_PAGE = 0x1B
+    QUERY_PAGE_SERVER_STATUS = 0x1C
 
     # Command requests (0x20-0x2F)
     CMD_SEND = 0x20
@@ -80,6 +81,16 @@ class IPCMessageType(IntEnum):
     CMD_SYNC_MESSAGES = 0x2C
     CMD_PAGE_DISCONNECT = 0x2D
     CMD_REBOOT_DEVICE = 0x2E
+    CMD_REMOTE_INBOX = 0x2F
+
+    # Extended command range (0x40-0x4F) for remote operations
+    CMD_REMOTE_MESSAGES = 0x40
+
+    # Terminal session (0x50-0x5F)
+    CMD_TERMINAL_OPEN = 0x50
+    CMD_TERMINAL_INPUT = 0x51
+    CMD_TERMINAL_RESIZE = 0x52
+    CMD_TERMINAL_CLOSE = 0x53
 
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30
@@ -93,6 +104,10 @@ class IPCMessageType(IntEnum):
     # Events (0xC0-0xFF) - pushed to subscribers
     EVENT_DEVICE = 0xC0
     EVENT_MESSAGE = 0xC1
+    EVENT_TERMINAL_OUTPUT = 0xC2
+    EVENT_TERMINAL_EXITED = 0xC3
+    EVENT_TERMINAL_ERROR = 0xC4
+    EVENT_TERMINAL_READY = 0xC5
 
 
 class IPCError(Exception):

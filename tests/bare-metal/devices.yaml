@@ -3,21 +3,6 @@
 # SSH config should handle user/key selection (see ~/.ssh/config)
 
 devices:
-  styrene-node:
-    # ASUS Q502LA - Primary x86_64 test node
-    host: styrene-node.vanderlyn.local
-    hardware: ASUS Q502LA
-    cpu: Intel Core i5-4210U
-    arch: x86_64
-    os: NixOS 24.11
-    venv_path: ~/.local/styrene-venv
-    config_path: ~/.config/styrene
-    identity_hash: 698f2232d4ddab456ca11f38c8bb8a90
-    capabilities:
-      - tcp_server
-      - auto_interface
-      - systemd_user
-
   t100ta:
     # ASUS T100TA - Low-power x86_64 (Atom) test node
     host: t100ta.vanderlyn.local
@@ -64,8 +49,25 @@ devices:
 
 # Device groups for targeted test runs
 groups:
-  all: [styrene-node, t100ta, minigmk, mobilepi]
-  nixos: [styrene-node, t100ta]
+  all: [t100ta, minigmk, mobilepi]
+  nixos: [t100ta]
   debian: [minigmk, mobilepi]
-  x86_64: [styrene-node, t100ta, minigmk]
+  x86_64: [t100ta, minigmk]
   aarch64: [mobilepi]
+
+# Admin / operations stations (not part of test fleet)
+# These devices run styrened as persistent mesh operators, not test targets.
+admin:
+  styrene-admin:
+    # ASUS Q502LA - Deployment operations station
+    # Identity: "Styrene Admin (admin@styrene.io)"
+    # Role: Known-good x86_64 NixOS system for integration testing,
+    #        deployment operations, and remote fleet management via RPC.
+    host: styrene-node.vanderlyn.local
+    hardware: ASUS Q502LA
+    cpu: Intel Core i5-4210U
+    arch: x86_64
+    os: NixOS 24.11
+    identity_hash: 698f2232d4ddab456ca11f38c8bb8a90
+    config_path: ~/.config/styrene
+    profile: operator

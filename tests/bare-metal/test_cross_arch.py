@@ -6,6 +6,7 @@ Validates that x86_64 and aarch64 devices interoperate correctly.
 from __future__ import annotations
 
 import pytest
+
 from tests.harness.ssh import SSHHarness
 
 

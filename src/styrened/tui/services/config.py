@@ -24,7 +24,7 @@ from styrened import paths
 from styrened.models.config import ConfigFieldError
 from styrened.tui.models.config import (
     ConfigLoadError,
-    ConfigValidationErrors,
+    ConfigValidationError,
     DeploymentMode,
     GatewayMode,
     LogLevel,
@@ -521,7 +521,7 @@ def load_config() -> StyreneConfig:
 
     Raises:
         ConfigLoadError: If config file exists but cannot be parsed.
-        ConfigValidationErrors: If config is invalid.
+        ConfigValidationError: If config is invalid.
     """
     config_path = get_config_path()
 
@@ -545,7 +545,7 @@ def load_config() -> StyreneConfig:
     # Validate
     errors = validate_config(config)
     if errors:
-        raise ConfigValidationErrors(errors)
+        raise ConfigValidationError(errors)
 
     return config
 
@@ -560,13 +560,13 @@ def save_config(config: StyreneConfig) -> None:
         config: Configuration to save.
 
     Raises:
-        ConfigValidationErrors: If config is invalid.
+        ConfigValidationError: If config is invalid.
         OSError: If file cannot be written.
     """
     # Validate before saving
     errors = validate_config(config)
     if errors:
-        raise ConfigValidationErrors(errors)
+        raise ConfigValidationError(errors)
 
     # Ensure config directory exists
     config_path = get_config_path()

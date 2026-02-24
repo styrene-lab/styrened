@@ -23,6 +23,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from styrened.tui.widgets.micron_parser import parse_micron, render_to_rich
+from styrened.tui.widgets.page_renderers import render_structured_page
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +127,19 @@ class PageBrowserWidget(Widget):
                 transfer_time = result.get("transfer_time", 0.0)
                 content_length = result.get("content_length", 0)
 
-                # Parse and render micron markup
-                elements = parse_micron(content)
-                rendered = render_to_rich(elements)
+                # Try structured data rendering first
+                structured_data = result.get("structured_data")
+                page_metadata = result.get("page_metadata")
+                rendered = None
+
+                if structured_data and page_metadata:
+                    page_type = page_metadata.get("page_type", "")
+                    rendered = render_structured_page(page_type, structured_data)
+
+                # Fall back to micron rendering
+                if rendered is None:
+                    elements = parse_micron(content)
+                    rendered = render_to_rich(elements)
 
                 self._page_content = content
                 self.current_path = path
@@ -218,6 +229,17 @@ class PageBrowserWidget(Widget):
     def action_focus_url(self) -> None:
         """Focus URL bar for manual navigation (placeholder)."""
         self.notify("Manual URL entry coming soon", severity="information")
+
+    def set_destination(self, destination_hash: str) -> None:
+        """Change target node and reload index page.
+
+        Args:
+            destination_hash: Hex-encoded destination hash of the new NomadNet node.
+        """
+        self.destination_hash = destination_hash
+        self._history.clear()
+        self.current_path = "/page/index.mu"
+        self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
 
     def navigate(self, path: str) -> None:
         """Navigate to a new page path.

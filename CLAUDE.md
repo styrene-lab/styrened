@@ -94,7 +94,12 @@ styrened daemon           # Run daemon explicitly
 # CLI tools for interactive testing
 styrened devices              # List discovered mesh devices
 styrened devices -w 10        # Wait 10s for announces
+styrened status               # Show local daemon health (hub, interfaces, mesh)
 styrened status <dest>        # Query remote node status
+styrened doctor              # Run installation diagnostics
+styrened doctor --offline    # Skip PyPI version check
+styrened doctor --fix        # Auto-fix simple issues (create dirs, identity)
+styrened doctor --setup      # Interactive setup wizard
 styrened send <dest> "msg"    # Send chat message to node
 styrened exec <dest> uptime   # Execute command on remote
 styrened announce             # Trigger local announce
@@ -122,6 +127,7 @@ src/styrened/
 │   ├── rns_service.py  # RNS destination caching
 │   ├── lxmf_service.py # LXMF router and message handling
 │   ├── auto_reply.py   # Auto-reply with cooldown tracking
+│   ├── doctor.py       # Installation diagnostics and setup wizard
 │   ├── hub_connection.py
 │   └── node_store.py   # Device storage/queries
 ├── rpc/                # Remote procedure calls over LXMF

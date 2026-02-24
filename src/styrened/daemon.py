@@ -88,6 +88,7 @@ class StyreneDaemon:
         self._notification_service: Any = None  # Notification dispatch service
         self._callback_backend: Any = None  # For TUI/GUI callback registration
         self._page_browser_service: Any = None  # NomadNet page browsing service
+        self._page_server_service: Any = None  # NomadNet page server service
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -114,6 +115,10 @@ class StyreneDaemon:
 
         # Initialize conversation service for chat backend
         self._init_conversation_service()
+
+        # Wire conversation service into RPC server for remote inbox queries
+        if self._rpc_server and self._conversation_service:
+            self._rpc_server.set_conversation_service(self._conversation_service)
 
         # Start auto-reply handler for chat messages
         self._start_auto_reply()
@@ -145,6 +150,9 @@ class StyreneDaemon:
 
         # Start page browser service for NomadNet page fetching
         await self._start_page_browser()
+
+        # Start page server service if enabled
+        self._start_page_server()
 
         self._running = True
         logger.info("Styrene daemon running")
@@ -955,6 +963,48 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to start page browser service: {e}")
 
+    def _start_page_server(self) -> None:
+        """Start the NomadNet page server service.
+
+        The page server creates the ("nomadnetwork", "node") destination
+        and serves .mu pages with optional Styrene directive enhancement.
+        Skips destination creation if NomadNet already owns it (hub guard).
+        """
+        if not self.config.page_server.enabled:
+            return
+
+        try:
+            from styrened.services.page_server import PageServerService
+
+            self._page_server_service = PageServerService(self.config.page_server)
+            self._page_server_service.start()
+
+            # Register demo pages if enabled
+            if self.config.page_server.demo:
+                from styrened.pages.demo_host import register_demo_pages
+
+                register_demo_pages(self._page_server_service)
+
+            logger.info(
+                "[METRICS] page_server_started "
+                f"owns_destination={self._page_server_service.owns_destination} "
+                f"static_pages={len(self._page_server_service.static_pages)}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to start page server: {e}")
+
+    def _stop_page_server(self) -> None:
+        """Stop the page server service gracefully."""
+        if self._page_server_service:
+            try:
+                self._page_server_service.stop()
+                logger.info("[METRICS] page_server_stopped")
+            except Exception as e:
+                logger.error(f"Error stopping page server: {e}")
+            finally:
+                self._page_server_service = None
+
     def _start_terminal_service(self) -> None:
         """Start the terminal session service.
 
@@ -1297,6 +1347,9 @@ class StyreneDaemon:
 
         # Stop terminal service (closes all sessions)
         self._stop_terminal_service()
+
+        # Stop page server service
+        self._stop_page_server()
 
         # Stop page browser service
         if self._page_browser_service:

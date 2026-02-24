@@ -9,11 +9,12 @@ from __future__ import annotations
 import itertools
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+
 from tests.harness.ssh import SSHHarness
 
 RESULTS_DIR = Path(__file__).parents[2] / "test-results" / "bare-metal"
@@ -101,7 +102,7 @@ class TestMeshConvergence:
         # Write results
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         result_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "devices": devices_with_identity,
             "device_count": len(devices_with_identity),
             "pair_count": len(expected_pairs),
@@ -170,7 +171,7 @@ class TestMeshConvergence:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         with open(RESULTS_DIR / "pairwise-discovery.json", "w") as f:
             json.dump({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "pairs": pair_results,
             }, f, indent=2)
 

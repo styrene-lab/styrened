@@ -460,7 +460,7 @@ class K8sHarness(TestHarness):
         ]
 
         if ipc_relay:
-            set_values.append(f"ipcRelay.enabled=true")
+            set_values.append("ipcRelay.enabled=true")
             set_values.append(f"ipcRelay.port={ipc_relay_port}")
 
         if image_repository:

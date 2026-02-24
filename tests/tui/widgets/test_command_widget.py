@@ -1,7 +1,7 @@
 """Tests for CommandWidget, OutputEntry, and command presets."""
 
 from styrened.tui.widgets.command_widget import (
-    COMMAND_PRESETS,
+    FLEET_OP_PRESETS,
     CommandWidget,
     OutputEntry,
 )
@@ -109,17 +109,17 @@ class TestPresetFiltering:
         available: list[str] = []
         visible = [
             (label, cmd)
-            for label, cmd in COMMAND_PRESETS
+            for label, cmd in FLEET_OP_PRESETS
             if not available or cmd.split()[0] in available
         ]
-        assert len(visible) == len(COMMAND_PRESETS)
+        assert len(visible) == len(FLEET_OP_PRESETS)
 
     def test_presets_filtered_by_available_commands(self):
         """Only presets whose base command is in available_commands are shown."""
         available = ["uptime", "df"]
         visible = [
             (label, cmd)
-            for label, cmd in COMMAND_PRESETS
+            for label, cmd in FLEET_OP_PRESETS
             if not available or cmd.split()[0] in available
         ]
         assert len(visible) == 2
@@ -131,7 +131,7 @@ class TestPresetFiltering:
         available = ["nonexistent_cmd"]
         visible = [
             (label, cmd)
-            for label, cmd in COMMAND_PRESETS
+            for label, cmd in FLEET_OP_PRESETS
             if not available or cmd.split()[0] in available
         ]
         assert visible == []

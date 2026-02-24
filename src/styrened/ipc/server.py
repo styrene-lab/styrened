@@ -256,8 +256,16 @@ class ControlServer:
             IPCMessageType.CMD_SYNC_MESSAGES: self._handlers.handle_cmd_sync_messages,
             IPCMessageType.QUERY_PATH_INFO: self._handlers.handle_query_path_info,
             IPCMessageType.QUERY_PAGE: self._handlers.handle_query_page,
+            IPCMessageType.QUERY_PAGE_SERVER_STATUS: self._handlers.handle_query_page_server_status,
             IPCMessageType.CMD_PAGE_DISCONNECT: self._handlers.handle_cmd_page_disconnect,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
+            IPCMessageType.CMD_REMOTE_INBOX: self._handlers.handle_cmd_remote_inbox,
+            IPCMessageType.CMD_REMOTE_MESSAGES: self._handlers.handle_cmd_remote_messages,
+            # Terminal handlers (input/resize/close dispatched normally;
+            # terminal_open is handled inline in _client_loop for client ref)
+            IPCMessageType.CMD_TERMINAL_INPUT: self._handlers.handle_cmd_terminal_input,
+            IPCMessageType.CMD_TERMINAL_RESIZE: self._handlers.handle_cmd_terminal_resize,
+            IPCMessageType.CMD_TERMINAL_CLOSE: self._handlers.handle_cmd_terminal_close,
         }
 
     async def _handle_client(
@@ -338,6 +346,18 @@ class ControlServer:
 
                 response = ResultResponse(data={"unsubscribed": True})
                 await client.send_response(request_id, response)
+                continue
+
+            # Terminal open needs client reference for event routing
+            if msg_type == IPCMessageType.CMD_TERMINAL_OPEN:
+                if self._handlers:
+                    request = create_request(msg_type, payload)
+                    dispatch_response = await self._handlers.handle_cmd_terminal_open(
+                        request, client=client
+                    )
+                else:
+                    dispatch_response = ErrorResponse.internal_error("Handlers not initialized")
+                await client.send_response(request_id, dispatch_response)
                 continue
 
             # Dispatch to handler

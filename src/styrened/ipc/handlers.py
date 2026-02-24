@@ -10,6 +10,8 @@ Usage:
     response = await handlers.handle_query_devices(request)
 """
 
+import asyncio
+import base64
 import logging
 import re
 import threading
@@ -39,12 +41,18 @@ from styrened.ipc.messages import (
     CmdMarkReadRequest,
     CmdPageDisconnectRequest,
     CmdRebootDeviceRequest,
+    CmdRemoteInboxRequest,
+    CmdRemoteMessagesRequest,
     CmdRemoveContactRequest,
     CmdRetryMessageRequest,
     CmdSendChatRequest,
     CmdSendRequest,
     CmdSetAutoReplyRequest,
     CmdSetContactRequest,
+    CmdTerminalCloseRequest,
+    CmdTerminalInputRequest,
+    CmdTerminalOpenRequest,
+    CmdTerminalResizeRequest,
     DaemonStatus,
     DeviceInfo,
     ErrorResponse,
@@ -90,6 +98,8 @@ class IPCHandlers:
                 during testing or partial initialization.
         """
         self.daemon = daemon
+        # Terminal session tracking: session_id_hex -> (TerminalClientSession, client_ref)
+        self._terminal_sessions: dict[str, Any] = {}
 
     def _check_daemon(self) -> ErrorResponse | None:
         """Check if daemon is available.
@@ -259,13 +269,47 @@ class IPCHandlers:
             if self.daemon._rpc_client:
                 pending_rpc = self.daemon._rpc_client.pending_count
 
-            # Count RNS interfaces
+            # Count RNS interfaces and collect details
             interface_count = 0
+            interfaces: list[dict[str, Any]] = []
+            transport_enabled = False
+            active_links = 0
             try:
                 import RNS
 
                 if hasattr(RNS.Transport, "interfaces") and RNS.Transport.interfaces:
                     interface_count = len(RNS.Transport.interfaces)
+                    for iface in RNS.Transport.interfaces:
+                        interfaces.append({
+                            "name": getattr(iface, "name", "unnamed"),
+                            "type": type(iface).__name__,
+                            "online": getattr(iface, "online", True),
+                        })
+
+                transport_enabled = getattr(RNS.Transport, "transport_enabled", False)
+                active_links = len(getattr(RNS.Transport, "active_links", []))
+            except Exception:
+                pass
+
+            # Hub status
+            hub_status = "disabled"
+            hub_address: str | None = None
+            try:
+                from styrened.services.hub_connection import get_hub_connection
+
+                hub = get_hub_connection()
+                hub_status = hub.status.value
+                hub_address = hub.hub_address
+            except Exception:
+                pass
+
+            # LXMF propagation state
+            propagation_enabled = False
+            try:
+                if self.daemon._lxmf_service and self.daemon._lxmf_service.router:
+                    propagation_enabled = getattr(
+                        self.daemon._lxmf_service.router, "propagation_enabled", False
+                    )
             except Exception:
                 pass
 
@@ -278,6 +322,12 @@ class IPCHandlers:
                 styrene_node_count=styrene_count,
                 pending_rpc_count=pending_rpc,
                 interface_count=interface_count,
+                hub_status=hub_status,
+                hub_address=hub_address,
+                interfaces=interfaces,
+                propagation_enabled=propagation_enabled,
+                transport_enabled=transport_enabled,
+                active_links=active_links,
             )
 
             return ResultResponse(data=status.to_dict())
@@ -546,6 +596,95 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error rebooting device: {e}")
             return ErrorResponse.internal_error(f"Failed to reboot device: {e}")
+
+    # -------------------------------------------------------------------------
+    # Remote inbox handlers (RPC over LXMF)
+    # -------------------------------------------------------------------------
+
+    async def handle_cmd_remote_inbox(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_REMOTE_INBOX request.
+
+        Queries a remote node's inbox via RPC over LXMF.
+
+        Args:
+            request: CmdRemoteInboxRequest instance.
+
+        Returns:
+            ResultResponse with remote conversation list.
+        """
+        req = (
+            request
+            if isinstance(request, CmdRemoteInboxRequest)
+            else CmdRemoteInboxRequest()
+        )
+
+        if not req.destination:
+            return ErrorResponse.invalid_request("destination is required")
+
+        try:
+            err = self._check_rpc_client()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._rpc_client is not None
+
+            result = await self.daemon._rpc_client.call_inbox(
+                destination=req.destination,
+                limit=req.limit,
+                timeout=req.timeout,
+            )
+
+            return ResultResponse(data={"conversations": result.conversations})
+
+        except Exception as e:
+            if "timed out" in str(e):
+                return ErrorResponse.timeout(f"Remote inbox query timed out after {req.timeout}s")
+            logger.exception(f"Error querying remote inbox: {e}")
+            return ErrorResponse.internal_error(f"Failed to query remote inbox: {e}")
+
+    async def handle_cmd_remote_messages(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_REMOTE_MESSAGES request.
+
+        Queries messages for a specific peer on a remote node via RPC over LXMF.
+
+        Args:
+            request: CmdRemoteMessagesRequest instance.
+
+        Returns:
+            ResultResponse with remote message list.
+        """
+        req = (
+            request
+            if isinstance(request, CmdRemoteMessagesRequest)
+            else CmdRemoteMessagesRequest()
+        )
+
+        if not req.destination:
+            return ErrorResponse.invalid_request("destination is required")
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        try:
+            err = self._check_rpc_client()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._rpc_client is not None
+
+            result = await self.daemon._rpc_client.call_messages(
+                destination=req.destination,
+                peer_hash=req.peer_hash,
+                limit=req.limit,
+                timeout=req.timeout,
+            )
+
+            return ResultResponse(data={"messages": result.messages})
+
+        except Exception as e:
+            if "timed out" in str(e):
+                return ErrorResponse.timeout(
+                    f"Remote messages query timed out after {req.timeout}s"
+                )
+            logger.exception(f"Error querying remote messages: {e}")
+            return ErrorResponse.internal_error(f"Failed to query remote messages: {e}")
 
     # -------------------------------------------------------------------------
     # Conversation handlers
@@ -1608,11 +1747,68 @@ class IPCHandlers:
             if response.error_message:
                 data["error_message"] = response.error_message
 
+            # Include Styrene structured data if present
+            if response.structured_data is not None:
+                data["structured_data"] = response.structured_data
+            if response.page_metadata is not None:
+                meta = response.page_metadata
+                data["page_metadata"] = {
+                    "version": meta.version,
+                    "page_type": meta.page_type,
+                    "capabilities": meta.capabilities,
+                    "timestamp": meta.timestamp,
+                    "etag": meta.etag,
+                    "refresh": meta.refresh,
+                }
+
             return ResultResponse(data=data)
 
         except Exception as e:
             logger.exception(f"Error fetching page: {e}")
             return ErrorResponse.internal_error(f"Failed to fetch page: {e}")
+
+    def _check_page_server(self) -> ErrorResponse | None:
+        """Check if page server service is available."""
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not getattr(self.daemon, "_page_server_service", None):
+            return ErrorResponse.internal_error("Page server service not initialized")
+        return None
+
+    async def handle_query_page_server_status(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_PAGE_SERVER_STATUS request.
+
+        Returns page server status including pages directory, destination
+        ownership, registered handlers, and static pages.
+
+        Args:
+            request: QueryPageServerStatusRequest instance.
+
+        Returns:
+            ResultResponse with page server status.
+        """
+        err = self._check_page_server()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        svc = self.daemon._page_server_service
+        try:
+            data: dict[str, object] = {
+                "enabled": True,
+                "started": svc.is_started,
+                "owns_destination": svc.owns_destination,
+                "pages_dir": str(svc.pages_dir) if svc.pages_dir else None,
+                "static_pages": svc.static_pages,
+                "registered_handlers": svc.registered_handlers,
+            }
+            return ResultResponse(data=data)
+
+        except Exception as e:
+            logger.exception(f"Error querying page server status: {e}")
+            return ErrorResponse.internal_error(f"Failed to query page server status: {e}")
 
     async def handle_cmd_page_disconnect(self, request: IPCRequest) -> IPCResponse:
         """Handle CMD_PAGE_DISCONNECT request.
@@ -1649,3 +1845,246 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error disconnecting page link: {e}")
             return ErrorResponse.internal_error(f"Failed to disconnect page link: {e}")
+
+    # -------------------------------------------------------------------------
+    # Terminal handlers
+    # -------------------------------------------------------------------------
+
+    def _check_styrene_protocol(self) -> ErrorResponse | None:
+        """Check if StyreneProtocol is available for terminal operations."""
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not getattr(self.daemon, "_styrene_protocol", None):
+            return ErrorResponse.internal_error("Styrene protocol not initialized")
+        return None
+
+    async def handle_cmd_terminal_open(
+        self, request: IPCRequest, client: Any = None
+    ) -> IPCResponse:
+        """Handle CMD_TERMINAL_OPEN request.
+
+        Creates a TerminalClient, connects to the remote node, and wires
+        callbacks to push terminal events to the originating IPC client.
+
+        Args:
+            request: CmdTerminalOpenRequest instance.
+            client: ClientConnection that opened this session (for event routing).
+
+        Returns:
+            ResultResponse with session_id on success.
+        """
+        err = self._check_styrene_protocol()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, CmdTerminalOpenRequest)
+            else CmdTerminalOpenRequest()
+        )
+
+        if not req.destination:
+            return ErrorResponse.invalid_request("destination is required")
+
+        try:
+            from styrened.ipc.protocol import IPCMessageType
+            from styrened.terminal import TerminalClient
+
+            terminal_client = TerminalClient(self.daemon._styrene_protocol)
+
+            session = await terminal_client.connect(
+                destination=req.destination,
+                term_type=req.term_type,
+                rows=req.rows,
+                cols=req.cols,
+                shell=req.shell,
+                timeout=30.0,
+            )
+
+            if session is None:
+                return ErrorResponse.internal_error(
+                    f"Terminal connection rejected by {req.destination[:16]}..."
+                )
+
+            session_id_hex = session.session_id.hex()
+
+            # Store session with client reference for event routing
+            self._terminal_sessions[session_id_hex] = {
+                "session": session,
+                "client": client,
+                "terminal_client": terminal_client,
+            }
+
+            # Get the event loop for thread-safe callback scheduling
+            loop = asyncio.get_running_loop()
+
+            # Wire callbacks from TerminalClientSession to IPC events
+            def on_output(data: bytes) -> None:
+                """Forward terminal output to IPC client (runs in RNS thread)."""
+                if client is None or client.closed:
+                    return
+                payload = {
+                    "session_id": session_id_hex,
+                    "data_b64": base64.b64encode(data).decode("ascii"),
+                }
+                loop.call_soon_threadsafe(
+                    asyncio.ensure_future,
+                    client.send_event(IPCMessageType.EVENT_TERMINAL_OUTPUT, payload),
+                )
+
+            def on_exit(exit_code: int) -> None:
+                """Forward terminal exit to IPC client (runs in RNS thread)."""
+                payload = {
+                    "session_id": session_id_hex,
+                    "exit_code": exit_code,
+                }
+                if client is not None and not client.closed:
+                    loop.call_soon_threadsafe(
+                        asyncio.ensure_future,
+                        client.send_event(IPCMessageType.EVENT_TERMINAL_EXITED, payload),
+                    )
+                # Clean up session
+                self._terminal_sessions.pop(session_id_hex, None)
+
+            def on_error(message: str) -> None:
+                """Forward terminal error to IPC client (runs in RNS thread)."""
+                if client is None or client.closed:
+                    return
+                payload = {
+                    "session_id": session_id_hex,
+                    "error": message,
+                }
+                loop.call_soon_threadsafe(
+                    asyncio.ensure_future,
+                    client.send_event(IPCMessageType.EVENT_TERMINAL_ERROR, payload),
+                )
+
+            session.on_output = on_output
+            session.on_exit = on_exit
+            session.on_error = on_error
+
+            # Establish RNS Link for data plane
+            connected = await session.connect()
+            if not connected:
+                self._terminal_sessions.pop(session_id_hex, None)
+                return ErrorResponse.internal_error(
+                    "Failed to establish RNS Link to remote terminal"
+                )
+
+            # Send READY event
+            if client is not None and not client.closed:
+                await client.send_event(
+                    IPCMessageType.EVENT_TERMINAL_READY,
+                    {"session_id": session_id_hex},
+                )
+
+            return ResultResponse(
+                data={
+                    "session_id": session_id_hex,
+                    "connected": True,
+                }
+            )
+
+        except Exception as e:
+            logger.exception(f"Error opening terminal: {e}")
+            return ErrorResponse.internal_error(f"Failed to open terminal: {e}")
+
+    async def handle_cmd_terminal_input(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_TERMINAL_INPUT request.
+
+        Forwards input data to the terminal session.
+
+        Args:
+            request: CmdTerminalInputRequest instance.
+
+        Returns:
+            ResultResponse on success.
+        """
+        req = (
+            request
+            if isinstance(request, CmdTerminalInputRequest)
+            else CmdTerminalInputRequest()
+        )
+
+        if not req.session_id:
+            return ErrorResponse.invalid_request("session_id is required")
+
+        entry = self._terminal_sessions.get(req.session_id)
+        if not entry:
+            return ErrorResponse.not_found(f"Terminal session not found: {req.session_id[:16]}...")
+
+        try:
+            data = base64.b64decode(req.data_b64)
+            session = entry["session"]
+            sent = session.send_input(data)
+            return ResultResponse(data={"sent": sent})
+        except Exception as e:
+            logger.warning(f"Error sending terminal input: {e}")
+            return ErrorResponse.internal_error(f"Failed to send terminal input: {e}")
+
+    async def handle_cmd_terminal_resize(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_TERMINAL_RESIZE request.
+
+        Sends window resize to the terminal session.
+
+        Args:
+            request: CmdTerminalResizeRequest instance.
+
+        Returns:
+            ResultResponse on success.
+        """
+        req = (
+            request
+            if isinstance(request, CmdTerminalResizeRequest)
+            else CmdTerminalResizeRequest()
+        )
+
+        if not req.session_id:
+            return ErrorResponse.invalid_request("session_id is required")
+
+        entry = self._terminal_sessions.get(req.session_id)
+        if not entry:
+            return ErrorResponse.not_found(f"Terminal session not found: {req.session_id[:16]}...")
+
+        try:
+            session = entry["session"]
+            sent = session.send_resize(req.rows, req.cols)
+            return ResultResponse(data={"resized": sent})
+        except Exception as e:
+            logger.warning(f"Error resizing terminal: {e}")
+            return ErrorResponse.internal_error(f"Failed to resize terminal: {e}")
+
+    async def handle_cmd_terminal_close(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_TERMINAL_CLOSE request.
+
+        Closes a terminal session gracefully.
+
+        Args:
+            request: CmdTerminalCloseRequest instance.
+
+        Returns:
+            ResultResponse on success.
+        """
+        req = (
+            request
+            if isinstance(request, CmdTerminalCloseRequest)
+            else CmdTerminalCloseRequest()
+        )
+
+        if not req.session_id:
+            return ErrorResponse.invalid_request("session_id is required")
+
+        entry = self._terminal_sessions.pop(req.session_id, None)
+        if not entry:
+            return ErrorResponse.not_found(f"Terminal session not found: {req.session_id[:16]}...")
+
+        try:
+            session = entry["session"]
+            await session.close()
+            return ResultResponse(data={"closed": True})
+        except Exception as e:
+            logger.warning(f"Error closing terminal: {e}")
+            return ErrorResponse.internal_error(f"Failed to close terminal: {e}")

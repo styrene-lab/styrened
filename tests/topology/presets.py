@@ -262,9 +262,6 @@ def linear_chain(node_count: int = 5) -> MeshTopology:
         # Server interfaces for downstream segments (segments where this node is the left member)
         if not is_last:
             seg_name = f"seg-{i}"
-            listen_port = 4242 + len(
-                [n for n in node_networks if n < seg_name or n == seg_name]
-            ) - 1
             # Use sequential ports starting at 4242
             server_port = 4242 + (0 if is_first else node_networks.index(f"seg-{i}"))
             interfaces.append(

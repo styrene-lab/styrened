@@ -12,7 +12,7 @@ from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
 from styrened.services.hub_connection import STYRENE_HUB_ADDRESS
 from styrened.tui.models.config import (
-    ConfigValidationErrors,
+    ConfigValidationError,
     GatewayMode,
     LogLevel,
     StyreneConfig,
@@ -498,7 +498,7 @@ class SettingsScreen(Screen[None]):
             self._show_success("Configuration saved successfully")
             self.app.call_later(self.dismiss, 1.0)
 
-        except ConfigValidationErrors as e:
+        except ConfigValidationError as e:
             error_msgs = [str(err) for err in e.errors]
             self._show_error(f"Validation failed: {'; '.join(error_msgs[:3])}")
         except Exception as e:

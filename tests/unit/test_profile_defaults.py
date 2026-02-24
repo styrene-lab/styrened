@@ -424,7 +424,7 @@ class TestPublicModeEdgeCases:
         """_parse_bool handles 'yes' as True."""
         assert _parse_bool("yes") is True
 
-    def test_parse_bool_string_YES_case_insensitive(self) -> None:
+    def test_parse_bool_string_yes_case_insensitive(self) -> None:
         """_parse_bool handles 'YES' case-insensitively."""
         assert _parse_bool("YES") is True
 
@@ -432,7 +432,7 @@ class TestPublicModeEdgeCases:
         """_parse_bool handles the string 'true' (not bool True) as True."""
         assert _parse_bool("true") is True
 
-    def test_parse_bool_string_True_mixed_case(self) -> None:
+    def test_parse_bool_string_true_mixed_case(self) -> None:
         """_parse_bool handles 'True' (mixed case string) as True."""
         assert _parse_bool("True") is True
 

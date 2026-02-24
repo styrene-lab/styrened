@@ -24,12 +24,12 @@ def mock_socket_path(tmp_path):
 @pytest.fixture
 def mock_control_client():
     """Patch ControlClient at source module (lazy-imported in _ping())."""
-    with patch("styrened.ipc.ControlClient") as MockClient:
+    with patch("styrened.ipc.ControlClient") as mock_client_cls:
         client = AsyncMock()
         client.connect = AsyncMock()
         client.ping = AsyncMock(return_value=True)
         client.disconnect = AsyncMock()
-        MockClient.return_value = client
+        mock_client_cls.return_value = client
         yield client
 
 

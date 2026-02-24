@@ -22,7 +22,7 @@ from styrened.tui.forge.models import (
 
 
 def _specs(**overrides: object) -> DeviceSpecs:
-    defaults = dict(cpu="Test", cores=4, ram_mb=4096, storage="test", network="test")
+    defaults = {"cpu": "Test", "cores": 4, "ram_mb": 4096, "storage": "test", "network": "test"}
     defaults.update(overrides)
     return DeviceSpecs(**defaults)
 

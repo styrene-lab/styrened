@@ -19,7 +19,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .rns_config import generate_rns_config
 from .spec import InterfaceType, MeshTopology, NodeRole
 
 logger = logging.getLogger(__name__)
@@ -132,7 +131,7 @@ def generate_network_policies(
     Returns:
         List of NetworkPolicy manifest dicts.
     """
-    topology_label = f"styrene.io/topology"
+    topology_label = "styrene.io/topology"
     policies: list[dict[str, Any]] = []
 
     # Default-deny for all topology pods
@@ -207,8 +206,8 @@ def get_pod_labels(topology: MeshTopology, node_name: str) -> dict[str, str]:
     """
     node = topology.get_node(node_name)
     labels = {
-        f"styrene.io/topology": topology.name,
-        f"styrene.io/role": node.role.value,
+        "styrene.io/topology": topology.name,
+        "styrene.io/role": node.role.value,
     }
     for net_name in node.networks:
         labels[f"styrene.io/net-{net_name}"] = "true"

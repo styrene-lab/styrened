@@ -63,11 +63,12 @@ class TestSubcommandParsing:
         args = parser.parse_args(["devices", "--json"])
         assert args.json is True
 
-    def test_status_command_requires_destination(self):
-        """status command should require destination argument."""
+    def test_status_command_destination_optional(self):
+        """status command without destination should default to local status."""
         parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["status"])  # Missing required argument
+        args = parser.parse_args(["status"])
+        assert args.command == "status"
+        assert args.destination is None
 
     def test_status_command_with_destination(self):
         """status command should parse destination."""

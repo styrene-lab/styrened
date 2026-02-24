@@ -37,6 +37,7 @@ dependencies = [
     "platformdirs>=4.0",
     "sqlalchemy>=2.0",
     "msgpack>=1.0",
+    "packaging>=21.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +53,7 @@ yubikey = [
 ]
 tui = [
     "textual>=0.47.0",
+    "pyte>=0.8",
     "psutil>=5.9",
 ]
 dev = [

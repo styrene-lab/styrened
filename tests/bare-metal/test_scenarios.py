@@ -85,7 +85,7 @@ class TestConnectivityScenario:
     @pytest.mark.smoke
     @pytest.mark.parametrize(
         "source,target",
-        [pair for pair in permutations(ALL_DEVICES, 2)],
+        list(permutations(ALL_DEVICES, 2)),
         ids=[f"{a}->{b}" for a, b in permutations(ALL_DEVICES, 2)],
     )
     def test_devices_can_reach_each_other(

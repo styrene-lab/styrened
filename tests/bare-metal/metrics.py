@@ -7,11 +7,10 @@ Provides summary analysis for memory leak detection and performance tracking.
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -134,7 +133,7 @@ class BareMetalMetricsCollector:
 
     def _collect_snapshot(self) -> FleetSnapshot:
         """Collect one fleet-wide snapshot."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         elapsed = time.time() - self._start_time
         collect_devices = (self._snapshot_index % self.device_count_interval) == 0
 
@@ -248,7 +247,7 @@ class BareMetalMetricsCollector:
                 n = len(rss_values)
                 sum_t = sum(timestamps)
                 sum_r = sum(rss_values)
-                sum_tr = sum(t * r for t, r in zip(timestamps, rss_values))
+                sum_tr = sum(t * r for t, r in zip(timestamps, rss_values, strict=True))
                 sum_tt = sum(t * t for t in timestamps)
 
                 denom = n * sum_tt - sum_t * sum_t

@@ -115,12 +115,16 @@ class StyreneMessageType(IntEnum):
     REBOOT = 0x41
     CONFIG_UPDATE = 0x42
     SERVICE_CONTROL = 0x43
+    INBOX_QUERY = 0x44
+    MESSAGES_QUERY = 0x45
 
     # RPC Responses (0x60-0x7F)
     EXEC_RESULT = 0x60
     REBOOT_RESULT = 0x61
     CONFIG_RESULT = 0x62
     SERVICE_RESULT = 0x63
+    INBOX_RESPONSE = 0x64
+    MESSAGES_RESPONSE = 0x65
 
     # Hub Services (0x80-0x9F)
     REGISTRY_QUERY = 0x80
@@ -663,6 +667,88 @@ def create_config_result(
         payload=encode_payload(
             {"success": success, "message": message, "updated_keys": updated_keys}
         ),
+        request_id=request_id if request_id else NO_CORRELATION,
+    )
+
+
+# Remote inbox query convenience functions
+
+
+def create_inbox_query(limit: int = 50, request_id: bytes | None = None) -> StyreneEnvelope:
+    """Create an INBOX_QUERY message envelope.
+
+    Args:
+        limit: Maximum number of conversations to return.
+        request_id: Optional correlation ID (auto-generated if None).
+
+    Returns:
+        StyreneEnvelope configured as INBOX_QUERY with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.INBOX_QUERY,
+        payload=encode_payload({"limit": limit}),
+        request_id=request_id,
+    )
+
+
+def create_inbox_response(
+    conversations: list[dict[str, Any]], request_id: bytes | None = None
+) -> StyreneEnvelope:
+    """Create an INBOX_RESPONSE message envelope.
+
+    Args:
+        conversations: List of conversation dicts (from ConversationInfo.to_dict()).
+        request_id: Correlation ID from the INBOX_QUERY request.
+
+    Returns:
+        StyreneEnvelope configured as INBOX_RESPONSE with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.INBOX_RESPONSE,
+        payload=encode_payload({"conversations": conversations}),
+        request_id=request_id if request_id else NO_CORRELATION,
+    )
+
+
+def create_messages_query(
+    peer_hash: str, limit: int = 50, request_id: bytes | None = None
+) -> StyreneEnvelope:
+    """Create a MESSAGES_QUERY message envelope.
+
+    Args:
+        peer_hash: LXMF destination hash of the peer to query messages for.
+        limit: Maximum number of messages to return.
+        request_id: Optional correlation ID (auto-generated if None).
+
+    Returns:
+        StyreneEnvelope configured as MESSAGES_QUERY with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.MESSAGES_QUERY,
+        payload=encode_payload({"peer_hash": peer_hash, "limit": limit}),
+        request_id=request_id,
+    )
+
+
+def create_messages_response(
+    messages: list[dict[str, Any]], request_id: bytes | None = None
+) -> StyreneEnvelope:
+    """Create a MESSAGES_RESPONSE message envelope.
+
+    Args:
+        messages: List of message dicts (from MessageInfo.to_dict()).
+        request_id: Correlation ID from the MESSAGES_QUERY request.
+
+    Returns:
+        StyreneEnvelope configured as MESSAGES_RESPONSE with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.MESSAGES_RESPONSE,
+        payload=encode_payload({"messages": messages}),
         request_id=request_id if request_id else NO_CORRELATION,
     )
 

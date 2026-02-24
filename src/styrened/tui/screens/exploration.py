@@ -1,13 +1,10 @@
 """Exploration Screen - Reticulum network discovery.
 
-This screen displays all non-Styrene announces on the Reticulum network:
-- LXMF peers and propagation nodes
-- NomadNet nodes
-- Generic Reticulum destinations
-- RNodes
-- Unknown/binary announces
-
-Similar to Nomadnet's announcement exploration page.
+Categorized tabbed interface for non-Styrene announces on the Reticulum network:
+- LXMF tab: messaging peers (Sideband, MeshChat, NomadNet users)
+- Pages tab: NomadNet page services with inline page browser
+- Infrastructure tab: propagation nodes, RNodes
+- Other tab: generic/unknown announces
 """
 
 from __future__ import annotations
@@ -16,14 +13,22 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container
+from textual.containers import Container, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Input, Static
+from textual.widgets import (
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.services.reticulum import discover_devices, start_discovery
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 # Device types shown on the exploration screen (non-Styrene announces)
 _EXPLORATION_TYPES = frozenset({
@@ -35,15 +40,27 @@ _EXPLORATION_TYPES = frozenset({
     DeviceType.NOMADNET_NODE,
 })
 
+# Category groupings for tabs
+_LXMF_TYPES = frozenset({DeviceType.LXMF_PEER})
+_PAGES_TYPES = frozenset({DeviceType.NOMADNET_NODE})
+_INFRA_TYPES = frozenset({DeviceType.PROPAGATION_NODE, DeviceType.RNODE})
+_OTHER_TYPES = frozenset({DeviceType.GENERIC, DeviceType.UNKNOWN})
+
 
 class ReticumAnnounceTable(DataTable[str]):
-    """Reticulum announce listing - shows all non-Styrene devices."""
+    """Reticulum announce listing — filterable by device type categories."""
 
     # Column keys for sorting
     COLUMN_KEYS = ("name", "type", "identity", "status", "last_announce")
 
-    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+    def __init__(
+        self,
+        *args,  # noqa: ANN002
+        device_types: frozenset[DeviceType] | None = None,
+        **kwargs,  # noqa: ANN003
+    ) -> None:
         super().__init__(*args, **kwargs)
+        self._device_types = device_types or _EXPLORATION_TYPES
         self._all_devices: list[MeshDevice] = []
         self._filter_text: str = ""
         self._sort_column: str = "last_announce"
@@ -58,10 +75,28 @@ class ReticumAnnounceTable(DataTable[str]):
             ("last_announce", "LAST ANNOUNCE"),
         )
         self.cursor_type = "row"
-        self._load_data()
+
+    @property
+    def device_count(self) -> int:
+        """Number of devices in this table (pre-filter)."""
+        return len(self._all_devices)
+
+    def load_from_devices(self, devices: list[MeshDevice]) -> None:
+        """Accept pre-fetched device list, filter to this table's types, and rebuild.
+
+        Args:
+            devices: Full list of exploration devices (already LXMF-shadow-filtered).
+        """
+        self._all_devices = [
+            d for d in devices if d.device_type in self._device_types
+        ]
+        self._rebuild_table()
 
     def _load_data(self) -> None:
-        """Load all non-Styrene device announces from mesh discovery."""
+        """Load all non-Styrene device announces from mesh discovery.
+
+        Standalone fallback — primary path uses load_from_devices().
+        """
         # Load historical data from NodeStore first
         try:
             from styrened.services.node_store import get_node_store
@@ -86,10 +121,15 @@ class ReticumAnnounceTable(DataTable[str]):
         }
 
         # Filter to non-Styrene devices, excluding LXMF shadows of Styrene nodes
-        self._all_devices = [
+        all_exploration = [
             d for d in all_devices_dict.values()
             if d.device_type in _EXPLORATION_TYPES
             and d.identity_hash not in styrene_identities
+        ]
+
+        # Further filter to this table's device types
+        self._all_devices = [
+            d for d in all_exploration if d.device_type in self._device_types
         ]
 
         self._rebuild_table()
@@ -133,7 +173,6 @@ class ReticumAnnounceTable(DataTable[str]):
             self.add_row(
                 "-", "-", "-", f"[{cascade.dim}]{msg}[/]", "-"
             )
-            # Update count
             self._post_count_update(0, len(self._all_devices))
             return
 
@@ -239,32 +278,22 @@ class ReticumAnnounceTable(DataTable[str]):
         self._rebuild_table()
 
     def refresh_data(self) -> None:
-        """Refresh announce data."""
+        """Refresh announce data (standalone mode)."""
         self._load_data()
 
 
 class ExplorationScreen(Screen[None]):
     """Reticulum network exploration screen.
 
-    Shows all non-Styrene announces discovered on the network:
-    - LXMF destinations
-    - Propagation nodes
-    - NomadNet nodes
-    - Generic Reticulum services
-    - RNodes
-    - Unknown/binary announces
+    Categorized tabs for non-Styrene announces:
+    - LXMF: messaging destinations
+    - Pages: NomadNet page services with inline browser
+    - Infrastructure: propagation nodes, RNodes
+    - Other: generic/unknown announces
     """
 
     CSS = """
     #exploration-container {
-        height: 1fr;
-    }
-
-    #announces-panel {
-        height: 1fr;
-    }
-
-    #reticulum-announce-table {
         height: 1fr;
     }
 
@@ -284,6 +313,47 @@ class ExplorationScreen(Screen[None]):
         padding: 0 1;
         color: $panel;
     }
+
+    #explore-tabs {
+        height: 1fr;
+    }
+
+    .explore-tab-table {
+        height: 1fr;
+    }
+
+    #pages-pane-content {
+        height: 1fr;
+    }
+
+    #pages-table-section {
+        height: 2fr;
+        min-height: 5;
+    }
+
+    #pages-browser-section {
+        height: 3fr;
+    }
+
+    #pages-browser-section.hidden {
+        display: none;
+    }
+
+    #pages-browser-placeholder {
+        height: 3;
+        padding: 1;
+        color: $panel;
+        text-style: italic;
+    }
+
+    #pages-browser-placeholder.hidden {
+        display: none;
+    }
+
+    .explore-inline-browser {
+        height: 1fr;
+        border-top: solid $border;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -291,7 +361,8 @@ class ExplorationScreen(Screen[None]):
         Binding("enter", "select_device", "Select"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
-        Binding("slash", "show_search", "Search", key_display="/"),
+        Binding("slash", "show_search", "Search", key_display="/", priority=True),
+        Binding("v", "preview_page", "Preview", show=True),
     ]
 
     # Debounce settings for discovery callbacks
@@ -299,75 +370,195 @@ class ExplorationScreen(Screen[None]):
     _discovery_debounce_seconds: float = 2.0
 
     def on_mount(self) -> None:
-        """Start device discovery when screen mounts."""
-        # Start announce listener for device discovery
+        """Start device discovery and load initial data."""
         start_discovery(callback=self._on_device_discovered)
+        self.set_interval(15.0, self._refresh_announce_tables)
+        # Initial load
+        self._refresh_announce_tables()
+        # Focus active table after TabbedContent is ready
+        self.call_later(self._focus_active_table)
 
-        # Set up periodic refresh
-        self.set_interval(15.0, self._refresh_announce_table)
+    def _focus_active_table(self) -> None:
+        """Focus the table in the currently active tab."""
+        table = self._get_active_table()
+        if table:
+            table.focus()
 
     def _on_device_discovered(self, device: MeshDevice) -> None:
         """Called when new device discovered via announce.
 
-        This runs in RNS callback thread - use call_from_thread for UI updates.
-
-        Args:
-            device: Discovered MeshDevice object.
+        This runs in RNS callback thread — use call_from_thread for UI updates.
         """
         try:
             self.app.call_from_thread(self._add_discovered_device, device)
         except RuntimeError:
-            # Already on main thread (e.g., in tests)
             self._add_discovered_device(device)
 
     def _add_discovered_device(self, device: MeshDevice) -> None:
         """Add discovered device (runs on main thread).
 
         Debounces refresh to avoid constant table rebuilds.
-
-        Args:
-            device: MeshDevice object.
         """
         import time
 
-        # Only notify for RNodes (interesting hardware)
         if device.is_rnode:
             self.notify(
                 f"RNode: {device.name}",
                 severity="information",
             )
 
-        # Debounce table refresh
         now = time.time()
         if now - self._last_discovery_refresh >= self._discovery_debounce_seconds:
             self._last_discovery_refresh = now
-            self._refresh_announce_table()
-
-    def _refresh_announce_table(self) -> None:
-        """Refresh the announce table with current discoveries."""
-        try:
-            table_widget = self.query_one(
-                "#reticulum-announce-table", ReticumAnnounceTable
-            )
-            table_widget.refresh_data()
-        except Exception:
-            pass
+            self._refresh_announce_tables()
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Container(id="exploration-container"):
-            yield HighlightedPanel(
-                ReticumAnnounceTable(id="reticulum-announce-table"),
-                Input(
-                    placeholder="Search announces...",
-                    id="explore-search-bar",
-                    classes="hidden",
-                ),
-                Static("", id="explore-count"),
-                title="RETICULUM ANNOUNCES",
-                id="announces-panel",
+            yield Input(
+                placeholder="Search announces...",
+                id="explore-search-bar",
+                classes="hidden",
             )
+            with TabbedContent(id="explore-tabs"):
+                with TabPane("LXMF", id="tab-lxmf"):
+                    yield ReticumAnnounceTable(
+                        id="table-lxmf",
+                        device_types=_LXMF_TYPES,
+                        classes="explore-tab-table",
+                    )
+                with TabPane("Pages", id="tab-pages"):
+                    with Vertical(id="pages-pane-content"):
+                        with Vertical(id="pages-table-section"):
+                            yield ReticumAnnounceTable(
+                                id="table-pages",
+                                device_types=_PAGES_TYPES,
+                                classes="explore-tab-table",
+                            )
+                        yield Static(
+                            "Press [bold]v[/bold] on a node to preview pages",
+                            id="pages-browser-placeholder",
+                        )
+                        with Vertical(id="pages-browser-section", classes="hidden"):
+                            pass  # PageBrowserWidget mounted dynamically
+                with TabPane("Infra", id="tab-infra"):
+                    yield ReticumAnnounceTable(
+                        id="table-infra",
+                        device_types=_INFRA_TYPES,
+                        classes="explore-tab-table",
+                    )
+                with TabPane("Other", id="tab-other"):
+                    yield ReticumAnnounceTable(
+                        id="table-other",
+                        device_types=_OTHER_TYPES,
+                        classes="explore-tab-table",
+                    )
+            yield Static("", id="explore-count")
         yield Footer()
+
+    def _get_all_tables(self) -> list[ReticumAnnounceTable]:
+        """Get all announce tables across tabs."""
+        table_ids = ["#table-lxmf", "#table-pages", "#table-infra", "#table-other"]
+        tables = []
+        for tid in table_ids:
+            try:
+                tables.append(self.query_one(tid, ReticumAnnounceTable))
+            except Exception:
+                pass
+        return tables
+
+    def _get_active_table(self) -> ReticumAnnounceTable | None:
+        """Get the announce table in the currently active tab."""
+        try:
+            tabs = self.query_one("#explore-tabs", TabbedContent)
+            active_id = tabs.active
+            # Map tab pane ID to table ID
+            table_map = {
+                "tab-lxmf": "#table-lxmf",
+                "tab-pages": "#table-pages",
+                "tab-infra": "#table-infra",
+                "tab-other": "#table-other",
+            }
+            table_id = table_map.get(active_id)
+            if table_id:
+                return self.query_one(table_id, ReticumAnnounceTable)
+        except Exception:
+            pass
+        return None
+
+    def _load_all_devices(self) -> list[MeshDevice]:
+        """Load and deduplicate all exploration devices, filtering LXMF shadows."""
+        try:
+            from styrened.services.node_store import get_node_store
+            stored_nodes = get_node_store().get_all_nodes()
+        except Exception:
+            stored_nodes = []
+
+        live_nodes = discover_devices()
+
+        all_devices_dict = {n.destination_hash: n for n in stored_nodes}
+        all_devices_dict.update({n.destination_hash: n for n in live_nodes})
+
+        styrene_identities = {
+            d.identity_hash
+            for d in all_devices_dict.values()
+            if d.device_type == DeviceType.STYRENE_NODE
+        }
+
+        return [
+            d for d in all_devices_dict.values()
+            if d.device_type in _EXPLORATION_TYPES
+            and d.identity_hash not in styrene_identities
+        ]
+
+    def _refresh_announce_tables(self) -> None:
+        """Load all devices once and distribute to category tables."""
+        devices = self._load_all_devices()
+        for table in self._get_all_tables():
+            table.load_from_devices(devices)
+        self._update_tab_labels()
+
+    def _update_tab_labels(self) -> None:
+        """Update tab labels with device counts."""
+        label_map = {
+            "#table-lxmf": ("tab-lxmf", "LXMF"),
+            "#table-pages": ("tab-pages", "Pages"),
+            "#table-infra": ("tab-infra", "Infra"),
+            "#table-other": ("tab-other", "Other"),
+        }
+        try:
+            tabs_widget = self.query_one("#explore-tabs", TabbedContent)
+            for table_id, (pane_id, base_label) in label_map.items():
+                try:
+                    table = self.query_one(table_id, ReticumAnnounceTable)
+                    count = table.device_count
+                    tab = tabs_widget.get_tab(pane_id)
+                    if count > 0:
+                        tab.label = f"{base_label} ({count})"
+                    else:
+                        tab.label = base_label
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        """Clear search bar when switching tabs.
+
+        Does NOT auto-focus the table — focus stays on the tab bar so
+        arrow keys continue navigating between tabs.  Press Tab to enter
+        the table content.
+        """
+        try:
+            search = self.query_one("#explore-search-bar", Input)
+            if not search.has_class("hidden"):
+                search.value = ""
+                for table in self._get_all_tables():
+                    table.set_filter("")
+        except Exception:
+            pass
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle DataTable enter key — navigate to device detail screen."""
@@ -381,20 +572,17 @@ class ExplorationScreen(Screen[None]):
         """Handle column header click — sort by that column."""
         column_key = str(event.column_key.value) if event.column_key else None
         if column_key and column_key in ReticumAnnounceTable.COLUMN_KEYS:
-            try:
-                table = self.query_one("#reticulum-announce-table", ReticumAnnounceTable)
+            # Use the specific table that emitted the event
+            table = event.data_table
+            if isinstance(table, ReticumAnnounceTable):
                 table.sort_by(column_key)
-            except Exception:
-                pass
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Handle search input changes — filter the table."""
+        """Handle search input changes — filter the active tab's table."""
         if event.input.id == "explore-search-bar":
-            try:
-                table = self.query_one("#reticulum-announce-table", ReticumAnnounceTable)
+            table = self._get_active_table()
+            if table:
                 table.set_filter(event.value)
-            except Exception:
-                pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle search input submitted — hide search, keep filter active."""
@@ -402,12 +590,17 @@ class ExplorationScreen(Screen[None]):
             self._hide_search()
 
     def _get_selected_identity(self) -> str | None:
-        """Get the identity of the currently selected row."""
-        table = self.query_one("#reticulum-announce-table", DataTable)
-        if table.cursor_row is not None:
-            cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
-            if cell_key and cell_key.row_key and cell_key.row_key.value != "-":
-                return str(cell_key.row_key.value)
+        """Get the identity of the currently selected row in the active tab."""
+        table = self._get_active_table()
+        if table and table.cursor_row is not None:
+            try:
+                cell_key = table.coordinate_to_cell_key(
+                    Coordinate(table.cursor_row, 0)
+                )
+                if cell_key and cell_key.row_key and cell_key.row_key.value != "-":
+                    return str(cell_key.row_key.value)
+            except Exception:
+                pass
         return None
 
     def action_show_search(self) -> None:
@@ -420,29 +613,24 @@ class ExplorationScreen(Screen[None]):
         """Dismiss search or pop screen."""
         search = self.query_one("#explore-search-bar", Input)
         if not search.has_class("hidden"):
-            # Clear filter and hide search
             search.value = ""
             self._hide_search()
-            try:
-                table = self.query_one("#reticulum-announce-table", ReticumAnnounceTable)
+            table = self._get_active_table()
+            if table:
                 table.set_filter("")
-            except Exception:
-                pass
         else:
             self.app.pop_screen()
 
     def _hide_search(self) -> None:
-        """Hide the search input and return focus to the table."""
+        """Hide the search input and return focus to the active tab's table."""
         search = self.query_one("#explore-search-bar", Input)
         search.add_class("hidden")
-        try:
-            table = self.query_one("#reticulum-announce-table", ReticumAnnounceTable)
+        table = self._get_active_table()
+        if table:
             table.focus()
-        except Exception:
-            pass
 
     def update_count(self, visible: int, total: int) -> None:
-        """Update the count indicator below the table."""
+        """Update the count indicator below the tabs."""
         try:
             count_widget = self.query_one("#explore-count", Static)
             if visible == total:
@@ -453,7 +641,7 @@ class ExplorationScreen(Screen[None]):
             pass
 
     def action_select_device(self) -> None:
-        """Handle device selection - navigate to device detail screen."""
+        """Handle device selection — navigate to device detail screen."""
         device_identity = self._get_selected_identity()
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
@@ -472,15 +660,43 @@ class ExplorationScreen(Screen[None]):
                 MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
             )
 
+    def action_preview_page(self) -> None:
+        """Load selected NomadNet node's index page in the inline browser."""
+        try:
+            tabs = self.query_one("#explore-tabs", TabbedContent)
+            if tabs.active != "tab-pages":
+                return
+        except Exception:
+            return
+
+        dest_hash = self._get_selected_identity()
+        if not dest_hash:
+            return
+
+        from styrened.tui.widgets.page_browser import PageBrowserWidget
+
+        try:
+            # Hide placeholder, show browser section
+            placeholder = self.query_one("#pages-browser-placeholder", Static)
+            placeholder.add_class("hidden")
+
+            browser_section = self.query_one("#pages-browser-section", Vertical)
+            browser_section.remove_class("hidden")
+
+            # Check if browser already exists
+            existing = browser_section.query(PageBrowserWidget)
+            if existing:
+                existing.first().set_destination(dest_hash)
+            else:
+                browser = PageBrowserWidget(
+                    destination_hash=dest_hash,
+                    classes="explore-inline-browser",
+                )
+                browser_section.mount(browser)
+        except Exception:
+            pass
+
     def action_refresh(self) -> None:
         """Refresh all data on the exploration screen."""
         self.notify("Refreshing...", title="Refresh")
-
-        # Refresh announce table
-        try:
-            table_widget = self.query_one(
-                "#reticulum-announce-table", ReticumAnnounceTable
-            )
-            table_widget.refresh_data()
-        except Exception:
-            pass
+        self._refresh_announce_tables()

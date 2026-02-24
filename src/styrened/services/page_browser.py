@@ -24,10 +24,12 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import RNS
+
+    from styrened.pages.directives import PageMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,8 @@ class PageResponse:
     content_length: int
     cache_ttl: int | None = None
     error_message: str | None = None
+    structured_data: dict[str, Any] | None = None
+    page_metadata: "PageMetadata | None" = None
 
 
 @dataclass
@@ -301,6 +305,19 @@ class PageBrowserService:
                 except ValueError:
                     pass
 
+        # Extract Styrene structured data if present
+        structured_data: dict[str, Any] | None = None
+        page_metadata: PageMetadata | None = None
+        try:
+            from styrened.pages.parser import parse_page_directives
+
+            parsed = parse_page_directives(content)
+            if parsed:
+                structured_data = parsed.data
+                page_metadata = parsed.metadata
+        except Exception as e:
+            logger.debug(f"Failed to parse page directives: {e}")
+
         # Update link usage
         if destination_hash in self._links:
             self._links[destination_hash].last_used = time.time()
@@ -313,6 +330,8 @@ class PageBrowserService:
             transfer_time=transfer_time,
             content_length=len(response_data) if isinstance(response_data, bytes) else len(content),
             cache_ttl=cache_ttl,
+            structured_data=structured_data,
+            page_metadata=page_metadata,
         )
 
     async def disconnect(self, destination_hash: str) -> bool:

@@ -515,3 +515,37 @@ class IPCBridge:
         client = await self._ensure_connected()
         async for evt_type, payload in client.iter_events(event_type):
             yield evt_type, payload
+
+    # -------------------------------------------------------------------------
+    # Terminal
+    # -------------------------------------------------------------------------
+
+    async def terminal_open(
+        self,
+        destination: str,
+        rows: int = 24,
+        cols: int = 80,
+        term_type: str = "xterm-256color",
+        shell: str | None = None,
+    ) -> dict[str, Any]:
+        """Open a terminal session to a remote node."""
+        return await self._call(
+            "terminal_open",
+            destination=destination,
+            rows=rows,
+            cols=cols,
+            term_type=term_type,
+            shell=shell,
+        )
+
+    async def terminal_input(self, session_id: str, data: bytes) -> None:
+        """Send input data to a terminal session."""
+        await self._call("terminal_input", session_id=session_id, data=data)
+
+    async def terminal_resize(self, session_id: str, rows: int, cols: int) -> None:
+        """Resize a terminal session."""
+        await self._call("terminal_resize", session_id=session_id, rows=rows, cols=cols)
+
+    async def terminal_close(self, session_id: str) -> None:
+        """Close a terminal session."""
+        await self._call("terminal_close", session_id=session_id)

@@ -6,9 +6,8 @@ Run with: pytest tests/bare-metal/test_mesh.py -v
 
 from __future__ import annotations
 
-import json
-
 import pytest
+
 from tests.harness.ssh import SSHHarness
 
 

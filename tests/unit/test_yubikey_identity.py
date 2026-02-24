@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from styrened.services.yubikey import (
-    FIDO2_AVAILABLE,
     SALT_ENCRYPT,
     SALT_SIGN,
     YubiKeyCredentialError,

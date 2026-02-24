@@ -464,8 +464,8 @@ class AutoReplyHandler:
                     peer_hash=peer_hash,
                     limit=chatbot_cfg.max_context_messages,
                 )
-                # get_messages returns newest-first, reverse for chronological order
-                for msg in reversed(history):
+                # get_messages returns oldest-first (chronological order)
+                for msg in history:
                     role = "assistant" if msg.is_outgoing else "user"
                     messages.append({"role": role, "content": msg.content})
             except Exception as e:

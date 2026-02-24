@@ -634,3 +634,63 @@ class TestIPCHandlersPageBrowser:
 
         assert isinstance(response, ErrorResponse)
         assert "destination_hash is required" in response.message
+
+
+class TestIPCHandlersPageServer:
+    """Tests for page server status handler."""
+
+    @pytest.mark.asyncio
+    async def test_handle_page_server_status_returns_error_when_daemon_none(self):
+        """QUERY_PAGE_SERVER_STATUS should return error when daemon is None."""
+        handlers = IPCHandlers(daemon=None)
+
+        from styrened.ipc.messages import QueryPageServerStatusRequest
+
+        request = QueryPageServerStatusRequest()
+        response = await handlers.handle_query_page_server_status(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Daemon not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_page_server_status_returns_error_when_service_none(self):
+        """QUERY_PAGE_SERVER_STATUS should return error when service is None."""
+        daemon = MockDaemon()
+        daemon._page_server_service = None
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import QueryPageServerStatusRequest
+
+        request = QueryPageServerStatusRequest()
+        response = await handlers.handle_query_page_server_status(request)
+
+        assert isinstance(response, ErrorResponse)
+        assert "Page server service not initialized" in response.message
+
+    @pytest.mark.asyncio
+    async def test_handle_page_server_status_returns_status(self):
+        """QUERY_PAGE_SERVER_STATUS should return service status."""
+        daemon = MockDaemon()
+
+        mock_svc = MagicMock()
+        mock_svc.is_started = True
+        mock_svc.owns_destination = False
+        mock_svc.pages_dir = "/tmp/pages"
+        mock_svc.static_pages = ["index.mu", "about.mu"]
+        mock_svc.registered_handlers = ["/page/styrene/status.mu"]
+        daemon._page_server_service = mock_svc
+
+        handlers = IPCHandlers(daemon=daemon)
+
+        from styrened.ipc.messages import QueryPageServerStatusRequest, ResultResponse
+
+        request = QueryPageServerStatusRequest()
+        response = await handlers.handle_query_page_server_status(request)
+
+        assert isinstance(response, ResultResponse)
+        assert response.data["enabled"] is True
+        assert response.data["started"] is True
+        assert response.data["owns_destination"] is False
+        assert response.data["pages_dir"] == "/tmp/pages"
+        assert response.data["static_pages"] == ["index.mu", "about.mu"]
+        assert response.data["registered_handlers"] == ["/page/styrene/status.mu"]

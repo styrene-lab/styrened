@@ -14,7 +14,7 @@ Daemon usage:
     # or run via: styrened command
 """
 
-__version__ = "0.10.4"
+__version__ = "0.10.5"
 
 # Path resolution
 from styrened import paths  # noqa: F401

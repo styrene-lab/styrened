@@ -4,8 +4,6 @@ import argparse
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from styrened.cli import cmd_identity_yubikey_derive, cmd_identity_yubikey_setup
 
 

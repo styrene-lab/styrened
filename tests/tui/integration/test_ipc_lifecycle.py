@@ -215,17 +215,17 @@ class TestLifecycleIPCIntegration:
 
         # Patch DaemonManager to use EXTERNAL mode pointing at our socket
         with (
-            patch("styrened.tui.services.daemon_manager.DaemonManager") as MockDM,
-            patch("styrened.tui.services.ipc_bridge.IPCBridge") as MockBridge,
+            patch("styrened.tui.services.daemon_manager.DaemonManager") as mock_dm_cls,
+            patch("styrened.tui.services.ipc_bridge.IPCBridge") as mock_bridge_cls,
         ):
             mock_dm = AsyncMock()
             mock_dm.ensure_running = AsyncMock(return_value=True)
             mock_dm.shutdown = AsyncMock()
-            MockDM.return_value = mock_dm
+            mock_dm_cls.return_value = mock_dm
 
             # Use real IPCBridge pointed at the socket
             real_bridge = IPCBridge(socket_path=socket_path)
-            MockBridge.return_value = real_bridge
+            mock_bridge_cls.return_value = real_bridge
 
             result = await lifecycle.initialize_async()
 
