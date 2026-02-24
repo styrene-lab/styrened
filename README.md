@@ -38,6 +38,7 @@ Headless Styrene daemon for edge deployments on Reticulum mesh networks.
 ### PyPI
 
 ```bash
+pip install styrene             # Full stack: daemon + TUI (meta-package)
 pip install styrened            # Daemon only (no UI dependencies)
 pip install styrened[tui]       # Daemon + Terminal UI
 ```
