@@ -844,10 +844,19 @@ CommandWidget .cmd-log-content {
     width: 100%;
 }
 
-CommandWidget #cmd-input-row {
-    height: 3;
-    dock: bottom;
+/* === DeviceStatusWidget Layout === */
+.status-updated-ts {
+    height: 1;
     padding: 0 1;
+    color: $panel;
+    text-align: right;
+}
+
+.status-section-header {
+    height: 1;
+    padding: 0 1;
+    color: $primary;
+    margin-top: 1;
 }
 
 /* === TerminalWidget Layout === */
