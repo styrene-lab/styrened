@@ -238,6 +238,35 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         yield Footer()
 
+    def on_mount(self) -> None:
+        """Auto-fetch status when the screen mounts if no initial data."""
+        if self.device and self.initial_status is None:
+            self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
+
+    async def _auto_fetch_status(self) -> None:
+        """Silently fetch status on mount (no toast on success)."""
+        try:
+            status_widget = self.query_one("#status-widget", DeviceStatusWidget)
+        except Exception:
+            return
+
+        status_widget.loading = True
+        status_widget.error = None
+
+        try:
+            app: StyreneApp = self.app  # type: ignore[assignment]
+            response = await app.rpc_client.call_status(
+                self.device_identity,
+                timeout=30.0,
+            )
+            status_widget.status = response
+            status_widget.error = None
+        except Exception:
+            # Silent failure on auto-fetch — user can manually refresh
+            pass
+        finally:
+            status_widget.loading = False
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press events.
 

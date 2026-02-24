@@ -5,9 +5,8 @@ Commands are restricted to a server-side whitelist discovered via ping.
 
 Features:
 - Ping: Measures RTT and populates available_commands from server whitelist
-- Available commands: Displayed as clickable labels, filtered via shutil.which()
+- Available commands: Displayed as informational text (server capabilities)
 - Presets: Common operation combos filtered against available_commands
-- Command history: Up/down arrow cycles through in-session history
 - Reboot: Double-tap confirmation with 3s auto-cancel
 - Session log: Scrollable output with color-coded exit codes
 - Dual-mode routing: IPCBridge first, falls back to app.rpc_client
@@ -19,17 +18,20 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
-from textual.binding import Binding, BindingType
+from textual.binding import BindingType
 from textual.containers import Horizontal, VerticalScroll
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Static
 
 logger = logging.getLogger(__name__)
 
 # Reboot confirmation timeout (seconds)
 _REBOOT_CONFIRM_TIMEOUT = 3.0
+
+# Update confirmation timeout (seconds)
+_UPDATE_CONFIRM_TIMEOUT = 3.0
 
 # Fleet operation presets
 FLEET_OP_PRESETS: list[tuple[str, str]] = [
@@ -63,17 +65,13 @@ class CommandWidget(Widget):
     RPC — not an interactive shell. Commands are restricted to a server-side
     whitelist discovered via ping.
 
-    Provides a toolbar, available command display, presets, session log,
-    and command input with history navigation.
+    Provides a toolbar, available command display, presets, and session log.
 
     Attributes:
         device_identity: Reticulum identity hash of target device.
     """
 
-    BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("up", "history_prev", "Previous", show=False),
-        Binding("down", "history_next", "Next", show=False),
-    ]
+    BINDINGS: ClassVar[list[BindingType]] = []
 
     executing: reactive[bool] = reactive(False)
 
@@ -86,11 +84,11 @@ class CommandWidget(Widget):
         super().__init__(**kwargs)
         self.device_identity = device_identity
         self._available_commands: list[str] = initial_available_commands or []
-        self._command_history: list[str] = []
-        self._history_index: int = -1
         self._output_entries: list[OutputEntry] = []
         self._reboot_armed: bool = False
         self._reboot_confirm_timer: Timer | None = None
+        self._update_armed: bool = False
+        self._update_confirm_timer: Timer | None = None
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -114,10 +112,11 @@ class CommandWidget(Widget):
         with Horizontal(id="cmd-toolbar"):
             yield Button("Ping", id="cmd-ping", variant="default")
             yield Button("Reboot...", id="cmd-reboot", classes="-danger")
+            yield Button("Update...", id="cmd-update", classes="-danger")
             yield Button("Clear", id="cmd-clear", variant="default")
             yield Static("", id="cmd-status", classes="cmd-status-text")
 
-        # Available commands
+        # Available commands (informational)
         yield Static("", id="cmd-available", classes="cmd-available-bar")
 
         # Presets
@@ -127,11 +126,6 @@ class CommandWidget(Widget):
         # Session log
         with VerticalScroll(id="cmd-session-log"):
             yield Static("", id="cmd-log-content", classes="cmd-log-content")
-
-        # Input row (docked bottom)
-        with Horizontal(id="cmd-input-row"):
-            yield Input(placeholder="Enter whitelisted command...", id="cmd-input")
-            yield Button("Execute", id="cmd-execute", variant="primary")
 
     def on_mount(self) -> None:
         """Populate available commands and presets on mount."""
@@ -151,10 +145,7 @@ class CommandWidget(Widget):
         if not self._available_commands:
             label.update("[dim]No available commands yet — ping to discover server whitelist[/]")
         else:
-            tags = "  ".join(
-                f"[@click=cmd_fill('{cmd}')]{cmd}[/]"
-                for cmd in self._available_commands
-            )
+            tags = "  ".join(self._available_commands)
             label.update(f"[bold]Available:[/] {tags}")
 
     def _refresh_presets(self) -> None:
@@ -240,12 +231,12 @@ class CommandWidget(Widget):
         """Handle button press events."""
         button_id = str(event.button.id)
 
-        if button_id == "cmd-execute":
-            await self._execute_from_input()
-        elif button_id == "cmd-ping":
+        if button_id == "cmd-ping":
             self.run_worker(self._do_ping(), name="ping")
         elif button_id == "cmd-reboot":
             await self._handle_reboot()
+        elif button_id == "cmd-update":
+            await self._handle_update()
         elif button_id == "cmd-clear":
             self._output_entries.clear()
             self._refresh_log()
@@ -256,52 +247,6 @@ class CommandWidget(Widget):
                 self._execute_command_string(event.button.name),
                 name="preset-exec",
             )
-
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter key in the input field."""
-        if str(event.input.id) == "cmd-input":
-            await self._execute_from_input()
-
-    def action_cmd_fill(self, command: str) -> None:
-        """Fill the input field with a command (from clickable labels)."""
-        try:
-            cmd_input = self.query_one("#cmd-input", Input)
-            cmd_input.value = command
-            cmd_input.focus()
-        except Exception:
-            pass
-
-    def action_history_prev(self) -> None:
-        """Navigate to previous command in history."""
-        if not self._command_history:
-            return
-        try:
-            cmd_input = self.query_one("#cmd-input", Input)
-        except Exception:
-            return
-
-        if self._history_index == -1:
-            self._history_index = len(self._command_history) - 1
-        elif self._history_index > 0:
-            self._history_index -= 1
-
-        cmd_input.value = self._command_history[self._history_index]
-
-    def action_history_next(self) -> None:
-        """Navigate to next command in history."""
-        if not self._command_history or self._history_index == -1:
-            return
-        try:
-            cmd_input = self.query_one("#cmd-input", Input)
-        except Exception:
-            return
-
-        if self._history_index < len(self._command_history) - 1:
-            self._history_index += 1
-            cmd_input.value = self._command_history[self._history_index]
-        else:
-            self._history_index = -1
-            cmd_input.value = ""
 
     # -------------------------------------------------------------------------
     # Reboot double-tap confirmation
@@ -340,32 +285,44 @@ class CommandWidget(Widget):
         self._set_status("")
 
     # -------------------------------------------------------------------------
-    # Command execution
+    # Update double-tap confirmation
     # -------------------------------------------------------------------------
 
-    async def _execute_from_input(self) -> None:
-        """Execute command from the input field."""
+    async def _handle_update(self) -> None:
+        """Handle update button — requires double-tap within timeout."""
+        if self._update_armed:
+            # Second tap — execute update
+            self._disarm_update()
+            self.run_worker(self._do_update(), name="update")
+        else:
+            # First tap — arm
+            self._update_armed = True
+            try:
+                btn = self.query_one("#cmd-update", Button)
+                btn.label = "CONFIRM?"
+            except Exception:
+                pass
+            self._set_status("[bold red]Press Update again within 3s to confirm[/]")
+            self._update_confirm_timer = self.set_timer(
+                _UPDATE_CONFIRM_TIMEOUT, self._disarm_update
+            )
+
+    def _disarm_update(self) -> None:
+        """Cancel update confirmation state."""
+        self._update_armed = False
+        if self._update_confirm_timer is not None:
+            self._update_confirm_timer.stop()
+            self._update_confirm_timer = None
         try:
-            cmd_input = self.query_one("#cmd-input", Input)
-            command_string = cmd_input.value.strip()
+            btn = self.query_one("#cmd-update", Button)
+            btn.label = "Update..."
         except Exception:
-            return
+            pass
+        self._set_status("")
 
-        if not command_string:
-            return
-
-        # Add to history
-        if not self._command_history or self._command_history[-1] != command_string:
-            self._command_history.append(command_string)
-        self._history_index = -1
-
-        # Clear input
-        cmd_input.value = ""
-
-        self.run_worker(
-            self._execute_command_string(command_string),
-            name="exec-cmd",
-        )
+    # -------------------------------------------------------------------------
+    # Command execution
+    # -------------------------------------------------------------------------
 
     async def _execute_command_string(self, command_string: str) -> None:
         """Execute a command string via RPC (IPC bridge or legacy client)."""
@@ -545,3 +502,67 @@ class CommandWidget(Widget):
                 entry_type="reboot",
             ))
             self._set_status(f"[red]Reboot failed: {e}[/]")
+
+    async def _do_update(self) -> None:
+        """Send self-update command to the device."""
+        self._set_status("[dim]Sending self-update...[/]")
+
+        try:
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                result = await bridge.self_update_device(
+                    destination=self.device_identity,
+                    timeout=120.0,
+                )
+                if result.success:
+                    self._append_output(OutputEntry(
+                        command="update",
+                        exit_code=0,
+                        stdout=result.message,
+                        entry_type="system",
+                    ))
+                else:
+                    self._append_output(OutputEntry(
+                        command="update",
+                        exit_code=1,
+                        stderr=result.message,
+                        entry_type="system",
+                    ))
+            else:
+                rpc = self._rpc_client
+                if rpc is None:
+                    self._append_output(OutputEntry(
+                        command="update",
+                        exit_code=1,
+                        stderr="No RPC client available",
+                        entry_type="system",
+                    ))
+                    return
+                result = await rpc.call_self_update(
+                    self.device_identity, timeout=120.0,
+                )
+                if result.success:
+                    self._append_output(OutputEntry(
+                        command="update",
+                        exit_code=0,
+                        stdout=result.message,
+                        entry_type="system",
+                    ))
+                else:
+                    self._append_output(OutputEntry(
+                        command="update",
+                        exit_code=1,
+                        stderr=result.message,
+                        entry_type="system",
+                    ))
+
+            self._set_status("")
+
+        except Exception as e:
+            self._append_output(OutputEntry(
+                command="update",
+                exit_code=1,
+                stderr=str(e),
+                entry_type="system",
+            ))
+            self._set_status(f"[red]Update failed: {e}[/]")
