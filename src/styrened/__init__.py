@@ -95,7 +95,6 @@ from styrened.rpc import (
     RPCServer,
     RPCTimeoutError,
     RPCTransportError,
-    SelfUpdateResult,
     # Response types (for type hints and deserialization)
     StatusResponse,
     UpdateConfigResult,
@@ -128,7 +127,6 @@ __all__ = [
     "StatusResponse",
     "ExecResult",
     "RebootResult",
-    "SelfUpdateResult",
     "UpdateConfigResult",
     # RPC Errors
     "RPCError",
