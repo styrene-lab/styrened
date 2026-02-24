@@ -259,6 +259,7 @@ class ControlServer:
             IPCMessageType.QUERY_PAGE_SERVER_STATUS: self._handlers.handle_query_page_server_status,
             IPCMessageType.CMD_PAGE_DISCONNECT: self._handlers.handle_cmd_page_disconnect,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
+            IPCMessageType.CMD_SELF_UPDATE: self._handlers.handle_cmd_self_update,
             IPCMessageType.CMD_REMOTE_INBOX: self._handlers.handle_cmd_remote_inbox,
             IPCMessageType.CMD_REMOTE_MESSAGES: self._handlers.handle_cmd_remote_messages,
             # Terminal handlers (input/resize/close dispatched normally;

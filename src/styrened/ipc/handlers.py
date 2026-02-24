@@ -45,6 +45,7 @@ from styrened.ipc.messages import (
     CmdRemoteMessagesRequest,
     CmdRemoveContactRequest,
     CmdRetryMessageRequest,
+    CmdSelfUpdateRequest,
     CmdSendChatRequest,
     CmdSendRequest,
     CmdSetAutoReplyRequest,
@@ -72,6 +73,7 @@ from styrened.ipc.messages import (
     RebootResultInfo,
     RemoteStatusInfo,
     ResultResponse,
+    SelfUpdateResultInfo,
 )
 
 if TYPE_CHECKING:
@@ -596,6 +598,53 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error rebooting device: {e}")
             return ErrorResponse.internal_error(f"Failed to reboot device: {e}")
+
+    async def handle_cmd_self_update(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SELF_UPDATE request.
+
+        Triggers self-update on a remote device via RPC.
+
+        Args:
+            request: CmdSelfUpdateRequest instance.
+
+        Returns:
+            ResultResponse with update result.
+        """
+        req = (
+            request
+            if isinstance(request, CmdSelfUpdateRequest)
+            else CmdSelfUpdateRequest()
+        )
+
+        if not req.destination:
+            return ErrorResponse.invalid_request("destination is required")
+
+        try:
+            err = self._check_rpc_client()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._rpc_client is not None
+
+            result = await self.daemon._rpc_client.call_self_update(
+                destination=req.destination,
+                version=req.version,
+                timeout=req.timeout,
+            )
+
+            update_info = SelfUpdateResultInfo(
+                success=result.success,
+                message=result.message,
+                old_version=result.old_version,
+                new_version=result.new_version,
+            )
+
+            return ResultResponse(data=update_info.to_dict())
+
+        except TimeoutError:
+            return ErrorResponse.timeout(f"Self-update request timed out after {req.timeout}s")
+        except Exception as e:
+            logger.exception(f"Error updating device: {e}")
+            return ErrorResponse.internal_error(f"Failed to update device: {e}")
 
     # -------------------------------------------------------------------------
     # Remote inbox handlers (RPC over LXMF)

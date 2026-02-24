@@ -480,6 +480,23 @@ class CmdRebootDeviceRequest(IPCRequest):
 
 
 @dataclass
+class CmdSelfUpdateRequest(IPCRequest):
+    """Trigger self-update on a remote device via RPC."""
+
+    MSG_TYPE = IPCMessageType.CMD_SELF_UPDATE
+    destination: str = ""
+    version: str | None = None
+    timeout: float = 120.0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination": self.destination,
+            "version": self.version,
+            "timeout": self.timeout,
+        }
+
+
+@dataclass
 class CmdRemoteInboxRequest(IPCRequest):
     """Query inbox (conversation list) on a remote node via RPC."""
 
@@ -966,6 +983,33 @@ class RebootResultInfo:
 
 
 @dataclass
+class SelfUpdateResultInfo:
+    """Remote self-update result."""
+
+    success: bool
+    message: str
+    old_version: str
+    new_version: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "message": self.message,
+            "old_version": self.old_version,
+            "new_version": self.new_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SelfUpdateResultInfo":
+        return cls(
+            success=data.get("success", False),
+            message=data.get("message", ""),
+            old_version=data.get("old_version", ""),
+            new_version=data.get("new_version"),
+        )
+
+
+@dataclass
 class MessageEventPayload:
     """Payload for EVENT_MESSAGE notifications.
 
@@ -1141,6 +1185,12 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             destination=payload.get("destination", ""),
             delay=payload.get("delay", 0),
             timeout=payload.get("timeout", 10.0),
+        )
+    elif msg_type == IPCMessageType.CMD_SELF_UPDATE:
+        return CmdSelfUpdateRequest(
+            destination=payload.get("destination", ""),
+            version=payload.get("version"),
+            timeout=payload.get("timeout", 120.0),
         )
     elif msg_type == IPCMessageType.CMD_REMOTE_INBOX:
         return CmdRemoteInboxRequest(
