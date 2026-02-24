@@ -56,6 +56,7 @@ def pytest_runtest_call(item: pytest.Item) -> None:
             "-v",
             "--tb=short",
             "-x",  # Stop on first failure for clarity
+            "-p", "no:xdist",  # Prevent nested parallelism
         ],
         capture_output=True,
         text=True,

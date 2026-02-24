@@ -13,6 +13,7 @@ import pytest
 from styrened.rpc.messages import (
     ExecCommand,
     ExecResult,
+    SelfUpdateResult,
     StatusRequest,
     StatusResponse,
 )
@@ -287,3 +288,81 @@ class TestExecResult:
 
         assert restored.stdout == "line 1\nline 2\nline 3\n"
         assert restored.stderr == "warning 1\nwarning 2\n"
+
+
+class TestSelfUpdateResult:
+    """Tests for SelfUpdateResult message model."""
+
+    def test_self_update_result_to_dict(self) -> None:
+        """Test SelfUpdateResult serializes to correct dict."""
+        msg = SelfUpdateResult(
+            success=True,
+            message="Updated from 0.10.5 to 0.10.6",
+            old_version="0.10.5",
+            new_version="0.10.6",
+        )
+        data = msg.to_dict()
+
+        assert data["type"] == "self_update_result"
+        assert data["success"] is True
+        assert data["message"] == "Updated from 0.10.5 to 0.10.6"
+        assert data["old_version"] == "0.10.5"
+        assert data["new_version"] == "0.10.6"
+
+    def test_self_update_result_from_dict(self) -> None:
+        """Test SelfUpdateResult deserializes from dict."""
+        data = {
+            "success": True,
+            "message": "Updated",
+            "old_version": "0.10.5",
+            "new_version": "0.10.6",
+        }
+        msg = SelfUpdateResult.from_dict(data)
+
+        assert isinstance(msg, SelfUpdateResult)
+        assert msg.success is True
+        assert msg.old_version == "0.10.5"
+        assert msg.new_version == "0.10.6"
+
+    def test_self_update_result_round_trip(self) -> None:
+        """Test SelfUpdateResult serialization round-trip."""
+        original = SelfUpdateResult(
+            success=True,
+            message="Updated from 0.10.5 to 0.10.6",
+            old_version="0.10.5",
+            new_version="0.10.6",
+        )
+        data = original.to_dict()
+        restored = SelfUpdateResult.from_dict(data)
+
+        assert restored.success == original.success
+        assert restored.message == original.message
+        assert restored.old_version == original.old_version
+        assert restored.new_version == original.new_version
+
+    def test_self_update_result_failure(self) -> None:
+        """Test SelfUpdateResult failure with no new_version."""
+        msg = SelfUpdateResult(
+            success=False,
+            message="pip install failed: package not found",
+            old_version="0.10.5",
+        )
+        data = msg.to_dict()
+
+        assert data["success"] is False
+        assert data["new_version"] is None
+
+        restored = SelfUpdateResult.from_dict(data)
+        assert restored.success is False
+        assert restored.new_version is None
+
+    def test_self_update_result_missing_new_version(self) -> None:
+        """Test SelfUpdateResult deserializes when new_version is missing."""
+        data = {
+            "success": False,
+            "message": "Failed",
+            "old_version": "0.10.5",
+        }
+        msg = SelfUpdateResult.from_dict(data)
+
+        assert msg.new_version is None
