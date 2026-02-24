@@ -62,45 +62,6 @@ class TestOutputEntry:
         assert entry.entry_type == "system"
 
 
-class TestCommandHistory:
-    """Tests for command history navigation."""
-
-    def test_empty_history(self):
-        """Widget starts with empty history."""
-        widget = CommandWidget.__new__(CommandWidget)
-        widget._command_history = []
-        widget._history_index = -1
-        assert widget._command_history == []
-        assert widget._history_index == -1
-
-    def test_history_index_initial(self):
-        """History index starts at -1 (current input)."""
-        widget = CommandWidget.__new__(CommandWidget)
-        widget._history_index = -1
-        assert widget._history_index == -1
-
-    def test_history_tracks_commands(self):
-        """Commands are tracked in order."""
-        history: list[str] = []
-        history.append("uptime")
-        history.append("df -h")
-        history.append("free -h")
-        assert history == ["uptime", "df -h", "free -h"]
-
-    def test_history_no_duplicate_consecutive(self):
-        """Duplicate consecutive commands should not be added."""
-        history: list[str] = []
-
-        def add(cmd: str) -> None:
-            if not history or history[-1] != cmd:
-                history.append(cmd)
-
-        add("uptime")
-        add("uptime")
-        add("df -h")
-        assert history == ["uptime", "df -h"]
-
-
 class TestPresetFiltering:
     """Tests for preset command filtering against available_commands."""
 
@@ -164,6 +125,33 @@ class TestRebootConfirmation:
         assert widget._reboot_armed is False
 
 
+class TestUpdateConfirmation:
+    """Tests for update double-tap confirmation state."""
+
+    def test_update_initially_disarmed(self):
+        """Update starts disarmed."""
+        widget = CommandWidget.__new__(CommandWidget)
+        widget._update_armed = False
+        widget._update_confirm_timer = None
+        assert widget._update_armed is False
+        assert widget._update_confirm_timer is None
+
+    def test_update_arm_state(self):
+        """Arming sets _update_armed to True."""
+        widget = CommandWidget.__new__(CommandWidget)
+        widget._update_armed = True
+        assert widget._update_armed is True
+
+    def test_update_disarm(self):
+        """Disarming resets state."""
+        widget = CommandWidget.__new__(CommandWidget)
+        widget._update_armed = True
+        # Simulate disarm
+        widget._update_armed = False
+        widget._update_confirm_timer = None
+        assert widget._update_armed is False
+
+
 class TestSessionLog:
     """Tests for session log accumulation."""
 
@@ -195,16 +183,14 @@ class TestCommandWidgetInit:
         widget = CommandWidget.__new__(CommandWidget)
         widget.device_identity = "abc123"
         widget._available_commands = []
-        widget._command_history = []
-        widget._history_index = -1
         widget._output_entries = []
         widget._reboot_armed = False
         widget._reboot_confirm_timer = None
 
         assert widget.device_identity == "abc123"
         assert widget._available_commands == []
-        assert widget._command_history == []
-        assert widget._history_index == -1
+        assert widget._output_entries == []
+        assert widget._reboot_armed is False
 
     def test_initial_available_commands(self):
         """Widget accepts initial available commands."""

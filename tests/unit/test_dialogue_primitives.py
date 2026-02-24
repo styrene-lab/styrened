@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import MagicMock
+import types
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from tests.dialogues.models import (
     DialogueScript,
@@ -31,6 +34,29 @@ from tests.dialogues.primitives import (
 )
 from tests.dialogues.results import DialogueResult, OvernightSummary, TurnResult
 from tests.harness.base import CommandResult, ExecutionBackend, NodeInfo
+
+
+@pytest.fixture()
+def _fast_clock():
+    """Replace time.sleep/time.time in primitives with an instant fake clock.
+
+    time.sleep(N) advances the clock by N seconds without waiting.
+    time.time() auto-advances by 1ms per call so durations are non-zero.
+    This eliminates real waits in polling loops and retry backoffs.
+    """
+    _t = [time.time()]
+
+    def fake_time():
+        _t[0] += 0.001  # 1ms per call so elapsed durations are non-zero
+        return _t[0]
+
+    def fake_sleep(seconds):
+        _t[0] += seconds
+
+    fake_mod = types.SimpleNamespace(time=fake_time, sleep=fake_sleep)
+
+    with patch("tests.dialogues.primitives.time", fake_mod):
+        yield
 
 
 def _make_harness(
@@ -162,6 +188,7 @@ class TestQueryMessagesViaCli:
         assert result == []
 
 
+@pytest.mark.usefixtures("_fast_clock")
 class TestVerifyMessageReceived:
     """Tests for verify_message_received."""
 
@@ -244,6 +271,7 @@ class TestVerifyMessageReceived:
         assert found is False
 
 
+@pytest.mark.usefixtures("_fast_clock")
 class TestSendAndVerify:
     """Tests for send_and_verify."""
 
@@ -313,6 +341,7 @@ class TestSendAndVerify:
         assert "timed out" in result.error.lower()
 
 
+@pytest.mark.usefixtures("_fast_clock")
 class TestSendAndVerifyRetries:
     """Tests for send_and_verify retry logic."""
 
@@ -448,6 +477,7 @@ class TestEnsureDaemonsHealthy:
         assert result.restarted == set()
 
 
+@pytest.mark.usefixtures("_fast_clock")
 class TestExecuteDialogue:
     """Tests for execute_dialogue."""
 
@@ -574,19 +604,18 @@ class TestExecuteDialogue:
         harness = _make_harness(run_styrened_return=_failure_result())
         script = self._make_script(turns=1)
 
-        before = time.time()
         result = execute_dialogue(
             harness, script, "node-a", "node-b",
             "id_a", "id_b", "lxmf_a", "lxmf_b",
             cycle_index=5,
         )
-        after = time.time()
 
         assert result.cycle_index == 5
-        assert before <= result.started_at <= after
-        assert result.started_at <= result.completed_at <= after
+        assert result.started_at > 0
+        assert result.started_at <= result.completed_at
 
 
+@pytest.mark.usefixtures("_fast_clock")
 class TestExecuteMultiNodeDialogueTurn:
     """Tests for execute_multi_node_dialogue_turn."""
 
@@ -662,6 +691,7 @@ class TestExecuteMultiNodeDialogueTurn:
         assert "id3" in captured_calls[0][1]
 
 
+@pytest.mark.usefixtures("_fast_clock")
 class TestExecuteMultiNodeDialogue:
     """Tests for execute_multi_node_dialogue."""
 
@@ -771,16 +801,14 @@ class TestExecuteMultiNodeDialogue:
         node_identities = {"n1": "id1", "n2": "id2"}
         lxmf_hashes = {("n1", "n2"): "h12", ("n2", "n1"): "h21"}
 
-        before = time.time()
         result = execute_multi_node_dialogue(
             harness, script, role_to_node, node_identities, lxmf_hashes,
             cycle_index=3,
         )
-        after = time.time()
 
         assert result.cycle_index == 3
-        assert before <= result.started_at <= after
-        assert result.started_at <= result.completed_at <= after
+        assert result.started_at > 0
+        assert result.started_at <= result.completed_at
 
 
 class TestResolveMultiNodeLxmfHashes:
