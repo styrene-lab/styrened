@@ -42,9 +42,6 @@ from styrened.tui.models.hardware import (
     NetworkInterfaceType,
     SystemInfo,
 )
-from styrened.tui.models.profiles import Profile
-from styrened.tui.models.roles import Role
-
 __all__ = [
     "AdvancedConfig",
     "Base",
@@ -64,14 +61,12 @@ __all__ = [
     "Message",
     "NetworkInterface",
     "NetworkInterfaceType",
-    "Profile",
     "ProvisioningDefaults",
     "ReticulumConfig",
     "ReticulumIdentity",
     "ReticulumInterface",
     "ReticulumNotConfiguredError",
     "ReticulumStateConfig",
-    "Role",
     "StatusResponse",
     "StyreneConfig",
     "SystemInfo",

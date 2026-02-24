@@ -4,6 +4,7 @@ Extracted from styrene-edge forge/models/ with path parameterization
 for portability outside the edge repo.
 """
 
+import importlib.resources
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -284,6 +285,35 @@ def load_forge_config(path: Path | None = None) -> ForgeConfig:
 # ---------------------------------------------------------------------------
 # Device catalog
 # ---------------------------------------------------------------------------
+
+
+def get_device_catalog_path() -> Path:
+    """Resolve path to devices.yaml catalog.
+
+    Checks ``~/.config/styrene/devices.yaml`` first (user override),
+    then falls back to the bundled package data.
+
+    Returns:
+        Path to the devices.yaml file.
+
+    Raises:
+        FileNotFoundError: If no catalog file can be found.
+    """
+    # User override
+    user_path = Path.home() / ".config" / "styrene" / "devices.yaml"
+    if user_path.exists():
+        return user_path
+
+    # Bundled package data
+    try:
+        ref = importlib.resources.files("styrened.tui.forge") / "data" / "devices.yaml"
+        with importlib.resources.as_file(ref) as p:
+            if p.exists():
+                return Path(p)
+    except (ModuleNotFoundError, FileNotFoundError, TypeError):
+        pass
+
+    raise FileNotFoundError("No devices.yaml catalog found (checked user config and package data)")
 
 
 def _parse_device(dev_id: str, data: dict) -> DeviceProfile:

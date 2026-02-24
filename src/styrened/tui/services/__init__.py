@@ -4,14 +4,6 @@ This package contains service modules that handle business logic,
 data loading, and external interactions.
 """
 
-from styrened.tui.services.catalog import (
-    Catalog,
-    load_catalog,
-    query_hardware,
-    query_profiles,
-    query_roles,
-    validate_profile_hardware,
-)
 from styrened.tui.services.config import (
     config_exists,
     create_default_config,
@@ -54,8 +46,6 @@ from styrened.tui.services.reticulum import (
 )
 
 __all__ = [
-    # Catalog service
-    "Catalog",
     # Fleet service
     "FleetInventoryError",
     "InventoryLoadError",
@@ -86,15 +76,10 @@ __all__ = [
     "get_reticulum_status",
     "get_system_info",
     "is_reticulum_configured",
-    "load_catalog",
     "load_config",
     "load_inventory",
-    "query_hardware",
-    "query_profiles",
-    "query_roles",
     "save_config",
     "save_inventory",
     "update_device_status",
     "validate_config",
-    "validate_profile_hardware",
 ]

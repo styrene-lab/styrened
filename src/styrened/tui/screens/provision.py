@@ -1,35 +1,119 @@
-"""Provisioning screen."""
+"""Provisioning screen — forge pipeline integration.
 
+End-to-end SD/USB flashing from device catalog selection through
+forge pipeline execution and post-flash mesh detection.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
 from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
+from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import Button, Static
+from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.worker import Worker
 
-from styrened.tui.models.device_hardware import Hardware
-from styrened.tui.models.profiles import Profile
-from styrened.tui.services.catalog import load_catalog, query_hardware, query_profiles
-from styrened.tui.services.provisioner import provision_device
-from styrened.tui.services.storage import StorageDevice, detect_storage
+from styrened.tui.forge.models import (
+    DeviceProfile,
+    DiskInfo,
+    FlashTarget,
+    ForgeConfig,
+    MediaEvent,
+    load_device_catalog,
+    load_forge_config,
+)
 from styrened.tui.widgets.config_form import ConfigForm
-from styrened.tui.widgets.hardware_picker import HardwarePicker
-from styrened.tui.widgets.profile_picker import ProfilePicker
-from styrened.tui.widgets.progress_panel import ProgressPanel
-from styrened.tui.widgets.storage_picker import StoragePicker
+from styrened.tui.widgets.forge_log import ForgeLog
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
+
+
+# ---------------------------------------------------------------------------
+# Device catalog table
+# ---------------------------------------------------------------------------
+
+
+class DeviceCatalogTable(DataTable[str]):
+    """Device selection table loaded from devices.yaml catalog."""
+
+    def on_mount(self) -> None:
+        self.add_columns("NAME", "MODEL", "ARCH", "MEDIA", "SPECS")
+        self.cursor_type = "row"
+
+    def load_catalog(self, devices: dict[str, DeviceProfile]) -> None:
+        """Populate the table from a device catalog dict."""
+        self.clear()
+        cascade = get_color_cascade()
+
+        for dev_id, dev in devices.items():
+            arch_color = cascade.medium if dev.arch == "aarch64" else cascade.dim
+            media_color = cascade.medium if dev.media_target == "sd" else cascade.dim
+            specs_summary = f"{dev.specs.cpu}, {dev.specs.ram_mb}MB"
+
+            self.add_row(
+                f"[{cascade.bright}]{dev.label}[/]",
+                f"[{cascade.dim}]{dev.model}[/]",
+                f"[{arch_color}]{dev.arch}[/]",
+                f"[{media_color}]{dev.media_target.upper()}[/]",
+                f"[{cascade.dim}]{specs_summary}[/]",
+                key=dev_id,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Disk detection table
+# ---------------------------------------------------------------------------
+
+
+class DiskDetectTable(DataTable[str]):
+    """External disk listing from platform detection."""
+
+    def on_mount(self) -> None:
+        self.add_columns("DEVICE", "NAME", "SIZE", "TYPE")
+        self.cursor_type = "row"
+
+    def load_disks(self, disks: list[DiskInfo]) -> None:
+        """Populate from disk detection results."""
+        self.clear()
+        cascade = get_color_cascade()
+
+        if not disks:
+            self.add_row(
+                f"[{cascade.dim}]—[/]",
+                f"[{cascade.dim}]No removable media detected[/]",
+                f"[{cascade.dim}]—[/]",
+                f"[{cascade.dim}]—[/]",
+            )
+            return
+
+        for disk in disks:
+            type_color = cascade.medium if disk.media_type == "SD" else cascade.dim
+            self.add_row(
+                f"[{cascade.bright}]{disk.device}[/]",
+                f"[{cascade.dim}]{disk.name}[/]",
+                f"[{cascade.dim}]{disk.size}[/]",
+                f"[{type_color}]{disk.media_type}[/]",
+                key=disk.device,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Provision screen
+# ---------------------------------------------------------------------------
 
 
 class ProvisionScreen(Screen[None]):
-    """Screen for device provisioning workflow.
+    """Device provisioning screen with progressive disclosure.
 
-    Provides a complete provisioning UI with profile, hardware, storage selection,
-    configuration input, and progress tracking.
+    Flow: Select device → Configure → Confirm → Flash → Mesh watch
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back", show=True),
+        Binding("r", "refresh_disks", "Refresh Disks", show=True),
     ]
 
     CSS = """
@@ -37,270 +121,414 @@ class ProvisionScreen(Screen[None]):
         background: $surface;
     }
 
-    ProvisionScreen .main-container {
-        width: 100%;
-        height: 100%;
+    #provision-container {
+        height: 1fr;
         padding: 1;
     }
 
-    ProvisionScreen .selection-panel {
-        width: 1fr;
-        height: 100%;
-    }
-
-    ProvisionScreen .left-column {
-        width: 50%;
-        height: 100%;
-    }
-
-    ProvisionScreen .right-column {
-        width: 50%;
-        height: 100%;
-    }
-
-    ProvisionScreen .summary-panel {
+    #device-panel {
         height: auto;
-        border: solid $primary;
-        padding: 1;
-        margin-top: 1;
+        max-height: 50%;
     }
 
-    ProvisionScreen .summary-title {
-        color: $accent;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    ProvisionScreen .summary-item {
-        color: $text;
-        margin-bottom: 0;
-    }
-
-    ProvisionScreen .actions {
+    #device-catalog-table {
         height: auto;
-        layout: horizontal;
-        margin-top: 1;
+        max-height: 16;
     }
 
-    ProvisionScreen Button {
-        margin-right: 1;
+    #config-panel {
+        height: auto;
     }
 
-    ProvisionScreen .progress-container {
-        width: 100%;
-        height: 100%;
+    #config-panel.hidden {
         display: none;
     }
 
-    ProvisionScreen .progress-container.visible {
-        display: block;
+    #config-inner {
+        height: auto;
+    }
+
+    #disk-section {
+        height: auto;
+        margin-top: 1;
+    }
+
+    #disk-table {
+        height: auto;
+        max-height: 8;
+    }
+
+    #disk-actions {
+        height: auto;
+        margin-top: 1;
+    }
+
+    #disk-actions Button {
+        margin-right: 1;
+    }
+
+    #forge-panel {
+        height: 1fr;
+    }
+
+    #forge-panel.hidden {
+        display: none;
+    }
+
+    .provision-flash-actions {
+        height: auto;
+        margin-top: 1;
+    }
+
+    .provision-flash-actions Button {
+        margin-right: 1;
     }
     """
 
     def __init__(self) -> None:
-        """Initialize provision screen."""
         super().__init__()
-        self._selected_profile: Profile | None = None
-        self._selected_hardware: Hardware | None = None
-        self._selected_storage: StorageDevice | None = None
+        self._devices: dict[str, DeviceProfile] = {}
+        self._selected_device: DeviceProfile | None = None
+        self._selected_disk: DiskInfo | None = None
+        self._detected_disks: list[DiskInfo] = []
+        self._forge_config: ForgeConfig = ForgeConfig()
+        self._edge_dir: Path | None = None
         self._config: dict[str, str] = {}
-        self._provisioning_worker: Worker[None] | None = None
+        self._flash_worker: Worker[None] | None = None
 
     def compose(self) -> ComposeResult:
-        """Compose the provision screen UI."""
-        with Container(classes="main-container"):
-            # Selection panel (visible initially)
-            with Vertical(classes="selection-panel", id="selection-panel"):
-                with Horizontal():
-                    # Left column: Profile and Hardware
-                    with Vertical(classes="left-column"):
-                        yield ProfilePicker([], id="profile-picker")
-                        yield HardwarePicker([], id="hardware-picker")
+        yield Header()
+        with Container(id="provision-container"):
+            # Device selection panel
+            with HighlightedPanel(title="SELECT DEVICE", id="device-panel"):
+                yield DeviceCatalogTable(id="device-catalog-table")
 
-                    # Right column: Storage and Config
-                    with Vertical(classes="right-column"):
-                        yield StoragePicker([], id="storage-picker")
-                        yield ConfigForm(id="config-form")
+            # Configuration panel (hidden until device selected)
+            with HighlightedPanel(title="CONFIGURE", id="config-panel", classes="hidden"):
+                with Vertical(id="config-inner"):
+                    yield ConfigForm(id="config-form")
 
-                # Summary and actions
-                with Vertical(classes="summary-panel", id="summary-panel"):
-                    yield Static("SUMMARY", classes="summary-title")
-                    yield Static(
-                        "Profile: Not selected", id="summary-profile", classes="summary-item"
-                    )
-                    yield Static(
-                        "Hardware: Not selected", id="summary-hardware", classes="summary-item"
-                    )
-                    yield Static(
-                        "Storage: Not selected", id="summary-storage", classes="summary-item"
-                    )
-                    yield Static("Hostname: Not set", id="summary-hostname", classes="summary-item")
+                    with Vertical(id="disk-section"):
+                        yield Static("TARGET DISK", classes="title")
+                        yield DiskDetectTable(id="disk-table")
 
-                with Container(classes="actions"):
-                    yield Button(
-                        "Provision Device", id="btn-provision", variant="success", disabled=True
-                    )
-                    yield Button("Cancel", id="btn-cancel", variant="default")
+                    with Horizontal(id="disk-actions"):
+                        yield Button(
+                            "Refresh Disks", id="btn-refresh-disks", variant="default"
+                        )
 
-            # Progress panel (hidden initially)
-            with Container(classes="progress-container", id="progress-container"):
-                yield ProgressPanel(id="progress-panel")
+                    with Horizontal(classes="provision-flash-actions"):
+                        yield Button(
+                            "Flash", id="btn-flash", variant="success", disabled=True
+                        )
+
+            # Forge panel (hidden until flash starts)
+            with HighlightedPanel(title="FORGE", id="forge-panel", classes="hidden"):
+                yield ForgeLog(id="forge-log")
+
+        yield Footer()
 
     async def on_mount(self) -> None:
-        """Load catalog and storage devices when screen mounts."""
-        # Load catalog (gracefully handle missing catalog files)
+        """Load device catalog and forge config on mount."""
+        # Resolve edge_dir from app config
         try:
-            catalog = load_catalog()
-            profiles = query_profiles(catalog)
-            hardware_list = query_hardware(catalog)
+            app = self.app
+            config = getattr(app, "config", None)
+            if config and config.fleet.edge_fleet_path:
+                self._edge_dir = config.fleet.edge_fleet_path
+        except Exception:
+            pass
 
-            # Update pickers
-            profile_picker = self.query_one("#profile-picker", ProfilePicker)
-            profile_picker.profiles = profiles
-            await profile_picker.recompose()
+        # Load device catalog
+        await self._load_catalog()
 
-            hardware_picker = self.query_one("#hardware-picker", HardwarePicker)
-            hardware_picker.hardware_list = hardware_list
-            await hardware_picker.recompose()
+        # Load forge config
+        if self._edge_dir:
+            forge_yaml = self._edge_dir / "forge.yaml"
+            self._forge_config = load_forge_config(forge_yaml)
 
-            # Detect storage devices
-            await self._refresh_storage()
+    async def _load_catalog(self) -> None:
+        """Load device catalog from bundled or edge_dir data."""
+        try:
+            catalog_path: Path | None = None
+
+            # Try edge_dir first
+            if self._edge_dir:
+                edge_catalog = self._edge_dir / "forge" / "data" / "devices.yaml"
+                if edge_catalog.exists():
+                    catalog_path = edge_catalog
+
+            # Fall back to bundled/user catalog
+            if catalog_path is None:
+                from styrened.tui.forge.models import get_device_catalog_path
+
+                catalog_path = get_device_catalog_path()
+
+            self._devices = load_device_catalog(catalog_path)
+            table = self.query_one("#device-catalog-table", DeviceCatalogTable)
+            table.load_catalog(self._devices)
+
         except Exception as e:
-            # Show error and allow graceful navigation
-            self.notify(
-                f"Provisioning unavailable: {e}",
-                title="Catalog Error",
-                severity="error",
+            self.notify(f"Could not load device catalog: {e}", severity="error")
+
+    # ------------------------------------------------------------------
+    # Device selection
+    # ------------------------------------------------------------------
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle device or disk row selection."""
+        if event.data_table.id == "device-catalog-table":
+            self._handle_device_selected(event)
+        elif event.data_table.id == "disk-table":
+            self._handle_disk_selected(event)
+
+    def _handle_device_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle device catalog row selection."""
+        if not event.row_key or not event.row_key.value:
+            return
+
+        dev_id = str(event.row_key.value)
+        device = self._devices.get(dev_id)
+        if not device:
+            return
+
+        self._selected_device = device
+
+        # Show config panel
+        config_panel = self.query_one("#config-panel")
+        config_panel.remove_class("hidden")
+
+        # Rebuild ConfigForm with device/forge defaults
+        self._rebuild_config_form()
+
+        # Trigger disk detection
+        self.run_worker(self._detect_disks(), group="disk-detect")
+
+        self._update_flash_button()
+
+    def _rebuild_config_form(self) -> None:
+        """Replace the ConfigForm with one pre-populated for the selected device."""
+        try:
+            old_form = self.query_one("#config-form", ConfigForm)
+            new_form = ConfigForm(
+                forge_config=self._forge_config,
+                device=self._selected_device,
+                id="config-form",
             )
+            old_form.replace_with(new_form)
+        except Exception:
+            pass
 
-    async def _refresh_storage(self) -> None:
-        """Refresh the list of storage devices."""
-        devices = await detect_storage()
-        storage_picker = self.query_one("#storage-picker", StoragePicker)
-        storage_picker.update_devices(devices)
+    # ------------------------------------------------------------------
+    # Disk detection
+    # ------------------------------------------------------------------
 
-    def on_profile_picker_changed(self, message: ProfilePicker.Changed) -> None:
-        """Handle profile selection change."""
-        self._selected_profile = message.profile
-        self._update_summary()
+    async def _detect_disks(self) -> None:
+        """Detect external disks."""
+        from styrened.tui.forge.disk_detect import detect_external_disks
 
-    def on_hardware_picker_changed(self, message: HardwarePicker.Changed) -> None:
-        """Handle hardware selection change."""
-        self._selected_hardware = message.hardware
-        self._update_summary()
+        self._detected_disks = detect_external_disks()
+        try:
+            table = self.query_one("#disk-table", DiskDetectTable)
+            table.load_disks(self._detected_disks)
+        except Exception:
+            pass
 
-    def on_storage_picker_changed(self, message: StoragePicker.Changed) -> None:
-        """Handle storage selection change."""
-        self._selected_storage = message.storage
-        self._update_summary()
+    def _handle_disk_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle disk table row selection."""
+        if not event.row_key or not event.row_key.value:
+            return
 
-    async def on_storage_picker_refresh_requested(
-        self, message: StoragePicker.RefreshRequested
-    ) -> None:
-        """Handle storage refresh request."""
-        await self._refresh_storage()
+        device_path = str(event.row_key.value)
+        for disk in self._detected_disks:
+            if disk.device == device_path:
+                self._selected_disk = disk
+                break
+
+        self._update_flash_button()
+
+    def action_refresh_disks(self) -> None:
+        """Refresh disk detection."""
+        self.run_worker(self._detect_disks(), group="disk-detect")
+
+    # ------------------------------------------------------------------
+    # Config form handling
+    # ------------------------------------------------------------------
 
     def on_config_form_changed(self, message: ConfigForm.Changed) -> None:
-        """Handle configuration change."""
+        """Handle configuration changes."""
         self._config = message.config
-        self._update_summary()
+        self._update_flash_button()
 
-    def _update_summary(self) -> None:
-        """Update the summary panel and provision button state."""
-        # Update summary text
-        self.query_one("#summary-profile", Static).update(
-            f"Profile: {self._selected_profile.label if self._selected_profile else 'Not selected'}"
-        )
-        self.query_one("#summary-hardware", Static).update(
-            f"Hardware: {self._selected_hardware.label if self._selected_hardware else 'Not selected'}"
-        )
-        self.query_one("#summary-storage", Static).update(
-            f"Storage: {self._selected_storage.display_name if self._selected_storage else 'Not selected'}"
-        )
-        self.query_one("#summary-hostname", Static).update(
-            f"Hostname: {self._config.get('hostname', 'Not set')}"
-        )
+    def _update_flash_button(self) -> None:
+        """Enable flash button only when all selections are made."""
+        can_flash = all([
+            self._selected_device,
+            self._selected_disk,
+            self._config.get("hostname"),
+        ])
+        try:
+            self.query_one("#btn-flash", Button).disabled = not can_flash
+        except Exception:
+            pass
 
-        # Enable provision button if all required selections are made
-        can_provision = all(
-            [
-                self._selected_profile,
-                self._selected_hardware,
-                self._selected_storage,
-                self._config.get("hostname"),
-            ]
-        )
-        self.query_one("#btn-provision", Button).disabled = not can_provision
+    # ------------------------------------------------------------------
+    # Flash flow
+    # ------------------------------------------------------------------
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        if event.button.id == "btn-cancel":
-            self.app.pop_screen()
-        elif event.button.id == "btn-provision":
-            await self._start_provisioning()
-        elif event.button.id == "abort-provision":
-            await self._handle_abort_or_close()
+        if event.button.id == "btn-flash":
+            await self._initiate_flash()
+        elif event.button.id == "btn-refresh-disks":
+            self.run_worker(self._detect_disks(), group="disk-detect")
 
-    async def _start_provisioning(self) -> None:
-        """Start the provisioning process."""
-        # Validate configuration
+    async def _initiate_flash(self) -> None:
+        """Validate, confirm, and start the flash process."""
+        if not self._selected_device or not self._selected_disk:
+            return
+
+        # Validate config form
         config_form = self.query_one("#config-form", ConfigForm)
-        is_valid, _errors = config_form.validate()
-
+        is_valid, errors = config_form.validate()
         if not is_valid:
-            # Show error notification (would use notify() in real implementation)
-            self.app.bell()
+            for err in errors:
+                self.notify(err, severity="error")
             return
 
-        # Validate storage is not mounted
-        if self._selected_storage and self._selected_storage.mounted:
-            # Show error notification
-            self.app.bell()
+        # Check edge_dir
+        if not self._edge_dir:
+            self.notify("Set edge fleet path in Settings", severity="error")
             return
 
-        # Hide selection panel, show progress panel
-        self.query_one("#selection-panel").add_class("hidden")
-        self.query_one("#progress-container").add_class("visible")
+        # Push confirmation modal
+        from styrened.tui.screens.confirm_flash import ConfirmFlash
 
-        # Clear progress panel
-        progress_panel = self.query_one("#progress-panel", ProgressPanel)
-        progress_panel.clear_log()
-
-        # Start provisioning worker
-        self._provisioning_worker = self.run_worker(self._provision_worker(), exclusive=True)
-
-    async def _provision_worker(self) -> None:
-        """Worker method that runs provisioning."""
-        progress_panel = self.query_one("#progress-panel", ProgressPanel)
-
-        def progress_callback(message: str) -> None:
-            """Callback for progress updates."""
-            progress_panel.append_log(message)
-
-        # Run provisioning
-        result = await provision_device(
-            profile=self._selected_profile,  # type: ignore
-            hardware=self._selected_hardware,  # type: ignore
-            storage=self._selected_storage,  # type: ignore
-            config=self._config,
-            progress_callback=progress_callback,
-            mock=True,  # Use mock provisioning for now
+        confirmed = await self.app.push_screen_wait(
+            ConfirmFlash(
+                device_label=self._selected_device.label,
+                device_model=self._selected_device.model,
+                disk_path=self._selected_disk.device,
+                disk_name=self._selected_disk.name,
+                disk_size=self._selected_disk.size,
+            )
         )
 
-        # Update progress panel with result
-        progress_panel.set_complete(result.success)
+        if not confirmed:
+            return
 
-    async def _handle_abort_or_close(self) -> None:
-        """Handle abort/close button in progress panel."""
-        progress_panel = self.query_one("#progress-panel", ProgressPanel)
+        # Transition to forge state
+        self._show_forge_panel()
 
-        if progress_panel.is_complete:
-            # Close the progress panel and return to selection
-            self.query_one("#progress-container").remove_class("visible")
-            self.query_one("#selection-panel").remove_class("hidden")
+        # Build FlashTarget
+        target = FlashTarget(
+            device=self._selected_device,
+            disk_path=self._selected_disk.device,
+            disk_name=self._selected_disk.name,
+            disk_size=self._selected_disk.size,
+            hostname=self._config.get("hostname", self._selected_device.default_hostname),
+            wifi_ssid=self._config.get("wifi_ssid", ""),
+            wifi_password=self._config.get("wifi_password", ""),
+            ssh_key_path=self._config.get("ssh_key_path", ""),
+        )
+
+        # Set hostname on forge log for mesh watch
+        forge_log = self.query_one("#forge-log", ForgeLog)
+        forge_log.set_hostname(target.hostname)
+
+        # Start forge pipeline
+        self._flash_worker = self.run_worker(
+            self._run_forge(target), exclusive=True, group="forge"
+        )
+
+    def _show_forge_panel(self) -> None:
+        """Hide selection panels, show forge panel."""
+        try:
+            self.query_one("#device-panel").add_class("hidden")
+            self.query_one("#config-panel").add_class("hidden")
+            forge_panel = self.query_one("#forge-panel")
+            forge_panel.remove_class("hidden")
+
+            forge_log = self.query_one("#forge-log", ForgeLog)
+            forge_log.reset()
+        except Exception:
+            pass
+
+    def _show_selection_panels(self) -> None:
+        """Return to selection state."""
+        try:
+            self.query_one("#device-panel").remove_class("hidden")
+            if self._selected_device:
+                self.query_one("#config-panel").remove_class("hidden")
+            self.query_one("#forge-panel").add_class("hidden")
+        except Exception:
+            pass
+
+    async def _run_forge(self, target: FlashTarget) -> None:
+        """Execute the forge media writer pipeline."""
+        from styrened.tui.forge.media_writer import run_media_writer
+
+        forge_log = self.query_one("#forge-log", ForgeLog)
+
+        try:
+            async for event in run_media_writer(target, self._edge_dir):
+                forge_log.handle_event(event)
+        except Exception as exc:
+            forge_log.handle_event(
+                MediaEvent(kind="error", message=f"Pipeline failed: {exc}")
+            )
+
+    # ------------------------------------------------------------------
+    # Forge log events
+    # ------------------------------------------------------------------
+
+    def on_forge_log_aborted(self, message: ForgeLog.Aborted) -> None:
+        """Handle abort/done from forge log."""
+        forge_log = self.query_one("#forge-log", ForgeLog)
+
+        if forge_log.is_complete or forge_log.is_error:
+            # Done — return to selection
+            self._show_selection_panels()
         else:
-            # Abort provisioning (would implement abort logic)
-            if self._provisioning_worker:
-                self._provisioning_worker.cancel()
-            self.query_one("#progress-container").remove_class("visible")
-            self.query_one("#selection-panel").remove_class("hidden")
+            # Active — cancel worker
+            if self._flash_worker:
+                self._flash_worker.cancel()
+            self._show_selection_panels()
+
+    def on_forge_log_flash_complete(self, message: ForgeLog.FlashComplete) -> None:
+        """Handle flash completion — start mesh watch."""
+        self.notify(f"Flash complete: {message.hostname}", severity="information")
+        self._start_mesh_watch(message.hostname)
+
+    # ------------------------------------------------------------------
+    # Post-flash mesh detection (Step 7)
+    # ------------------------------------------------------------------
+
+    def _start_mesh_watch(self, hostname: str) -> None:
+        """Begin watching for the newly provisioned node on the mesh."""
+        forge_log = self.query_one("#forge-log", ForgeLog)
+        forge_log.start_mesh_watch()
+
+        try:
+            from styrened.tui.services.reticulum import start_discovery
+
+            start_discovery(callback=lambda device: self._on_mesh_device(device, hostname))
+        except Exception:
+            pass
+
+    def _on_mesh_device(self, device, hostname: str) -> None:  # noqa: ANN001
+        """Callback for mesh device discovery during post-flash watch."""
+        try:
+            if device.name and hostname.lower() in device.name.lower():
+                self.app.call_from_thread(self._mesh_node_found, hostname)
+        except Exception:
+            pass
+
+    def _mesh_node_found(self, hostname: str) -> None:
+        """Handle mesh node detection (main thread)."""
+        try:
+            forge_log = self.query_one("#forge-log", ForgeLog)
+            forge_log.mesh_node_found(hostname)
+            self.notify(f"Node {hostname} joined the mesh")
+        except Exception:
+            pass

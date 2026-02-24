@@ -1,0 +1,159 @@
+devices:
+  minigmk:
+    label: "MiniGMK"
+    model: "GMKtec NucBox G3 Plus"
+    arch: x86_64
+    boot_type: uefi64
+    media_type: installer
+    media_target: usb
+    nixos_config: sbc/x86-generic/configuration.nix
+    bond_script: sbc/x86-generic/polymerize.sh
+    default_hostname: minigmk-01
+    specs:
+      cpu: "Intel N150"
+      cores: 4
+      ram_mb: 16384
+      storage: "NVMe SSD"
+      network: "WiFi 6, 2.5GbE"
+
+  t100ta:
+    label: "T100TA"
+    model: "ASUS Transformer Book T100TA"
+    arch: x86_64
+    boot_type: uefi32
+    media_type: installer
+    media_target: usb
+    nixos_config: sbc/t100ta/configuration.nix
+    bond_script: sbc/t100ta/polymerize.sh
+    default_hostname: t100ta
+    specs:
+      cpu: "Intel Atom Z3740"
+      cores: 4
+      ram_mb: 2048
+      storage: "32GB eMMC"
+      network: "WiFi 4"
+
+  q502l:
+    label: "Q502L"
+    model: "ASUS Q502LA"
+    arch: x86_64
+    boot_type: uefi64
+    media_type: installer
+    media_target: usb
+    nixos_config: sbc/x86-generic/configuration.nix
+    bond_script: sbc/x86-generic/polymerize.sh
+    default_hostname: q502l-01
+    specs:
+      cpu: "Intel Core i5-4210U"
+      cores: 2
+      ram_mb: 8192
+      storage: "HDD/SSD"
+      network: "WiFi 4, 1GbE"
+
+  miniser1:
+    label: "MiniSer1"
+    model: "Beelink SER5"
+    arch: x86_64
+    boot_type: uefi64
+    media_type: installer
+    media_target: usb
+    nixos_config: sbc/x86-generic/configuration.nix
+    bond_script: sbc/x86-generic/polymerize.sh
+    default_hostname: miniser1
+    specs:
+      cpu: "AMD Ryzen 7 5800H"
+      cores: 8
+      ram_mb: 32768
+      storage: "477 GB SATA SSD + 466 GB NVMe"
+      network: "WiFi 6, 1GbE, BT 5.2"
+
+  styrene-build:
+    label: "Styrene Build"
+    model: "Beelink SER5"
+    arch: x86_64
+    boot_type: uefi64
+    media_type: installer
+    media_target: usb
+    nixos_config: sbc/styrene-build/configuration.nix
+    bond_script: sbc/styrene-build/polymerize.sh
+    default_hostname: styrene-build
+    flake_root: sbc
+    flake_config: styrene-build
+    specs:
+      cpu: "AMD Ryzen 7 5800H"
+      cores: 8
+      ram_mb: 32768
+      storage: "477 GB SATA SSD + 466 GB NVMe"
+      network: "WiFi 6, 1GbE, BT 5.2"
+
+  rpi4:
+    label: "RPi 4B"
+    model: "Raspberry Pi 4 Model B Rev 1.5"
+    arch: aarch64
+    boot_type: uboot
+    media_type: direct
+    media_target: sd
+    nixos_config: sbc/rpi4/configuration.nix
+    bond_script: null
+    default_hostname: rpi4-01
+    nix_flake_output: "packages.aarch64-linux.rpi4-sd"
+    specs:
+      cpu: "Cortex-A72"
+      cores: 4
+      ram_mb: 4096
+      storage: "microSD"
+      network: "WiFi 5, 1GbE"
+
+  rpi-zero2w:
+    label: "RPi Zero 2W"
+    model: "Raspberry Pi Zero 2 W"
+    arch: aarch64
+    boot_type: uboot
+    media_type: direct
+    media_target: sd
+    nixos_config: sbc/rpi-zero2w/configuration.nix
+    bond_script: null
+    default_hostname: zero2w-01
+    nix_flake_output: "packages.aarch64-linux.rpi-zero2w-sd"
+    specs:
+      cpu: "Cortex-A53"
+      cores: 4
+      ram_mb: 512
+      storage: "microSD"
+      network: "WiFi 4, BLE 4.2"
+
+  rg35xx-h:
+    label: "RG35XX H"
+    model: "Anbernic RG35XX H"
+    arch: aarch64
+    boot_type: uboot
+    media_type: direct
+    media_target: sd
+    nixos_config: sbc/rg35xx-h/configuration.nix
+    bond_script: null
+    default_hostname: rg35xx-h-01
+    nix_flake_output: "packages.aarch64-linux.rg35xx-h-sd"
+    specs:
+      cpu: "Allwinner H700 (Cortex-A53)"
+      cores: 4
+      ram_mb: 1024
+      storage: "microSD"
+      network: "WiFi 5, BT 4.2"
+
+  r36s:
+    label: "R36S"
+    model: "PowKiddy R36S"
+    arch: aarch64
+    boot_type: uboot
+    media_type: direct
+    media_target: sd
+    nixos_config: sbc/r36s/configuration.nix
+    bond_script: null
+    default_hostname: r36s-01
+    nix_flake_output: "packages.aarch64-linux.r36s-sd"
+    specs:
+      cpu: "Rockchip RK3326 (Cortex-A35)"
+      cores: 4
+      ram_mb: 1024
+      storage: "2x microSD"
+      network: "None (USB OTG)"

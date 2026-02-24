@@ -87,6 +87,9 @@ path = "src/styrened/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/styrened"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/styrened/tui/forge/data" = "styrened/tui/forge/data"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

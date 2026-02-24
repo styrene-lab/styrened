@@ -1,12 +1,18 @@
-"""Configuration form widget."""
+"""Configuration form widget for device provisioning."""
+
+from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.message import Message
 from textual.validation import ValidationResult, Validator
-from textual.widgets import Checkbox, Input, Static
+from textual.widgets import Input, Static
+
+if TYPE_CHECKING:
+    from styrened.tui.forge.models import DeviceProfile, ForgeConfig
 
 
 class HostnameValidator(Validator):
@@ -37,13 +43,13 @@ class HostnameValidator(Validator):
 class ConfigForm(Container):
     """Widget for device configuration input.
 
-    Collects hostname, WiFi credentials, SSH key, and mesh settings.
+    Collects hostname, WiFi credentials, and SSH key path.
+    Supports pre-population from ForgeConfig and DeviceProfile defaults.
     """
 
     DEFAULT_CSS = """
     ConfigForm {
         height: auto;
-        border: solid $primary;
         padding: 1;
     }
 
@@ -66,10 +72,6 @@ class ConfigForm(Container):
     ConfigForm Input {
         width: 100%;
     }
-
-    ConfigForm Checkbox {
-        margin-top: 1;
-    }
     """
 
     class Changed(Message):
@@ -82,6 +84,8 @@ class ConfigForm(Container):
     def __init__(
         self,
         *,
+        forge_config: ForgeConfig | None = None,
+        device: DeviceProfile | None = None,
         name: str | None = None,
         id: str | None = None,
         classes: str | None = None,
@@ -89,20 +93,41 @@ class ConfigForm(Container):
         """Initialize configuration form.
 
         Args:
+            forge_config: Forge defaults for WiFi/SSH pre-population.
+            device: Device profile for hostname pre-population.
             name: Widget name.
             id: Widget ID.
             classes: CSS classes.
         """
         super().__init__(name=name, id=id, classes=classes)
+        self._forge_config = forge_config
+        self._device = device
         self._config: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
-        """Compose the configuration form UI."""
+        # Derive default values
+        default_hostname = ""
+        default_wifi_ssid = ""
+        default_wifi_password = ""
+        default_ssh_key = ""
+
+        if self._device:
+            default_hostname = self._device.default_hostname
+            # Check forge_config for per-device hostname override
+            if self._forge_config and self._device.id in self._forge_config.hostnames:
+                default_hostname = self._forge_config.hostnames[self._device.id]
+
+        if self._forge_config:
+            default_wifi_ssid = self._forge_config.wifi_ssid
+            default_wifi_password = self._forge_config.wifi_password
+            default_ssh_key = self._forge_config.ssh_key
+
         yield Static("DEVICE CONFIGURATION", classes="title")
 
         with Vertical(classes="field"):
             yield Static("Hostname *", classes="field-label")
             yield Input(
+                value=default_hostname,
                 placeholder="styrene-node-01",
                 id="input-hostname",
                 validators=[HostnameValidator()],
@@ -111,6 +136,7 @@ class ConfigForm(Container):
         with Vertical(classes="field"):
             yield Static("WiFi SSID (optional)", classes="field-label")
             yield Input(
+                value=default_wifi_ssid,
                 placeholder="MyNetwork",
                 id="input-wifi-ssid",
             )
@@ -118,6 +144,7 @@ class ConfigForm(Container):
         with Vertical(classes="field"):
             yield Static("WiFi Password (optional)", classes="field-label")
             yield Input(
+                value=default_wifi_password,
                 placeholder="",
                 id="input-wifi-password",
                 password=True,
@@ -126,18 +153,13 @@ class ConfigForm(Container):
         with Vertical(classes="field"):
             yield Static("SSH Public Key Path (optional)", classes="field-label")
             yield Input(
+                value=default_ssh_key,
                 placeholder="~/.ssh/id_ed25519.pub",
                 id="input-ssh-key",
             )
 
-        yield Checkbox("Enable mesh networking", id="checkbox-mesh", value=True)
-
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle input field changes."""
-        self._update_config()
-
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        """Handle checkbox changes."""
         self._update_config()
 
     def _update_config(self) -> None:
@@ -147,7 +169,6 @@ class ConfigForm(Container):
             "wifi_ssid": self.query_one("#input-wifi-ssid", Input).value,
             "wifi_password": self.query_one("#input-wifi-password", Input).value,
             "ssh_key_path": self.query_one("#input-ssh-key", Input).value,
-            "mesh_enabled": str(self.query_one("#checkbox-mesh", Checkbox).value).lower(),
         }
         self.post_message(self.Changed(self._config))
 
