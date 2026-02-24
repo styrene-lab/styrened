@@ -1,0 +1,79 @@
+/* Imperial CRT theme — maps docs.styrene.io design tokens to pdoc variables */
+
+/* --pdoc-background is the only :root-scoped variable in pdoc */
+:root {
+    --pdoc-background: #16171d;
+}
+
+/* All other pdoc variables are scoped to .pdoc */
+.pdoc {
+    --text: #cbf4ed;
+    --muted: #4a6767;
+    --link: #51958c;
+    --link-hover: #00f0d3;
+    --code: #202b30;
+    --active: rgba(0, 240, 211, 0.08);
+    --accent: #202b30;
+    --accent2: #304345;
+    --nav-hover: rgba(0, 240, 211, 0.1);
+    --name: #8bc4b8;
+    --def: #cbf4ed;
+    --annotation: #4a6767;
+}
+
+html {
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+nav.pdoc {
+    border-right: 1px solid #304345;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #16171d; }
+::-webkit-scrollbar-thumb { background: #304345; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #4a6767; }
+
+/* Search input */
+nav.pdoc input[type="search"] {
+    background: #16171d;
+    border: 1px solid #304345;
+    color: #cbf4ed;
+}
+
+/* --- Syntax highlighting (Pygments classes) for dark background --- */
+
+/* Comments */
+.pdoc-code .c, .pdoc-code .c1, .pdoc-code .ch, .pdoc-code .cm,
+.pdoc-code .cp, .pdoc-code .cpf, .pdoc-code .cs { color: #4a6767 !important; font-style: italic; }
+
+/* Keywords */
+.pdoc-code .k, .pdoc-code .kc, .pdoc-code .kd, .pdoc-code .kn,
+.pdoc-code .kp, .pdoc-code .kr, .pdoc-code .kt { color: #00f0d3 !important; }
+
+/* Strings */
+.pdoc-code .s, .pdoc-code .s1, .pdoc-code .s2, .pdoc-code .sa,
+.pdoc-code .sb, .pdoc-code .sc, .pdoc-code .sd, .pdoc-code .se,
+.pdoc-code .sh, .pdoc-code .si, .pdoc-code .sr, .pdoc-code .ss { color: #51958c !important; }
+
+/* Numbers */
+.pdoc-code .m, .pdoc-code .mb, .pdoc-code .mf, .pdoc-code .mh,
+.pdoc-code .mi, .pdoc-code .mo, .pdoc-code .il { color: #e98100 !important; }
+
+/* Names — default to body text */
+.pdoc-code .n, .pdoc-code .na, .pdoc-code .nc, .pdoc-code .nd,
+.pdoc-code .ni, .pdoc-code .nl, .pdoc-code .nn, .pdoc-code .no,
+.pdoc-code .nt, .pdoc-code .nv { color: #cbf4ed !important; }
+
+/* Builtins + magic methods */
+.pdoc-code .nb, .pdoc-code .bp { color: #51958c !important; }
+.pdoc-code .fm, .pdoc-code .nf { color: #8bc4b8 !important; }
+
+/* Operators, punctuation */
+.pdoc-code .o, .pdoc-code .ow { color: #cbf4ed !important; }
+.pdoc-code .p { color: #4a6767 !important; }
+
+/* Exceptions, decorators */
+.pdoc-code .ne { color: #e98100 !important; }
+.pdoc-code .nd { color: #51958c !important; }
