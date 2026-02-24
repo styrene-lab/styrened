@@ -1,4 +1,5 @@
-# Nightly cron: runs comprehensive tests at 2 AM UTC daily
+# Nightly cron: test main, build + push OCI with :nightly and :nightly-{sha} tags
+# Tagged releases (v*) are "islands of stability" — nightly builds are continuous.
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:

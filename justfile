@@ -191,13 +191,13 @@ push-prod-latest: push-prod
     podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:latest
     podman push {{ registry }}/{{ image_prod }}:latest
 
-# Push edge build (main branch)
-push-edge: container-login build
+# Push nightly build (:nightly + :nightly-{sha})
+push-nightly: container-login build
     nix run .#oci.copyToPodman
-    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:edge
-    podman push {{ registry }}/{{ image_prod }}:edge
-    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:{{ commit_sha }}
-    podman push {{ registry }}/{{ image_prod }}:{{ commit_sha }}
+    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:nightly
+    podman push {{ registry }}/{{ image_prod }}:nightly
+    podman tag {{ registry }}/{{ image_prod }}:{{ version }} {{ registry }}/{{ image_prod }}:nightly-{{ commit_sha }}
+    podman push {{ registry }}/{{ image_prod }}:nightly-{{ commit_sha }}
 
 # Push test image with 'latest' tag (nightly builds)
 push-test-nightly: container-login build-test
