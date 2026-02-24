@@ -689,7 +689,7 @@ ChatWidget #chat-reply-bar {
     color: $primary;
 }
 
-/* === Exploration Search Bar === */
+/* === Exploration Screen === */
 ExplorationScreen #explore-search-bar {
     height: auto;
     max-height: 3;
@@ -701,6 +701,39 @@ ExplorationScreen #explore-count {
     height: 1;
     padding: 0 1;
     color: $panel;
+}
+
+ExplorationScreen #explore-tabs {
+    height: 1fr;
+}
+
+ExplorationScreen .explore-tab-table {
+    height: 1fr;
+}
+
+ExplorationScreen #pages-pane-content {
+    height: 1fr;
+}
+
+ExplorationScreen #pages-table-section {
+    height: 2fr;
+    min-height: 5;
+}
+
+ExplorationScreen #pages-browser-section {
+    height: 3fr;
+}
+
+ExplorationScreen #pages-browser-placeholder {
+    height: 3;
+    padding: 1;
+    color: $panel;
+    text-style: italic;
+}
+
+ExplorationScreen .explore-inline-browser {
+    height: 1fr;
+    border-top: solid $border;
 }
 
 /* === Inbox Search Bar === */
@@ -815,4 +848,34 @@ CommandWidget #cmd-input-row {
     height: 3;
     dock: bottom;
     padding: 0 1;
+}
+
+/* === TerminalWidget Layout === */
+TerminalWidget {
+    height: 1fr;
+}
+
+TerminalWidget #terminal-chrome {
+    height: 1fr;
+}
+
+TerminalWidget #terminal-status {
+    height: 1;
+    padding: 0 1;
+    color: $primary;
+    background: $surface;
+    dock: top;
+}
+
+TerminalWidget #terminal-display {
+    height: 1fr;
+    overflow-y: scroll;
+    padding: 0;
+    background: $background;
+}
+
+TerminalWidget #terminal-connect-btn {
+    dock: bottom;
+    width: auto;
+    margin: 0 1;
 }

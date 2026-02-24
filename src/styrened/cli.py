@@ -3,18 +3,20 @@
 Provides subcommands for:
 - daemon: Run the headless daemon (default)
 - devices: List discovered mesh devices
-- status: Query status of a remote node
+- status: Show local daemon health or query remote node status
 - send: Send a message to a node
 - exec: Execute a command on a remote node
 - announce: Trigger an announce
 - identity: Show local operator identity
 - conversations: List conversations
 - messages: List messages for a conversation
+- doctor: Installation diagnostics and setup wizard
 
 Usage:
     styrened                      # Run daemon (default)
     styrened daemon               # Run daemon explicitly
     styrened devices              # List discovered devices
+    styrened status               # Show local daemon health
     styrened status <dest>        # Query remote node status
     styrened send <dest> <msg>    # Send chat message
     styrened exec <dest> <cmd>    # Execute command on remote
@@ -22,6 +24,8 @@ Usage:
     styrened identity             # Show local identity info
     styrened conversations        # List conversations
     styrened messages <peer>      # List messages with peer
+    styrened doctor               # Run diagnostics
+    styrened doctor --setup       # Interactive setup wizard
 """
 
 import argparse
@@ -235,6 +239,10 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
     """Async implementation of status command."""
     destination = args.destination
     timeout = args.timeout if hasattr(args, "timeout") else 30.0
+
+    # No destination: show local daemon health
+    if destination is None:
+        return await _cmd_local_status(args)
 
     # Try IPC first (uses daemon's mesh stack)
     client = await _try_ipc_client()
@@ -461,6 +469,86 @@ async def _cmd_status_async(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         lifecycle.shutdown()
+        return 1
+
+
+async def _cmd_local_status(args: argparse.Namespace) -> int:
+    """Display local daemon health via IPC QUERY_STATUS."""
+    client = await _try_ipc_client()
+    if not client:
+        print("Daemon not running (local status requires a running daemon)", file=sys.stderr)
+        print("Start with: styrened daemon", file=sys.stderr)
+        return 1
+
+    try:
+        status = await client.query_status()
+        await client.disconnect()
+
+        if args.json:
+            import json
+
+            print(json.dumps(status.to_dict(), indent=2))
+        else:
+            # Uptime formatting
+            hours, remainder = divmod(int(status.uptime), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            uptime_str = f"{hours}h {minutes}m {seconds}s"
+
+            rns_str = "initialized" if status.rns_initialized else "not initialized"
+            lxmf_str = "initialized" if status.lxmf_initialized else "not initialized"
+
+            print("\nstyrened status\n")
+            print("  Daemon")
+            print(f"    Version:    {status.daemon_version}")
+            print(f"    Uptime:     {uptime_str}")
+            print(f"    RNS:        {rns_str}")
+            print(f"    LXMF:       {lxmf_str}")
+
+            # Transport mode
+            transport_str = "enabled" if status.transport_enabled else "disabled"
+            print(f"    Transport:  {transport_str}")
+
+            # Hub section
+            hub_status = status.hub_status
+            if hub_status != "disabled":
+                print()
+                print("  Hub")
+                print(f"    Status:     {hub_status}")
+                if status.hub_address:
+                    print(f"    Address:    {status.hub_address}")
+
+            # Interfaces section
+            if status.interfaces:
+                print()
+                print(f"  Interfaces ({len(status.interfaces)})")
+                for iface in status.interfaces:
+                    name = iface.get("name", "unnamed")
+                    itype = iface.get("type", "unknown")
+                    online = iface.get("online", True)
+                    marker = "[UP]  " if online else "[DOWN]"
+                    print(f"    {marker} {name} ({itype})")
+            elif status.interface_count > 0:
+                print()
+                print(f"  Interfaces: {status.interface_count}")
+
+            # Mesh section
+            print()
+            print("  Mesh")
+            print(
+                f"    Devices:    {status.device_count} total, {status.styrene_node_count} styrene nodes"
+            )
+            print(f"    Pending:    {status.pending_rpc_count} RPC requests")
+            print(f"    Links:      {status.active_links} active")
+            print()
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Failed to query local status: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        print(f"Error querying daemon status: {e}", file=sys.stderr)
         return 1
 
 
@@ -1595,6 +1683,158 @@ async def _cmd_shell_async(args: argparse.Namespace) -> int:
 
 
 # -----------------------------------------------------------------------------
+# Subcommand: inbox (remote)
+# -----------------------------------------------------------------------------
+
+
+def cmd_inbox(args: argparse.Namespace) -> int:
+    """Query inbox on a remote node.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    return asyncio.run(_cmd_inbox_async(args))
+
+
+async def _cmd_inbox_async(args: argparse.Namespace) -> int:
+    """Async implementation of inbox command."""
+    destination = args.destination
+    limit = args.limit
+    timeout = args.timeout if hasattr(args, "timeout") else 30.0
+
+    client = await _try_ipc_client()
+    if not client:
+        print("Daemon not running (remote inbox query requires a running daemon)", file=sys.stderr)
+        print("Start with: styrened daemon", file=sys.stderr)
+        return 1
+
+    try:
+        print(f"Querying remote inbox on {destination[:16]}... (timeout: {timeout}s)")
+
+        conversations = await client.remote_inbox(
+            destination=destination,
+            limit=limit,
+            timeout=timeout,
+        )
+        await client.disconnect()
+
+        if not conversations:
+            print("No conversations on remote node")
+            return 0
+
+        if args.json:
+            import json
+
+            print(json.dumps(conversations, indent=2))
+        else:
+            print(f"\n{len(conversations)} conversation(s) on remote node:\n")
+            for conv in conversations:
+                peer = conv.get("peer_hash", "unknown")
+                unread = conv.get("unread_count", 0)
+                count = conv.get("message_count", 0)
+                preview = conv.get("last_message_preview", "")
+                display_name = conv.get("display_name", "")
+                name_str = f" ({display_name})" if display_name else ""
+                unread_str = f" ({unread} unread)" if unread else ""
+                preview_str = (
+                    f" - {preview[:60]}..."
+                    if len(preview) > 60
+                    else f" - {preview}"
+                    if preview
+                    else ""
+                )
+                print(f"  {peer[:16]}...{name_str}{unread_str} [{count} msgs]{preview_str}")
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Failed to query remote inbox: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+# -----------------------------------------------------------------------------
+# Subcommand: remote-messages
+# -----------------------------------------------------------------------------
+
+
+def cmd_remote_messages(args: argparse.Namespace) -> int:
+    """Query messages for a peer on a remote node.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    return asyncio.run(_cmd_remote_messages_async(args))
+
+
+async def _cmd_remote_messages_async(args: argparse.Namespace) -> int:
+    """Async implementation of remote-messages command."""
+    destination = args.destination
+    peer_hash = args.peer_hash
+    limit = args.limit
+    timeout = args.timeout if hasattr(args, "timeout") else 30.0
+
+    client = await _try_ipc_client()
+    if not client:
+        print(
+            "Daemon not running (remote messages query requires a running daemon)",
+            file=sys.stderr,
+        )
+        print("Start with: styrened daemon", file=sys.stderr)
+        return 1
+
+    try:
+        print(
+            f"Querying messages for {peer_hash[:16]}... on {destination[:16]}... "
+            f"(timeout: {timeout}s)"
+        )
+
+        messages = await client.remote_messages(
+            destination=destination,
+            peer_hash=peer_hash,
+            limit=limit,
+            timeout=timeout,
+        )
+        await client.disconnect()
+
+        if not messages:
+            print("No messages")
+            return 0
+
+        if args.json:
+            import json
+
+            print(json.dumps(messages, indent=2))
+        else:
+            print(f"\n{len(messages)} message(s):\n")
+            for msg in messages:
+                direction = "->" if msg.get("is_outgoing") else "<-"
+                status = msg.get("status", "")
+                content = msg.get("content", "")
+                content_str = content[:80] + "..." if len(content) > 80 else content
+                print(f"  {direction} [{status}] {content_str}")
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Failed to query remote messages: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+# -----------------------------------------------------------------------------
 # Subcommand: conversations
 # -----------------------------------------------------------------------------
 
@@ -1734,6 +1974,107 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+# -----------------------------------------------------------------------------
+# Subcommand: doctor
+# -----------------------------------------------------------------------------
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Run installation diagnostics.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code (0=ok, 1=warnings, 2=errors).
+    """
+    return asyncio.run(_cmd_doctor_async(args))
+
+
+async def _cmd_doctor_async(args: argparse.Namespace) -> int:
+    """Async implementation of doctor command."""
+    from styrened.services.doctor import apply_fixes, run_doctor, run_setup_wizard
+
+    # Setup wizard mode
+    if args.setup:
+        results = run_setup_wizard()
+        print()
+        for finding in results:
+            _print_finding(finding)
+        return 0
+
+    # Run diagnostics
+    report = await run_doctor(offline=args.offline)
+
+    # Apply fixes if requested
+    if args.fix:
+        fixed = apply_fixes(report)
+        report.findings.extend(fixed)
+
+    # Output
+    if args.json:
+        import json
+
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        _print_report(report)
+
+    return report.exit_code
+
+
+def _print_finding(finding) -> None:
+    """Print a single finding with severity prefix."""
+    from styrened.services.doctor import Severity
+
+    prefix_map = {
+        Severity.OK: "[OK] ",
+        Severity.WARN: "[WARN]",
+        Severity.ERROR: "[ERR] ",
+    }
+    prefix = prefix_map.get(finding.severity, "[???]")
+    print(f"  {prefix} {finding.message}")
+    if finding.fix_hint and finding.severity != Severity.OK:
+        print(f"         -> {finding.fix_hint}")
+
+
+def _print_report(report) -> None:
+    """Print a formatted doctor report grouped by category."""
+    from styrened.services.doctor import CheckCategory
+
+    category_labels = {
+        CheckCategory.VERSION: "Version",
+        CheckCategory.IDENTITY: "Identity",
+        CheckCategory.CONFIG: "Configuration",
+        CheckCategory.RETICULUM: "Reticulum",
+        CheckCategory.DAEMON: "Daemon",
+        CheckCategory.PATHS: "Paths",
+    }
+
+    print("\nstyrened doctor\n")
+
+    # Group findings by category
+    by_category: dict = {}
+    for finding in report.findings:
+        by_category.setdefault(finding.category, []).append(finding)
+
+    # Print in defined order
+    for category in CheckCategory:
+        findings = by_category.get(category, [])
+        if not findings:
+            continue
+        label = category_labels.get(category, category.value)
+        print(f"  {label}")
+        for finding in findings:
+            _print_finding(finding)
+        print()
+
+    # Summary
+    errors = sum(1 for f in report.findings if f.severity.value == "ERR")
+    warnings = sum(1 for f in report.findings if f.severity.value == "WARN")
+    oks = sum(1 for f in report.findings if f.severity.value == "OK")
+    print(f"  {oks} passed, {warnings} warnings, {errors} errors")
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for styrened CLI.
 
@@ -1764,8 +2105,15 @@ def create_parser() -> argparse.ArgumentParser:
     devices_parser.set_defaults(func=cmd_devices)
 
     # status
-    status_parser = subparsers.add_parser("status", help="Query remote node status")
-    status_parser.add_argument("destination", help="Destination hash (hex) of remote node")
+    status_parser = subparsers.add_parser(
+        "status", help="Show local daemon health or query remote node status"
+    )
+    status_parser.add_argument(
+        "destination",
+        nargs="?",
+        default=None,
+        help="Destination hash (hex) of remote node. Omit for local daemon status.",
+    )
     status_parser.add_argument(
         "-w",
         "--wait",
@@ -1940,10 +2288,57 @@ def create_parser() -> argparse.ArgumentParser:
     messages_parser.add_argument("--json", action="store_true", help="Output as JSON")
     messages_parser.set_defaults(func=cmd_messages)
 
+    # inbox (remote via RPC)
+    inbox_parser = subparsers.add_parser(
+        "inbox", help="Query inbox on a remote node (via RPC over LXMF)"
+    )
+    inbox_parser.add_argument("destination", help="Destination hash (hex) of remote node")
+    inbox_parser.add_argument(
+        "-n", "--limit", type=int, default=50, help="Maximum conversations (default: 50)"
+    )
+    inbox_parser.add_argument(
+        "-t", "--timeout", type=float, default=30.0, help="RPC timeout in seconds (default: 30)"
+    )
+    inbox_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    inbox_parser.set_defaults(func=cmd_inbox)
+
+    # remote-messages (remote via RPC)
+    remote_messages_parser = subparsers.add_parser(
+        "remote-messages", help="Query messages on a remote node (via RPC over LXMF)"
+    )
+    remote_messages_parser.add_argument(
+        "destination", help="Destination hash (hex) of remote node"
+    )
+    remote_messages_parser.add_argument("peer_hash", help="Peer hash to query messages for")
+    remote_messages_parser.add_argument(
+        "-n", "--limit", type=int, default=50, help="Maximum messages (default: 50)"
+    )
+    remote_messages_parser.add_argument(
+        "-t", "--timeout", type=float, default=30.0, help="RPC timeout in seconds (default: 30)"
+    )
+    remote_messages_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    remote_messages_parser.set_defaults(func=cmd_remote_messages)
+
     # version
     version_parser = subparsers.add_parser("version", help="Show version information")
     version_parser.add_argument("--json", action="store_true", help="Output as JSON")
     version_parser.set_defaults(func=cmd_version)
+
+    # doctor
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Run installation diagnostics and health checks"
+    )
+    doctor_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    doctor_parser.add_argument(
+        "--offline", action="store_true", help="Skip network checks (PyPI version)"
+    )
+    doctor_parser.add_argument(
+        "--fix", action="store_true", help="Auto-fix issues (create missing dirs)"
+    )
+    doctor_parser.add_argument(
+        "--setup", action="store_true", help="Run interactive setup wizard"
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
 
     return parser
 

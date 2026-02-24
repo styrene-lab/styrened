@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from styrened.models.config import (
     APIConfig,
     AutoReplyMode,
@@ -17,15 +15,15 @@ from styrened.models.config import (
     CoreConfig,
     DeploymentMode,
     DiscoveryConfig,
-    IPCConfig,
     IdentityConfig,
+    IPCConfig,
     LXMFConfig,
     MetricsConfig,
     NotificationsConfig,
     PeerConfig,
     PropagationNodeConfig,
-    RPCConfig,
     ReticulumConfig,
+    RPCConfig,
     ServerInterfaceConfig,
     TerminalConfig,
     YubiKeyConfig,

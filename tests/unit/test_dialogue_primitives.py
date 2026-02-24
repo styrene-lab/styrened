@@ -17,7 +17,6 @@ from tests.dialogues.models import (
     TurnDirection,
 )
 from tests.dialogues.primitives import (
-    HealthCheckResult,
     _extract_content,
     collect_version_info,
     ensure_daemons_healthy,
@@ -653,7 +652,7 @@ class TestExecuteMultiNodeDialogueTurn:
             ("n2", "n3"): "h23", ("n3", "n2"): "h32",
         }
 
-        result = execute_multi_node_dialogue_turn(
+        execute_multi_node_dialogue_turn(
             harness, turn, 0, role_to_node, node_identities, lxmf_hashes,
         )
 

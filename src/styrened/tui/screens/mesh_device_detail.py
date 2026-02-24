@@ -1,7 +1,7 @@
 """Mesh Device Detail Screen - Unified detail view with tabbed interface.
 
 Central hub for all peer-to-peer interactions with a node: status, chat,
-command execution, and future capabilities.
+fleet operations (structured RPC), and terminal (PTY-over-RNS).
 """
 
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -21,6 +21,7 @@ from styrened.tui.widgets.command_widget import CommandWidget
 from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 from styrened.tui.widgets.page_browser import PageBrowserWidget
+from styrened.tui.widgets.terminal_widget import TerminalWidget
 
 if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
@@ -91,8 +92,8 @@ class MeshDeviceDetailScreen(Screen[None]):
     Provides a persistent header with device info and tabbed content for:
     - Status: RPC status queries with refresh
     - Chat: Peer-to-peer messaging via ChatWidget
-    - Command: Remote command execution
-    - SSH: Placeholder for future SSH terminal
+    - Fleet Ops: Structured fleet operations over LXMF store-and-forward
+    - Terminal: PTY-over-RNS interactive shell (future)
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -113,7 +114,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         Args:
             device_identity: Reticulum identity hash of device.
             initial_status: Optional pre-fetched status response.
-            initial_tab: Optional tab ID to open initially (e.g. "chat", "command").
+            initial_tab: Optional tab ID to open initially (e.g. "chat", "fleet-ops", "terminal").
         """
         super().__init__()
         self.device_identity = device_identity
@@ -214,8 +215,8 @@ class MeshDeviceDetailScreen(Screen[None]):
                             id="chat-widget",
                         )
 
-                    # Command tab
-                    with TabPane("Command", id="command"):
+                    # Fleet Ops tab
+                    with TabPane("Fleet Ops", id="fleet-ops"):
                         initial_cmds = (
                             self.initial_status.available_commands
                             if self.initial_status
@@ -228,11 +229,11 @@ class MeshDeviceDetailScreen(Screen[None]):
                             id="command-widget",
                         )
 
-                    # SSH tab (placeholder)
-                    with TabPane("SSH", id="ssh"):
-                        yield Static(
-                            "[dim]SSH terminal — coming soon[/]",
-                            classes="placeholder-text",
+                    # Terminal tab
+                    with TabPane("Terminal", id="terminal"):
+                        yield TerminalWidget(
+                            device_identity=self.device_identity,
+                            id="terminal-widget",
                         )
 
         yield Footer()

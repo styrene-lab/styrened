@@ -279,7 +279,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         if node_store is None:
             return {"nodes": [], "edges": []}
 
-        excluded = set(s.strip() for s in exclude_status.split(",")) if exclude_status else set()
+        excluded = {s.strip() for s in exclude_status.split(",")} if exclude_status else set()
 
         devices = node_store.get_all_nodes()
         paths = node_store.get_all_paths()
@@ -348,7 +348,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         if node_store is None:
             return []
 
-        excluded = set(s.strip() for s in exclude_status.split(",")) if exclude_status else set()
+        excluded = {s.strip() for s in exclude_status.split(",")} if exclude_status else set()
 
         all_devices = node_store.get_all_nodes()
         result = []
@@ -765,8 +765,8 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 "stdout": result.stdout,
                 "stderr": result.stderr,
             }
-        except TimeoutError:
-            raise HTTPException(504, detail=f"Exec timed out after {body.timeout}s")
+        except TimeoutError as err:
+            raise HTTPException(504, detail=f"Exec timed out after {body.timeout}s") from err
 
     @router.get("/api/fleet/{destination}/status")
     async def fleet_status(destination: str):
@@ -790,8 +790,8 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 "os_version": result.os_version,
                 "nixos_generation": result.nixos_generation,
             }
-        except TimeoutError:
-            raise HTTPException(504, detail="Status request timed out")
+        except TimeoutError as err:
+            raise HTTPException(504, detail="Status request timed out") from err
 
     @router.post("/api/fleet/{destination}/reboot")
     async def fleet_reboot(destination: str, body: RebootRequest):

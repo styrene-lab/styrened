@@ -140,6 +140,11 @@ def parse_micron(source: str) -> list[MicronElement]:
     literal_mode = False
     literal_lines: list[str] = []
 
+    # Structured data block accumulation (parallel to literal_mode)
+    sd_block_mode = False
+    sd_block_encoding: str = ""
+    sd_block_lines: list[str] = []
+
     # Current formatting state (persists across lines)
     style = TextStyle()
 
@@ -164,9 +169,39 @@ def parse_micron(source: str) -> list[MicronElement]:
             literal_lines.append(line)
             continue
 
-        # Page directives (#!key=value)
+        # Page directives (#!key=value) and structured data blocks
         stripped = line.strip()
         if stripped.startswith("#!"):
+            # Check for structured data block end marker (#!sd:<enc>:end)
+            if sd_block_mode and stripped == f"#!sd:{sd_block_encoding}:end":
+                # Emit accumulated block as a single PAGE_DIRECTIVE element
+                elements.append(
+                    MicronElement(
+                        element_type=ElementType.PAGE_DIRECTIVE,
+                        directive_key=f"sd:{sd_block_encoding}:block",
+                        directive_value="\n".join(sd_block_lines),
+                    )
+                )
+                sd_block_mode = False
+                sd_block_encoding = ""
+                sd_block_lines = []
+                continue
+
+            # Inside a block, accumulate content (including #! lines)
+            if sd_block_mode:
+                sd_block_lines.append(line)
+                continue
+
+            # Check for structured data block begin marker (#!sd:<enc>:begin)
+            if stripped.startswith("#!sd:") and stripped.endswith(":begin"):
+                # Extract encoding from #!sd:<enc>:begin
+                inner = stripped[5:-6]  # strip "#!sd:" and ":begin"
+                if inner and ":" not in inner:
+                    sd_block_mode = True
+                    sd_block_encoding = inner
+                    sd_block_lines = []
+                    continue
+
             directive = stripped[2:]
             if "=" in directive:
                 key, _, value = directive.partition("=")
@@ -177,6 +212,11 @@ def parse_micron(source: str) -> list[MicronElement]:
                         directive_value=value.strip(),
                     )
                 )
+            continue
+
+        # Inside a structured data block, non-directive lines are block content
+        if sd_block_mode:
+            sd_block_lines.append(line)
             continue
 
         # Comments (# at start of line)
@@ -248,6 +288,9 @@ def parse_micron(source: str) -> list[MicronElement]:
                     ),
                 )
             )
+
+    # Close unclosed structured data block (discard — incomplete block)
+    # We intentionally don't emit partial blocks as they're malformed.
 
     # Close unclosed literal block
     if literal_mode and literal_lines:

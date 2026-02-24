@@ -87,7 +87,7 @@ def detect_memory_leak(snapshots: list[dict], threshold: float = 10.0) -> tuple[
     mean_time = sum(times) / n
     mean_memory = sum(memory) / n
 
-    covariance = sum((t - mean_time) * (m - mean_memory) for t, m in zip(times, memory))
+    covariance = sum((t - mean_time) * (m - mean_memory) for t, m in zip(times, memory, strict=True))
     variance = sum((t - mean_time) ** 2 for t in times)
 
     if variance == 0:

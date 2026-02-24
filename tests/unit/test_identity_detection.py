@@ -8,7 +8,6 @@ import pytest
 from styrened.services.reticulum import (
     KNOWN_LXMF_IDENTITY_PATHS,
     LXMF_SYMLINK_TARGETS,
-    SYSTEM_IDENTITY_PATH,
     detect_existing_lxmf_identity,
     ensure_operator_identity,
     get_identity_sharing_status,
@@ -933,7 +932,7 @@ class TestLifecycleIdentityWiring:
 
     def test_lifecycle_passes_config_override(self, tmp_path):
         """Config operator_identity_path should reach ensure_operator_identity as config_path."""
-        from styrened.models.config import CoreConfig, IdentityConfig, ReticulumConfig
+        from styrened.models.config import CoreConfig, ReticulumConfig
         from styrened.services.lifecycle import CoreLifecycle
 
         custom_path = tmp_path / "custom" / "identity"

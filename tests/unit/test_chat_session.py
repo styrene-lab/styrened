@@ -1,7 +1,6 @@
 """Unit tests for ChatSession async context manager."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -123,7 +122,7 @@ class TestChatSessionLifecycle:
             with patch(
                 "styrened.chat_session.ControlClient", return_value=mock_client
             ):
-                async with ChatSession() as chat:
+                async with ChatSession():
                     raise RuntimeError("Test error")
 
         mock_client.unsubscribe.assert_called_once()

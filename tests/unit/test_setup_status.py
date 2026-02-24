@@ -5,10 +5,7 @@ Validates first-run setup status detection.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from styrened.services.setup import SetupStatus, get_setup_status
 

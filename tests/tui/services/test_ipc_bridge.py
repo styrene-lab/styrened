@@ -19,7 +19,7 @@ from styrened.tui.services.ipc_bridge import (
 @pytest.fixture
 def mock_client():
     """Patch ControlClient at import location in ipc_bridge module."""
-    with patch("styrened.tui.services.ipc_bridge.ControlClient") as MockClient:
+    with patch("styrened.tui.services.ipc_bridge.ControlClient") as mock_client_cls:
         client = AsyncMock()
         client.connect = AsyncMock()
         client.disconnect = AsyncMock()
@@ -63,7 +63,7 @@ def mock_client():
         client.on_event = Mock()
         client.remove_event_handler = Mock()
 
-        MockClient.return_value = client
+        mock_client_cls.return_value = client
         yield client
 
 
@@ -341,9 +341,6 @@ class TestReconnect:
     @pytest.mark.asyncio
     async def test_five_attempts_max(self, mock_client):
         mock_client.ping.return_value = False
-        connect_count = 0
-
-        original_connect = bridge_connect = None
 
         bridge = IPCBridge()
 
@@ -367,7 +364,7 @@ class TestCall:
         bridge = IPCBridge()
         await bridge.connect()
 
-        result = await bridge._call("query_status")
+        await bridge._call("query_status")
         mock_client.query_status.assert_called_once()
 
     @pytest.mark.asyncio
@@ -397,7 +394,7 @@ class TestCall:
 
         mock_client.query_status = AsyncMock(side_effect=_query)
 
-        with patch.object(bridge, "_reconnect", return_value=True) as mock_reconnect:
+        with patch.object(bridge, "_reconnect", return_value=True):
             bridge._connected = True
             mock_client.connected = True
             result = await bridge._call("query_status")

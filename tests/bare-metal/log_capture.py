@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 def _results_dir() -> Path:
     """Get or create test results directory."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     base = Path(__file__).parents[2] / "test-results" / "bare-metal" / timestamp
     return base
 
@@ -55,7 +55,7 @@ def capture_logs_on_failure(request: pytest.FixtureRequest, harness: SSHHarness)
             with open(log_file, "a") as f:
                 f.write(f"\n{'='*60}\n")
                 f.write(f"Captured for: {request.node.nodeid}\n")
-                f.write(f"Time: {datetime.now(timezone.utc).isoformat()}\n")
+                f.write(f"Time: {datetime.now(UTC).isoformat()}\n")
                 f.write(f"{'='*60}\n")
                 f.write(result.stdout if result.success else f"Log capture failed: {result.stderr}\n")
             captured[device_name] = result.success
@@ -67,7 +67,7 @@ def capture_logs_on_failure(request: pytest.FixtureRequest, harness: SSHHarness)
     with open(context_file, "a") as f:
         json.dump({
             "test": request.node.nodeid,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "log_capture": captured,
         }, f)
         f.write("\n")

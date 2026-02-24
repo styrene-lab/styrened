@@ -1,13 +1,13 @@
-"""TUI tests for ExplorationScreen - search, sort, and type display.
+"""TUI tests for ExplorationScreen — categorized tabs, search, sort, and type display.
 
-Tests the search input, column sorting, and new device type display.
+Tests the tabbed exploration interface with LXMF, Pages, Infrastructure, and Other tabs.
 """
 
 from datetime import datetime
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Input, Static
+from textual.widgets import Input, Static, TabbedContent
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.app import StyreneApp
@@ -85,6 +85,134 @@ def _patch_discovery(devices):
     )
 
 
+class TestExplorationTabStructure:
+    """The screen has 4 categorized tabs."""
+
+    @pytest.mark.asyncio
+    async def test_four_tabs_present(self, sample_devices):
+        """TabbedContent should have 4 tab panes."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                panes = list(tabs.query("TabPane"))
+                assert len(panes) == 4
+
+    @pytest.mark.asyncio
+    async def test_each_tab_has_table(self, sample_devices):
+        """Each tab pane should contain a ReticumAnnounceTable."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                for tid in ["#table-lxmf", "#table-pages", "#table-infra", "#table-other"]:
+                    table = app.screen.query_one(tid, ReticumAnnounceTable)
+                    assert table is not None
+
+
+class TestDevicesInCorrectTab:
+    """Devices appear in the correct tab based on their type."""
+
+    @pytest.mark.asyncio
+    async def test_lxmf_peer_in_lxmf_tab(self, sample_devices):
+        """LXMF_PEER should appear in LXMF tab."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                table = app.screen.query_one("#table-lxmf", ReticumAnnounceTable)
+                assert table.device_count == 1  # Only Alice
+
+    @pytest.mark.asyncio
+    async def test_nomadnet_in_pages_tab(self, sample_devices):
+        """NOMADNET_NODE should appear in Pages tab."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                table = app.screen.query_one("#table-pages", ReticumAnnounceTable)
+                assert table.device_count == 1  # Only NomadPage
+
+    @pytest.mark.asyncio
+    async def test_infra_devices_in_infra_tab(self, sample_devices):
+        """PROPAGATION_NODE and RNODE should appear in Infra tab."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                table = app.screen.query_one("#table-infra", ReticumAnnounceTable)
+                assert table.device_count == 2  # MyRNode + PropNode1
+
+    @pytest.mark.asyncio
+    async def test_other_devices_in_other_tab(self, sample_devices):
+        """GENERIC and UNKNOWN should appear in Other tab."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                table = app.screen.query_one("#table-other", ReticumAnnounceTable)
+                assert table.device_count == 2  # Bob (generic) + unknown-dev
+
+
+class TestTabCountLabels:
+    """Tab labels show device counts."""
+
+    @pytest.mark.asyncio
+    async def test_tab_labels_show_counts(self, sample_devices):
+        """Populated tabs should show count in label."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                lxmf_tab = tabs.get_tab("tab-lxmf")
+                assert "(1)" in str(lxmf_tab.label)
+
+                infra_tab = tabs.get_tab("tab-infra")
+                assert "(2)" in str(infra_tab.label)
+
+    @pytest.mark.asyncio
+    async def test_empty_tab_no_count(self):
+        """Tab with zero devices should not show a count."""
+        # Only LXMF devices — other tabs should be empty
+        devices = [
+            _make_device("Alice", DeviceType.LXMF_PEER),
+        ]
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                other_tab = tabs.get_tab("tab-other")
+                label_text = str(other_tab.label)
+                assert "(" not in label_text
+
+
 class TestExplorationSearchHidden:
     """Search input is hidden by default."""
 
@@ -123,11 +251,11 @@ class TestExplorationSearchActivation:
 
 
 class TestExplorationSearchFilters:
-    """Search input filters table rows."""
+    """Search input filters the active tab's table rows."""
 
     @pytest.mark.asyncio
-    async def test_search_filters_by_name(self, sample_devices):
-        """Typing in search should filter table to matching rows."""
+    async def test_search_filters_active_tab(self, sample_devices):
+        """Typing in search should filter the active tab's table."""
         app = StyreneApp()
         p1, p2, p3 = _patch_discovery(sample_devices)
         with p1, p2, p3:
@@ -135,20 +263,24 @@ class TestExplorationSearchFilters:
                 await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
-                initial_count = table.row_count
+                # Switch to Infra tab which has 2 devices (better for filter test)
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                tabs.active = "tab-infra"
+                await pilot.pause()
 
-                # Activate search and type
+                table = app.screen.query_one("#table-infra", ReticumAnnounceTable)
+                assert table.device_count == 2
+                initial_row_count = table.row_count
+
+                # Activate search and type partial match
                 await pilot.press("slash")
                 await pilot.pause()
-                await pilot.press("a", "l", "i", "c", "e")
+                await pilot.press("r", "n", "o", "d", "e")
                 await pilot.pause()
 
-                # Should have fewer rows (only "Alice" matches)
-                assert table.row_count < initial_count
-                assert table.row_count >= 1
+                # Should filter to only MyRNode (1 row vs 2)
+                assert table.row_count < initial_row_count
+                assert table.row_count == 1
 
 
 class TestExplorationSearchDismiss:
@@ -167,12 +299,10 @@ class TestExplorationSearchDismiss:
                 # Open search and type
                 await pilot.press("slash")
                 await pilot.pause()
-                await pilot.press("a", "l", "i")
+                await pilot.press("z", "z", "z")
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
+                table = app.screen.query_one("#table-lxmf", ReticumAnnounceTable)
                 filtered_count = table.row_count
 
                 # Press escape to dismiss
@@ -184,6 +314,37 @@ class TestExplorationSearchDismiss:
                 assert search.value == ""
                 # All rows should be back
                 assert table.row_count >= filtered_count
+
+
+class TestExplorationTabSwitchClearsSearch:
+    """Tab switch clears the search bar."""
+
+    @pytest.mark.asyncio
+    async def test_tab_switch_clears_search(self, sample_devices):
+        """Switching tabs should clear any active search filter."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                # Open search and type
+                await pilot.press("slash")
+                await pilot.pause()
+                await pilot.press("a", "l", "i")
+                await pilot.pause()
+
+                search = app.screen.query_one("#explore-search-bar", Input)
+                assert search.value == "ali"
+
+                # Switch to Infra tab
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                tabs.active = "tab-infra"
+                await pilot.pause()
+
+                # Search input should be cleared
+                assert search.value == ""
 
 
 class TestExplorationSorting:
@@ -199,11 +360,9 @@ class TestExplorationSorting:
                 await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
+                # Use infra tab which has 2 items (good for sort testing)
+                table = app.screen.query_one("#table-infra", ReticumAnnounceTable)
 
-                # Sort by name
                 table.sort_by("name")
                 assert table._sort_column == "name"
                 assert table._sort_reverse is False
@@ -218,81 +377,24 @@ class TestExplorationSorting:
                 await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
+                table = app.screen.query_one("#table-infra", ReticumAnnounceTable)
 
-                # Sort ascending
                 table.sort_by("name")
                 assert table._sort_reverse is False
 
-                # Click again - should toggle to descending
                 table.sort_by("name")
                 assert table._sort_reverse is True
 
-    @pytest.mark.asyncio
-    async def test_sort_by_type(self, sample_devices):
-        """Sorting by type groups devices by their type value."""
-        app = StyreneApp()
-        p1, p2, p3 = _patch_discovery(sample_devices)
-        with p1, p2, p3:
-            async with app.run_test() as pilot:
-                await app.push_screen(ExplorationScreen())
-                await pilot.pause()
-
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
-
-                table.sort_by("type")
-                assert table._sort_column == "type"
-                # Should have all rows still
-                assert table.row_count == len(sample_devices)
-
-
-class TestExplorationNewDeviceTypes:
-    """New device types display correctly."""
-
-    @pytest.mark.asyncio
-    async def test_lxmf_peer_displays(self, sample_devices):
-        """LXMF peer should show LXMF type label."""
-        app = StyreneApp()
-        p1, p2, p3 = _patch_discovery(sample_devices)
-        with p1, p2, p3:
-            async with app.run_test() as pilot:
-                await app.push_screen(ExplorationScreen())
-                await pilot.pause()
-
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
-                # Should have rows for all device types
-                assert table.row_count == len(sample_devices)
-
-    @pytest.mark.asyncio
-    async def test_count_indicator_shows(self, sample_devices):
-        """Count indicator should show total announces."""
-        app = StyreneApp()
-        p1, p2, p3 = _patch_discovery(sample_devices)
-        with p1, p2, p3:
-            async with app.run_test() as pilot:
-                await app.push_screen(ExplorationScreen())
-                await pilot.pause()
-
-                count = app.screen.query_one("#explore-count", Static)
-                assert "announces" in str(count.render())
-
 
 class TestExplorationLxmfShadowFiltering:
-    """LXMF shadow entries for Styrene nodes are filtered out."""
+    """LXMF shadow entries for Styrene nodes are filtered out across all tabs."""
 
     @pytest.mark.asyncio
     async def test_lxmf_shadow_filtered_out(self):
         """An LXMF_PEER sharing identity_hash with a STYRENE_NODE should not appear."""
         now = int(datetime.now().timestamp())
-        shared_identity = "aabb" * 8  # 32 hex chars
+        shared_identity = "aabb" * 8
 
-        # Styrene node on operator aspect (different dest_hash, same identity)
         styrene_node = _make_device(
             "Testbed Node",
             DeviceType.STYRENE_NODE,
@@ -300,7 +402,6 @@ class TestExplorationLxmfShadowFiltering:
             identity_hash=shared_identity,
             last_announce=now - 5,
         )
-        # LXMF shadow on delivery aspect (different dest_hash, same identity)
         lxmf_shadow = _make_device(
             "Testbed Node",
             DeviceType.LXMF_PEER,
@@ -308,7 +409,6 @@ class TestExplorationLxmfShadowFiltering:
             identity_hash=shared_identity,
             last_announce=now - 5,
         )
-        # Unrelated LXMF peer (different identity)
         real_lxmf = _make_device(
             "Alice",
             DeviceType.LXMF_PEER,
@@ -325,11 +425,9 @@ class TestExplorationLxmfShadowFiltering:
                 await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
-                # Only the real LXMF peer should appear (shadow and styrene both excluded)
-                assert table.row_count == 1
+                # Only the real LXMF peer should appear in the LXMF tab
+                table = app.screen.query_one("#table-lxmf", ReticumAnnounceTable)
+                assert table.device_count == 1
 
     @pytest.mark.asyncio
     async def test_unrelated_lxmf_peer_not_filtered(self):
@@ -358,10 +456,8 @@ class TestExplorationLxmfShadowFiltering:
                 await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
-                assert table.row_count == 2
+                table = app.screen.query_one("#table-lxmf", ReticumAnnounceTable)
+                assert table.device_count == 2
 
 
 class TestExplorationScrollPreservation:
@@ -377,15 +473,17 @@ class TestExplorationScrollPreservation:
                 await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                table = app.screen.query_one(
-                    "#reticulum-announce-table", ReticumAnnounceTable
-                )
-
-                # Move cursor down a few rows
-                await pilot.press("down", "down")
+                # Switch to infra tab (has 2 rows — good for cursor test)
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                tabs.active = "tab-infra"
                 await pilot.pause()
 
-                # Record which row key is selected
+                table = app.screen.query_one("#table-infra", ReticumAnnounceTable)
+
+                # Move cursor down
+                await pilot.press("down")
+                await pilot.pause()
+
                 from textual.coordinate import Coordinate
 
                 cursor_row = table.cursor_row
@@ -396,9 +494,94 @@ class TestExplorationScrollPreservation:
                 table._rebuild_table()
                 await pilot.pause()
 
-                # Cursor should still point to the same row key
                 new_cursor_row = table.cursor_row
                 new_cell_key = table.coordinate_to_cell_key(
                     Coordinate(new_cursor_row, 0)
                 )
                 assert str(new_cell_key.row_key.value) == selected_key
+
+
+class TestExplorationCountIndicator:
+    """Count indicator shows total announces for active tab."""
+
+    @pytest.mark.asyncio
+    async def test_count_indicator_shows(self, sample_devices):
+        """Count indicator should show announces text."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                count = app.screen.query_one("#explore-count", Static)
+                assert "announces" in str(count.render())
+
+
+class TestPagesTabPreview:
+    """Pages tab v key triggers inline page browser."""
+
+    @pytest.mark.asyncio
+    async def test_placeholder_visible_initially(self, sample_devices):
+        """Pages tab should show placeholder before any preview."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                # Switch to Pages tab
+                tabs = app.screen.query_one("#explore-tabs", TabbedContent)
+                tabs.active = "tab-pages"
+                await pilot.pause()
+
+                placeholder = app.screen.query_one(
+                    "#pages-browser-placeholder", Static
+                )
+                assert not placeholder.has_class("hidden")
+
+    @pytest.mark.asyncio
+    async def test_v_key_outside_pages_tab_does_nothing(self, sample_devices):
+        """Pressing v on non-Pages tab should not trigger preview."""
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(sample_devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                # Stay on LXMF tab (default), press v
+                await pilot.press("v")
+                await pilot.pause()
+
+                # Browser section should remain hidden
+                from textual.containers import Vertical
+
+                browser_section = app.screen.query_one(
+                    "#pages-browser-section", Vertical
+                )
+                assert browser_section.has_class("hidden")
+
+
+class TestEmptyTabPlaceholder:
+    """Empty tabs show 'No announces discovered' message."""
+
+    @pytest.mark.asyncio
+    async def test_empty_tab_shows_placeholder_row(self):
+        """Tab with no matching devices should show a placeholder row."""
+        # Only LXMF devices — Pages tab will be empty
+        devices = [
+            _make_device("Alice", DeviceType.LXMF_PEER),
+        ]
+        app = StyreneApp()
+        p1, p2, p3 = _patch_discovery(devices)
+        with p1, p2, p3:
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
+                await pilot.pause()
+
+                table = app.screen.query_one("#table-pages", ReticumAnnounceTable)
+                assert table.device_count == 0
+                # Table should have a placeholder row
+                assert table.row_count == 1

@@ -1,7 +1,7 @@
 """Unit tests for IPC client event dispatch and server subscription filtering."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -9,7 +9,6 @@ from styrened.ipc.messages import (
     CmdSetContactRequest,
     QueryContactsRequest,
     QueryResolveNameRequest,
-    ResultResponse,
     SubDevicesRequest,
     SubMessagesRequest,
     UnsubRequest,

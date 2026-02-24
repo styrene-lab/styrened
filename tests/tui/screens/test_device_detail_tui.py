@@ -96,8 +96,8 @@ class TestDeviceDetailComposition:
                 assert len(tabbed) > 0, "Device detail should use TabbedContent"
 
     @pytest.mark.asyncio
-    async def test_device_detail_has_status_chat_command_ssh_tabs(self, test_device):
-        """Device detail should have Status, Chat, Command, and SSH tabs."""
+    async def test_device_detail_has_status_chat_fleet_ops_terminal_tabs(self, test_device):
+        """Device detail should have Status, Chat, Fleet Ops, and Terminal tabs."""
         app = StyreneApp()
 
         with patch(
@@ -120,8 +120,8 @@ class TestDeviceDetailComposition:
 
                 assert "status" in pane_ids, f"Missing Status tab. Found: {pane_ids}"
                 assert "chat" in pane_ids, f"Missing Chat tab. Found: {pane_ids}"
-                assert "command" in pane_ids, f"Missing Command tab. Found: {pane_ids}"
-                assert "ssh" in pane_ids, f"Missing SSH tab. Found: {pane_ids}"
+                assert "fleet-ops" in pane_ids, f"Missing Fleet Ops tab. Found: {pane_ids}"
+                assert "terminal" in pane_ids, f"Missing Terminal tab. Found: {pane_ids}"
 
     @pytest.mark.asyncio
     async def test_device_detail_shows_action_buttons(self, test_device):
@@ -532,7 +532,7 @@ class TestDeviceDetailNavigation:
         with patch(
             "styrened.tui.screens.mesh_device_detail.discover_devices", return_value=[]
         ):
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 await app.push_screen(
                     MeshDeviceDetailScreen(device_identity="nonexistent_device")
                 )

@@ -445,6 +445,13 @@ class QueryPageRequest(IPCRequest):
 
 
 @dataclass
+class QueryPageServerStatusRequest(IPCRequest):
+    """Query page server status."""
+
+    MSG_TYPE = IPCMessageType.QUERY_PAGE_SERVER_STATUS
+
+
+@dataclass
 class CmdPageDisconnectRequest(IPCRequest):
     """Disconnect link to a NomadNet node."""
 
@@ -470,6 +477,113 @@ class CmdRebootDeviceRequest(IPCRequest):
             "delay": self.delay,
             "timeout": self.timeout,
         }
+
+
+@dataclass
+class CmdRemoteInboxRequest(IPCRequest):
+    """Query inbox (conversation list) on a remote node via RPC."""
+
+    MSG_TYPE = IPCMessageType.CMD_REMOTE_INBOX
+    destination: str = ""
+    limit: int = 50
+    timeout: float = 30.0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination": self.destination,
+            "limit": self.limit,
+            "timeout": self.timeout,
+        }
+
+
+@dataclass
+class CmdRemoteMessagesRequest(IPCRequest):
+    """Query messages for a peer on a remote node via RPC."""
+
+    MSG_TYPE = IPCMessageType.CMD_REMOTE_MESSAGES
+    destination: str = ""
+    peer_hash: str = ""
+    limit: int = 50
+    timeout: float = 30.0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination": self.destination,
+            "peer_hash": self.peer_hash,
+            "limit": self.limit,
+            "timeout": self.timeout,
+        }
+
+
+# -----------------------------------------------------------------------------
+# Terminal requests
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class CmdTerminalOpenRequest(IPCRequest):
+    """Open a terminal session to a remote node."""
+
+    MSG_TYPE = IPCMessageType.CMD_TERMINAL_OPEN
+    destination: str = ""
+    term_type: str = "xterm-256color"
+    rows: int = 24
+    cols: int = 80
+    shell: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "destination": self.destination,
+            "term_type": self.term_type,
+            "rows": self.rows,
+            "cols": self.cols,
+        }
+        if self.shell is not None:
+            payload["shell"] = self.shell
+        return payload
+
+
+@dataclass
+class CmdTerminalInputRequest(IPCRequest):
+    """Send input data to a terminal session."""
+
+    MSG_TYPE = IPCMessageType.CMD_TERMINAL_INPUT
+    session_id: str = ""
+    data_b64: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "data_b64": self.data_b64,
+        }
+
+
+@dataclass
+class CmdTerminalResizeRequest(IPCRequest):
+    """Resize a terminal session."""
+
+    MSG_TYPE = IPCMessageType.CMD_TERMINAL_RESIZE
+    session_id: str = ""
+    rows: int = 24
+    cols: int = 80
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "rows": self.rows,
+            "cols": self.cols,
+        }
+
+
+@dataclass
+class CmdTerminalCloseRequest(IPCRequest):
+    """Close a terminal session."""
+
+    MSG_TYPE = IPCMessageType.CMD_TERMINAL_CLOSE
+    session_id: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"session_id": self.session_id}
 
 
 # -----------------------------------------------------------------------------
@@ -721,6 +835,12 @@ class DaemonStatus:
     styrene_node_count: int
     pending_rpc_count: int
     interface_count: int = 0
+    hub_status: str = "disabled"
+    hub_address: str | None = None
+    interfaces: list[dict[str, Any]] = field(default_factory=list)
+    propagation_enabled: bool = False
+    transport_enabled: bool = False
+    active_links: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -732,6 +852,12 @@ class DaemonStatus:
             "styrene_node_count": self.styrene_node_count,
             "pending_rpc_count": self.pending_rpc_count,
             "interface_count": self.interface_count,
+            "hub_status": self.hub_status,
+            "hub_address": self.hub_address,
+            "interfaces": self.interfaces,
+            "propagation_enabled": self.propagation_enabled,
+            "transport_enabled": self.transport_enabled,
+            "active_links": self.active_links,
         }
 
     @classmethod
@@ -745,6 +871,12 @@ class DaemonStatus:
             styrene_node_count=data.get("styrene_node_count", 0),
             pending_rpc_count=data.get("pending_rpc_count", 0),
             interface_count=data.get("interface_count", 0),
+            hub_status=data.get("hub_status", "disabled"),
+            hub_address=data.get("hub_address"),
+            interfaces=data.get("interfaces", []),
+            propagation_enabled=data.get("propagation_enabled", False),
+            transport_enabled=data.get("transport_enabled", False),
+            active_links=data.get("active_links", 0),
         )
 
 
@@ -998,6 +1130,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             form_data=payload.get("form_data"),
             timeout=payload.get("timeout", 30.0),
         )
+    elif msg_type == IPCMessageType.QUERY_PAGE_SERVER_STATUS:
+        return QueryPageServerStatusRequest()
     elif msg_type == IPCMessageType.CMD_PAGE_DISCONNECT:
         return CmdPageDisconnectRequest(
             destination_hash=payload.get("destination_hash", ""),
@@ -1007,6 +1141,42 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             destination=payload.get("destination", ""),
             delay=payload.get("delay", 0),
             timeout=payload.get("timeout", 10.0),
+        )
+    elif msg_type == IPCMessageType.CMD_REMOTE_INBOX:
+        return CmdRemoteInboxRequest(
+            destination=payload.get("destination", ""),
+            limit=payload.get("limit", 50),
+            timeout=payload.get("timeout", 30.0),
+        )
+    elif msg_type == IPCMessageType.CMD_REMOTE_MESSAGES:
+        return CmdRemoteMessagesRequest(
+            destination=payload.get("destination", ""),
+            peer_hash=payload.get("peer_hash", ""),
+            limit=payload.get("limit", 50),
+            timeout=payload.get("timeout", 30.0),
+        )
+    elif msg_type == IPCMessageType.CMD_TERMINAL_OPEN:
+        return CmdTerminalOpenRequest(
+            destination=payload.get("destination", ""),
+            term_type=payload.get("term_type", "xterm-256color"),
+            rows=payload.get("rows", 24),
+            cols=payload.get("cols", 80),
+            shell=payload.get("shell"),
+        )
+    elif msg_type == IPCMessageType.CMD_TERMINAL_INPUT:
+        return CmdTerminalInputRequest(
+            session_id=payload.get("session_id", ""),
+            data_b64=payload.get("data_b64", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_TERMINAL_RESIZE:
+        return CmdTerminalResizeRequest(
+            session_id=payload.get("session_id", ""),
+            rows=payload.get("rows", 24),
+            cols=payload.get("cols", 80),
+        )
+    elif msg_type == IPCMessageType.CMD_TERMINAL_CLOSE:
+        return CmdTerminalCloseRequest(
+            session_id=payload.get("session_id", ""),
         )
     elif msg_type == IPCMessageType.SUB_MESSAGES:
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))

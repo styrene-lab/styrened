@@ -3,6 +3,7 @@
 from styrened.ipc.messages import (
     CmdPageDisconnectRequest,
     QueryPageRequest,
+    QueryPageServerStatusRequest,
     create_request,
 )
 from styrened.ipc.protocol import IPCMessageType
@@ -59,8 +60,25 @@ class TestCmdPageDisconnectRequest:
         assert payload["destination_hash"] == ""
 
 
+class TestQueryPageServerStatusRequest:
+    """Tests for QueryPageServerStatusRequest serialization."""
+
+    def test_serialization(self):
+        """QueryPageServerStatusRequest should serialize correctly."""
+        req = QueryPageServerStatusRequest()
+        msg_type, payload = req.to_wire()
+
+        assert msg_type == IPCMessageType.QUERY_PAGE_SERVER_STATUS
+        assert payload == {}
+
+
 class TestCreateRequestFactory:
     """Tests for create_request() with page browser types."""
+
+    def test_create_query_page_server_status(self):
+        """Should create QueryPageServerStatusRequest via factory."""
+        req = create_request(IPCMessageType.QUERY_PAGE_SERVER_STATUS, {})
+        assert isinstance(req, QueryPageServerStatusRequest)
 
     def test_create_query_page(self):
         """Should create QueryPageRequest via factory."""

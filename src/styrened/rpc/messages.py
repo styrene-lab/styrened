@@ -8,6 +8,8 @@ Response types:
 - ExecResult: Command execution result
 - RebootResult: Reboot result
 - UpdateConfigResult: Config update result
+- InboxResponse: Remote inbox query response
+- MessagesResponse: Remote messages query response
 
 Note:
     Request types and wire format encoding are handled by StyreneEnvelope
@@ -16,6 +18,8 @@ Note:
     - create_exec()
     - create_reboot()
     - create_config_update()
+    - create_inbox_query()
+    - create_messages_query()
 
     See: models/styrene_wire.py for the wire format implementation.
 """
@@ -283,3 +287,51 @@ class UpdateConfigResult:
             message=data["message"],
             updated_keys=data.get("updated_keys", []),
         )
+
+
+@dataclass
+class InboxResponse:
+    """Remote inbox query response.
+
+    Contains a list of conversations from the remote node's inbox.
+
+    Attributes:
+        conversations: List of conversation dicts (ConversationInfo.to_dict() format).
+        type: Message type identifier.
+    """
+
+    conversations: list[dict[str, Any]]
+    type: str = "inbox_response"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return {"conversations": self.conversations, "type": self.type}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "InboxResponse":
+        """Deserialize from dict."""
+        return cls(conversations=data.get("conversations", []))
+
+
+@dataclass
+class MessagesResponse:
+    """Remote messages query response.
+
+    Contains a list of messages from the remote node for a specific peer.
+
+    Attributes:
+        messages: List of message dicts (MessageInfo.to_dict() format).
+        type: Message type identifier.
+    """
+
+    messages: list[dict[str, Any]]
+    type: str = "messages_response"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return {"messages": self.messages, "type": self.type}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MessagesResponse":
+        """Deserialize from dict."""
+        return cls(messages=data.get("messages", []))

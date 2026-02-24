@@ -40,18 +40,6 @@ from styrened.models.config import (
     ServerInterfaceConfig,
 )
 
-
-class ConfigValidationErrors(Exception):
-    """Collection of validation errors from config loading.
-
-    Defined locally since styrened dropped this class post-v0.3.0.
-    """
-
-    def __init__(self, errors: list[ConfigFieldError]) -> None:
-        self.errors = errors
-        messages = [str(e) for e in errors]
-        super().__init__(f"Config validation failed: {'; '.join(messages)}")
-
 # Re-export core config components for backward compatibility
 __all__ = [
     # Core models (re-exported)
@@ -62,7 +50,6 @@ __all__ = [
     "ConfigFieldError",
     "ConfigLoadError",
     "ConfigValidationError",
-    "ConfigValidationErrors",
     "CoreConfig",
     "DeploymentMode",
     "DiscoveryConfig",

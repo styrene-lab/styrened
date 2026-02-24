@@ -1,9 +1,12 @@
-"""Command execution widget for running commands on devices via RPC.
+"""Fleet operations widget for executing whitelisted commands on devices via RPC.
+
+Structured fleet operations over LXMF store-and-forward — this is NOT a shell.
+Commands are restricted to a server-side whitelist discovered via ping.
 
 Features:
-- Ping: Measures RTT and populates available_commands
+- Ping: Measures RTT and populates available_commands from server whitelist
 - Available commands: Displayed as clickable labels, filtered via shutil.which()
-- Presets: Common command combos filtered against available_commands
+- Presets: Common operation combos filtered against available_commands
 - Command history: Up/down arrow cycles through in-session history
 - Reboot: Double-tap confirmation with 3s auto-cancel
 - Session log: Scrollable output with color-coded exit codes
@@ -28,8 +31,8 @@ logger = logging.getLogger(__name__)
 # Reboot confirmation timeout (seconds)
 _REBOOT_CONFIRM_TIMEOUT = 3.0
 
-# Preset command combos
-COMMAND_PRESETS: list[tuple[str, str]] = [
+# Fleet operation presets
+FLEET_OP_PRESETS: list[tuple[str, str]] = [
     ("uptime", "uptime"),
     ("df -h", "df -h"),
     ("free -h", "free -h"),
@@ -54,7 +57,11 @@ class OutputEntry:
 
 
 class CommandWidget(Widget):
-    """Widget for executing commands on device via RPC.
+    """Fleet operations widget for structured RPC commands over LXMF.
+
+    Executes whitelisted commands on remote devices via store-and-forward
+    RPC — not an interactive shell. Commands are restricted to a server-side
+    whitelist discovered via ping.
 
     Provides a toolbar, available command display, presets, session log,
     and command input with history navigation.
@@ -123,7 +130,7 @@ class CommandWidget(Widget):
 
         # Input row (docked bottom)
         with Horizontal(id="cmd-input-row"):
-            yield Input(placeholder="Enter command...", id="cmd-input")
+            yield Input(placeholder="Enter whitelisted command...", id="cmd-input")
             yield Button("Execute", id="cmd-execute", variant="primary")
 
     def on_mount(self) -> None:
@@ -142,7 +149,7 @@ class CommandWidget(Widget):
             return
 
         if not self._available_commands:
-            label.update("[dim]No available commands yet — ping to discover[/]")
+            label.update("[dim]No available commands yet — ping to discover server whitelist[/]")
         else:
             tags = "  ".join(
                 f"[@click=cmd_fill('{cmd}')]{cmd}[/]"
@@ -162,7 +169,7 @@ class CommandWidget(Widget):
             child.remove()
 
         # Filter presets by available commands
-        for label, cmd_string in COMMAND_PRESETS:
+        for label, cmd_string in FLEET_OP_PRESETS:
             base_cmd = cmd_string.split()[0]
             if not self._available_commands or base_cmd in self._available_commands:
                 btn = Button(
@@ -221,7 +228,7 @@ class CommandWidget(Widget):
                         lines.append(f"[red][exit {entry.exit_code}][/]")
                 lines.append("")  # blank separator
 
-        log_widget.update("\n".join(lines) if lines else "[dim]No commands executed yet[/]")
+        log_widget.update("\n".join(lines) if lines else "[dim]No fleet operations executed yet — ping to discover available commands[/]")
         # Auto-scroll to bottom
         scroll.scroll_end(animate=False)
 

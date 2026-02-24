@@ -456,7 +456,7 @@ class TestOutboundPacketErrorFilter:
         assert service._outbound_error_filter_installed is False
 
         # Mock RNS.Reticulum to avoid singleton issues
-        with patch("RNS.Reticulum") as mock_rns:
+        with patch("RNS.Reticulum"):
             # Initialize
             service.initialize()
 
@@ -665,7 +665,7 @@ class TestOutboundPacketErrorFilter:
         service = RNSService()
 
         # Mock RNS.Reticulum
-        with patch("RNS.Reticulum") as mock_rns:
+        with patch("RNS.Reticulum"):
             # Initialize twice
             service.initialize()
             service.initialize()
@@ -684,7 +684,7 @@ class TestOutboundPacketErrorFilter:
         service = RNSService()
 
         # Mock RNS.Reticulum
-        with patch("RNS.Reticulum") as mock_rns:
+        with patch("RNS.Reticulum"):
             # Initialize
             service.initialize()
             assert service._outbound_error_filter_installed is True

@@ -547,6 +547,29 @@ class TerminalConfig:
 
 
 @dataclass
+class PageServerConfig:
+    """NomadNet page server configuration.
+
+    Controls serving NomadNet-compatible pages over RNS, optionally enhanced
+    with Styrene structured data directives.  The page server creates the
+    ``("nomadnetwork", "node")`` destination unless NomadNet already owns it
+    (hub guard).
+
+    Attributes:
+        enabled: Whether to enable the page server service.
+        pages_dir: Directory containing ``.mu`` page files.
+            Defaults to ``~/.styrene/pages/`` if None.
+        node_name: Display name included in NomadNet announces.
+        demo: Whether to register demo/test pages on startup.
+    """
+
+    enabled: bool = False
+    pages_dir: Path | None = None
+    node_name: str | None = None
+    demo: bool = False
+
+
+@dataclass
 class CoreConfig:
     """Core Styrene configuration for headless applications.
 
@@ -565,6 +588,7 @@ class CoreConfig:
         notifications: Notification delivery configuration.
         lxmf: LXMF messaging and propagation configuration.
         terminal: Terminal session configuration.
+        page_server: NomadNet page server configuration.
     """
 
     profile: Profile = Profile.OPERATOR
@@ -578,3 +602,4 @@ class CoreConfig:
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     lxmf: LXMFConfig = field(default_factory=LXMFConfig)
     terminal: TerminalConfig = field(default_factory=TerminalConfig)
+    page_server: PageServerConfig = field(default_factory=PageServerConfig)

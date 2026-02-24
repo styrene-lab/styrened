@@ -487,7 +487,6 @@ def k8s_mesh_topology(
     created_managers = []
 
     async def _deploy(topology_spec):
-        import asyncio
 
         # Deploy to K8s
         pod_names = deploy_topology(
@@ -515,7 +514,7 @@ def k8s_mesh_topology(
 
         # Create MeshControlClients
         clients = {}
-        for node, pod in zip(topology_spec.nodes, pod_names):
+        for node, pod in zip(topology_spec.nodes, pod_names, strict=True):
             host, port = mgr.get_endpoint(pod)
             client = MeshControlClient(host=host, port=port, timeout=10.0)
             if not await wait_for_ping(client, timeout=60):

@@ -14,7 +14,7 @@ from textual.binding import Binding, BindingType
 from textual.screen import Screen
 from textual.widgets import Footer, Header
 
-from styrened.tui.models.config import ConfigLoadError, ConfigValidationErrors, StyreneConfig
+from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
 from styrened.tui.screens.dashboard import DashboardScreen
@@ -228,7 +228,7 @@ class StyreneApp(App[None]):
             # Log error and use defaults
             self.log.error(f"Failed to load config: {e}")
             self.config = get_default_config()
-        except ConfigValidationErrors as e:
+        except ConfigValidationError as e:
             # Log validation errors and use defaults
             self.log.warning(f"Config validation failed: {e}")
             self.config = get_default_config()

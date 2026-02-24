@@ -513,6 +513,18 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                     authorized.add(ident)
             config.terminal.authorized_identities = authorized
 
+    # Parse page_server section
+    if "page_server" in data and isinstance(data["page_server"], dict):
+        ps = data["page_server"]
+        if "enabled" in ps:
+            config.page_server.enabled = _parse_bool(ps["enabled"])
+        if "pages_dir" in ps and ps["pages_dir"]:
+            config.page_server.pages_dir = Path(str(ps["pages_dir"])).expanduser()
+        if "node_name" in ps and ps["node_name"]:
+            config.page_server.node_name = str(ps["node_name"])
+        if "demo" in ps:
+            config.page_server.demo = _parse_bool(ps["demo"])
+
     return config
 
 
@@ -703,6 +715,17 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     if config.terminal.authorized_identities:
         terminal_dict["authorized_identities"] = sorted(config.terminal.authorized_identities)
 
+    # Page server section
+    page_server_dict: dict[str, Any] = {
+        "enabled": config.page_server.enabled,
+    }
+    if config.page_server.pages_dir is not None:
+        page_server_dict["pages_dir"] = str(config.page_server.pages_dir)
+    if config.page_server.node_name is not None:
+        page_server_dict["node_name"] = config.page_server.node_name
+    if config.page_server.demo:
+        page_server_dict["demo"] = True
+
     return {
         "profile": config.profile.value,
         "reticulum": reticulum_dict,
@@ -715,6 +738,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "notifications": notifications_dict,
         "lxmf": lxmf_dict,
         "terminal": terminal_dict,
+        "page_server": page_server_dict,
     }
 
 

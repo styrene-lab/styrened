@@ -37,6 +37,8 @@ from styrened.models.styrene_wire import (
     StyreneMessageType,
     create_config_update,
     create_exec,
+    create_inbox_query,
+    create_messages_query,
     create_reboot,
     create_status_request,
     decode_payload,
@@ -52,6 +54,8 @@ from styrened.rpc.errors import (
 # Import response types for type hints and public API
 from styrened.rpc.messages import (
     ExecResult,
+    InboxResponse,
+    MessagesResponse,
     RebootResult,
     StatusResponse,
     UpdateConfigResult,
@@ -63,7 +67,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Response type union for type hints
-RPCResponseType = StatusResponse | ExecResult | RebootResult | UpdateConfigResult
+RPCResponseType = StatusResponse | ExecResult | RebootResult | UpdateConfigResult | InboxResponse | MessagesResponse
 
 
 @dataclass
@@ -126,6 +130,8 @@ class RPCClient(Protocol):
             StyreneMessageType.EXEC_RESULT,
             StyreneMessageType.REBOOT_RESULT,
             StyreneMessageType.CONFIG_RESULT,
+            StyreneMessageType.INBOX_RESPONSE,
+            StyreneMessageType.MESSAGES_RESPONSE,
             StyreneMessageType.ERROR,
         ]
 
@@ -311,6 +317,8 @@ class RPCClient(Protocol):
             StyreneMessageType.EXEC_RESULT,
             StyreneMessageType.REBOOT_RESULT,
             StyreneMessageType.CONFIG_RESULT,
+            StyreneMessageType.INBOX_RESPONSE,
+            StyreneMessageType.MESSAGES_RESPONSE,
             StyreneMessageType.ERROR,
         )
 
@@ -360,6 +368,14 @@ class RPCClient(Protocol):
                 success=payload_data.get("success", False),
                 message=payload_data.get("message", ""),
                 updated_keys=payload_data.get("updated_keys", []),
+            )
+        elif envelope.message_type == StyreneMessageType.INBOX_RESPONSE:
+            return InboxResponse(
+                conversations=payload_data.get("conversations", []),
+            )
+        elif envelope.message_type == StyreneMessageType.MESSAGES_RESPONSE:
+            return MessagesResponse(
+                messages=payload_data.get("messages", []),
             )
         elif envelope.message_type == StyreneMessageType.ERROR:
             # Convert ERROR to an exception
@@ -625,6 +641,58 @@ class RPCClient(Protocol):
         envelope = create_config_update(updates=config_updates)
         response = await self.call(destination, envelope, timeout=timeout)
         assert isinstance(response, UpdateConfigResult)
+        return response
+
+    async def call_inbox(
+        self,
+        destination: str,
+        limit: int = 50,
+        timeout: float = 30.0,
+    ) -> InboxResponse:
+        """Query remote node's inbox (conversation list).
+
+        Args:
+            destination: Device destination hash.
+            limit: Maximum conversations to return.
+            timeout: Timeout in seconds.
+
+        Returns:
+            InboxResponse with conversation list.
+
+        Raises:
+            RPCTimeoutError: If response not received within timeout.
+            RPCTransportError: If LXMF send fails.
+        """
+        envelope = create_inbox_query(limit=limit)
+        response = await self.call(destination, envelope, timeout=timeout)
+        assert isinstance(response, InboxResponse)
+        return response
+
+    async def call_messages(
+        self,
+        destination: str,
+        peer_hash: str,
+        limit: int = 50,
+        timeout: float = 30.0,
+    ) -> MessagesResponse:
+        """Query messages for a specific peer on a remote node.
+
+        Args:
+            destination: Device destination hash.
+            peer_hash: Peer hash to query messages for.
+            limit: Maximum messages to return.
+            timeout: Timeout in seconds.
+
+        Returns:
+            MessagesResponse with message list.
+
+        Raises:
+            RPCTimeoutError: If response not received within timeout.
+            RPCTransportError: If LXMF send fails.
+        """
+        envelope = create_messages_query(peer_hash=peer_hash, limit=limit)
+        response = await self.call(destination, envelope, timeout=timeout)
+        assert isinstance(response, MessagesResponse)
         return response
 
     def set_timeout(self, message_type: StyreneMessageType, timeout: float) -> None:

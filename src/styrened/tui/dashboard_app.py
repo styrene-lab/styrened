@@ -13,7 +13,7 @@ from pathlib import Path
 
 from textual.app import App
 
-from styrened.tui.models.config import ConfigLoadError, ConfigValidationErrors, StyreneConfig
+from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
 from styrened.tui.screens.dashboard_local import LocalDashboardScreen
 from styrened.tui.services.app_lifecycle import StyreneLifecycle
 from styrened.tui.services.config import (
@@ -52,7 +52,7 @@ class LocalDashboardApp(App[None]):
         self.config: StyreneConfig
         try:
             self.config = load_config()
-        except (ConfigLoadError, ConfigValidationErrors):
+        except (ConfigLoadError, ConfigValidationError):
             self.config = get_default_config()
 
         # Register and apply styrene brand theme

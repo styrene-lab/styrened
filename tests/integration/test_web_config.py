@@ -5,14 +5,13 @@ Uses FastAPI TestClient with a mock daemon.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from styrened.models.config import CoreConfig, DeploymentMode
+from styrened.models.config import CoreConfig
 from styrened.web.events import SSEBroadcaster
 from styrened.web.routes import create_router
 

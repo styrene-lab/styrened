@@ -12,6 +12,7 @@ Usage:
 """
 
 import asyncio
+import base64
 import logging
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -26,6 +27,8 @@ from styrened.ipc.messages import (
     CmdMarkReadRequest,
     CmdPageDisconnectRequest,
     CmdRebootDeviceRequest,
+    CmdRemoteInboxRequest,
+    CmdRemoteMessagesRequest,
     CmdRemoveContactRequest,
     CmdRetryMessageRequest,
     CmdSendChatRequest,
@@ -33,6 +36,10 @@ from styrened.ipc.messages import (
     CmdSetAutoReplyRequest,
     CmdSetContactRequest,
     CmdSyncMessagesRequest,
+    CmdTerminalCloseRequest,
+    CmdTerminalInputRequest,
+    CmdTerminalOpenRequest,
+    CmdTerminalResizeRequest,
     DaemonStatus,
     DeviceInfo,
     ErrorResponse,
@@ -48,6 +55,7 @@ from styrened.ipc.messages import (
     QueryIdentityRequest,
     QueryMessagesRequest,
     QueryPageRequest,
+    QueryPageServerStatusRequest,
     QueryPathInfoRequest,
     QueryResolveNameRequest,
     QuerySearchMessagesRequest,
@@ -890,6 +898,140 @@ class ControlClient:
             CmdPageDisconnectRequest(destination_hash=destination_hash)
         )
         return cast(bool, data.get("disconnected", False))
+
+    async def query_page_server_status(self) -> dict[str, Any]:
+        """Query page server status.
+
+        Returns:
+            Dict with enabled, started, owns_destination, pages_dir,
+            static_pages, and registered_handlers.
+        """
+        return await self._request(QueryPageServerStatusRequest())
+
+    # -------------------------------------------------------------------------
+    # Remote inbox methods (RPC over LXMF)
+    # -------------------------------------------------------------------------
+
+    async def remote_inbox(
+        self,
+        destination: str,
+        limit: int = 50,
+        timeout: float = 30.0,
+    ) -> list[dict[str, Any]]:
+        """Query inbox on a remote node via RPC over LXMF.
+
+        Args:
+            destination: Destination hash of remote node.
+            limit: Maximum conversations to return.
+            timeout: RPC timeout in seconds.
+
+        Returns:
+            List of conversation dicts from the remote node.
+        """
+        request = CmdRemoteInboxRequest(
+            destination=destination,
+            limit=limit,
+            timeout=timeout,
+        )
+        data = await self._request(request, timeout=timeout + 5)
+        return cast(list[dict[str, Any]], data.get("conversations", []))
+
+    async def remote_messages(
+        self,
+        destination: str,
+        peer_hash: str,
+        limit: int = 50,
+        timeout: float = 30.0,
+    ) -> list[dict[str, Any]]:
+        """Query messages for a peer on a remote node via RPC over LXMF.
+
+        Args:
+            destination: Destination hash of remote node.
+            peer_hash: Peer hash to query messages for.
+            limit: Maximum messages to return.
+            timeout: RPC timeout in seconds.
+
+        Returns:
+            List of message dicts from the remote node.
+        """
+        request = CmdRemoteMessagesRequest(
+            destination=destination,
+            peer_hash=peer_hash,
+            limit=limit,
+            timeout=timeout,
+        )
+        data = await self._request(request, timeout=timeout + 5)
+        return cast(list[dict[str, Any]], data.get("messages", []))
+
+    # -------------------------------------------------------------------------
+    # Terminal methods
+    # -------------------------------------------------------------------------
+
+    async def terminal_open(
+        self,
+        destination: str,
+        rows: int = 24,
+        cols: int = 80,
+        term_type: str = "xterm-256color",
+        shell: str | None = None,
+    ) -> dict[str, Any]:
+        """Open a terminal session to a remote node.
+
+        Args:
+            destination: Destination identity hash.
+            rows: Terminal rows.
+            cols: Terminal columns.
+            term_type: Terminal type string.
+            shell: Optional shell path.
+
+        Returns:
+            Dict with session_id and connected status.
+        """
+        request = CmdTerminalOpenRequest(
+            destination=destination,
+            rows=rows,
+            cols=cols,
+            term_type=term_type,
+            shell=shell,
+        )
+        return await self._request(request, timeout=45.0)
+
+    async def terminal_input(self, session_id: str, data: bytes) -> None:
+        """Send input data to a terminal session.
+
+        Args:
+            session_id: Hex-encoded session ID.
+            data: Raw input bytes to send.
+        """
+        request = CmdTerminalInputRequest(
+            session_id=session_id,
+            data_b64=base64.b64encode(data).decode("ascii"),
+        )
+        await self._request(request)
+
+    async def terminal_resize(self, session_id: str, rows: int, cols: int) -> None:
+        """Resize a terminal session.
+
+        Args:
+            session_id: Hex-encoded session ID.
+            rows: New row count.
+            cols: New column count.
+        """
+        request = CmdTerminalResizeRequest(
+            session_id=session_id,
+            rows=rows,
+            cols=cols,
+        )
+        await self._request(request)
+
+    async def terminal_close(self, session_id: str) -> None:
+        """Close a terminal session.
+
+        Args:
+            session_id: Hex-encoded session ID.
+        """
+        request = CmdTerminalCloseRequest(session_id=session_id)
+        await self._request(request)
 
 
 async def get_daemon_client() -> ControlClient | None:

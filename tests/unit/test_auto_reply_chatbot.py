@@ -200,14 +200,14 @@ class TestBuildLlmMessages:
         config = MockChatConfig()
         mock_conv_service = MagicMock()
 
-        # Simulate conversation history (newest first from DB)
+        # Simulate conversation history (oldest-first, as get_messages returns)
         msg1 = MagicMock()
         msg1.is_outgoing = False
         msg1.content = "Hello"
         msg2 = MagicMock()
         msg2.is_outgoing = True
         msg2.content = "Hi there"
-        mock_conv_service.get_messages.return_value = [msg2, msg1]  # newest first
+        mock_conv_service.get_messages.return_value = [msg1, msg2]  # oldest first
 
         handler = AutoReplyHandler(
             config=config,
@@ -219,7 +219,7 @@ class TestBuildLlmMessages:
         messages = handler._build_llm_messages("abcdef1234567890")
 
         assert messages[0]["role"] == "system"
-        # Reversed from newest-first to chronological
+        # Chronological order (oldest first)
         assert messages[1] == {"role": "user", "content": "Hello"}
         assert messages[2] == {"role": "assistant", "content": "Hi there"}
 

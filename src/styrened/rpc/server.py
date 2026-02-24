@@ -59,6 +59,8 @@ from styrened.models.styrene_wire import (
     create_config_result,
     create_error,
     create_exec_result,
+    create_inbox_response,
+    create_messages_response,
     create_reboot_result,
     create_status_response,
     decode_payload,
@@ -200,6 +202,9 @@ class RPCServer:
 
         self._enable_dangerous_commands = enable_dangerous_commands
 
+        # Conversation service for inbox queries (injected after init)
+        self._conversation_service: Any = None
+
         # Rate limiting
         self._rate_limit = rate_limit
         self._request_timestamps: dict[str, list[float]] = {}
@@ -266,6 +271,15 @@ class RPCServer:
         except Exception as e:
             logger.error(f"Failed to load authorized identities: {e}")
 
+    def set_conversation_service(self, service: Any) -> None:
+        """Inject conversation service for inbox query handling.
+
+        Args:
+            service: ConversationService instance.
+        """
+        self._conversation_service = service
+        logger.info("Conversation service injected into RPC server")
+
     def _register_with_protocol(self) -> None:
         """Register RPC message handlers with StyreneProtocol."""
         # Register for RPC command types
@@ -275,6 +289,8 @@ class RPCServer:
             StyreneMessageType.REBOOT,
             StyreneMessageType.CONFIG_UPDATE,
             StyreneMessageType.PING,
+            StyreneMessageType.INBOX_QUERY,
+            StyreneMessageType.MESSAGES_QUERY,
         ]
         for msg_type in rpc_types:
             self._protocol.register_handler(msg_type, self._protocol_handler)
@@ -286,6 +302,8 @@ class RPCServer:
         self._handlers[StyreneMessageType.REBOOT] = self._handle_reboot
         self._handlers[StyreneMessageType.CONFIG_UPDATE] = self._handle_config_update
         self._handlers[StyreneMessageType.PING] = self._handle_ping
+        self._handlers[StyreneMessageType.INBOX_QUERY] = self._handle_inbox_query
+        self._handlers[StyreneMessageType.MESSAGES_QUERY] = self._handle_messages_query
 
     async def _protocol_handler(self, message: LXMFMessage, envelope: StyreneEnvelope) -> None:
         """Handler called by StyreneProtocol for RPC messages.
@@ -926,6 +944,154 @@ class RPCServer:
             logger.debug(f"Sent ERROR to {destination[:16]}...")
         except Exception as e:
             logger.error(f"Failed to send ERROR: {e}")
+
+    def _handle_inbox_query(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle INBOX_QUERY - return conversation list from local inbox.
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        logger.debug("Handling INBOX_QUERY")
+
+        if not self._conversation_service:
+            logger.warning("INBOX_QUERY received but conversation service not available")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_FAILED,
+                    "Conversation service not available",
+                )
+            )
+            return
+
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+            limit = min(max(1, payload_data.get("limit", 50)), 500)
+
+            conversations = self._conversation_service.list_conversations()
+            conv_list = [c.to_dict() for c in conversations[:limit]]
+
+            asyncio.create_task(
+                self._send_inbox_response(source_hash, envelope.request_id, conv_list)
+            )
+        except Exception as e:
+            logger.error(f"Error handling INBOX_QUERY: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_FAILED,
+                    "Failed to query inbox",
+                )
+            )
+
+    async def _send_inbox_response(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        conversations: list[dict[str, Any]],
+    ) -> None:
+        """Send INBOX_RESPONSE.
+
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            conversations: List of conversation dicts.
+        """
+        response_envelope = create_inbox_response(conversations, request_id=request_id)
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent INBOX_RESPONSE to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send INBOX_RESPONSE: {e}")
+
+    def _handle_messages_query(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle MESSAGES_QUERY - return messages for a specific peer.
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        logger.debug("Handling MESSAGES_QUERY")
+
+        if not self._conversation_service:
+            logger.warning("MESSAGES_QUERY received but conversation service not available")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_FAILED,
+                    "Conversation service not available",
+                )
+            )
+            return
+
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+            peer_hash = payload_data.get("peer_hash", "")
+            limit = min(max(1, payload_data.get("limit", 50)), 500)
+
+            if not peer_hash:
+                asyncio.create_task(
+                    self._send_error(
+                        source_hash,
+                        envelope.request_id,
+                        RPCErrorCode.INVALID_REQUEST,
+                        "peer_hash is required",
+                    )
+                )
+                return
+
+            messages = self._conversation_service.get_messages(
+                peer_hash=peer_hash, limit=limit
+            )
+            msg_list = [m.to_dict() for m in messages]
+
+            asyncio.create_task(
+                self._send_messages_response(source_hash, envelope.request_id, msg_list)
+            )
+        except Exception as e:
+            logger.error(f"Error handling MESSAGES_QUERY: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_FAILED,
+                    "Failed to query messages",
+                )
+            )
+
+    async def _send_messages_response(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Send MESSAGES_RESPONSE.
+
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            messages: List of message dicts.
+        """
+        response_envelope = create_messages_response(messages, request_id=request_id)
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent MESSAGES_RESPONSE to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send MESSAGES_RESPONSE: {e}")
 
     # System information helpers
 

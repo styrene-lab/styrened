@@ -7,7 +7,7 @@ import pytest
 
 from styrened.tui.models.config import (
     ConfigLoadError,
-    ConfigValidationErrors,
+    ConfigValidationError,
     GatewayMode,
     LogLevel,
     StyreneConfig,
@@ -178,7 +178,7 @@ class TestConfigLoadSave:
         config = get_default_config()
         config.mesh.channel = 99  # Invalid
 
-        with pytest.raises(ConfigValidationErrors):
+        with pytest.raises(ConfigValidationError):
             save_config(config)
 
     def test_load_partial_config(self, temp_config_dir, monkeypatch):

@@ -110,7 +110,7 @@ def dialogue_trio(harness: SSHHarness):
             assert result.success, f"Failed to start daemon on {node}: {result.stderr}"
             assert harness.wait_for_daemon(node, timeout=30), f"{node} daemon not responsive"
 
-    role_to_node = dict(zip(roles, nodes))
+    role_to_node = dict(zip(roles, nodes, strict=True))
     node_identities = {
         name: harness.registry[name].identity_hash
         for name in nodes

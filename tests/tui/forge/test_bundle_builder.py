@@ -201,7 +201,7 @@ class TestAssembleStyreneFiles:
         """RPi4 profile (no bond_script) skips polymerize.sh."""
         bundle = Bundle.create(tmp_path / "bundles", aarch64_sd_target)
 
-        events = await collect(
+        await collect(
             _assemble_styrene_files(bundle, aarch64_sd_target, fake_edge_dir)
         )
 
@@ -217,7 +217,7 @@ class TestAssembleStyreneFiles:
         bundle = Bundle.create(tmp_path / "bundles", x86_usb_target)
         x86_usb_target.hostname = "test-node"
 
-        events = await collect(
+        await collect(
             _assemble_styrene_files(bundle, x86_usb_target, fake_edge_dir)
         )
 
@@ -238,7 +238,7 @@ class TestAssembleStyreneFiles:
         x86_usb_target.ssh_key_path = str(ssh_key_file)
         bundle = Bundle.create(tmp_path / "bundles", x86_usb_target)
 
-        events = await collect(
+        await collect(
             _assemble_styrene_files(bundle, x86_usb_target, fake_edge_dir)
         )
 
@@ -268,7 +268,7 @@ class TestAssembleStyreneFiles:
         """WiFi config is written when SSID is set."""
         bundle = Bundle.create(tmp_path / "bundles", x86_usb_target)
 
-        events = await collect(
+        await collect(
             _assemble_styrene_files(bundle, x86_usb_target, fake_edge_dir)
         )
 
@@ -282,7 +282,7 @@ class TestAssembleStyreneFiles:
         """Common NixOS modules are copied."""
         bundle = Bundle.create(tmp_path / "bundles", x86_usb_target)
 
-        events = await collect(
+        await collect(
             _assemble_styrene_files(bundle, x86_usb_target, fake_edge_dir)
         )
 

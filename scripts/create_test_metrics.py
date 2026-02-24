@@ -17,15 +17,21 @@ Usage:
 
 import argparse
 import json
-import time
-from pathlib import Path
 
 # Add parent directory to path to import metrics modules
 import sys
+import time
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "tests" / "k8s"))
 
-from metrics import PodMetrics, TestRunMetadata, TestSnapshot, TestSummary, calculate_memory_growth_rate
+from metrics import (
+    PodMetrics,
+    TestRunMetadata,
+    TestSnapshot,
+    TestSummary,
+    calculate_memory_growth_rate,
+)
 
 
 def generate_test_metrics(
