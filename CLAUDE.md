@@ -36,6 +36,12 @@ def test_<unit>_<scenario>_<expected_outcome>():
 - Bug fixes: Must include regression test
 - Refactors: Existing tests must continue to pass
 
+**Running tests correctly**:
+- For verification after changes, use `just test-unit` (~5s). This runs `tests/test_*.py tests/unit/` only.
+- Do NOT glob `tests/tui/` into unit test runs. That directory contains IPC integration tests (`tests/tui/integration/`) with 30-second socket timeouts that block without a running daemon, ballooning a 5-second suite to 8+ minutes.
+- When testing TUI changes, target specific subdirectories: `pytest tests/tui/widgets/` or `pytest tests/tui/models/`, not the whole `tests/tui/` tree.
+- The justfile uses bare `pytest` — in sessions without PATH activation, use `.venv/bin/python -m pytest` instead.
+
 ## Project Overview
 
 Styrened is a headless daemon for running Styrene services on Reticulum mesh networks. It's optimized for resource-constrained edge devices and supports deployment via Nix flakes, containers, or PyPI. The styrene-core library and styrene-tui have been merged into this package.
@@ -50,9 +56,9 @@ make install              # Install with dev dependencies
 pip install -e ".[tui,dev]"  # Install with TUI + dev dependencies
 
 # Testing
-make test                 # Run all tests
-make test-unit            # Run unit tests only (excludes k8s)
-make test-k8s             # Run k8s integration tests
+just test-unit            # Run unit tests only (~5s, 1700+ tests)
+just test                 # Run all tests (unit + integration, no k8s)
+just test-k8s             # Run k8s integration tests
 pytest tests/tui/models/ -v  # Run TUI model tests
 pytest tests/test_models.py::test_name -v  # Run single test
 
