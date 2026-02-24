@@ -48,6 +48,9 @@ spec:
         secretName: cachix-auth-token
     - name: version-scratch
       emptyDir: {}
+    - name: ntfy-auth
+      secret:
+        secretName: ntfy-secret
 
   templates:
     - name: pipeline
@@ -446,11 +449,13 @@ spec:
         command: [sh, -c]
         args:
           - |
+            NTFY_TOKEN=$(cat /ntfy/token)
             REF="{{workflow.parameters.ref}}"
             VERSION="${REF#refs/tags/v}"
             ARGO_URL="https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}"
             if [ "{{workflow.status}}" = "Succeeded" ]; then
               curl -sf \
+                -H "Authorization: Bearer ${NTFY_TOKEN}" \
                 -H "Title: Released v${VERSION}" \
                 -H "Priority: 3" \
                 -H "Tags: rocket" \
@@ -459,6 +464,7 @@ spec:
                 http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
             else
               curl -sf \
+                -H "Authorization: Bearer ${NTFY_TOKEN}" \
                 -H "Title: Release FAILED: v${VERSION}" \
                 -H "Priority: 5" \
                 -H "Tags: rotating_light" \
@@ -466,6 +472,10 @@ spec:
                 -d "Release pipeline failed — check Argo for details" \
                 http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
             fi
+        volumeMounts:
+          - name: ntfy-auth
+            mountPath: /ntfy
+            readOnly: true
         resources:
           requests:
             cpu: 50m
