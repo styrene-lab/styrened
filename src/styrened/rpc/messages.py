@@ -290,6 +290,38 @@ class UpdateConfigResult:
 
 
 @dataclass
+class SelfUpdateResult:
+    """Self-update command result.
+
+    Attributes:
+        success: Whether update was applied successfully.
+        message: Human-readable result message.
+        old_version: Version before update.
+        new_version: Version after update (None if update failed).
+    """
+
+    success: bool
+    message: str
+    old_version: str
+    new_version: str | None = None
+    type: str = "self_update_result"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SelfUpdateResult":
+        """Deserialize from dict."""
+        return cls(
+            success=data["success"],
+            message=data["message"],
+            old_version=data["old_version"],
+            new_version=data.get("new_version"),
+        )
+
+
+@dataclass
 class InboxResponse:
     """Remote inbox query response.
 
