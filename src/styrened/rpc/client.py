@@ -40,6 +40,7 @@ from styrened.models.styrene_wire import (
     create_inbox_query,
     create_messages_query,
     create_reboot,
+    create_self_update,
     create_status_request,
     decode_payload,
     generate_request_id,
@@ -57,6 +58,7 @@ from styrened.rpc.messages import (
     InboxResponse,
     MessagesResponse,
     RebootResult,
+    SelfUpdateResult,
     StatusResponse,
     UpdateConfigResult,
 )
@@ -67,7 +69,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Response type union for type hints
-RPCResponseType = StatusResponse | ExecResult | RebootResult | UpdateConfigResult | InboxResponse | MessagesResponse
+RPCResponseType = StatusResponse | ExecResult | RebootResult | UpdateConfigResult | SelfUpdateResult | InboxResponse | MessagesResponse
 
 
 @dataclass
@@ -130,6 +132,7 @@ class RPCClient(Protocol):
             StyreneMessageType.EXEC_RESULT,
             StyreneMessageType.REBOOT_RESULT,
             StyreneMessageType.CONFIG_RESULT,
+            StyreneMessageType.SELF_UPDATE_RESULT,
             StyreneMessageType.INBOX_RESPONSE,
             StyreneMessageType.MESSAGES_RESPONSE,
             StyreneMessageType.ERROR,
@@ -317,6 +320,7 @@ class RPCClient(Protocol):
             StyreneMessageType.EXEC_RESULT,
             StyreneMessageType.REBOOT_RESULT,
             StyreneMessageType.CONFIG_RESULT,
+            StyreneMessageType.SELF_UPDATE_RESULT,
             StyreneMessageType.INBOX_RESPONSE,
             StyreneMessageType.MESSAGES_RESPONSE,
             StyreneMessageType.ERROR,
@@ -368,6 +372,13 @@ class RPCClient(Protocol):
                 success=payload_data.get("success", False),
                 message=payload_data.get("message", ""),
                 updated_keys=payload_data.get("updated_keys", []),
+            )
+        elif envelope.message_type == StyreneMessageType.SELF_UPDATE_RESULT:
+            return SelfUpdateResult(
+                success=payload_data.get("success", False),
+                message=payload_data.get("message", ""),
+                old_version=payload_data.get("old_version", ""),
+                new_version=payload_data.get("new_version"),
             )
         elif envelope.message_type == StyreneMessageType.INBOX_RESPONSE:
             return InboxResponse(
@@ -693,6 +704,34 @@ class RPCClient(Protocol):
         envelope = create_messages_query(peer_hash=peer_hash, limit=limit)
         response = await self.call(destination, envelope, timeout=timeout)
         assert isinstance(response, MessagesResponse)
+        return response
+
+    async def call_self_update(
+        self,
+        destination: str,
+        version: str | None = None,
+        timeout: float = 120.0,
+    ) -> SelfUpdateResult:
+        """Trigger self-update on remote device.
+
+        Convenience method for self-update commands. Uses a longer default
+        timeout since pip install can take significant time.
+
+        Args:
+            destination: Device destination hash.
+            version: Target version (None = latest from PyPI).
+            timeout: Timeout in seconds (default 120.0).
+
+        Returns:
+            SelfUpdateResult with old/new versions and success status.
+
+        Raises:
+            RPCTimeoutError: If response not received within timeout.
+            RPCTransportError: If LXMF send fails.
+        """
+        envelope = create_self_update(version=version)
+        response = await self.call(destination, envelope, timeout=timeout)
+        assert isinstance(response, SelfUpdateResult)
         return response
 
     def set_timeout(self, message_type: StyreneMessageType, timeout: float) -> None:

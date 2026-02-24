@@ -117,6 +117,7 @@ class StyreneMessageType(IntEnum):
     SERVICE_CONTROL = 0x43
     INBOX_QUERY = 0x44
     MESSAGES_QUERY = 0x45
+    SELF_UPDATE = 0x46
 
     # RPC Responses (0x60-0x7F)
     EXEC_RESULT = 0x60
@@ -125,6 +126,7 @@ class StyreneMessageType(IntEnum):
     SERVICE_RESULT = 0x63
     INBOX_RESPONSE = 0x64
     MESSAGES_RESPONSE = 0x65
+    SELF_UPDATE_RESULT = 0x66
 
     # Hub Services (0x80-0x9F)
     REGISTRY_QUERY = 0x80
@@ -667,6 +669,60 @@ def create_config_result(
         payload=encode_payload(
             {"success": success, "message": message, "updated_keys": updated_keys}
         ),
+        request_id=request_id if request_id else NO_CORRELATION,
+    )
+
+
+def create_self_update(
+    version: str | None = None, request_id: bytes | None = None
+) -> StyreneEnvelope:
+    """Create a SELF_UPDATE command envelope.
+
+    Args:
+        version: Target version to install (None = latest from PyPI).
+        request_id: Optional correlation ID (auto-generated if None).
+
+    Returns:
+        StyreneEnvelope configured as SELF_UPDATE with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.SELF_UPDATE,
+        payload=encode_payload({"version": version}),
+        request_id=request_id,
+    )
+
+
+def create_self_update_result(
+    success: bool,
+    message: str,
+    old_version: str,
+    new_version: str | None = None,
+    request_id: bytes | None = None,
+) -> StyreneEnvelope:
+    """Create a SELF_UPDATE_RESULT response envelope.
+
+    Args:
+        success: Whether update was applied successfully.
+        message: Human-readable result message.
+        old_version: Version before update.
+        new_version: Version after update (None if update failed).
+        request_id: Correlation ID from the SELF_UPDATE request.
+
+    Returns:
+        StyreneEnvelope configured as SELF_UPDATE_RESULT with encoded payload.
+    """
+    payload_data: dict[str, Any] = {
+        "success": success,
+        "message": message,
+        "old_version": old_version,
+    }
+    if new_version is not None:
+        payload_data["new_version"] = new_version
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.SELF_UPDATE_RESULT,
+        payload=encode_payload(payload_data),
         request_id=request_id if request_id else NO_CORRELATION,
     )
 

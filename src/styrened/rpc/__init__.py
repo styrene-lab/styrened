@@ -53,6 +53,7 @@ from styrened.rpc.messages import (
     ExecResult,
     RebootCommand,
     RebootResult,
+    SelfUpdateResult,
     StatusRequest,
     StatusResponse,
     UpdateConfigCommand,
@@ -78,6 +79,7 @@ __all__ = [
     "ExecResult",
     "RebootResult",
     "UpdateConfigResult",
+    "SelfUpdateResult",
     # Errors
     "RPCError",
     "RPCTimeoutError",

@@ -1000,6 +1000,226 @@ async def _cmd_exec_async(args: argparse.Namespace) -> int:
 
 
 # -----------------------------------------------------------------------------
+# Subcommand: update
+# -----------------------------------------------------------------------------
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Trigger self-update on a remote node.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    return asyncio.run(_cmd_update_async(args))
+
+
+async def _cmd_update_async(args: argparse.Namespace) -> int:
+    """Async implementation of update command."""
+    destination = args.destination
+    version = args.version if hasattr(args, "version") else None
+    timeout = args.timeout if hasattr(args, "timeout") else 120.0
+
+    # Try IPC first (uses daemon's mesh stack)
+    client = await _try_ipc_client()
+    if client:
+        try:
+            version_str = version or "latest"
+            print(f"Sending self-update ({version_str}) via daemon...")
+            result = await client.self_update_device(
+                destination, version=version, timeout=timeout,
+            )
+            await client.disconnect()
+
+            if args.json:
+                import json
+
+                output = result.to_dict()
+                print(json.dumps(output, indent=2))
+            else:
+                if result.success:
+                    print(f"Update successful: {result.old_version} -> {result.new_version}")
+                    print(f"  {result.message}")
+                else:
+                    print(f"Update failed: {result.message}", file=sys.stderr)
+
+            return 0 if result.success else 1
+        except Exception as e:
+            logger.warning(f"IPC update failed, falling back to standalone: {e}")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+    # Fallback: standalone mode
+    from styrened.rpc import RPCClient
+    from styrened.rpc.errors import RPCTimeoutError, RPCTransportError
+    from styrened.services.config import get_default_core_config, load_core_config
+    from styrened.services.lifecycle import CoreLifecycle
+    from styrened.services.lxmf_service import get_lxmf_service
+    from styrened.services.node_store import get_node_store
+    from styrened.services.reticulum import (
+        discover_devices,
+        get_operator_identity_object,
+        start_discovery,
+        stop_discovery,
+    )
+
+    discovery_wait = getattr(args, "wait", 10)
+
+    # Load config
+    try:
+        config = load_core_config()
+    except FileNotFoundError:
+        config = get_default_core_config()
+
+    # Initialize services (client_only=True to avoid binding server port)
+    lifecycle = CoreLifecycle(config, client_only=True)
+    if not lifecycle.initialize():
+        print("Failed to initialize services", file=sys.stderr)
+        return 1
+
+    # Initialize LXMF
+    lxmf_service = get_lxmf_service()
+    identity = get_operator_identity_object()
+    if not identity or not lxmf_service.initialize(identity):
+        print("Failed to initialize LXMF", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    # Start discovery and wait for target device to announce
+    node_store = get_node_store()
+    print(f"Waiting for {destination[:16]}... to announce ({discovery_wait}s)...")
+    start_discovery(node_store=node_store)
+
+    # Wait for announce from target device
+    target_device = None
+    start_time = time.time()
+    prefix = destination[:16]
+    while time.time() - start_time < discovery_wait:
+        devices = discover_devices()
+        for device in devices:
+            if (
+                (device.destination_hash and device.destination_hash.startswith(prefix))
+                or (
+                    device.lxmf_destination_hash and device.lxmf_destination_hash.startswith(prefix)
+                )
+                or (device.identity_hash and device.identity_hash.startswith(prefix))
+            ):
+                target_device = device
+                break
+        if target_device:
+            await asyncio.sleep(1.0)
+            devices = discover_devices()
+            for device in devices:
+                if (
+                    (device.destination_hash and device.destination_hash.startswith(prefix))
+                    or (
+                        device.lxmf_destination_hash
+                        and device.lxmf_destination_hash.startswith(prefix)
+                    )
+                    or (device.identity_hash and device.identity_hash.startswith(prefix))
+                ):
+                    target_device = device
+                    break
+            break
+        await asyncio.sleep(0.5)
+
+    # Stop discovery before sending
+    stop_discovery()
+    await asyncio.sleep(0.5)
+
+    if not target_device:
+        print(f"Device {destination[:16]}... not found after {discovery_wait}s", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+    # Use the LXMF destination for RPC
+    lxmf_dest = target_device.lxmf_destination_hash or destination
+    print(f"Found {target_device.name or 'device'}, LXMF dest {lxmf_dest[:16]}...")
+
+    # Create StyreneProtocol for RPC transport
+    from styrened.models.messages import init_db
+    from styrened.protocols.base import LXMFMessage
+    from styrened.protocols.styrene import StyreneProtocol
+
+    db_engine = init_db()
+    styrene_protocol = StyreneProtocol(
+        router=lxmf_service.router,
+        identity=lxmf_service._identity,
+        db_engine=db_engine,
+    )
+
+    # Register LXMF callback to dispatch messages to StyreneProtocol
+    def dispatch_to_styrene(lxmf_message: Any) -> None:
+        import asyncio
+
+        wrapped = LXMFMessage(
+            source_hash=lxmf_message.source_hash.hex(),
+            destination_hash=lxmf_message.destination_hash.hex()
+            if lxmf_message.destination_hash
+            else "",
+            timestamp=lxmf_message.timestamp if hasattr(lxmf_message, "timestamp") else 0.0,
+            content=lxmf_message.content.decode("utf-8")
+            if isinstance(lxmf_message.content, bytes)
+            else (lxmf_message.content or ""),
+            fields=lxmf_message.fields or {},
+        )
+        if styrene_protocol.can_handle(wrapped):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(styrene_protocol.handle_message(wrapped))
+            except RuntimeError:
+                asyncio.run(styrene_protocol.handle_message(wrapped))
+
+    lxmf_service.register_callback(dispatch_to_styrene, raw_mode=True)
+
+    # Create RPC client with StyreneProtocol
+    rpc_client = RPCClient(styrene_protocol)
+
+    version_str = version or "latest"
+    print(f"Sending self-update ({version_str}) to {lxmf_dest[:16]}... (timeout: {timeout}s)")
+
+    try:
+        result = await rpc_client.call_self_update(lxmf_dest, version=version, timeout=timeout)
+
+        if args.json:
+            import json
+
+            output = {
+                "success": result.success,
+                "message": result.message,
+                "old_version": result.old_version,
+                "new_version": result.new_version,
+            }
+            print(json.dumps(output, indent=2))
+        else:
+            if result.success:
+                print(f"Update successful: {result.old_version} -> {result.new_version}")
+                print(f"  {result.message}")
+            else:
+                print(f"Update failed: {result.message}", file=sys.stderr)
+
+        lifecycle.shutdown()
+        return 0 if result.success else 1
+
+    except RPCTimeoutError:
+        print(f"Timeout: no response after {timeout}s", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+    except RPCTransportError as e:
+        print(f"Transport error: {e}", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        lifecycle.shutdown()
+        return 1
+
+
+# -----------------------------------------------------------------------------
 # Subcommand: announce
 # -----------------------------------------------------------------------------
 
@@ -2155,6 +2375,23 @@ def create_parser() -> argparse.ArgumentParser:
     )
     exec_parser.add_argument("--json", action="store_true", help="Output as JSON")
     exec_parser.set_defaults(func=cmd_exec)
+
+    # update
+    update_parser = subparsers.add_parser(
+        "update", help="Trigger self-update on a remote node"
+    )
+    update_parser.add_argument("destination", help="Destination hash (hex) of remote node")
+    update_parser.add_argument(
+        "--version", default=None, help="Target version (default: latest from PyPI)"
+    )
+    update_parser.add_argument(
+        "-t", "--timeout", type=float, default=120.0, help="Timeout in seconds (default: 120)"
+    )
+    update_parser.add_argument(
+        "-w", "--wait", type=int, default=10, help="Discovery wait time in seconds (default: 10)"
+    )
+    update_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    update_parser.set_defaults(func=cmd_update)
 
     # shell - interactive terminal session
     shell_parser = subparsers.add_parser(

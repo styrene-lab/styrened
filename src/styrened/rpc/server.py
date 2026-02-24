@@ -46,6 +46,7 @@ import platform
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -62,6 +63,7 @@ from styrened.models.styrene_wire import (
     create_inbox_response,
     create_messages_response,
     create_reboot_result,
+    create_self_update_result,
     create_status_response,
     decode_payload,
 )
@@ -119,6 +121,7 @@ DANGEROUS_RPC_COMMANDS: frozenset[StyreneMessageType] = frozenset(
         StyreneMessageType.EXEC,
         StyreneMessageType.REBOOT,
         StyreneMessageType.CONFIG_UPDATE,
+        StyreneMessageType.SELF_UPDATE,
     }
 )
 
@@ -226,11 +229,11 @@ class RPCServer:
 
         if enable_dangerous_commands:
             logger.warning(
-                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE) are ENABLED"
+                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are ENABLED"
             )
         else:
             logger.info(
-                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE) are DISABLED"
+                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are DISABLED"
             )
 
         # Register default handlers
@@ -288,6 +291,7 @@ class RPCServer:
             StyreneMessageType.EXEC,
             StyreneMessageType.REBOOT,
             StyreneMessageType.CONFIG_UPDATE,
+            StyreneMessageType.SELF_UPDATE,
             StyreneMessageType.PING,
             StyreneMessageType.INBOX_QUERY,
             StyreneMessageType.MESSAGES_QUERY,
@@ -301,6 +305,7 @@ class RPCServer:
         self._handlers[StyreneMessageType.EXEC] = self._handle_exec
         self._handlers[StyreneMessageType.REBOOT] = self._handle_reboot
         self._handlers[StyreneMessageType.CONFIG_UPDATE] = self._handle_config_update
+        self._handlers[StyreneMessageType.SELF_UPDATE] = self._handle_self_update
         self._handlers[StyreneMessageType.PING] = self._handle_ping
         self._handlers[StyreneMessageType.INBOX_QUERY] = self._handle_inbox_query
         self._handlers[StyreneMessageType.MESSAGES_QUERY] = self._handle_messages_query
@@ -913,6 +918,143 @@ class RPCServer:
             logger.debug(f"Sent CONFIG_RESULT to {destination[:16]}...")
         except Exception as e:
             logger.error(f"Failed to send CONFIG_RESULT: {e}")
+
+    def _handle_self_update(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle SELF_UPDATE - upgrade styrened package and restart service.
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        # Decode payload
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+        except Exception as e:
+            logger.error(f"Failed to decode SELF_UPDATE payload: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    f"Invalid payload: {e}",
+                )
+            )
+            return
+
+        version = payload_data.get("version")
+        logger.info(f"Self-update requested (version: {version or 'latest'})")
+
+        # Execute update
+        result = self._do_self_update(version)
+
+        # Send response
+        asyncio.create_task(
+            self._send_self_update_result(source_hash, envelope.request_id, result)
+        )
+
+        # On success, schedule service restart
+        if result["success"]:
+            logger.info("Self-update succeeded, scheduling service restart in 5s")
+            asyncio.get_event_loop().call_later(5, self._restart_service)
+
+    def _do_self_update(self, version: str | None) -> dict[str, Any]:
+        """Execute pip install --upgrade for styrened.
+
+        Args:
+            version: Target version (None = latest from PyPI).
+
+        Returns:
+            Dictionary with success, message, old_version, new_version.
+        """
+        old_version = _styrened_version
+        spec = f"styrened=={version}" if version else "styrened"
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", spec],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode == 0:
+                # Try to detect new version from pip output
+                new_version = version or "latest"
+                # Parse pip output for installed version
+                for line in result.stdout.splitlines():
+                    if "Successfully installed" in line and "styrened-" in line:
+                        for part in line.split():
+                            if part.startswith("styrened-"):
+                                new_version = part.split("-", 1)[1]
+                                break
+
+                return {
+                    "success": True,
+                    "message": f"Updated from {old_version} to {new_version}",
+                    "old_version": old_version,
+                    "new_version": new_version,
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"pip install failed: {result.stderr.strip()}",
+                    "old_version": old_version,
+                    "new_version": None,
+                }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "message": "pip install timed out after 120 seconds",
+                "old_version": old_version,
+                "new_version": None,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Self-update failed: {e}",
+                "old_version": old_version,
+                "new_version": None,
+            }
+
+    async def _send_self_update_result(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        result: dict[str, Any],
+    ) -> None:
+        """Send SELF_UPDATE_RESULT response.
+
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            result: Self-update result dictionary.
+        """
+        response_envelope = create_self_update_result(
+            success=result["success"],
+            message=result["message"],
+            old_version=result["old_version"],
+            new_version=result.get("new_version"),
+            request_id=request_id,
+        )
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=response_envelope.message_type,
+                payload=response_envelope.payload,
+                request_id=response_envelope.request_id,
+            )
+            logger.debug(f"Sent SELF_UPDATE_RESULT to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send SELF_UPDATE_RESULT: {e}")
+
+    def _restart_service(self) -> None:
+        """Restart the styrened service via systemctl."""
+        logger.warning("Restarting styrened service after self-update")
+        try:
+            subprocess.Popen(["systemctl", "restart", "styrened"])
+        except Exception as e:
+            logger.error(f"Service restart failed: {e}")
 
     async def _send_error(
         self,
