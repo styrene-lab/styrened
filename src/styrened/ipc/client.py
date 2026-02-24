@@ -31,6 +31,7 @@ from styrened.ipc.messages import (
     CmdRemoteMessagesRequest,
     CmdRemoveContactRequest,
     CmdRetryMessageRequest,
+    CmdSelfUpdateRequest,
     CmdSendChatRequest,
     CmdSendRequest,
     CmdSetAutoReplyRequest,
@@ -62,6 +63,7 @@ from styrened.ipc.messages import (
     QueryStatusRequest,
     RebootResultInfo,
     RemoteStatusInfo,
+    SelfUpdateResultInfo,
     SubDevicesRequest,
     SubMessagesRequest,
     UnsubRequest,
@@ -582,6 +584,30 @@ class ControlClient:
         )
         data = await self._request(request, timeout=timeout + 5)
         return RebootResultInfo.from_dict(data)
+
+    async def self_update_device(
+        self,
+        destination: str,
+        version: str | None = None,
+        timeout: float = 120.0,
+    ) -> SelfUpdateResultInfo:
+        """Trigger self-update on a remote device.
+
+        Args:
+            destination: Destination hash.
+            version: Target version (None = latest from PyPI).
+            timeout: Timeout in seconds.
+
+        Returns:
+            SelfUpdateResultInfo with result.
+        """
+        request = CmdSelfUpdateRequest(
+            destination=destination,
+            version=version,
+            timeout=timeout,
+        )
+        data = await self._request(request, timeout=timeout + 5)
+        return SelfUpdateResultInfo.from_dict(data)
 
     # -------------------------------------------------------------------------
     # Chat methods

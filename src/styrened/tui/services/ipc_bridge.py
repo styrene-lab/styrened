@@ -37,6 +37,7 @@ from styrened.ipc.messages import (
     IdentityInfo,
     RebootResultInfo,
     RemoteStatusInfo,
+    SelfUpdateResultInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -325,6 +326,20 @@ class IPCBridge:
             "reboot_device",
             destination=destination,
             delay=delay,
+            timeout=timeout,
+        )
+
+    async def self_update_device(
+        self,
+        destination: str,
+        version: str | None = None,
+        timeout: float = 120.0,
+    ) -> SelfUpdateResultInfo:
+        """Trigger self-update on a remote device."""
+        return await self._call(
+            "self_update_device",
+            destination=destination,
+            version=version,
             timeout=timeout,
         )
 

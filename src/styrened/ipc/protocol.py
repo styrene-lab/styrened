@@ -85,6 +85,7 @@ class IPCMessageType(IntEnum):
 
     # Extended command range (0x40-0x4F) for remote operations
     CMD_REMOTE_MESSAGES = 0x40
+    CMD_SELF_UPDATE = 0x41
 
     # Terminal session (0x50-0x5F)
     CMD_TERMINAL_OPEN = 0x50
