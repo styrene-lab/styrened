@@ -36,6 +36,9 @@ spec:
     - name: cachix-auth
       secret:
         secretName: cachix-auth-token
+    - name: ntfy-auth
+      secret:
+        secretName: ntfy-secret
 
   templates:
     - name: pipeline
@@ -253,9 +256,11 @@ spec:
         command: [sh, -c]
         args:
           - |
+            NTFY_TOKEN=$(cat /ntfy/token)
             ARGO_URL="https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}"
             if [ "{{workflow.status}}" = "Succeeded" ]; then
               curl -sf \
+                -H "Authorization: Bearer ${NTFY_TOKEN}" \
                 -H "Title: Nightly passed" \
                 -H "Priority: 2" \
                 -H "Tags: white_check_mark" \
@@ -264,6 +269,7 @@ spec:
                 http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
             else
               curl -sf \
+                -H "Authorization: Bearer ${NTFY_TOKEN}" \
                 -H "Title: Nightly FAILED" \
                 -H "Priority: 4" \
                 -H "Tags: warning" \
@@ -271,6 +277,10 @@ spec:
                 -d "Workflow {{workflow.name}} failed — check Argo for details" \
                 http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
             fi
+        volumeMounts:
+          - name: ntfy-auth
+            mountPath: /ntfy
+            readOnly: true
         resources:
           requests:
             cpu: 50m
