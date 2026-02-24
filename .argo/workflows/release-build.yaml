@@ -14,6 +14,10 @@ spec:
   entrypoint: pipeline
   serviceAccountName: ci-workflow-sa
 
+  hooks:
+    exit:
+      template: notify-release-result
+
   volumeClaimTemplates:
     - metadata:
         name: workspace-pypi
@@ -86,6 +90,14 @@ spec:
                   value: "{{tasks.extract-version.outputs.parameters.version}}"
                 - name: prerelease
                   value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
+          - name: notify-meta-package
+            template: dispatch-styrene-pypi
+            depends: "create-release"
+            when: "'{{tasks.extract-version.outputs.parameters.prerelease}}' == 'false'"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
 
     - name: parse-version
       container:
@@ -391,3 +403,70 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+
+    - name: dispatch-styrene-pypi
+      inputs:
+        parameters:
+          - name: version
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            apk add --no-cache curl >/dev/null 2>&1
+
+            VERSION="{{inputs.parameters.version}}"
+            GHCR_TOKEN=$(cat /ghcr/password)
+
+            echo "Dispatching styrened-release to styrene-pypi (version ${VERSION})..."
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+              -H "Authorization: token ${GHCR_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/styrene-lab/styrene-pypi/dispatches" \
+              -d "{\"event_type\":\"styrened-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}")
+
+            if [ "$HTTP_CODE" = "204" ]; then
+              echo "Dispatch successful"
+            else
+              echo "Warning: dispatch returned HTTP ${HTTP_CODE} (non-fatal)"
+            fi
+        volumeMounts:
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+
+    - name: notify-release-result
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            REF="{{workflow.parameters.ref}}"
+            VERSION="${REF#refs/tags/v}"
+            ARGO_URL="https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}"
+            if [ "{{workflow.status}}" = "Succeeded" ]; then
+              curl -sf \
+                -H "Title: Released v${VERSION}" \
+                -H "Priority: 3" \
+                -H "Tags: rocket" \
+                -H "Click: ${ARGO_URL}" \
+                -d "styrened v${VERSION} published to PyPI + GHCR" \
+                http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
+            else
+              curl -sf \
+                -H "Title: Release FAILED: v${VERSION}" \
+                -H "Priority: 5" \
+                -H "Tags: rotating_light" \
+                -H "Click: ${ARGO_URL}" \
+                -d "Release pipeline failed — check Argo for details" \
+                http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
+            fi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 32Mi
