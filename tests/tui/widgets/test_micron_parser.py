@@ -11,6 +11,7 @@ from styrened.tui.widgets.micron_parser import (
     MicronElement,
     TextStyle,
     _expand_color,
+    _parse_inline,
     parse_micron,
     render_to_rich,
 )
@@ -414,6 +415,21 @@ class TestRenderToRich:
         result = render_to_rich(elements)
         assert "[underline]" in result
         assert "Click" in result
+        assert "navigate_link" in result
+        assert "/page/about.mu" in result
+
+    def test_link_url_escaped_in_action(self):
+        """Single quotes in URLs should be escaped in @click action."""
+        elements = [
+            MicronElement(
+                element_type=ElementType.LINK,
+                content="Weird",
+                url="/page/it's.mu",
+            )
+        ]
+        result = render_to_rich(elements)
+        assert "\\'" in result
+        assert "Weird" in result
 
     def test_checkbox_unchecked(self):
         elements = [
@@ -557,3 +573,203 @@ Literal code
         assert len(text_elems) == 2
         contents = [e.content for e in text_elems]
         assert "`" not in contents
+
+
+class TestHeadingInlineFormatting:
+    """Bug 1: Heading text should be parsed through inline formatter."""
+
+    def test_heading_with_bold_inline(self):
+        """Heading containing `! bold toggle should parse children.
+
+        Headings start with bold=True. The `! code toggles bold OFF,
+        so 'Styrix' between the toggles is NOT bold.
+        """
+        elements = parse_micron(">NixOS `!Styrix`!")
+        assert len(elements) == 1
+        h = elements[0]
+        assert h.element_type == ElementType.HEADING
+        assert h.children is not None
+        assert len(h.children) >= 2
+        # First child: "NixOS " inherits heading bold
+        assert h.children[0].content == "NixOS "
+        assert h.children[0].style.bold is True
+        # Second child: "Styrix" — `! toggled bold OFF from heading base
+        assert h.children[1].content == "Styrix"
+        assert h.children[1].style.bold is False
+
+    def test_heading_with_color_inline(self):
+        """Heading with foreground color code should parse inline."""
+        elements = parse_micron(">`Ff00Red Heading")
+        h = elements[0]
+        assert h.element_type == ElementType.HEADING
+        assert h.children is not None
+        color_child = [c for c in h.children if c.style.fg_color == "#ff0000"]
+        assert len(color_child) >= 1
+
+    def test_heading_plain_text_no_children(self):
+        """Heading with no inline formatting should have no children."""
+        elements = parse_micron(">Plain Heading")
+        h = elements[0]
+        assert h.element_type == ElementType.HEADING
+        # Plain text: children should be None (no inline codes present)
+        assert h.children is None
+
+    def test_heading_inline_does_not_leak(self):
+        """Inline formatting in heading must not affect subsequent lines."""
+        source = ">`!Bold Heading\nRegular text"
+        elements = parse_micron(source)
+        heading = elements[0]
+        assert heading.element_type == ElementType.HEADING
+        text = [e for e in elements if e.element_type == ElementType.TEXT]
+        assert len(text) == 1
+        # Bold from heading must NOT leak to regular text
+        assert text[0].style.bold is False
+
+    def test_heading_inherently_bold(self):
+        """Heading children should have bold=True as base style."""
+        elements = parse_micron(">Simple Title")
+        h = elements[0]
+        assert h.style.bold is True
+
+
+class TestSectionResetRecursive:
+    """Bug 2: Section reset < should recursively parse headings/dividers."""
+
+    def test_section_reset_then_heading(self):
+        """<>Heading should produce a HEADING element."""
+        elements = parse_micron("<>My Heading")
+        headings = [e for e in elements if e.element_type == ElementType.HEADING]
+        assert len(headings) == 1
+        assert headings[0].content == "My Heading"
+        assert headings[0].level == 1
+
+    def test_section_reset_then_divider(self):
+        """<- should produce a DIVIDER element."""
+        elements = parse_micron("<-")
+        dividers = [e for e in elements if e.element_type == ElementType.DIVIDER]
+        assert len(dividers) == 1
+
+    def test_section_reset_then_level2_heading(self):
+        """<>>Sub should produce a level-2 heading."""
+        elements = parse_micron("<>>Sub Heading")
+        headings = [e for e in elements if e.element_type == ElementType.HEADING]
+        assert len(headings) == 1
+        assert headings[0].level == 2
+        assert headings[0].content == "Sub Heading"
+
+    def test_section_reset_preserves_formatting(self):
+        """< does NOT reset inline formatting state (only depth)."""
+        source = "`!Bold start\n<Still bold"
+        elements = parse_micron(source)
+        text_elems = [e for e in elements if e.element_type == ElementType.TEXT]
+        assert len(text_elems) == 2
+        assert text_elems[0].style.bold is True
+        assert text_elems[1].style.bold is True
+
+    def test_section_reset_divider_custom_char(self):
+        """<-= should produce a DIVIDER with '=' fill character."""
+        elements = parse_micron("<-=")
+        dividers = [e for e in elements if e.element_type == ElementType.DIVIDER]
+        assert len(dividers) == 1
+        assert dividers[0].divider_char == "="
+
+
+class TestLiteralBlockStyling:
+    """Bug 3: Literal blocks should use dim italic for better distinction."""
+
+    def test_literal_renders_dim_italic(self):
+        """Literal blocks should render with [dim italic] not just [dim]."""
+        elements = [
+            MicronElement(element_type=ElementType.LITERAL, content="code line")
+        ]
+        result = render_to_rich(elements)
+        assert "[dim italic]" in result
+        assert "code line" in result
+
+    def test_literal_multiline_all_dim_italic(self):
+        """Each line of a literal block should have dim italic styling."""
+        elements = [
+            MicronElement(element_type=ElementType.LITERAL, content="line1\nline2")
+        ]
+        result = render_to_rich(elements)
+        lines = result.split("\n")
+        for line in lines:
+            assert "[dim italic]" in line
+
+
+class TestHeadingRenderWithChildren:
+    """Bug 1 render side: headings with children should render inline styles."""
+
+    def test_heading_children_rendered_bold(self):
+        """Heading with children should produce bold output for all children."""
+        children = [
+            MicronElement(
+                element_type=ElementType.TEXT,
+                content="Hello ",
+                style=TextStyle(bold=False),
+            ),
+            MicronElement(
+                element_type=ElementType.TEXT,
+                content="World",
+                style=TextStyle(italic=True),
+            ),
+        ]
+        elem = MicronElement(
+            element_type=ElementType.HEADING,
+            content="Hello World",
+            level=1,
+            children=children,
+        )
+        result = render_to_rich([elem])
+        assert "Hello " in result
+        assert "World" in result
+        # Bold should be applied (heading base style)
+        assert "[bold]" in result or "bold" in result
+
+    def test_heading_level3_children_bold_italic(self):
+        """Level 3+ headings with children should use bold italic base."""
+        children = [
+            MicronElement(
+                element_type=ElementType.TEXT,
+                content="Minor",
+                style=TextStyle(),
+            ),
+        ]
+        elem = MicronElement(
+            element_type=ElementType.HEADING,
+            content="Minor",
+            level=3,
+            children=children,
+        )
+        result = render_to_rich([elem])
+        assert "bold" in result
+        assert "italic" in result
+
+    def test_heading_no_children_backward_compat(self):
+        """Heading without children should still render plain content."""
+        elem = MicronElement(
+            element_type=ElementType.HEADING,
+            content="Plain",
+            level=1,
+        )
+        result = render_to_rich([elem])
+        assert "[bold]Plain[/bold]" in result
+
+    def test_heading_children_with_color(self):
+        """Heading children with fg_color should include color in output."""
+        children = [
+            MicronElement(
+                element_type=ElementType.TEXT,
+                content="Colored",
+                style=TextStyle(fg_color="#ff0000"),
+            ),
+        ]
+        elem = MicronElement(
+            element_type=ElementType.HEADING,
+            content="Colored",
+            level=1,
+            children=children,
+        )
+        result = render_to_rich([elem])
+        assert "#ff0000" in result
+        assert "bold" in result
