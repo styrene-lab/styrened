@@ -19,8 +19,10 @@ from styrened.models.config import (
     CoreConfig,
     DeploymentMode,
     NotificationsConfig,
+    PQCConfig,
     Profile,
     PropagationNodeConfig,
+    WebAuthConfig,
     YubiKeyConfig,
     validate_short_name,
 )
@@ -363,6 +365,22 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             if "enabled" in metrics:
                 config.api.metrics.enabled = _parse_bool(metrics["enabled"])
 
+        # Parse auth subsection
+        if "auth" in api and isinstance(api["auth"], dict):
+            auth = api["auth"]
+            config.api.auth = WebAuthConfig(
+                enabled=_parse_bool(auth.get("enabled", False)),
+                allow_unauthenticated=_parse_bool(auth.get("allow_unauthenticated", False)),
+                exempt_localhost=_parse_bool(auth.get("exempt_localhost", True)),
+                session_ttl=int(auth.get("session_ttl", 86400)),
+            )
+            if "authorized_identities" in auth and isinstance(auth["authorized_identities"], list):
+                authorized = set()
+                for ident in auth["authorized_identities"]:
+                    if isinstance(ident, str) and len(ident) == 32:
+                        authorized.add(ident)
+                config.api.auth.authorized_identities = authorized
+
     # Parse identity section (ecosystem appearance + provider)
     if "identity" in data and isinstance(data["identity"], dict):
         ident = data["identity"]
@@ -525,6 +543,16 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         if "demo" in ps:
             config.page_server.demo = _parse_bool(ps["demo"])
 
+    # Parse pqc section
+    if "pqc" in data and isinstance(data["pqc"], dict):
+        pqc = data["pqc"]
+        config.pqc = PQCConfig(
+            enabled=_parse_bool(pqc.get("enabled", True)),
+            rekey_interval_hours=int(pqc.get("rekey_interval_hours", 24)),
+            require_pqc_for_rpc=_parse_bool(pqc.get("require_pqc_for_rpc", False)),
+            auto_initiate=_parse_bool(pqc.get("auto_initiate", True)),
+        )
+
     return config
 
 
@@ -648,6 +676,15 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     chat_dict["chatbot"] = chatbot_dict
 
     # API section
+    auth_dict: dict[str, Any] = {
+        "enabled": config.api.auth.enabled,
+        "allow_unauthenticated": config.api.auth.allow_unauthenticated,
+        "exempt_localhost": config.api.auth.exempt_localhost,
+        "session_ttl": config.api.auth.session_ttl,
+    }
+    if config.api.auth.authorized_identities:
+        auth_dict["authorized_identities"] = sorted(config.api.auth.authorized_identities)
+
     api_dict: dict[str, Any] = {
         "enabled": config.api.enabled,
         "host": config.api.host,
@@ -656,6 +693,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "metrics": {
             "enabled": config.api.metrics.enabled,
         },
+        "auth": auth_dict,
     }
 
     # IPC section
@@ -726,6 +764,14 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     if config.page_server.demo:
         page_server_dict["demo"] = True
 
+    # PQC section
+    pqc_dict: dict[str, Any] = {
+        "enabled": config.pqc.enabled,
+        "rekey_interval_hours": config.pqc.rekey_interval_hours,
+        "require_pqc_for_rpc": config.pqc.require_pqc_for_rpc,
+        "auto_initiate": config.pqc.auto_initiate,
+    }
+
     return {
         "profile": config.profile.value,
         "reticulum": reticulum_dict,
@@ -739,6 +785,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "lxmf": lxmf_dict,
         "terminal": terminal_dict,
         "page_server": page_server_dict,
+        "pqc": pqc_dict,
     }
 
 
@@ -864,6 +911,25 @@ def validate_core_config(
     # --- API ---
     _check_port("api.port", config.api.port)
 
+    # API auth
+    if config.api.auth.session_ttl < 60:
+        errors.append(
+            ConfigFieldError(
+                "api.auth.session_ttl",
+                "Must be >= 60 seconds",
+                str(config.api.auth.session_ttl),
+            )
+        )
+    for ident in config.api.auth.authorized_identities:
+        if len(ident) != 32:
+            errors.append(
+                ConfigFieldError(
+                    "api.auth.authorized_identities",
+                    "Each identity must be a 32-character hex hash",
+                    ident,
+                )
+            )
+
     # --- IPC ---
     if not 0 <= config.ipc.socket_mode <= 0o777:
         errors.append(
@@ -959,6 +1025,16 @@ def validate_core_config(
                     ident,
                 )
             )
+
+    # --- PQC ---
+    if config.pqc.rekey_interval_hours < 1:
+        errors.append(
+            ConfigFieldError(
+                "pqc.rekey_interval_hours",
+                "Must be >= 1",
+                str(config.pqc.rekey_interval_hours),
+            )
+        )
 
     if raise_on_error and errors:
         raise ConfigValidationError(errors)

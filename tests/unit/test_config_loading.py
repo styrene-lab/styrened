@@ -763,3 +763,138 @@ identity:
             config = load_core_config(Path(f.name))
 
         assert config.identity.provider == "yubikey"
+
+
+class TestWebAuthConfigLoading:
+    """Tests for api.auth config section loading."""
+
+    def test_auth_defaults_when_missing(self) -> None:
+        """Missing auth section uses defaults."""
+        yaml_content = """
+api:
+  enabled: true
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.api.auth.enabled is False
+        assert config.api.auth.exempt_localhost is True
+        assert config.api.auth.session_ttl == 86400
+        assert config.api.auth.allow_unauthenticated is False
+        assert config.api.auth.authorized_identities == set()
+
+    def test_auth_full_config(self) -> None:
+        """Full auth config is parsed correctly."""
+        yaml_content = """
+api:
+  enabled: true
+  auth:
+    enabled: true
+    exempt_localhost: false
+    allow_unauthenticated: true
+    session_ttl: 3600
+    authorized_identities:
+      - "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      - "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.api.auth.enabled is True
+        assert config.api.auth.exempt_localhost is False
+        assert config.api.auth.allow_unauthenticated is True
+        assert config.api.auth.session_ttl == 3600
+        assert config.api.auth.authorized_identities == {
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        }
+
+    def test_auth_invalid_identity_length_filtered(self) -> None:
+        """Identities with wrong length are filtered out."""
+        yaml_content = """
+api:
+  auth:
+    authorized_identities:
+      - "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      - "tooshort"
+      - "123"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.api.auth.authorized_identities == {
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }
+
+    def test_auth_string_bools(self) -> None:
+        """Auth bools handle string representations."""
+        yaml_content = """
+api:
+  auth:
+    enabled: "true"
+    exempt_localhost: "false"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = load_core_config(Path(f.name))
+
+        assert config.api.auth.enabled is True
+        assert config.api.auth.exempt_localhost is False
+
+
+class TestPQCConfigLoading:
+    """Tests for PQC configuration loading."""
+
+    def test_pqc_config_defaults(self) -> None:
+        """Default PQCConfig values are correct."""
+        from styrened.models.config import PQCConfig
+
+        pqc = PQCConfig()
+        assert pqc.enabled is True
+        assert pqc.rekey_interval_hours == 24
+        assert pqc.require_pqc_for_rpc is False
+        assert pqc.auto_initiate is True
+
+    def test_pqc_config_in_core_config(self) -> None:
+        """CoreConfig has PQC section with defaults."""
+        from styrened.models.config import CoreConfig
+
+        config = CoreConfig()
+        assert config.pqc.enabled is True
+        assert config.pqc.rekey_interval_hours == 24
+
+    def test_pqc_config_from_yaml(self, tmp_path: Path) -> None:
+        """PQC config round-trips through YAML correctly."""
+        from styrened.models.config import CoreConfig, PQCConfig
+
+        config = CoreConfig()
+        config.pqc = PQCConfig(
+            enabled=False,
+            rekey_interval_hours=12,
+            require_pqc_for_rpc=True,
+            auto_initiate=False,
+        )
+
+        config_file = tmp_path / "config.yaml"
+        save_core_config(config, config_file)
+        loaded = load_core_config(config_file)
+
+        assert loaded.pqc.enabled is False
+        assert loaded.pqc.rekey_interval_hours == 12
+        assert loaded.pqc.require_pqc_for_rpc is True
+        assert loaded.pqc.auto_initiate is False
+
+    def test_pqc_config_missing_uses_defaults(self, tmp_path: Path) -> None:
+        """Missing pqc section uses defaults."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("profile: operator\n")
+        loaded = load_core_config(config_file)
+        assert loaded.pqc.enabled is True
+        assert loaded.pqc.rekey_interval_hours == 24

@@ -26,6 +26,7 @@ from styrened.models.config import (
     RPCConfig,
     ServerInterfaceConfig,
     TerminalConfig,
+    WebAuthConfig,
     YubiKeyConfig,
 )
 from styrened.services.config import load_core_config, save_core_config
@@ -74,6 +75,10 @@ class TestSaveCoreConfigRoundTrip:
         assert loaded.api.host == config.api.host
         assert loaded.api.port == config.api.port
         assert loaded.api.metrics.enabled == config.api.metrics.enabled
+        assert loaded.api.auth.enabled == config.api.auth.enabled
+        assert loaded.api.auth.exempt_localhost == config.api.auth.exempt_localhost
+        assert loaded.api.auth.session_ttl == config.api.auth.session_ttl
+        assert loaded.api.auth.allow_unauthenticated == config.api.auth.allow_unauthenticated
 
         # IPC
         assert loaded.ipc.enabled == config.ipc.enabled
@@ -135,6 +140,13 @@ class TestSaveCoreConfigRoundTrip:
                 host="127.0.0.1",
                 port=9000,
                 metrics=MetricsConfig(enabled=True),
+                auth=WebAuthConfig(
+                    enabled=True,
+                    authorized_identities={"aa" * 16, "bb" * 16},
+                    allow_unauthenticated=False,
+                    exempt_localhost=False,
+                    session_ttl=3600,
+                ),
             ),
             ipc=IPCConfig(
                 enabled=False,
@@ -212,6 +224,11 @@ class TestSaveCoreConfigRoundTrip:
         assert loaded.api.host == "127.0.0.1"
         assert loaded.api.port == 9000
         assert loaded.api.metrics.enabled is True
+        assert loaded.api.auth.enabled is True
+        assert loaded.api.auth.authorized_identities == {"aa" * 16, "bb" * 16}
+        assert loaded.api.auth.allow_unauthenticated is False
+        assert loaded.api.auth.exempt_localhost is False
+        assert loaded.api.auth.session_ttl == 3600
 
         # IPC
         assert loaded.ipc.enabled is False
