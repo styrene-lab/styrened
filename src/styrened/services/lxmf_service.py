@@ -303,7 +303,7 @@ class LXMFService:
     def send_message(
         self,
         destination_hash: str,
-        payload: dict[str, object],
+        payload: "str | dict[str, object]",
         on_delivery: "Callable[[LXMF.LXMessage], None] | None" = None,
         on_failed: "Callable[[LXMF.LXMessage], None] | None" = None,
         delivery_method: str = DeliveryMethod.AUTO,
@@ -324,7 +324,9 @@ class LXMFService:
                             - Operator destination hash (from device discovery)
                             - LXMF destination hash (from announce app_data)
                             - Identity hash (direct identity lookup)
-            payload: JSON-serializable message payload.
+            payload: Message body — plain string for chat messages (ecosystem-
+                friendly) or a JSON-serializable dict for Styrene protocol
+                messages.
             on_delivery: Optional callback invoked when message is delivered.
             on_failed: Optional callback invoked when delivery fails.
             delivery_method: Delivery method to use. One of:
@@ -392,8 +394,12 @@ class LXMFService:
                 "delivery",
             )
 
-            # Serialize payload to JSON
-            content = json.dumps(payload).encode("utf-8")
+            # Encode payload: plain strings are sent as-is (ecosystem-friendly),
+            # dicts are JSON-serialized for Styrene protocol messages.
+            if isinstance(payload, str):
+                content = payload.encode("utf-8")
+            else:
+                content = json.dumps(payload).encode("utf-8")
 
             # Build LXMF fields dict for ecosystem interoperability
             # Start with provided fields or empty dict
@@ -464,17 +470,21 @@ class LXMFService:
             # Get the message hash after sending (LXMF computes it during handle_outbound)
             message_hash: bytes = message.hash if message.hash else b""
 
+            # Log summary (payload may be str or dict)
+            if isinstance(payload, dict):
+                log_detail = f"type={payload.get('type')}, protocol={payload.get('protocol')}"
+            else:
+                log_detail = f"content_length={len(content)}"
+
             if message_hash:
                 logger.info(
                     f"[HASH] Sent LXMF message to {dest_destination.hash.hex()[:16]}... "
-                    f"(type={payload.get('type')}, protocol={payload.get('protocol')}, "
-                    f"method={method_used}, msg_hash={message_hash.hex()[:16]}...)"
+                    f"({log_detail}, method={method_used}, msg_hash={message_hash.hex()[:16]}...)"
                 )
             else:
                 logger.info(
                     f"[HASH] Queued LXMF message to {dest_destination.hash.hex()[:16]}... "
-                    f"(type={payload.get('type')}, protocol={payload.get('protocol')}, "
-                    f"method={method_used})"
+                    f"({log_detail}, method={method_used})"
                 )
 
             return SendMessageResult(
@@ -727,8 +737,11 @@ class LXMFService:
                 "delivery",
             )
 
-            # Serialize payload to JSON
-            content = json.dumps(payload).encode("utf-8")
+            # Encode payload
+            if isinstance(payload, str):
+                content = payload.encode("utf-8")
+            else:
+                content = json.dumps(payload).encode("utf-8")
 
             # Create LXMF message with proper destination objects
             message = LXMF.LXMessage(
@@ -993,7 +1006,7 @@ class MockLXMFService:
     def send_message(
         self,
         destination: str,
-        payload: dict[str, Any],
+        payload: "str | dict[str, Any]",
         on_delivery: Callable[[Any], None] | None = None,
         on_failed: Callable[[Any], None] | None = None,
         delivery_method: str = DeliveryMethod.AUTO,
@@ -1002,7 +1015,7 @@ class MockLXMFService:
 
         Args:
             destination: Destination hash.
-            payload: Message payload.
+            payload: Message payload (string or dict).
             on_delivery: Optional callback invoked when message is delivered.
             on_failed: Optional callback invoked when delivery fails.
             delivery_method: Delivery method (direct, propagated, or auto).
