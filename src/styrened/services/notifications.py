@@ -131,20 +131,36 @@ class CallbackBackend(NotificationBackend):
 class IPCEventBackend(NotificationBackend):
     """Bridges notifications to IPC event broadcasting.
 
-    Dispatches notification events as EVENT_MESSAGE frames to
-    connected IPC clients via the ControlServer.
+    Routes notification events to targeted IPC event types (EVENT_MESSAGE,
+    EVENT_DEVICE) and always broadcasts to EVENT_ACTIVITY as a unified feed.
     """
+
+    # Map event_type strings to targeted IPC message types
+    _EVENT_ROUTING: dict[str, Any] = {}  # Populated at class load time
 
     def __init__(self, control_server: Any) -> None:
         self._control_server = control_server
 
     async def dispatch(self, event: NotificationEvent) -> bool:
-        """Broadcast event to IPC clients."""
+        """Broadcast event to IPC clients with type-based routing.
+
+        Routes events to both targeted types (EVENT_MESSAGE, EVENT_DEVICE)
+        and the unified EVENT_ACTIVITY feed.
+        """
         if self._control_server is None:
             return False
 
         try:
             from styrened.ipc.protocol import IPCMessageType
+
+            # Lazily populate routing table (avoids import-time circular ref)
+            if not IPCEventBackend._EVENT_ROUTING:
+                IPCEventBackend._EVENT_ROUTING = {
+                    "new_message": IPCMessageType.EVENT_MESSAGE,
+                    "delivery_status": IPCMessageType.EVENT_MESSAGE,
+                    "device_discovered": IPCMessageType.EVENT_DEVICE,
+                    "device_updated": IPCMessageType.EVENT_DEVICE,
+                }
 
             payload = {
                 "event_type": event.event_type,
@@ -157,8 +173,14 @@ class IPCEventBackend(NotificationBackend):
             }
             payload.update(event.metadata)
 
+            # Send to targeted event type if mapped
+            targeted_type = self._EVENT_ROUTING.get(event.event_type)
+            if targeted_type is not None:
+                await self._control_server.broadcast_event(targeted_type, payload)
+
+            # Always broadcast to unified activity feed
             await self._control_server.broadcast_event(
-                IPCMessageType.EVENT_MESSAGE, payload
+                IPCMessageType.EVENT_ACTIVITY, payload
             )
             return True
         except Exception as e:
