@@ -218,6 +218,9 @@ class IPCBridge:
         title: str | None = None,
         delivery_method: str = "auto",
         reply_to_hash: str | None = None,
+        attachment_data_b64: str | None = None,
+        attachment_filename: str | None = None,
+        attachment_mime: str | None = None,
     ) -> dict[str, Any]:
         """Send a chat message to a peer."""
         return await self._call(
@@ -227,7 +230,14 @@ class IPCBridge:
             title=title,
             delivery_method=delivery_method,
             reply_to_hash=reply_to_hash,
+            attachment_data_b64=attachment_data_b64,
+            attachment_filename=attachment_filename,
+            attachment_mime=attachment_mime,
         )
+
+    async def get_attachment(self, message_id: int) -> dict[str, Any]:
+        """Get attachment data for a message."""
+        return await self._call("query_attachment", message_id=message_id)
 
     # -------------------------------------------------------------------------
     # Messages (maps: session.query(Message) → get_messages)
@@ -434,6 +444,24 @@ class IPCBridge:
         )
 
     # -------------------------------------------------------------------------
+    # Identity
+    # -------------------------------------------------------------------------
+
+    async def set_identity(
+        self,
+        display_name: str = "",
+        icon: str = "",
+        short_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Set operator identity appearance fields."""
+        return await self._call(
+            "set_identity",
+            display_name=display_name,
+            icon=icon,
+            short_name=short_name,
+        )
+
+    # -------------------------------------------------------------------------
     # Propagation sync
     # -------------------------------------------------------------------------
 
@@ -496,6 +524,10 @@ class IPCBridge:
     async def subscribe_devices(self) -> bool:
         """Subscribe to real-time device events."""
         return await self._call("subscribe_devices")
+
+    async def subscribe_activity(self) -> bool:
+        """Subscribe to unified activity events for dashboard feed."""
+        return await self._call("subscribe_activity")
 
     async def unsubscribe(self, subscription_type: str = "") -> bool:
         """Unsubscribe from events."""
