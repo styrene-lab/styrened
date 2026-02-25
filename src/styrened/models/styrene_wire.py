@@ -81,7 +81,9 @@ class StyreneMessageType(IntEnum):
     - 0x60-0x7F:  RPC responses (32 types)
     - 0x80-0x9F:  Hub services (32 types)
     - 0xA0-0xBF:  Pub/Sub (32 types)
-    - 0xC0-0xDF:  Reserved/future (32 types)
+    - 0xC0-0xCF:  Terminal sessions (16 types)
+    - 0xD0-0xD7:  PQC session (8 types)
+    - 0xD8-0xDF:  Reserved/future (8 types)
     - 0xE0-0xFE:  Application-specific (31 types)
     - 0xFF:       Error
     """
@@ -149,6 +151,14 @@ class StyreneMessageType(IntEnum):
     TERMINAL_SIGNAL = 0xC4  # Send signal to PTY (SIGINT, etc.)
     TERMINAL_CLOSE = 0xC5  # Graceful close request
     TERMINAL_CLOSED = 0xC6  # Session terminated (with exit code)
+
+    # PQC Session (0xD0-0xD7) - Post-quantum hybrid key exchange
+    PQC_INITIATE = 0xD0  # X25519 ephemeral + ML-KEM ciphertext + session_id
+    PQC_RESPOND = 0xD1  # X25519 ephemeral + ML-KEM ciphertext + HMAC
+    PQC_CONFIRM = 0xD2  # Confirmation HMAC, session established
+    PQC_REKEY = 0xD3  # Initiate session rekeying
+    PQC_DATA = 0xD4  # Encrypted payload wrapper
+    PQC_CLOSE = 0xD5  # Close PQC session
 
     # Error (0xFF)
     ERROR = 0xFF
@@ -1039,6 +1049,76 @@ def create_terminal_closed(
     return StyreneEnvelope(
         version=STYRENE_VERSION,
         message_type=StyreneMessageType.TERMINAL_CLOSED,
+        payload=encode_payload(payload),
+        request_id=request_id if request_id else NO_CORRELATION,
+    )
+
+
+# ---------------------------------------------------------------------------
+# File transfer factories
+# ---------------------------------------------------------------------------
+
+
+def create_file_offer(
+    filename: str,
+    size: int,
+    mime_type: str | None = None,
+    checksum_sha256: str | None = None,
+    request_id: bytes | None = None,
+) -> StyreneEnvelope:
+    """Create a FILE_OFFER envelope.
+
+    Sent to propose a file transfer to a Styrene peer. The receiver
+    responds with FILE_ACCEPT (with size limit) or ignores.
+
+    Args:
+        filename: Name of the file being offered.
+        size: Total size in bytes.
+        mime_type: Optional MIME type.
+        checksum_sha256: Optional SHA-256 hex digest for integrity verification.
+        request_id: Correlation ID for response matching.
+
+    Returns:
+        StyreneEnvelope configured as FILE_OFFER.
+    """
+    payload: dict[str, Any] = {
+        "filename": filename,
+        "size": size,
+    }
+    if mime_type is not None:
+        payload["mime_type"] = mime_type
+    if checksum_sha256 is not None:
+        payload["checksum"] = checksum_sha256
+
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.FILE_OFFER,
+        payload=encode_payload(payload),
+        request_id=request_id,
+    )
+
+
+def create_file_accept(
+    max_size: int,
+    request_id: bytes | None = None,
+) -> StyreneEnvelope:
+    """Create a FILE_ACCEPT envelope.
+
+    Sent in response to a FILE_OFFER to authorize the transfer.
+    The sender should proceed only if the file fits within max_size.
+
+    Args:
+        max_size: Maximum file size the receiver will accept.
+        request_id: Correlation ID matching the original FILE_OFFER.
+
+    Returns:
+        StyreneEnvelope configured as FILE_ACCEPT.
+    """
+    payload: dict[str, Any] = {"max_size": max_size}
+
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.FILE_ACCEPT,
         payload=encode_payload(payload),
         request_id=request_id if request_id else NO_CORRELATION,
     )
