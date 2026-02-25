@@ -2295,6 +2295,86 @@ def _print_report(report) -> None:
     print(f"  {oks} passed, {warnings} warnings, {errors} errors")
 
 
+# -----------------------------------------------------------------------------
+# Subcommand: api-auth
+# -----------------------------------------------------------------------------
+
+
+def cmd_api_auth(args: argparse.Namespace) -> int:
+    """Manage web API authentication configuration.
+
+    Operates directly on config file (no running daemon needed).
+
+    Args:
+        args: Parsed arguments with api_auth_action and optional identity_hash.
+
+    Returns:
+        Exit code.
+    """
+    import json as json_mod
+
+    from styrened.services.config import load_core_config, save_core_config
+
+    config = load_core_config()
+    action = args.api_auth_action
+
+    if action == "list":
+        auth = config.api.auth
+        if args.json:
+            output = {
+                "enabled": auth.enabled,
+                "exempt_localhost": auth.exempt_localhost,
+                "allow_unauthenticated": auth.allow_unauthenticated,
+                "session_ttl": auth.session_ttl,
+                "authorized_identities": sorted(auth.authorized_identities),
+            }
+            print(json_mod.dumps(output, indent=2))
+        else:
+            print(f"Auth enabled:           {auth.enabled}")
+            print(f"Exempt localhost:       {auth.exempt_localhost}")
+            print(f"Allow unauthenticated:  {auth.allow_unauthenticated}")
+            print(f"Session TTL:            {auth.session_ttl}s")
+            if auth.authorized_identities:
+                print(f"Authorized identities:  ({len(auth.authorized_identities)})")
+                for ident in sorted(auth.authorized_identities):
+                    print(f"  {ident}")
+            else:
+                print("Authorized identities:  (none)")
+        return 0
+
+    elif action == "add":
+        identity_hash = args.identity_hash.lower()
+        if len(identity_hash) != 32:
+            print(f"Error: identity hash must be 32 hex characters, got {len(identity_hash)}", file=sys.stderr)
+            return 1
+        try:
+            int(identity_hash, 16)
+        except ValueError:
+            print("Error: identity hash must be valid hexadecimal", file=sys.stderr)
+            return 1
+
+        config.api.auth.authorized_identities.add(identity_hash)
+        if not config.api.auth.enabled:
+            config.api.auth.enabled = True
+            print("Auth auto-enabled (was disabled)")
+        save_core_config(config)
+        print(f"Added {identity_hash} to authorized identities")
+        return 0
+
+    elif action == "remove":
+        identity_hash = args.identity_hash.lower()
+        if identity_hash in config.api.auth.authorized_identities:
+            config.api.auth.authorized_identities.discard(identity_hash)
+            save_core_config(config)
+            print(f"Removed {identity_hash} from authorized identities")
+        else:
+            print(f"Identity {identity_hash} not found in authorized set", file=sys.stderr)
+            return 1
+        return 0
+
+    return 1
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for styrened CLI.
 
@@ -2576,6 +2656,25 @@ def create_parser() -> argparse.ArgumentParser:
         "--setup", action="store_true", help="Run interactive setup wizard"
     )
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    # api-auth
+    api_auth_parser = subparsers.add_parser(
+        "api-auth", help="Manage web API authentication"
+    )
+    api_auth_sub = api_auth_parser.add_subparsers(
+        dest="api_auth_action", help="Auth management action"
+    )
+
+    api_auth_list = api_auth_sub.add_parser("list", help="Show auth config and authorized identities")
+    api_auth_list.add_argument("--json", action="store_true", help="Output as JSON")
+
+    api_auth_add = api_auth_sub.add_parser("add", help="Add an identity to the authorized set")
+    api_auth_add.add_argument("identity_hash", help="32-character hex identity hash")
+
+    api_auth_remove = api_auth_sub.add_parser("remove", help="Remove an identity from the authorized set")
+    api_auth_remove.add_argument("identity_hash", help="32-character hex identity hash")
+
+    api_auth_parser.set_defaults(func=cmd_api_auth)
 
     return parser
 
