@@ -23,6 +23,7 @@ Dependencies:
 """
 
 import asyncio
+import json
 import logging
 import signal
 import sys
@@ -42,7 +43,9 @@ except ImportError:
 if TYPE_CHECKING:
     from styrened.models.mesh_device import MeshDevice
 
+from styrened.crypto.pqc_crypto import pqc_available
 from styrened.models.config import CoreConfig
+from styrened.models.mesh_device import DeviceType
 from styrened.services.auto_reply import AutoReplyHandler
 from styrened.services.config import get_default_core_config, load_core_config
 from styrened.services.lifecycle import CoreLifecycle
@@ -89,6 +92,7 @@ class StyreneDaemon:
         self._callback_backend: Any = None  # For TUI/GUI callback registration
         self._page_browser_service: Any = None  # NomadNet page browsing service
         self._page_server_service: Any = None  # NomadNet page server service
+        self._pqc_service: Any = None  # PQC session layer service
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -119,6 +123,9 @@ class StyreneDaemon:
         # Wire conversation service into RPC server for remote inbox queries
         if self._rpc_server and self._conversation_service:
             self._rpc_server.set_conversation_service(self._conversation_service)
+
+        # Initialize PQC session layer (after StyreneProtocol is available)
+        self._init_pqc_service()
 
         # Start auto-reply handler for chat messages
         self._start_auto_reply()
@@ -160,6 +167,40 @@ class StyreneDaemon:
         # Main loop with periodic announces
         await self._run_loop()
 
+    def _emit_activity_event(
+        self,
+        event_type: str,
+        peer_hash: str = "",
+        metadata: dict | None = None,
+    ) -> None:
+        """Emit a NotificationEvent for the unified activity feed.
+
+        Dispatches through NotificationService which routes to both
+        targeted IPC event types and EVENT_ACTIVITY.
+
+        Args:
+            event_type: Event category string.
+            peer_hash: LXMF hash of the peer (if applicable).
+            metadata: Additional event-specific data.
+        """
+        if self._notification_service is None:
+            return
+
+        from styrened.services.notifications import NotificationEvent
+
+        event = NotificationEvent(
+            event_type=event_type,
+            peer_hash=peer_hash,
+            timestamp=time.time(),
+            metadata=metadata or {},
+        )
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._notification_service.notify(event))
+        except RuntimeError:
+            pass
+
     def _on_device_discovered(self, device: "MeshDevice") -> None:
         """Handle discovered device.
 
@@ -188,6 +229,20 @@ class StyreneDaemon:
                     broadcaster.broadcast_device_event(device)
             except Exception:
                 pass
+
+        # Emit activity event for dashboard feed
+        self._emit_activity_event(
+            "device_discovered",
+            peer_hash=device.destination_hash,
+            metadata={
+                "name": device.name,
+                "device_type": device.device_type.value,
+                "status": device.status.value,
+            },
+        )
+
+        # Auto-initiate PQC session with Styrene nodes
+        self._maybe_initiate_pqc(device)
 
     def _init_operator_destination(self) -> None:
         """Initialize and cache the operator destination.
@@ -245,6 +300,46 @@ class StyreneDaemon:
                 logger.info("[RECONNECT] Daemon re-announced after reconnection")
             except Exception as e:
                 logger.warning(f"[RECONNECT] Failed to re-announce: {e}")
+
+    def _init_pqc_service(self) -> None:
+        """Initialize PQC session layer if enabled and liboqs is available."""
+        if not self.config.pqc.enabled:
+            logger.info("PQC session layer disabled in configuration")
+            return
+
+        if not self._styrene_protocol:
+            logger.warning("PQC enabled but StyreneProtocol not available")
+            return
+
+        if not pqc_available():
+            logger.warning("PQC enabled but liboqs not installed — running RNS-only")
+            return
+
+        try:
+            from styrened.services.pqc_session import PQCSessionService
+
+            self._pqc_service = PQCSessionService(self._styrene_protocol, self.config.pqc)
+            logger.info("PQC session layer initialized (ML-KEM-768 + X25519)")
+        except Exception as e:
+            logger.error(f"Failed to initialize PQC session service: {e}")
+
+    def _maybe_initiate_pqc(self, device: "MeshDevice") -> None:
+        """Auto-initiate PQC session with a newly discovered Styrene node.
+
+        Args:
+            device: Discovered MeshDevice.
+        """
+        if not self._pqc_service:
+            return
+        if not self.config.pqc.auto_initiate:
+            return
+        if device.device_type != DeviceType.STYRENE_NODE:
+            return
+
+        try:
+            self._pqc_service.initiate_session_sync(device.destination_hash)
+        except Exception as e:
+            logger.warning(f"PQC auto-initiate failed for {device.destination_hash[:16]}...: {e}")
 
     def _init_conversation_service(self) -> None:
         """Initialize the conversation service for chat backend.
@@ -523,8 +618,8 @@ class StyreneDaemon:
             if image_field:
                 has_attachment = True
                 attachment_type = "image"
-                if isinstance(image_field, tuple) and len(image_field) >= 2:
-                    # Format: (mime_type, data)
+                if isinstance(image_field, (list, tuple)) and len(image_field) >= 2:
+                    # Format: (mime_type, data) — msgpack deserializes tuples as lists
                     attachment_mime = str(image_field[0]) if image_field[0] else None
                     attachment_size = (
                         len(image_field[1]) if isinstance(image_field[1], bytes) else None
@@ -538,7 +633,7 @@ class StyreneDaemon:
                 if audio_field:
                     has_attachment = True
                     attachment_type = "audio"
-                    if isinstance(audio_field, tuple) and len(audio_field) >= 2:
+                    if isinstance(audio_field, (list, tuple)) and len(audio_field) >= 2:
                         # Format: (codec_mode, data) or (mime_type, data)
                         # The first element may be an integer codec mode or a mime string
                         first_elem = audio_field[0]
@@ -563,7 +658,7 @@ class StyreneDaemon:
                     attachment_type = "file"
                     if isinstance(file_field, list) and len(file_field) > 0:
                         first_file = file_field[0]
-                        if isinstance(first_file, tuple) and len(first_file) >= 2:
+                        if isinstance(first_file, (list, tuple)) and len(first_file) >= 2:
                             # Format: (filename, data) or (filename, data, mime_type)
                             attachment_name = str(first_file[0]) if first_file[0] else None
                             attachment_size = (
@@ -572,6 +667,82 @@ class StyreneDaemon:
                             if len(first_file) >= 3 and first_file[2]:
                                 attachment_mime = str(first_file[2])
 
+            # Extract and store raw attachment binary data
+            attachment_path: str | None = None
+            if has_attachment:
+                try:
+                    from styrened.services.attachment_store import get_attachment_store
+
+                    raw_data: bytes | None = None
+                    att_filename = attachment_name or f"{attachment_type or 'file'}_attachment"
+
+                    if attachment_type == "image" and image_field:
+                        if isinstance(image_field, (list, tuple)) and len(image_field) >= 2:
+                            raw_data = image_field[1] if isinstance(image_field[1], bytes) else None
+                        elif isinstance(image_field, bytes):
+                            raw_data = image_field
+                        if not attachment_name:
+                            # Derive extension from mime
+                            ext = ".jpg"
+                            if attachment_mime:
+                                mime_ext = attachment_mime.split("/")[-1].split(";")[0]
+                                if mime_ext in ("png", "gif", "webp", "bmp", "tiff"):
+                                    ext = f".{mime_ext}"
+                            att_filename = f"image{ext}"
+
+                    elif attachment_type == "audio":
+                        audio_field_val = fields.get(LXMF.FIELD_AUDIO) if LXMF_AVAILABLE else fields.get(0x07)
+                        if audio_field_val:
+                            if isinstance(audio_field_val, (list, tuple)) and len(audio_field_val) >= 2:
+                                raw_data = audio_field_val[1] if isinstance(audio_field_val[1], bytes) else None
+                            elif isinstance(audio_field_val, bytes):
+                                raw_data = audio_field_val
+                        if not attachment_name:
+                            att_filename = "audio.opus"
+
+                    elif attachment_type == "file":
+                        file_field_val = fields.get(LXMF.FIELD_FILE_ATTACHMENTS) if LXMF_AVAILABLE else fields.get(0x05)
+                        if file_field_val and isinstance(file_field_val, list) and len(file_field_val) > 0:
+                            if len(file_field_val) > 1:
+                                logger.info(
+                                    f"Multi-file message from {source_hash[:8]}: "
+                                    f"{len(file_field_val)} files"
+                                )
+                            first = file_field_val[0]
+                            if isinstance(first, (list, tuple)) and len(first) >= 2:
+                                raw_data = first[1] if isinstance(first[1], bytes) else None
+
+                    if raw_data is not None:
+                        store = get_attachment_store()
+                        saved_path = store.save(
+                            source_hash, 0, att_filename, raw_data, mime=attachment_mime
+                        )
+                        attachment_path = str(saved_path)
+                        logger.debug(f"Saved attachment: {att_filename} ({len(raw_data)} bytes)")
+
+                    # Save additional files from multi-file messages
+                    if attachment_type == "file":
+                        file_field_val = fields.get(LXMF.FIELD_FILE_ATTACHMENTS) if LXMF_AVAILABLE else fields.get(0x05)
+                        if file_field_val and isinstance(file_field_val, list) and len(file_field_val) > 1:
+                            for idx, extra_file in enumerate(file_field_val[1:], start=1):
+                                if isinstance(extra_file, (list, tuple)) and len(extra_file) >= 2:
+                                    extra_name = str(extra_file[0]) if extra_file[0] else f"file_{idx}"
+                                    extra_data = extra_file[1] if isinstance(extra_file[1], bytes) else None
+                                    extra_mime = str(extra_file[2]) if len(extra_file) >= 3 and extra_file[2] else None
+                                    if extra_data is not None:
+                                        try:
+                                            store.save(
+                                                source_hash, 0, extra_name, extra_data, mime=extra_mime
+                                            )
+                                            logger.debug(
+                                                f"Saved additional attachment {idx}: "
+                                                f"{extra_name} ({len(extra_data)} bytes)"
+                                            )
+                                        except Exception as e:
+                                            logger.warning(f"Failed to save additional attachment {idx}: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to save attachment data: {e}")
+
             try:
                 from styrened.web.metrics import messages_total
 
@@ -579,13 +750,37 @@ class StyreneDaemon:
             except ImportError:
                 pass
 
+            # Build a JSON-safe fields dict for persistence.
+            # Raw LXMF fields contain binary blobs (image data, audio data, file
+            # contents) under integer keys that cannot be JSON-serialized.
+            # Attachment metadata is already extracted into dedicated columns, so
+            # we only keep serializable scalar/string values.
+            safe_fields: dict[str, Any] = {}
+            for k, v in fields.items():
+                str_key = str(k)
+                if isinstance(v, (str, int, float, bool, type(None))):
+                    safe_fields[str_key] = v
+                elif isinstance(v, bytes):
+                    # Binary blob — record presence/size, not data
+                    safe_fields[str_key] = f"<bytes:{len(v)}>"
+                elif isinstance(v, (list, tuple)):
+                    # Attachment tuples (mime, data) — summarize
+                    safe_fields[str_key] = f"<{type(v).__name__}:{len(v)}>"
+                elif isinstance(v, dict):
+                    # Nested dicts (e.g. thread info) — try to keep if safe
+                    try:
+                        json.dumps(v)
+                        safe_fields[str_key] = v
+                    except (TypeError, ValueError):
+                        safe_fields[str_key] = f"<dict:{len(v)}>"
+
             # Save to conversation service
             msg_id = self._conversation_service.save_incoming_message(
                 source_hash=source_hash,
                 content=content,
                 timestamp=timestamp,
                 title=title,
-                fields=fields,
+                fields=safe_fields,
                 thread_id=thread_id,
                 reply_to_hash=reply_to_hash,
                 has_attachment=has_attachment,
@@ -593,7 +788,23 @@ class StyreneDaemon:
                 attachment_name=attachment_name,
                 attachment_size=attachment_size,
                 attachment_mime=attachment_mime,
+                attachment_path=attachment_path,
             )
+
+            # Rename attachment file to include real message_id
+            if attachment_path:
+                try:
+                    from pathlib import Path
+
+                    from styrened.services.attachment_store import get_attachment_store
+
+                    store = get_attachment_store()
+                    new_path = store.rename_for_message(Path(attachment_path), msg_id)
+                    if str(new_path) != attachment_path:
+                        # Update the DB record with the new path
+                        self._conversation_service.update_attachment_path(msg_id, str(new_path))
+                except Exception as e:
+                    logger.warning(f"Failed to rename attachment for msg {msg_id}: {e}")
 
             logger.debug(f"Saved incoming chat message from {source_hash[:16]}...")
 
@@ -821,6 +1032,7 @@ class StyreneDaemon:
                 self._styrene_protocol,
                 enable_dangerous_commands=self.config.rpc.allow_command_execution,
             )
+            self._rpc_server._daemon = self
 
             # Create RPC client for outgoing requests (used by IPC handlers)
             from styrened.rpc import RPCClient
@@ -1271,6 +1483,9 @@ class StyreneDaemon:
             except ImportError:
                 pass
 
+            # Emit activity event for dashboard feed
+            self._emit_activity_event("announce_sent")
+
             # Also announce LXMF delivery destination
             try:
                 from styrened.services.lxmf_service import get_lxmf_service
@@ -1281,6 +1496,13 @@ class StyreneDaemon:
                     and lxmf_service.router
                     and lxmf_service.delivery_destination
                 ):
+                    # Sync display_name onto the LXMF delivery destination so
+                    # the router's announce app_data reflects the current config.
+                    # register_delivery_identity() only sets this once at init;
+                    # without this, identity changes never propagate to LXMF peers.
+                    lxmf_service.delivery_destination.display_name = (
+                        self.config.identity.display_name
+                    )
                     lxmf_service.router.announce(lxmf_service.delivery_destination.hash)
                     logger.debug("Announced LXMF delivery destination")
             except Exception as e:
@@ -1339,6 +1561,21 @@ class StyreneDaemon:
             # (for messages where LXMF callbacks never fired)
             if self._conversation_service:
                 self._conversation_service.cleanup_stale_deliveries()
+
+            # Check for PQC session rekeying
+            if self._pqc_service:
+                try:
+                    await self._pqc_service.check_rekey()
+                except Exception as e:
+                    logger.warning(f"PQC rekey check failed: {e}")
+
+            # Periodic attachment storage budget enforcement
+            try:
+                from styrened.services.attachment_store import get_attachment_store
+
+                get_attachment_store().enforce_budget()
+            except Exception as e:
+                logger.debug(f"Attachment budget enforcement skipped: {e}")
 
     async def stop(self) -> None:
         """Stop the daemon services."""
