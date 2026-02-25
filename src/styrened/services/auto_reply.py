@@ -224,8 +224,13 @@ class AutoReplyHandler:
             # Keep as bytes for memory efficiency
             source_hash_bytes: bytes = message.source_hash
 
-            # Check cooldown (fast path - no string conversion)
-            if not self._check_cooldown(source_hash_bytes):
+            # Cooldown check: template mode uses the configured cooldown to
+            # prevent spamming the same static message. Chatbot mode skips
+            # the cooldown — every message deserves a conversational reply,
+            # and bot-to-bot loop prevention is handled by the "bot" field.
+            if mode == AutoReplyMode.TEMPLATE and not self._check_cooldown(
+                source_hash_bytes
+            ):
                 try:
                     from styrened.web.metrics import auto_replies_total
 
