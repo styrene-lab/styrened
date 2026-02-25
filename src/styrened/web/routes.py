@@ -96,6 +96,15 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
                 config_dict["terminal"]["authorized_identities_count"] = len(auth_ids)
                 del config_dict["terminal"]["authorized_identities"]
 
+        # Redact API auth authorized_identities (show count only)
+        if "api" in config_dict:
+            api_auth = config_dict["api"].get("auth")
+            if api_auth and isinstance(api_auth, dict):
+                auth_ids = api_auth.get("authorized_identities")
+                if auth_ids:
+                    api_auth["authorized_identities_count"] = len(auth_ids)
+                    del api_auth["authorized_identities"]
+
         # Redact infrastructure details in public mode
         if cfg.api.public_mode:
             if "reticulum" in config_dict:
@@ -133,6 +142,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         protected_fields = {
             ("identity", "yubikey", "credential_id"),
             ("terminal", "authorized_identities"),
+            ("api", "auth"),  # entire auth subtree — manage via CLI only
         }
 
         # Check for protected fields
@@ -221,6 +231,13 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
             if auth_ids:
                 result["terminal"]["authorized_identities_count"] = len(auth_ids)
                 del result["terminal"]["authorized_identities"]
+        if "api" in result:
+            api_auth = result["api"].get("auth")
+            if api_auth and isinstance(api_auth, dict):
+                auth_ids = api_auth.get("authorized_identities")
+                if auth_ids:
+                    api_auth["authorized_identities_count"] = len(auth_ids)
+                    del api_auth["authorized_identities"]
 
         return {"config": result}
 
