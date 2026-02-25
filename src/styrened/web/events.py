@@ -107,7 +107,8 @@ def create_events_router(broadcaster: SSEBroadcaster) -> APIRouter:
     router = APIRouter()
 
     @router.get("/events")
-    async def events(request: Request) -> StreamingResponse:
+    async def events(request: Request, token: str | None = None) -> StreamingResponse:
+        # token query param is consumed by AuthMiddleware for SSE EventSource auth
         queue = await broadcaster.subscribe()
 
         def _is_public() -> bool:
