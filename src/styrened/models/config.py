@@ -297,6 +297,31 @@ class MetricsConfig:
 
 
 @dataclass
+class WebAuthConfig:
+    """RNS identity-based authentication for the web API.
+
+    Uses Ed25519 challenge-response with RNS identities.  A phone or
+    remote client proves possession of an authorized RNS identity by
+    signing a server-issued nonce, then receives a session token.
+
+    Attributes:
+        enabled: Whether to require authentication for API access.
+        authorized_identities: Set of 32-char hex identity hashes allowed to authenticate.
+            If empty and allow_unauthenticated is False, only localhost is allowed.
+        allow_unauthenticated: Skip whitelist check — any identity that completes
+            the challenge-response is granted a session.
+        exempt_localhost: Requests from loopback addresses bypass auth entirely.
+        session_ttl: Session token lifetime in seconds (default 24 hours).
+    """
+
+    enabled: bool = False
+    authorized_identities: set[str] = field(default_factory=set)
+    allow_unauthenticated: bool = False
+    exempt_localhost: bool = True
+    session_ttl: int = 86400
+
+
+@dataclass
 class APIConfig:
     """HTTP API configuration for headless mode.
 
@@ -306,6 +331,7 @@ class APIConfig:
         port: TCP port for API server.
         public_mode: If true, reject all write operations via the web API (read-only dashboard).
         metrics: Prometheus metrics endpoint configuration.
+        auth: RNS identity-based authentication configuration.
     """
 
     enabled: bool = False
@@ -313,6 +339,7 @@ class APIConfig:
     port: int = 8000
     public_mode: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    auth: WebAuthConfig = field(default_factory=WebAuthConfig)
 
 
 @dataclass
@@ -366,8 +393,16 @@ class ChatbotConfig:
     model: str = "llama3"
     api_key: str = ""
     system_prompt: str = (
-        "You are a helpful assistant on mesh node {hostname}. "
-        "Keep responses concise — this is a low-bandwidth mesh network."
+        "You are an automated assistant running on {hostname}, a Reticulum mesh "
+        "network node (styrened {version}, up {uptime}). You are NOT a human "
+        "operator — be upfront about that if asked.\n\n"
+        "Guidelines:\n"
+        "- Be friendly and conversational. Match the tone of the person messaging you.\n"
+        "- Keep responses short (1-3 sentences). This is a low-bandwidth mesh link.\n"
+        "- Only share node status (uptime, version) when specifically asked.\n"
+        "- For casual messages (greetings, small talk), respond naturally — "
+        "don't pivot to technical info unprompted.\n"
+        "- If you don't know something, say so. Don't fabricate node data."
     )
     max_tokens: int = 256
     temperature: float = 0.7
@@ -570,6 +605,26 @@ class PageServerConfig:
 
 
 @dataclass
+class PQCConfig:
+    """Post-quantum cryptographic session layer configuration.
+
+    Controls hybrid PQC session negotiation with Styrene peers.
+    Uses X25519 + ML-KEM-768 combined via HKDF for key exchange.
+
+    Attributes:
+        enabled: Whether to auto-negotiate PQC sessions with capable peers.
+        rekey_interval_hours: Hours between time-based session rekeying.
+        require_pqc_for_rpc: Reject RPC commands from non-PQC peers.
+        auto_initiate: Automatically initiate PQC handshake on device discovery.
+    """
+
+    enabled: bool = True
+    rekey_interval_hours: int = 24
+    require_pqc_for_rpc: bool = False
+    auto_initiate: bool = True
+
+
+@dataclass
 class CoreConfig:
     """Core Styrene configuration for headless applications.
 
@@ -589,6 +644,7 @@ class CoreConfig:
         lxmf: LXMF messaging and propagation configuration.
         terminal: Terminal session configuration.
         page_server: NomadNet page server configuration.
+        pqc: Post-quantum cryptographic session layer configuration.
     """
 
     profile: Profile = Profile.OPERATOR
@@ -603,3 +659,4 @@ class CoreConfig:
     lxmf: LXMFConfig = field(default_factory=LXMFConfig)
     terminal: TerminalConfig = field(default_factory=TerminalConfig)
     page_server: PageServerConfig = field(default_factory=PageServerConfig)
+    pqc: PQCConfig = field(default_factory=PQCConfig)
