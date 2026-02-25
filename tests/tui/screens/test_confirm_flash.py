@@ -1,6 +1,5 @@
 """Tests for ConfirmFlash modal."""
 
-import pytest
 
 from styrened.tui.screens.confirm_flash import ConfirmFlash
 

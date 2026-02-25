@@ -99,16 +99,20 @@ class InboxScreen(Screen[None]):
         color: $primary;
     }
 
-    InboxScreen #ooo-bar {
-        height: 3;
+    InboxScreen #inbox-header-bar {
+        height: auto;
         padding: 0 1;
     }
 
-    InboxScreen #ooo-bar Static {
+    InboxScreen #inbox-title {
+        width: 1fr;
+    }
+
+    InboxScreen #ooo-label {
         width: auto;
     }
 
-    InboxScreen #ooo-bar Switch {
+    InboxScreen #inbox-header-bar Switch {
         width: auto;
     }
 
@@ -144,11 +148,11 @@ class InboxScreen(Screen[None]):
         """Compose inbox UI."""
         yield Header()
         yield Container(
-            Static("INBOX - LXMF Conversations", id="inbox-title"),
             Horizontal(
-                Static("Auto-Reply (OOO): "),
+                Static("INBOX - LXMF Conversations", id="inbox-title"),
+                Static("Auto-Reply (OOO): ", id="ooo-label"),
                 Switch(value=False, id="ooo-switch"),
-                id="ooo-bar",
+                id="inbox-header-bar",
             ),
             # Compose bar (hidden by default)
             Horizontal(
@@ -193,6 +197,7 @@ class InboxScreen(Screen[None]):
 
         self.run_worker(self._load_conversations())
         self.run_worker(self._load_auto_reply_state())
+        table.focus()
 
     def on_screen_resume(self) -> None:
         """Refresh conversations when returning from another screen."""

@@ -1,7 +1,7 @@
 """Settings screen for configuration management."""
 
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual import on
 from textual.app import ComposeResult
@@ -10,6 +10,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
+from styrened.models.config import validate_short_name
 from styrened.services.hub_connection import STYRENE_HUB_ADDRESS
 from styrened.tui.models.config import (
     ConfigValidationError,
@@ -55,6 +56,51 @@ class SettingsScreen(Screen[None]):
         self.config = config
         self._status_message = ""
 
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge from app lifecycle."""
+        try:
+            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
+    async def _save_identity(
+        self, display_name: str, icon: str, short_name: str
+    ) -> None:
+        """Persist identity fields to daemon config.
+
+        In IPC mode, sends a CMD_SET_IDENTITY to the daemon which handles
+        persistence and re-announce. In local mode, updates core config
+        directly.
+
+        Must be awaited so the IPC roundtrip completes before the screen
+        is dismissed.
+        """
+        bridge = self._ipc_bridge
+        if bridge is not None:
+            # IPC mode: push to daemon (persists core-config + re-announces)
+            await bridge.set_identity(
+                display_name=display_name,
+                icon=icon,
+                short_name=short_name if short_name else "",
+            )
+        else:
+            # Local mode: update core config directly
+            try:
+                from styrened.services.config import load_core_config, save_core_config
+
+                core_cfg = load_core_config()
+                if display_name:
+                    core_cfg.identity.display_name = display_name
+                if icon:
+                    core_cfg.identity.icon = icon
+                core_cfg.identity.short_name = (
+                    short_name if short_name else None
+                )
+                save_core_config(core_cfg)
+            except Exception as e:
+                self._show_error(f"Failed to save identity: {e}")
+
     def _get_hub_key_from_address(self, address: str | None) -> str:
         """Determine which hub key matches the given address.
 
@@ -78,6 +124,46 @@ class SettingsScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         """Compose the settings screen layout."""
         with VerticalScroll(id="settings-container"):
+            # Operator Identity
+            yield HighlightedPanel(
+                Horizontal(
+                    Label("Display Name:", classes="setting-label"),
+                    Input(
+                        value=self.config.identity.display_name,
+                        placeholder="Anonymous Styrene",
+                        id="identity_display_name",
+                        classes="setting-input",
+                    ),
+                    classes="setting-row",
+                ),
+                Horizontal(
+                    Label("Icon:", classes="setting-label"),
+                    Input(
+                        value=self.config.identity.icon,
+                        placeholder="🔗",
+                        id="identity_icon",
+                        classes="setting-input",
+                    ),
+                    classes="setting-row",
+                ),
+                Horizontal(
+                    Label("Short Name:", classes="setting-label"),
+                    Input(
+                        value=self.config.identity.short_name or "",
+                        placeholder="alice (3-20 chars, lowercase)",
+                        id="identity_short_name",
+                        classes="setting-input",
+                    ),
+                    classes="setting-row",
+                ),
+                Static(
+                    "[dim]Controls how this node appears in mesh announces. "
+                    "Other LXMF clients (Sideband, NomadNet) will see these values.[/dim]",
+                    classes="setting-description",
+                ),
+                title="OPERATOR IDENTITY",
+            )
+
             # TUI Settings
             yield HighlightedPanel(
                 Horizontal(
@@ -311,7 +397,7 @@ class SettingsScreen(Screen[None]):
 
     def action_save(self) -> None:
         """Save configuration."""
-        self._save_settings()
+        self.run_worker(self._save_settings())
 
     def action_cancel(self) -> None:
         """Cancel and return to previous screen."""
@@ -344,7 +430,7 @@ class SettingsScreen(Screen[None]):
     @on(Button.Pressed, "#save-btn")
     def on_save_button(self) -> None:
         """Handle save button press."""
-        self._save_settings()
+        self.run_worker(self._save_settings())
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel_button(self) -> None:
@@ -376,9 +462,36 @@ class SettingsScreen(Screen[None]):
             self._show_error(f"Failed to clear node history: {e}")
             self.app.log.error(f"Error clearing node history: {e}")
 
-    def _save_settings(self) -> None:
+    async def _save_settings(self) -> None:
         """Read form values, validate, and save configuration."""
         try:
+            # Read Operator Identity settings
+            identity_display_name = self.query_one(
+                "#identity_display_name", Input
+            ).value.strip()
+            identity_icon = self.query_one("#identity_icon", Input).value.strip()
+            identity_short_name = self.query_one(
+                "#identity_short_name", Input
+            ).value.strip()
+
+            if identity_display_name and len(identity_display_name) > 100:
+                self._show_error("Display name exceeds 100 characters")
+                return
+
+            if identity_short_name and not validate_short_name(identity_short_name):
+                self._show_error(
+                    "Invalid short name: 3-20 chars, lowercase alphanumeric + hyphens"
+                )
+                return
+
+            # Persist identity via IPC (daemon mode) or core config (local mode).
+            # Identity lives in core-config.yaml, not the TUI config, so
+            # save_config() alone won't persist it.  Must be awaited so the
+            # IPC roundtrip completes before the screen dismisses.
+            await self._save_identity(
+                identity_display_name, identity_icon, identity_short_name
+            )
+
             # Read TUI settings
             log_level_select = self.query_one("#log_level", Select)
             show_hardware = self.query_one("#show_hardware_panel", Checkbox)
@@ -494,9 +607,12 @@ class SettingsScreen(Screen[None]):
                     # If connection failed, start waiting timer
                     hub_connection.start_waiting()
 
-            # Show success and dismiss
+            # Show success and dismiss.  dismiss() returns an AwaitComplete
+            # that raises ScreenError when awaited from the screen's own
+            # message pump.  Scheduling via app.call_later ensures the
+            # active_message_pump is the App, not this Screen.
             self._show_success("Configuration saved successfully")
-            self.app.call_later(self.dismiss, 1.0)
+            self.app.call_later(self.dismiss)
 
         except ConfigValidationError as e:
             error_msgs = [str(err) for err in e.errors]
