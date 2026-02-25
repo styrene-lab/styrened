@@ -215,6 +215,9 @@ class RPCServer:
         # Replay protection - track recent request_ids with timestamps
         self._recent_request_ids: dict[bytes, float] = {}
 
+        # Optional daemon reference for activity event emission
+        self._daemon: Any = None
+
         # Log security configuration
         if not self._authorized_identities:
             logger.warning(
@@ -420,6 +423,13 @@ class RPCServer:
         # Dispatch to handler (handlers use asyncio.create_task internally)
         try:
             handler(source_hash, envelope)
+            # Emit activity event for RPC commands
+            if self._daemon is not None and hasattr(self._daemon, "_emit_activity_event"):
+                self._daemon._emit_activity_event(
+                    "rpc_received",
+                    peer_hash=source_hash,
+                    metadata={"command": msg_type.name},
+                )
         except Exception as e:
             logger.error(f"Error handling RPC request: {e}")
             # Send error response if we have a request_id
