@@ -1115,8 +1115,7 @@ class TestInlineTimestamps:
 
         cascade = get_color_cascade()
         bubble = widget._create_bubble(msg, cascade)
-        # After rename from content to raw_content, Static.content holds rendered markup
-        markup = str(bubble.content)
+        markup = bubble._text
         assert "14:32" in markup
 
     def test_incoming_message_has_timestamp(self):
@@ -1139,7 +1138,7 @@ class TestInlineTimestamps:
 
         cascade = get_color_cascade()
         bubble = widget._create_bubble(msg, cascade)
-        markup = str(bubble.content)
+        markup = bubble._text
         assert "09:05" in markup
 
 

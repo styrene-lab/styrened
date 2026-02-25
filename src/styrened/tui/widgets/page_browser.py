@@ -8,7 +8,7 @@ Features:
 - Scrollable content area with rendered micron markup
 - Back navigation with history stack
 - Reload current page
-- Link click navigation (same-node)
+- Link click navigation (same-node page links)
 - Status bar with transfer time and content size
 """
 
@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
@@ -26,6 +27,27 @@ from styrened.tui.widgets.micron_parser import parse_micron, render_to_rich
 from styrened.tui.widgets.page_renderers import render_structured_page
 
 logger = logging.getLogger(__name__)
+
+
+class _LinkClicked(Message):
+    """Posted when a micron link is clicked in the page body."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        super().__init__()
+
+
+class _PageBody(Static):
+    """Static widget with micron link click handling.
+
+    Renders Rich markup from the micron parser.  When the user clicks a
+    ``[@click="navigate_link(...)"]`` span, the action dispatches here
+    and we bubble a ``_LinkClicked`` message up to ``PageBrowserWidget``.
+    """
+
+    def action_navigate_link(self, url: str) -> None:
+        """Handle @click action from micron link markup."""
+        self.post_message(_LinkClicked(url))
 
 
 class PageBrowserWidget(Widget):
@@ -88,7 +110,7 @@ class PageBrowserWidget(Widget):
                 id="page-url-bar",
             )
             with VerticalScroll(id="page-content"):
-                yield Static("Loading...", id="page-body", classes="placeholder-text")
+                yield _PageBody("Loading...", id="page-body", classes="placeholder-text")
             yield Static("", id="page-status")
 
     def on_mount(self) -> None:
@@ -146,7 +168,7 @@ class PageBrowserWidget(Widget):
 
                 # Update display
                 try:
-                    body = self.query_one("#page-body", Static)
+                    body = self.query_one("#page-body", _PageBody)
                     body.update(rendered)
                     body.remove_class("placeholder-text")
                 except Exception:
@@ -207,7 +229,7 @@ class PageBrowserWidget(Widget):
     def _set_error(self, message: str) -> None:
         """Display an error in the content area."""
         try:
-            body = self.query_one("#page-body", Static)
+            body = self.query_one("#page-body", _PageBody)
             body.update(f"[bold red]{message}[/bold red]")
             body.add_class("placeholder-text")
         except Exception:
@@ -229,6 +251,31 @@ class PageBrowserWidget(Widget):
     def action_focus_url(self) -> None:
         """Focus URL bar for manual navigation (placeholder)."""
         self.notify("Manual URL entry coming soon", severity="information")
+
+    def on__link_clicked(self, message: _LinkClicked) -> None:
+        """Handle link click from page body.
+
+        NomadNet link URL formats:
+        - ``/page/path``              — same-node absolute path
+        - ``path.mu``                 — same-node relative path
+        - ``:/page/path``             — same-node absolute (colon = self)
+        - ``:path.mu``                — same-node relative (colon = self)
+        - ``dest_hash:/page/path``    — cross-node reference
+        """
+        url = message.url.strip()
+        if not url:
+            return
+        if url.startswith(":"):
+            # Same-node link (NomadNet convention: leading colon = self)
+            path = url[1:]
+            if path:
+                self.navigate(path)
+            return
+        if ":" in url and not url.startswith("/"):
+            # Cross-node reference (dest_hash:/page/path) — not yet supported
+            self.notify("Cross-node links not yet supported", severity="warning")
+            return
+        self.navigate(url)
 
     def set_destination(self, destination_hash: str) -> None:
         """Change target node and reload index page.

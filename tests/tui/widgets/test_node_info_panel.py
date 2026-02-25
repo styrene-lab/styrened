@@ -162,6 +162,111 @@ class TestRNSLabels:
             assert "Port Conflict" in rendered
 
 
+class TestIdentitySection:
+    """Test IDENTITY section rendering in NodeInfoPanel."""
+
+    def test_render_identity_section_with_name_and_icon(self) -> None:
+        """Identity section renders display name, icon, alias, and hash."""
+        with patch(
+            "styrened.tui.widgets.node_info_panel.get_system_info",
+            side_effect=Exception("skip"),
+        ):
+            panel = NodeInfoPanel()
+            panel.hardware_error = "skip"
+            panel.identity_display_name = "Alice"
+            panel.identity_icon = "🖥️"
+            panel.identity_short_name = "alice"
+            panel.identity_hash = "abc123def456abc123def456abc12345"
+            rendered = panel.render()
+
+            assert "IDENTITY" in rendered
+            assert "Alice" in rendered
+            assert "🖥️" in rendered
+            assert "alice" in rendered
+            assert "abc123def456abc1" in rendered  # First 16 chars
+
+    def test_render_identity_section_without_short_name(self) -> None:
+        """Identity section shows 'not set' when short_name is None."""
+        with patch(
+            "styrened.tui.widgets.node_info_panel.get_system_info",
+            side_effect=Exception("skip"),
+        ):
+            panel = NodeInfoPanel()
+            panel.hardware_error = "skip"
+            panel.identity_display_name = "Bob"
+            panel.identity_icon = "📱"
+            panel.identity_short_name = None
+            rendered = panel.render()
+
+            assert "IDENTITY" in rendered
+            assert "not set" in rendered
+
+    def test_render_no_identity_when_empty(self) -> None:
+        """No IDENTITY section when display_name and icon are empty."""
+        with patch(
+            "styrened.tui.widgets.node_info_panel.get_system_info",
+            side_effect=Exception("skip"),
+        ):
+            panel = NodeInfoPanel()
+            panel.hardware_error = "skip"
+            panel.identity_display_name = ""
+            panel.identity_icon = ""
+            rendered = panel.render()
+
+            assert "IDENTITY" not in rendered
+
+
+class TestSecurityTierDisplay:
+    """Test SEC display in IDENTITY section."""
+
+    def test_security_tier_pqc_displayed(self) -> None:
+        """Non-empty security_tier containing 'PQC' renders in IDENTITY section."""
+        with patch(
+            "styrened.tui.widgets.node_info_panel.get_system_info",
+            side_effect=Exception("skip"),
+        ):
+            panel = NodeInfoPanel()
+            panel.hardware_error = "skip"
+            panel.identity_display_name = "Alice"
+            panel.identity_icon = ""
+            panel.security_tier = "PQC_HYBRID"
+            rendered = panel.render()
+
+            assert "SEC:" in rendered
+            assert "PQC_HYBRID" in rendered
+
+    def test_security_tier_rns_displayed(self) -> None:
+        """security_tier without 'PQC' renders with medium color."""
+        with patch(
+            "styrened.tui.widgets.node_info_panel.get_system_info",
+            side_effect=Exception("skip"),
+        ):
+            panel = NodeInfoPanel()
+            panel.hardware_error = "skip"
+            panel.identity_display_name = "Bob"
+            panel.identity_icon = ""
+            panel.security_tier = "RNS_ONLY"
+            rendered = panel.render()
+
+            assert "SEC:" in rendered
+            assert "RNS_ONLY" in rendered
+
+    def test_security_tier_empty_hidden(self) -> None:
+        """Empty security_tier renders no SEC line."""
+        with patch(
+            "styrened.tui.widgets.node_info_panel.get_system_info",
+            side_effect=Exception("skip"),
+        ):
+            panel = NodeInfoPanel()
+            panel.hardware_error = "skip"
+            panel.identity_display_name = "Carol"
+            panel.identity_icon = ""
+            panel.security_tier = ""
+            rendered = panel.render()
+
+            assert "SEC:" not in rendered
+
+
 class TestIPCManagedGating:
     """Test that ipc_managed flag gates local queries."""
 
