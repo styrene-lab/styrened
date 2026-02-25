@@ -193,6 +193,12 @@ Examples:
             filemode="w",
         )
 
+        # Probe terminal image capabilities before Textual takes over
+        try:
+            import textual_image.renderable  # noqa: F401
+        except ImportError:
+            pass
+
         from styrened.tui.app import StyreneApp
 
         # Create TUI app with CLI overrides

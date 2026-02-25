@@ -38,6 +38,12 @@ from styrened.tui.themes.styrene_brand import (
 )
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
 
+try:
+    import textual_image.renderable  # noqa: F401
+    HAS_TEXTUAL_IMAGE = True
+except ImportError:
+    HAS_TEXTUAL_IMAGE = False
+
 
 class StyreneApp(App[None]):
     """Styrene fleet provisioning and management TUI.
