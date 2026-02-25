@@ -228,7 +228,59 @@ class TestValidateCoreConfig:
             validate_core_config(config, raise_on_error=True)
         assert len(exc_info.value.errors) >= 1
 
+    # --- API Auth ---
+
+    def test_auth_session_ttl_too_low(self) -> None:
+        """Session TTL below 60 seconds is rejected."""
+        config = CoreConfig()
+        config.api.auth.session_ttl = 30
+        errors = validate_core_config(config)
+        field_names = [e.field for e in errors]
+        assert "api.auth.session_ttl" in field_names
+
+    def test_auth_session_ttl_valid(self) -> None:
+        """Session TTL of 60 seconds passes."""
+        config = CoreConfig()
+        config.api.auth.session_ttl = 60
+        errors = validate_core_config(config)
+        assert not any(e.field == "api.auth.session_ttl" for e in errors)
+
+    def test_auth_invalid_authorized_identity(self) -> None:
+        """Auth authorized identities must be 32-char hex hashes."""
+        config = CoreConfig()
+        config.api.auth.authorized_identities = {"short"}
+        errors = validate_core_config(config)
+        field_names = [e.field for e in errors]
+        assert "api.auth.authorized_identities" in field_names
+
+    def test_auth_valid_authorized_identity(self) -> None:
+        """Valid 32-char hex hash passes."""
+        config = CoreConfig()
+        config.api.auth.authorized_identities = {"a" * 32}
+        errors = validate_core_config(config)
+        assert not any(e.field == "api.auth.authorized_identities" for e in errors)
+
     def test_raise_on_error_no_error_succeeds(self) -> None:
         """raise_on_error=True with valid config does not raise."""
         errors = validate_core_config(CoreConfig(), raise_on_error=True)
         assert errors == []
+
+
+class TestPQCConfigValidation:
+    """Tests for PQC configuration validation."""
+
+    def test_pqc_rekey_interval_valid(self) -> None:
+        """Valid rekey_interval_hours passes validation."""
+        config = CoreConfig()
+        config.pqc.rekey_interval_hours = 12
+        errors = validate_core_config(config)
+        pqc_errors = [e for e in errors if "pqc." in e.field]
+        assert len(pqc_errors) == 0
+
+    def test_pqc_rekey_interval_zero_fails(self) -> None:
+        """rekey_interval_hours < 1 fails validation."""
+        config = CoreConfig()
+        config.pqc.rekey_interval_hours = 0
+        errors = validate_core_config(config)
+        pqc_errors = [e for e in errors if e.field == "pqc.rekey_interval_hours"]
+        assert len(pqc_errors) == 1
