@@ -9,6 +9,7 @@ from styrened.ipc.messages import (
     CmdSetContactRequest,
     QueryContactsRequest,
     QueryResolveNameRequest,
+    SubActivityRequest,
     SubDevicesRequest,
     SubMessagesRequest,
     UnsubRequest,
@@ -342,3 +343,102 @@ class TestClientEventDispatch:
         # Check callback was invoked
         assert len(received) == 1
         assert received[0]["peer_hash"] == "abcd"
+
+
+class TestActivityEventProtocol:
+    """Tests for SUB_ACTIVITY and EVENT_ACTIVITY protocol additions."""
+
+    def test_sub_activity_exists(self):
+        """SUB_ACTIVITY enum value is 0x32."""
+        assert IPCMessageType.SUB_ACTIVITY == 0x32
+
+    def test_event_activity_exists(self):
+        """EVENT_ACTIVITY enum value is 0xC6."""
+        assert IPCMessageType.EVENT_ACTIVITY == 0xC6
+
+    def test_event_activity_is_event_type(self):
+        """is_event_type() returns True for EVENT_ACTIVITY."""
+        assert is_event_type(IPCMessageType.EVENT_ACTIVITY) is True
+
+    def test_sub_activity_is_not_event_type(self):
+        """SUB_ACTIVITY is a request, not an event."""
+        assert is_event_type(IPCMessageType.SUB_ACTIVITY) is False
+
+    def test_create_sub_activity_request(self):
+        """create_request handles SUB_ACTIVITY."""
+        req = create_request(IPCMessageType.SUB_ACTIVITY, {})
+        assert isinstance(req, SubActivityRequest)
+
+    def test_sub_activity_request_wire_format(self):
+        """SubActivityRequest serializes with correct MSG_TYPE."""
+        req = SubActivityRequest()
+        msg_type, payload = req.to_wire()
+        assert msg_type == IPCMessageType.SUB_ACTIVITY
+        assert payload == {}
+
+
+class TestActivityBroadcastFiltering:
+    """Tests for EVENT_ACTIVITY subscription broadcast routing."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_activity_to_subscribed_client(self):
+        """broadcast_event sends EVENT_ACTIVITY to clients with 'activity' subscription."""
+        from styrened.ipc.server import ControlServer
+
+        server = ControlServer.__new__(ControlServer)
+        server._clients = set()
+
+        client = MagicMock(spec=ClientConnection)
+        client.closed = False
+        client.subscriptions = {"activity"}
+        client.message_peer_filter = set()
+        client.send_event = AsyncMock()
+        server._clients.add(client)
+
+        await server.broadcast_event(
+            IPCMessageType.EVENT_ACTIVITY,
+            {"event_type": "device_discovered", "peer_hash": "abcd"},
+        )
+        client.send_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_activity_skips_unsubscribed(self):
+        """broadcast_event skips clients without 'activity' subscription."""
+        from styrened.ipc.server import ControlServer
+
+        server = ControlServer.__new__(ControlServer)
+        server._clients = set()
+
+        client = MagicMock(spec=ClientConnection)
+        client.closed = False
+        client.subscriptions = {"messages"}  # Only subscribed to messages
+        client.message_peer_filter = set()
+        client.send_event = AsyncMock()
+        server._clients.add(client)
+
+        await server.broadcast_event(
+            IPCMessageType.EVENT_ACTIVITY,
+            {"event_type": "device_discovered", "peer_hash": "abcd"},
+        )
+        client.send_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_message_subscription_unchanged(self):
+        """Regression: EVENT_MESSAGE still routes to 'messages' subscribers."""
+        from styrened.ipc.server import ControlServer
+
+        server = ControlServer.__new__(ControlServer)
+        server._clients = set()
+
+        client = MagicMock(spec=ClientConnection)
+        client.closed = False
+        client.subscriptions = {"messages"}
+        client.message_peer_filter = set()
+        client.send_event = AsyncMock()
+        server._clients.add(client)
+
+        await server.broadcast_event(
+            IPCMessageType.EVENT_MESSAGE,
+            {"event_type": "new", "peer_hash": "abcd"},
+        )
+        client.send_event.assert_called_once()

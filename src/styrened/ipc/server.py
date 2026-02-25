@@ -257,11 +257,14 @@ class ControlServer:
             IPCMessageType.QUERY_PATH_INFO: self._handlers.handle_query_path_info,
             IPCMessageType.QUERY_PAGE: self._handlers.handle_query_page,
             IPCMessageType.QUERY_PAGE_SERVER_STATUS: self._handlers.handle_query_page_server_status,
+            IPCMessageType.QUERY_ATTACHMENT: self._handlers.handle_query_attachment,
             IPCMessageType.CMD_PAGE_DISCONNECT: self._handlers.handle_cmd_page_disconnect,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
             IPCMessageType.CMD_SELF_UPDATE: self._handlers.handle_cmd_self_update,
+            IPCMessageType.CMD_SET_IDENTITY: self._handlers.handle_cmd_set_identity,
             IPCMessageType.CMD_REMOTE_INBOX: self._handlers.handle_cmd_remote_inbox,
             IPCMessageType.CMD_REMOTE_MESSAGES: self._handlers.handle_cmd_remote_messages,
+            IPCMessageType.CMD_PQC_STATUS: self._handlers.handle_cmd_pqc_status,
             # Terminal handlers (input/resize/close dispatched normally;
             # terminal_open is handled inline in _client_loop for client ref)
             IPCMessageType.CMD_TERMINAL_INPUT: self._handlers.handle_cmd_terminal_input,
@@ -328,6 +331,14 @@ class ControlServer:
 
             if msg_type == IPCMessageType.SUB_DEVICES:
                 client.subscriptions.add("devices")
+                from styrened.ipc.messages import ResultResponse
+
+                response = ResultResponse(data={"subscribed": True})
+                await client.send_response(request_id, response)
+                continue
+
+            if msg_type == IPCMessageType.SUB_ACTIVITY:
+                client.subscriptions.add("activity")
                 from styrened.ipc.messages import ResultResponse
 
                 response = ResultResponse(data={"subscribed": True})
@@ -413,6 +424,8 @@ class ControlServer:
             sub_key = "messages"
         elif event_type == IPCMessageType.EVENT_DEVICE:
             sub_key = "devices"
+        elif event_type == IPCMessageType.EVENT_ACTIVITY:
+            sub_key = "activity"
         else:
             sub_key = ""
 

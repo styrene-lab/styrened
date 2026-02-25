@@ -269,6 +269,9 @@ class CmdSendChatRequest(IPCRequest):
     title: str | None = None
     delivery_method: str = "auto"  # "auto", "direct", or "propagated"
     reply_to_hash: str | None = None  # LXMF hash of message being replied to
+    attachment_data_b64: str | None = None  # Base64-encoded attachment data
+    attachment_filename: str | None = None  # Original filename
+    attachment_mime: str | None = None  # MIME type
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -280,6 +283,12 @@ class CmdSendChatRequest(IPCRequest):
             payload["title"] = self.title
         if self.reply_to_hash is not None:
             payload["reply_to_hash"] = self.reply_to_hash
+        if self.attachment_data_b64 is not None:
+            payload["attachment_data_b64"] = self.attachment_data_b64
+            if self.attachment_filename is not None:
+                payload["attachment_filename"] = self.attachment_filename
+            if self.attachment_mime is not None:
+                payload["attachment_mime"] = self.attachment_mime
         return payload
 
 
@@ -452,6 +461,17 @@ class QueryPageServerStatusRequest(IPCRequest):
 
 
 @dataclass
+class QueryAttachmentRequest(IPCRequest):
+    """Request attachment data for a message."""
+
+    MSG_TYPE = IPCMessageType.QUERY_ATTACHMENT
+    message_id: int = 0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"message_id": self.message_id}
+
+
+@dataclass
 class CmdPageDisconnectRequest(IPCRequest):
     """Disconnect link to a NomadNet node."""
 
@@ -494,6 +514,36 @@ class CmdSelfUpdateRequest(IPCRequest):
             "version": self.version,
             "timeout": self.timeout,
         }
+
+
+@dataclass
+class CmdSetIdentityRequest(IPCRequest):
+    """Set operator identity appearance fields."""
+
+    MSG_TYPE = IPCMessageType.CMD_SET_IDENTITY
+    display_name: str = ""
+    icon: str = ""
+    short_name: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "display_name": self.display_name,
+            "icon": self.icon,
+        }
+        if self.short_name is not None:
+            payload["short_name"] = self.short_name
+        return payload
+
+
+@dataclass
+class PQCStatusRequest(IPCRequest):
+    """Query PQC session status for a peer."""
+
+    MSG_TYPE = IPCMessageType.CMD_PQC_STATUS
+    peer_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"peer_hash": self.peer_hash}
 
 
 @dataclass
@@ -627,6 +677,13 @@ class SubDevicesRequest(IPCRequest):
     """Subscribe to device events."""
 
     MSG_TYPE = IPCMessageType.SUB_DEVICES
+
+
+@dataclass
+class SubActivityRequest(IPCRequest):
+    """Subscribe to unified activity events."""
+
+    MSG_TYPE = IPCMessageType.SUB_ACTIVITY
 
 
 @dataclass
@@ -823,12 +880,18 @@ class IdentityInfo:
     identity_hash: str
     destination_hash: str
     lxmf_destination_hash: str
+    display_name: str = ""
+    icon: str = ""
+    short_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "identity_hash": self.identity_hash,
             "destination_hash": self.destination_hash,
             "lxmf_destination_hash": self.lxmf_destination_hash,
+            "display_name": self.display_name,
+            "icon": self.icon,
+            "short_name": self.short_name,
         }
 
     @classmethod
@@ -837,6 +900,9 @@ class IdentityInfo:
             identity_hash=data.get("identity_hash", ""),
             destination_hash=data.get("destination_hash", ""),
             lxmf_destination_hash=data.get("lxmf_destination_hash", ""),
+            display_name=data.get("display_name", ""),
+            icon=data.get("icon", ""),
+            short_name=data.get("short_name"),
         )
 
 
@@ -1119,6 +1185,10 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             destination=payload.get("destination", ""),
             timeout=payload.get("timeout", 30.0),
         )
+    elif msg_type == IPCMessageType.QUERY_ATTACHMENT:
+        return QueryAttachmentRequest(
+            message_id=payload.get("message_id", 0),
+        )
     elif msg_type == IPCMessageType.CMD_SEND_CHAT:
         # Coerce values to correct types (handle null from msgpack)
         peer_hash = payload.get("peer_hash")
@@ -1129,6 +1199,9 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             title=payload.get("title"),
             delivery_method=payload.get("delivery_method", "auto"),
             reply_to_hash=payload.get("reply_to_hash"),
+            attachment_data_b64=payload.get("attachment_data_b64"),
+            attachment_filename=payload.get("attachment_filename"),
+            attachment_mime=payload.get("attachment_mime"),
         )
     elif msg_type == IPCMessageType.CMD_MARK_READ:
         return CmdMarkReadRequest(peer_hash=payload.get("peer_hash", ""))
@@ -1192,6 +1265,12 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             version=payload.get("version"),
             timeout=payload.get("timeout", 120.0),
         )
+    elif msg_type == IPCMessageType.CMD_SET_IDENTITY:
+        return CmdSetIdentityRequest(
+            display_name=payload.get("display_name", ""),
+            icon=payload.get("icon", ""),
+            short_name=payload.get("short_name"),
+        )
     elif msg_type == IPCMessageType.CMD_REMOTE_INBOX:
         return CmdRemoteInboxRequest(
             destination=payload.get("destination", ""),
@@ -1204,6 +1283,10 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
             peer_hash=payload.get("peer_hash", ""),
             limit=payload.get("limit", 50),
             timeout=payload.get("timeout", 30.0),
+        )
+    elif msg_type == IPCMessageType.CMD_PQC_STATUS:
+        return PQCStatusRequest(
+            peer_hash=payload.get("peer_hash", ""),
         )
     elif msg_type == IPCMessageType.CMD_TERMINAL_OPEN:
         return CmdTerminalOpenRequest(
@@ -1232,6 +1315,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))
     elif msg_type == IPCMessageType.SUB_DEVICES:
         return SubDevicesRequest()
+    elif msg_type == IPCMessageType.SUB_ACTIVITY:
+        return SubActivityRequest()
     elif msg_type == IPCMessageType.UNSUB:
         return UnsubRequest(subscription_type=payload.get("subscription_type", ""))
     else:

@@ -115,6 +115,26 @@ class TestCommandRequests:
         assert payload["destination"] == "ghi789"
         assert payload["timeout"] == 20.0
 
+    def test_pqc_status_request(self):
+        """PQCStatusRequest should serialize correctly."""
+        from styrened.ipc.messages import PQCStatusRequest
+
+        req = PQCStatusRequest(peer_hash="abc123def456")
+        msg_type, payload = req.to_wire()
+
+        assert msg_type == IPCMessageType.CMD_PQC_STATUS
+        assert payload == {"peer_hash": "abc123def456"}
+
+    def test_pqc_status_request_default(self):
+        """PQCStatusRequest should have empty peer_hash by default."""
+        from styrened.ipc.messages import PQCStatusRequest
+
+        req = PQCStatusRequest()
+        msg_type, payload = req.to_wire()
+
+        assert msg_type == IPCMessageType.CMD_PQC_STATUS
+        assert payload == {"peer_hash": ""}
+
 
 class TestResponses:
     """Tests for response dataclasses."""
@@ -221,6 +241,67 @@ class TestInfoDataclasses:
         assert restored.identity_hash == "abc123"
         assert restored.destination_hash == "def456"
         assert restored.lxmf_destination_hash == "ghi789"
+
+    def test_identity_info_round_trip_with_appearance_fields(self):
+        """IdentityInfo should round-trip display_name, icon, short_name."""
+        info = IdentityInfo(
+            identity_hash="abc123",
+            destination_hash="def456",
+            lxmf_destination_hash="ghi789",
+            display_name="Alice",
+            icon="🖥️",
+            short_name="alice",
+        )
+
+        data = info.to_dict()
+        assert data["display_name"] == "Alice"
+        assert data["icon"] == "🖥️"
+        assert data["short_name"] == "alice"
+
+        restored = IdentityInfo.from_dict(data)
+        assert restored.display_name == "Alice"
+        assert restored.icon == "🖥️"
+        assert restored.short_name == "alice"
+
+    def test_identity_info_backward_compat(self):
+        """IdentityInfo.from_dict should handle dicts without appearance fields."""
+        data = {
+            "identity_hash": "abc123",
+            "destination_hash": "def456",
+            "lxmf_destination_hash": "ghi789",
+        }
+        restored = IdentityInfo.from_dict(data)
+        assert restored.display_name == ""
+        assert restored.icon == ""
+        assert restored.short_name is None
+
+    def test_cmd_set_identity_request_serialization(self):
+        """CmdSetIdentityRequest should serialize correctly."""
+        from styrened.ipc.messages import CmdSetIdentityRequest
+
+        req = CmdSetIdentityRequest(
+            display_name="Bob",
+            icon="📱",
+            short_name="bob",
+        )
+        msg_type, payload = req.to_wire()
+
+        assert msg_type == IPCMessageType.CMD_SET_IDENTITY
+        assert payload["display_name"] == "Bob"
+        assert payload["icon"] == "📱"
+        assert payload["short_name"] == "bob"
+
+    def test_cmd_set_identity_request_omits_none_short_name(self):
+        """CmdSetIdentityRequest should omit short_name when None."""
+        from styrened.ipc.messages import CmdSetIdentityRequest
+
+        req = CmdSetIdentityRequest(
+            display_name="Bob",
+            icon="📱",
+            short_name=None,
+        )
+        _, payload = req.to_wire()
+        assert "short_name" not in payload
 
     def test_daemon_status_round_trip(self):
         """DaemonStatus should serialize and deserialize correctly."""
@@ -402,6 +483,48 @@ class TestCreateRequest:
         assert req.destination == "abc"
         assert req.delay == 5
         assert req.timeout == 15.0
+
+    def test_create_cmd_set_identity(self):
+        """Should create CmdSetIdentityRequest."""
+        from styrened.ipc.messages import CmdSetIdentityRequest
+
+        req = create_request(
+            IPCMessageType.CMD_SET_IDENTITY,
+            {"display_name": "Alice", "icon": "🖥️", "short_name": "alice"},
+        )
+        assert isinstance(req, CmdSetIdentityRequest)
+        assert req.display_name == "Alice"
+        assert req.icon == "🖥️"
+        assert req.short_name == "alice"
+
+    def test_create_cmd_set_identity_defaults(self):
+        """Should create CmdSetIdentityRequest with defaults for missing fields."""
+        from styrened.ipc.messages import CmdSetIdentityRequest
+
+        req = create_request(IPCMessageType.CMD_SET_IDENTITY, {})
+        assert isinstance(req, CmdSetIdentityRequest)
+        assert req.display_name == ""
+        assert req.icon == ""
+        assert req.short_name is None
+
+    def test_create_cmd_pqc_status(self):
+        """Should create PQCStatusRequest with peer_hash from payload."""
+        from styrened.ipc.messages import PQCStatusRequest
+
+        req = create_request(
+            IPCMessageType.CMD_PQC_STATUS,
+            {"peer_hash": "abcd1234" * 4},
+        )
+        assert isinstance(req, PQCStatusRequest)
+        assert req.peer_hash == "abcd1234" * 4
+
+    def test_create_cmd_pqc_status_defaults(self):
+        """Should create PQCStatusRequest with default empty peer_hash."""
+        from styrened.ipc.messages import PQCStatusRequest
+
+        req = create_request(IPCMessageType.CMD_PQC_STATUS, {})
+        assert isinstance(req, PQCStatusRequest)
+        assert req.peer_hash == ""
 
     def test_unknown_type_raises(self):
         """Should raise ValueError for unknown types."""
