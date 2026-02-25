@@ -510,6 +510,23 @@ def validate_config(config: StyreneConfig) -> list[ConfigFieldError]:
 # -----------------------------------------------------------------------------
 
 
+def _overlay_core_identity(config: StyreneConfig) -> None:
+    """Overlay identity fields from the daemon's core config.
+
+    Identity is persisted in core config.yaml (via ``_save_identity`` in
+    the settings screen or the daemon's IPC handler), not in tui.yaml.
+    After loading the TUI config we read core config.yaml and copy the
+    identity section so that the settings screen shows the real values.
+    """
+    try:
+        from styrened.services.config import load_core_config
+
+        core = load_core_config()
+        config.core.identity = core.identity
+    except Exception:
+        pass  # Core config missing or unparseable — keep defaults
+
+
 def load_config() -> StyreneConfig:
     """Load configuration from file, creating defaults if needed.
 
@@ -526,7 +543,9 @@ def load_config() -> StyreneConfig:
     config_path = get_config_path()
 
     if not config_path.exists():
-        return get_default_config()
+        config = get_default_config()
+        _overlay_core_identity(config)
+        return config
 
     try:
         with open(config_path) as f:
@@ -541,6 +560,9 @@ def load_config() -> StyreneConfig:
     # Migrate if needed
     if config.advanced.config_version < CURRENT_CONFIG_VERSION:
         config = _migrate_config(config)
+
+    # Overlay identity from core config (persisted separately)
+    _overlay_core_identity(config)
 
     # Validate
     errors = validate_config(config)

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from styrened.tui.models.config import DeploymentMode, PeerConfig
 from styrened.tui.services.config import (
@@ -159,6 +160,61 @@ def test_config_defaults() -> None:
     assert config.api.port == 8000
 
     assert config.advanced.headless is False
+
+
+def test_identity_loaded_from_core_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Identity saved to core config.yaml must be visible when TUI reloads."""
+    config_dir = tmp_path / ".styrene"
+    config_dir.mkdir()
+    monkeypatch.setattr("styrened.paths.config_dir", lambda: config_dir)
+
+    # Write a core config.yaml with identity fields (as _save_identity does)
+    core_config_path = config_dir / "config.yaml"
+    core_config_path.write_text(yaml.dump({
+        "identity": {
+            "display_name": "Alice Mesh",
+            "icon": "🛰️",
+            "short_name": "alice",
+        },
+    }))
+
+    # Save a minimal TUI config so load_config() doesn't fall back to defaults
+    tui_config_path = config_dir / "tui.yaml"
+    tui_config_path.write_text(yaml.dump({
+        "tui": {"log_level": "INFO"},
+    }))
+
+    # Load TUI config — identity must come from core config.yaml
+    config = load_config()
+    assert config.identity.display_name == "Alice Mesh"
+    assert config.identity.icon == "🛰️"
+    assert config.identity.short_name == "alice"
+
+
+def test_identity_roundtrip_through_core_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Identity set via _save_identity (local mode) survives TUI restart."""
+    config_dir = tmp_path / ".styrene"
+    config_dir.mkdir()
+    monkeypatch.setattr("styrened.paths.config_dir", lambda: config_dir)
+
+    # Simulate what _save_identity does in local mode
+    from styrened.services.config import load_core_config, save_core_config
+
+    core_cfg = load_core_config()
+    core_cfg.identity.display_name = "Bob Node"
+    core_cfg.identity.icon = "📡"
+    core_cfg.identity.short_name = "bob"
+    save_core_config(core_cfg)
+
+    # Also save a TUI config
+    config = get_default_config()
+    save_config(config)
+
+    # Reload TUI config — identity must reflect core config values
+    loaded = load_config()
+    assert loaded.identity.display_name == "Bob Node"
+    assert loaded.identity.icon == "📡"
+    assert loaded.identity.short_name == "bob"
 
 
 def test_auto_enable_server_in_hub_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -42,6 +42,7 @@ from styrened.tui.models.hardware import (
     NetworkInterfaceType,
     SystemInfo,
 )
+
 __all__ = [
     "AdvancedConfig",
     "Base",

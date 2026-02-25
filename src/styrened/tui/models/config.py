@@ -32,6 +32,7 @@ from styrened.models.config import (
     DeploymentMode,
     DiscoveryConfig,
     GatewayMode,
+    IdentityConfig,
     InterfaceConfig,
     LogLevel,
     PeerConfig,
@@ -54,6 +55,7 @@ __all__ = [
     "DeploymentMode",
     "DiscoveryConfig",
     "GatewayMode",
+    "IdentityConfig",
     "InterfaceConfig",
     "LogLevel",
     "PeerConfig",
@@ -234,3 +236,8 @@ class StyreneConfig:
     def api(self) -> APIConfig:
         """Access API config (backward compatibility)."""
         return self.core.api
+
+    @property
+    def identity(self) -> IdentityConfig:
+        """Access identity config (backward compatibility)."""
+        return self.core.identity
