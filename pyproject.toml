@@ -51,10 +51,15 @@ metrics = [
 yubikey = [
     "python-fido2>=1.0",
 ]
+pqc = [
+    "liboqs-python>=0.10.0",
+]
 tui = [
     "textual>=0.47.0",
     "pyte>=0.8",
     "psutil>=5.9",
+    "textual-image>=0.8.0",
+    "Pillow>=10.0",
 ]
 dev = [
     "pytest>=8.0",
