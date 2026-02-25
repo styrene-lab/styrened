@@ -125,6 +125,11 @@ def messages_db() -> Path:
     return data_dir() / "messages.db"
 
 
+def attachments_dir() -> Path:
+    """Attachment storage directory."""
+    return data_dir() / "attachments"
+
+
 def lxmf_storage() -> Path:
     """LXMF router storage directory."""
     return data_dir() / "lxmf"

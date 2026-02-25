@@ -96,6 +96,7 @@ class MessageInfo:
     attachment_name: str | None = None
     attachment_size: int | None = None
     attachment_mime: str | None = None
+    attachment_path: str | None = None  # Filesystem path to stored attachment
     # Threading fields (LXMF FIELD_THREAD)
     thread_id: str | None = None
     reply_to_hash: str | None = None
@@ -127,6 +128,8 @@ class MessageInfo:
             result["attachment_name"] = self.attachment_name
             result["attachment_size"] = self.attachment_size
             result["attachment_mime"] = self.attachment_mime
+            if self.attachment_path:
+                result["attachment_path"] = self.attachment_path
         return result
 
     @classmethod
@@ -152,6 +155,7 @@ class MessageInfo:
             attachment_name=data.get("attachment_name"),
             attachment_size=data.get("attachment_size"),
             attachment_mime=data.get("attachment_mime"),
+            attachment_path=data.get("attachment_path"),
             thread_id=data.get("thread_id"),
             reply_to_hash=data.get("reply_to_hash"),
         )
@@ -201,6 +205,7 @@ class MessageInfo:
             attachment_name=msg.attachment_name,
             attachment_size=msg.attachment_size,
             attachment_mime=msg.attachment_mime,
+            attachment_path=msg.attachment_path,
             thread_id=msg.thread_id,
             reply_to_hash=msg.reply_to_hash,
         )
@@ -658,6 +663,7 @@ class ConversationService:
         attachment_name: str | None = None,
         attachment_size: int | None = None,
         attachment_mime: str | None = None,
+        attachment_path: str | None = None,
     ) -> int:
         """Save an incoming chat message.
 
@@ -680,6 +686,7 @@ class ConversationService:
             attachment_name: Filename for file attachments
             attachment_size: Size of attachment in bytes
             attachment_mime: MIME type of attachment
+            attachment_path: Filesystem path to stored attachment data
 
         Returns:
             Database ID of saved message
@@ -712,6 +719,7 @@ class ConversationService:
                 attachment_name=attachment_name,
                 attachment_size=attachment_size,
                 attachment_mime=attachment_mime,
+                attachment_path=attachment_path,
             )
             if fields:
                 msg.set_fields_dict(fields)
@@ -740,6 +748,12 @@ class ConversationService:
         delivery_attempts: int = 0,
         thread_id: str | None = None,
         reply_to_hash: str | None = None,
+        has_attachment: bool = False,
+        attachment_type: str | None = None,
+        attachment_name: str | None = None,
+        attachment_size: int | None = None,
+        attachment_mime: str | None = None,
+        attachment_path: str | None = None,
     ) -> int:
         """Save an outgoing chat message.
 
@@ -780,6 +794,12 @@ class ConversationService:
                 lxmf_hash=lxmf_hash_hex,
                 thread_id=thread_id,
                 reply_to_hash=reply_to_hash,
+                has_attachment=has_attachment,
+                attachment_type=attachment_type,
+                attachment_name=attachment_name,
+                attachment_size=attachment_size,
+                attachment_mime=attachment_mime,
+                attachment_path=attachment_path,
             )
             if fields:
                 msg.set_fields_dict(fields)
@@ -799,6 +819,28 @@ class ConversationService:
         logger.debug(f"Saved outgoing message to {destination_hash[:16]}..., id={msg_id}")
         log_conversation_event(direction="outgoing", source_hash=self._local_identity_hash, destination_hash=destination_hash, content_length=len(content), display_name=self._get_display_name(destination_hash), message_id=msg_id)
         return msg_id
+
+    def update_attachment_path(self, message_id: int, path: str) -> bool:
+        """Update the attachment_path of a message.
+
+        Called after rename_for_message to update the stored path.
+
+        Args:
+            message_id: Database ID of the message
+            path: New filesystem path
+
+        Returns:
+            True if message was found and updated
+        """
+        with Session(self._db_engine) as session:
+            msg = session.query(Message).filter(Message.id == message_id).first()
+            if msg is None:
+                return False
+
+            msg.attachment_path = path
+            session.commit()
+
+        return True
 
     def update_message_status(self, message_id: int, status: str) -> bool:
         """Update the delivery status of a message.
@@ -1036,6 +1078,8 @@ class ConversationService:
     def delete_conversation(self, peer_hash: str) -> int:
         """Delete all messages in a conversation.
 
+        Also deletes associated attachment files from the filesystem.
+
         Args:
             peer_hash: LXMF destination hash of the peer
 
@@ -1066,11 +1110,22 @@ class ConversationService:
         with self._lock:
             self._unread_counts.pop(peer_hash, None)
 
+        # Delete associated attachment files
+        try:
+            from styrened.services.attachment_store import get_attachment_store
+
+            store = get_attachment_store()
+            store.delete_for_peer(peer_hash)
+        except Exception as e:
+            logger.warning(f"Failed to clean up attachments for {peer_hash[:8]}: {e}")
+
         logger.info(f"Deleted {count} messages in conversation with {peer_hash[:16]}...")
         return count
 
     def delete_message(self, message_id: int) -> bool:
         """Delete a specific message.
+
+        Also deletes the associated attachment file if present.
 
         Args:
             message_id: Database ID of the message
@@ -1083,6 +1138,9 @@ class ConversationService:
             if msg is None:
                 return False
 
+            # Capture attachment path before deleting the row
+            att_path = msg.attachment_path
+
             # Update unread count if this was an unread received message
             if msg.status == MessageStatus.RECEIVED:
                 peer_hash = msg.source_hash
@@ -1094,6 +1152,16 @@ class ConversationService:
 
             session.delete(msg)
             session.commit()
+
+        # Delete associated attachment file
+        if att_path:
+            try:
+                from styrened.services.attachment_store import get_attachment_store
+
+                store = get_attachment_store()
+                store.delete(att_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete attachment for message {message_id}: {e}")
 
         logger.debug(f"Deleted message {message_id}")
         return True
