@@ -10,7 +10,7 @@ links, form fields, literal blocks, dividers, and page directives.
 Reference: NomadNet MicronParser.py
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
 
@@ -77,6 +77,8 @@ class MicronElement:
     directive_value: str = ""
     # Divider fill character
     divider_char: str = "\u2500"
+    # Compound children for inline-formatted headings
+    children: list["MicronElement"] | None = None
 
 
 def _expand_color(code: str) -> str | None:
@@ -121,6 +123,108 @@ def _expand_color(code: str) -> str | None:
             return None
 
     return None
+
+
+def _has_inline_codes(text: str) -> bool:
+    """Check whether text contains any backtick formatting codes."""
+    i = 0
+    while i < len(text):
+        if text[i] == "\\" and i + 1 < len(text):
+            i += 2
+            continue
+        if text[i] == "`" and i + 1 < len(text):
+            return True
+        i += 1
+    return False
+
+
+def _parse_line(
+    stripped: str, style: TextStyle, elements: list[MicronElement]
+) -> None:
+    """Parse a single stripped line into elements.
+
+    Handles section reset, headings, dividers, lone backtick reset,
+    and regular text. Extracted from parse_micron() to enable recursive
+    parsing of section reset remainder.
+
+    Args:
+        stripped: The stripped line content.
+        style: Current formatting state (modified in-place for regular text).
+        elements: Accumulator list to append parsed elements to.
+    """
+    # Section reset (<) — recurse on remainder
+    if stripped.startswith("<"):
+        remainder = stripped[1:]
+        if remainder:
+            _parse_line(remainder, style, elements)
+        return
+
+    # Headings (>, >>, >>>)
+    if stripped.startswith(">"):
+        level = 0
+        i = 0
+        while i < len(stripped) and stripped[i] == ">":
+            level += 1
+            i += 1
+        heading_text = stripped[i:].strip()
+
+        # Parse heading text through inline formatter with isolated style
+        children = None
+        if _has_inline_codes(heading_text):
+            heading_style = replace(style)
+            heading_style.bold = True
+            children = _parse_inline(heading_text, heading_style)
+            # Discard heading_style — formatting does NOT leak
+
+        elements.append(
+            MicronElement(
+                element_type=ElementType.HEADING,
+                content=heading_text,
+                level=level,
+                style=TextStyle(bold=True),
+                children=children,
+            )
+        )
+        return
+
+    # Dividers (- at start of line)
+    if stripped.startswith("-"):
+        fill_char = "\u2500"
+        if len(stripped) > 1:
+            fill_char = stripped[1]
+        elements.append(
+            MicronElement(
+                element_type=ElementType.DIVIDER,
+                divider_char=fill_char,
+            )
+        )
+        return
+
+    # Lone backtick — formatting reset (no visible output)
+    if stripped == "`":
+        style.bold = False
+        style.italic = False
+        style.underline = False
+        style.fg_color = None
+        style.bg_color = None
+        style.alignment = Alignment.LEFT
+        return
+
+    # Regular text with inline formatting
+    if stripped:
+        text_elements = _parse_inline(stripped, style)
+        elements.extend(text_elements)
+    else:
+        # Empty line
+        elements.append(
+            MicronElement(
+                element_type=ElementType.TEXT,
+                content="",
+                style=TextStyle(
+                    alignment=style.alignment,
+                ),
+            )
+        )
 
 
 def parse_micron(source: str) -> list[MicronElement]:
@@ -223,71 +327,7 @@ def parse_micron(source: str) -> list[MicronElement]:
         if stripped.startswith("#"):
             continue
 
-        # Section reset (<)
-        if stripped.startswith("<"):
-            # Reset section depth, parse remainder as text
-            remainder = stripped[1:]
-            if remainder:
-                text_elements = _parse_inline(remainder, style)
-                elements.extend(text_elements)
-            continue
-
-        # Headings (>, >>, >>>)
-        if stripped.startswith(">"):
-            level = 0
-            i = 0
-            while i < len(stripped) and stripped[i] == ">":
-                level += 1
-                i += 1
-            heading_text = stripped[i:].strip()
-            elements.append(
-                MicronElement(
-                    element_type=ElementType.HEADING,
-                    content=heading_text,
-                    level=level,
-                    style=TextStyle(bold=True),
-                )
-            )
-            continue
-
-        # Dividers (- at start of line)
-        if stripped.startswith("-"):
-            fill_char = "\u2500"
-            if len(stripped) > 1:
-                fill_char = stripped[1]
-            elements.append(
-                MicronElement(
-                    element_type=ElementType.DIVIDER,
-                    divider_char=fill_char,
-                )
-            )
-            continue
-
-        # Lone backtick — formatting reset (no visible output)
-        if stripped == "`":
-            style.bold = False
-            style.italic = False
-            style.underline = False
-            style.fg_color = None
-            style.bg_color = None
-            style.alignment = Alignment.LEFT
-            continue
-
-        # Regular text with inline formatting
-        if stripped:
-            text_elements = _parse_inline(stripped, style)
-            elements.extend(text_elements)
-        else:
-            # Empty line
-            elements.append(
-                MicronElement(
-                    element_type=ElementType.TEXT,
-                    content="",
-                    style=TextStyle(
-                        alignment=style.alignment,
-                    ),
-                )
-            )
+        _parse_line(stripped, style, elements)
 
     # Close unclosed structured data block (discard — incomplete block)
     # We intentionally don't emit partial blocks as they're malformed.
@@ -648,12 +688,28 @@ def render_to_rich(elements: list[MicronElement]) -> str:
 
         if elem.element_type == ElementType.HEADING:
             level = min(elem.level, 3)
-            if level == 1:
-                lines.append(f"[bold]{_escape(elem.content)}[/bold]")
-            elif level == 2:
-                lines.append(f"[bold]{_escape(elem.content)}[/bold]")
+            base_tag = "bold italic" if level >= 3 else "bold"
+
+            if elem.children:
+                # Children-aware: render each child with heading base
+                # style merged with its own inline style
+                parts: list[str] = []
+                for child in elem.children:
+                    child_tags = [base_tag]
+                    if child.style.fg_color:
+                        child_tags.append(child.style.fg_color)
+                    if child.style.italic and base_tag == "bold":
+                        child_tags.append("italic")
+                    if child.style.underline:
+                        child_tags.append("underline")
+                    tag_str = " ".join(child_tags)
+                    parts.append(
+                        f"[{tag_str}]{_escape(child.content)}[/{tag_str}]"
+                    )
+                lines.append("".join(parts))
             else:
-                lines.append(f"[bold italic]{_escape(elem.content)}[/bold italic]")
+                # Backward compat: plain content rendering
+                lines.append(f"[{base_tag}]{_escape(elem.content)}[/{base_tag}]")
 
         elif elem.element_type == ElementType.TEXT:
             if not elem.content:
@@ -666,13 +722,18 @@ def render_to_rich(elements: list[MicronElement]) -> str:
             lines.append(f"[dim]{elem.divider_char * 40}[/dim]")
 
         elif elem.element_type == ElementType.LITERAL:
-            # Render verbatim content
+            # Render verbatim content with dim italic for visual distinction
             for lit_line in elem.content.split("\n"):
-                lines.append(f"[dim]{_escape(lit_line)}[/dim]")
+                lines.append(f"[dim italic]{_escape(lit_line)}[/dim italic]")
 
         elif elem.element_type == ElementType.LINK:
             label = _escape(elem.content) or _escape(elem.url)
-            lines.append(f"[underline]{label}[/underline]")
+            url_safe = elem.url.replace("\\", "\\\\").replace("'", "\\'")
+            lines.append(
+                f"[@click=\"navigate_link('{url_safe}')\"]"
+                f"[underline]{label}[/underline]"
+                f"[/]"
+            )
 
         elif elem.element_type == ElementType.FORM_FIELD:
             if elem.field_type == FieldType.TEXT:
