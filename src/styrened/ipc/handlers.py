@@ -50,6 +50,7 @@ from styrened.ipc.messages import (
     CmdSendRequest,
     CmdSetAutoReplyRequest,
     CmdSetContactRequest,
+    CmdSetIdentityRequest,
     CmdTerminalCloseRequest,
     CmdTerminalInputRequest,
     CmdTerminalOpenRequest,
@@ -62,6 +63,8 @@ from styrened.ipc.messages import (
     IPCRequest,
     IPCResponse,
     PongResponse,
+    PQCStatusRequest,
+    QueryAttachmentRequest,
     QueryContactsRequest,
     QueryConversationsRequest,
     QueryDevicesRequest,
@@ -222,10 +225,23 @@ class IPCHandlers:
             if lxmf_service and lxmf_service._destination:
                 lxmf_destination_hash = lxmf_service._destination.hexhash
 
+            # Populate appearance fields from config
+            display_name = ""
+            icon = ""
+            short_name = None
+            if hasattr(self.daemon.config, "identity"):
+                id_cfg = self.daemon.config.identity
+                display_name = getattr(id_cfg, "display_name", "")
+                icon = getattr(id_cfg, "icon", "")
+                short_name = getattr(id_cfg, "short_name", None)
+
             info = IdentityInfo(
                 identity_hash=identity_hash,
                 destination_hash=destination_hash,
                 lxmf_destination_hash=lxmf_destination_hash,
+                display_name=display_name,
+                icon=icon,
+                short_name=short_name,
             )
 
             return ResultResponse(data=info.to_dict())
@@ -379,6 +395,14 @@ class IPCHandlers:
                     "port": config.api.port,
                 },
             }
+
+            # Include identity section if available
+            if hasattr(config, "identity"):
+                config_dict["identity"] = {
+                    "display_name": config.identity.display_name,
+                    "icon": config.identity.icon,
+                    "short_name": config.identity.short_name,
+                }
 
             return ResultResponse(data={"config": config_dict})
 
@@ -986,6 +1010,72 @@ class IPCHandlers:
             logger.exception(f"Error searching messages: {e}")
             return ErrorResponse.internal_error(f"Failed to search messages: {e}")
 
+    async def handle_query_attachment(self, request: IPCRequest) -> IPCResponse:
+        """Handle QUERY_ATTACHMENT request.
+
+        Returns base64-encoded attachment data for a message.
+
+        Args:
+            request: QueryAttachmentRequest instance.
+
+        Returns:
+            ResultResponse with {data_b64, filename, mime, size}.
+        """
+        req = (
+            request
+            if isinstance(request, QueryAttachmentRequest)
+            else QueryAttachmentRequest()
+        )
+
+        if not req.message_id:
+            return ErrorResponse.invalid_request("message_id is required")
+
+        try:
+            err = self._check_conversation_service()
+            if err:
+                return err
+            assert self.daemon is not None and self.daemon._conversation_service is not None
+
+            from sqlalchemy.orm import Session as SASession
+
+            from styrened.models.messages import Message
+
+            with SASession(self.daemon._conversation_service._db_engine) as session:
+                msg = session.query(Message).filter(Message.id == req.message_id).first()
+                if msg is None:
+                    return ErrorResponse.not_found(f"Message {req.message_id} not found")
+                if not msg.has_attachment or not msg.attachment_path:
+                    return ErrorResponse.not_found(
+                        f"Message {req.message_id} has no stored attachment"
+                    )
+
+                att_path = msg.attachment_path
+                att_name = msg.attachment_name
+                att_mime = msg.attachment_mime
+                att_size = msg.attachment_size
+
+            from styrened.services.attachment_store import get_attachment_store
+
+            store = get_attachment_store()
+            data = store.load(att_path)
+
+            return ResultResponse(
+                data={
+                    "data_b64": base64.b64encode(data).decode("ascii"),
+                    "filename": att_name,
+                    "mime": att_mime,
+                    "size": att_size or len(data),
+                }
+            )
+
+        except FileNotFoundError:
+            return ErrorResponse.not_found(
+                f"Attachment file not found for message {req.message_id}"
+            )
+        except Exception as e:
+            logger.exception(f"Error querying attachment: {e}")
+            return ErrorResponse.internal_error(f"Failed to query attachment: {e}")
+
     async def handle_cmd_send_chat(self, request: IPCRequest) -> IPCResponse:
         """Handle CMD_SEND_CHAT request.
 
@@ -1052,22 +1142,69 @@ class IPCHandlers:
             if not lxmf_service:
                 return ErrorResponse.internal_error("LXMF service not initialized")
 
-            # Build message fields
+            # Build message fields (stored in DB for protocol routing)
             fields: dict[str, object] = {"protocol": "chat"}
             if req.title:
                 fields["title"] = req.title
 
-            # Build LXMF payload
-            payload: dict[str, object] = {
-                "type": "chat",
-                "protocol": "chat",
-                "content": req.content,
-            }
-            if req.title:
-                payload["title"] = req.title
+            # LXMF message body is plain content text — NOT a JSON envelope.
+            # Standard LXMF clients (Sideband, NomadNet, echo bots) display
+            # the body as-is; wrapping it in JSON makes the message unreadable
+            # to non-Styrene peers.
+            payload = req.content
 
             # Get conversation service reference for callbacks
             conversation_service = self.daemon._conversation_service
+
+            # Process attachment if provided
+            has_attachment = False
+            attachment_type: str | None = None
+            attachment_name: str | None = None
+            attachment_size: int | None = None
+            attachment_mime: str | None = None
+            attachment_path: str | None = None
+            attachment_raw: bytes | None = None
+
+            if req.attachment_data_b64:
+                # Pre-check base64 length before decoding to prevent
+                # memory exhaustion from oversized payloads.
+                # 10 MB raw ≈ 13.4 MB base64; add 1 KB headroom.
+                from styrened.services.attachment_store import DEFAULT_MAX_FILE_SIZE
+
+                max_b64_len = int(DEFAULT_MAX_FILE_SIZE * 4 / 3) + 1024
+                if len(req.attachment_data_b64) > max_b64_len:
+                    return ErrorResponse.invalid_request(
+                        f"Attachment too large (base64 length {len(req.attachment_data_b64)} "
+                        f"exceeds limit {max_b64_len})"
+                    )
+
+                try:
+                    attachment_raw = base64.b64decode(req.attachment_data_b64)
+                    attachment_name = req.attachment_filename or "attachment"
+                    attachment_mime = req.attachment_mime
+                    attachment_size = len(attachment_raw)
+                    has_attachment = True
+
+                    # Determine attachment type from mime
+                    if attachment_mime and attachment_mime.startswith("image/"):
+                        attachment_type = "image"
+                    elif attachment_mime and attachment_mime.startswith("audio/"):
+                        attachment_type = "audio"
+                    else:
+                        attachment_type = "file"
+
+                    # Save to attachment store
+                    from styrened.services.attachment_store import get_attachment_store
+
+                    store = get_attachment_store()
+                    saved = store.save(
+                        req.peer_hash, 0, attachment_name, attachment_raw,
+                        mime=attachment_mime,
+                    )
+                    attachment_path = str(saved)
+                except Exception as e:
+                    logger.warning(f"Failed to process attachment: {e}")
+                    # Continue without attachment — message still sends
 
             # Step 1: Save message FIRST (avoids race with fast delivery callbacks)
             msg_id = conversation_service.save_outgoing_message(
@@ -1076,8 +1213,29 @@ class IPCHandlers:
                 title=req.title,
                 fields=fields,
                 reply_to_hash=req.reply_to_hash,
+                has_attachment=has_attachment,
+                attachment_type=attachment_type,
+                attachment_name=attachment_name,
+                attachment_size=attachment_size,
+                attachment_mime=attachment_mime,
+                attachment_path=attachment_path,
                 # Don't pass lxmf_hash yet - we register tracking after send
             )
+
+            # Rename attachment to include real message_id
+            if attachment_path:
+                try:
+                    from pathlib import Path
+
+                    from styrened.services.attachment_store import get_attachment_store
+
+                    att_store = get_attachment_store()
+                    new_path = att_store.rename_for_message(Path(attachment_path), msg_id)
+                    if str(new_path) != attachment_path:
+                        conversation_service.update_attachment_path(msg_id, str(new_path))
+                        attachment_path = str(new_path)
+                except Exception as e:
+                    logger.warning(f"Failed to rename attachment: {e}")
 
             # Step 2: Create thread-safe tracking registration and callbacks
             # We use a closure to capture the message_id and handle the race condition
@@ -1163,6 +1321,71 @@ class IPCHandlers:
                     lxmf_fields[LXMF.FIELD_THREAD] = {
                         "reply_to": req.reply_to_hash,
                     }
+
+                # Add attachment data to LXMF fields for ecosystem interop.
+                # For Styrene peers, we also attempt RNS.Resource transfer
+                # which provides full quality and progress tracking.
+                styrene_transfer_used = False
+                if has_attachment and attachment_raw is not None:
+                    # Try Styrene link-based transfer for Styrene peers
+                    if (
+                        self.daemon is not None
+                        and hasattr(self.daemon, "_file_transfer_service")
+                        and self.daemon._file_transfer_service is not None
+                    ):
+                        try:
+                            from styrened.services.node_store import get_node_store
+
+                            node_store = get_node_store()
+                            is_styrene = False
+                            if node_store:
+                                node = node_store.get_node(req.peer_hash)
+                                if node and node.is_styrene_node:
+                                    is_styrene = True
+                            if is_styrene:
+                                loop = asyncio.get_event_loop()
+                                loop.create_task(
+                                    self.daemon._file_transfer_service.send_file(
+                                        req.peer_hash,
+                                        attachment_raw,
+                                        attachment_name or "attachment",
+                                        mime_type=attachment_mime,
+                                    )
+                                )
+                                styrene_transfer_used = True
+                                logger.info(
+                                    f"Using Styrene link transfer for "
+                                    f"{attachment_name} to {req.peer_hash[:8]}"
+                                )
+                        except Exception as e:
+                            logger.debug(
+                                f"Styrene transfer not available, using LXMF: {e}"
+                            )
+
+                    # Include LXMF attachment fields only when Styrene transfer not used.
+                    # When Styrene transfer is active, the file goes via RNS.Resource
+                    # and embedding it in LXMF fields would duplicate the payload.
+                    if not styrene_transfer_used:
+                        if attachment_type == "image":
+                            # FIELD_IMAGE: (mime_type, data)
+                            lxmf_fields[LXMF.FIELD_IMAGE] = (
+                                attachment_mime or "image/jpeg",
+                                attachment_raw,
+                            )
+                        elif attachment_type == "audio":
+                            # FIELD_AUDIO: (mime_type, data)
+                            lxmf_fields[LXMF.FIELD_AUDIO] = (
+                                attachment_mime or "audio/opus",
+                                attachment_raw,
+                            )
+                        else:
+                            # FIELD_FILE_ATTACHMENTS: [(filename, data, mime)]
+                            file_entry: tuple[str, bytes] | tuple[str, bytes, str]
+                            if attachment_mime:
+                                file_entry = (attachment_name or "file", attachment_raw, attachment_mime)
+                            else:
+                                file_entry = (attachment_name or "file", attachment_raw)
+                            lxmf_fields[LXMF.FIELD_FILE_ATTACHMENTS] = [file_entry]
 
             # Step 4: Send via LXMF with race-safe callbacks
             result = lxmf_service.send_message(
@@ -1262,6 +1485,9 @@ class IPCHandlers:
             except Exception as receipt_err:
                 logger.warning(f"Failed to send read receipts: {receipt_err}")
 
+            self.daemon._emit_activity_event(
+                "conversation_read", peer_hash=req.peer_hash
+            )
             return ResultResponse(data={"marked_read": count})
 
         except Exception as e:
@@ -1309,6 +1535,9 @@ class IPCHandlers:
             for h in all_hashes:
                 count += self.daemon._conversation_service.delete_conversation(h)
 
+            self.daemon._emit_activity_event(
+                "conversation_deleted", peer_hash=req.peer_hash
+            )
             return ResultResponse(data={"deleted": count})
 
         except Exception as e:
@@ -1557,6 +1786,11 @@ class IPCHandlers:
             contact = self.daemon._contact_service.set_alias(
                 req.peer_hash, req.alias.strip(), notes=req.notes
             )
+            self.daemon._emit_activity_event(
+                "contact_set",
+                peer_hash=req.peer_hash,
+                metadata={"alias": req.alias.strip()},
+            )
             return ResultResponse(data=contact.to_dict())
         except Exception as e:
             logger.exception(f"Error setting contact: {e}")
@@ -1586,6 +1820,9 @@ class IPCHandlers:
                 return ErrorResponse.not_found(
                     f"Contact not found: {req.peer_hash[:16]}..."
                 )
+            self.daemon._emit_activity_event(
+                "contact_removed", peer_hash=req.peer_hash
+            )
             return ResultResponse(data={"removed": True})
         except Exception as e:
             logger.exception(f"Error removing contact: {e}")
@@ -1655,6 +1892,10 @@ class IPCHandlers:
             # Re-announce to propagate capability change
             self.daemon._announce()
 
+            self.daemon._emit_activity_event(
+                "auto_reply_changed",
+                metadata={"mode": self.daemon.config.chat.auto_reply_mode.value},
+            )
             return ResultResponse(
                 data={
                     "mode": self.daemon.config.chat.auto_reply_mode.value,
@@ -1665,6 +1906,130 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error setting auto-reply: {e}")
             return ErrorResponse.internal_error(f"Failed to set auto-reply: {e}")
+
+    async def handle_cmd_set_identity(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_SET_IDENTITY request.
+
+        Updates operator identity appearance fields, persists to disk,
+        and triggers re-announce to propagate changes.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, CmdSetIdentityRequest)
+            else CmdSetIdentityRequest()
+        )
+
+        try:
+            from styrened.models.config import validate_short_name
+            from styrened.services.config import save_core_config
+
+            identity_cfg = self.daemon.config.identity
+
+            # Validate display_name length
+            if req.display_name and len(req.display_name) > 100:
+                return ErrorResponse.invalid_request(
+                    "display_name exceeds maximum length of 100 characters"
+                )
+
+            # Update display_name if provided
+            if req.display_name:
+                identity_cfg.display_name = req.display_name
+
+            # Update icon if provided
+            if req.icon:
+                identity_cfg.icon = req.icon
+
+            # Handle short_name: explicit empty string clears it, None means no change
+            if req.short_name is not None:
+                if req.short_name == "":
+                    identity_cfg.short_name = None
+                else:
+                    if not validate_short_name(req.short_name):
+                        return ErrorResponse.invalid_request(
+                            "Invalid short_name: must be 3-20 chars, "
+                            "lowercase alphanumeric + hyphens, no leading/trailing hyphens"
+                        )
+                    identity_cfg.short_name = req.short_name
+
+            # Persist to disk
+            save_core_config(self.daemon.config)
+
+            # Re-announce to propagate identity changes
+            self.daemon._announce()
+
+            self.daemon._emit_activity_event(
+                "identity_changed",
+                metadata={
+                    "display_name": identity_cfg.display_name,
+                    "icon": identity_cfg.icon or "",
+                },
+            )
+            return ResultResponse(
+                data={
+                    "display_name": identity_cfg.display_name,
+                    "icon": identity_cfg.icon,
+                    "short_name": identity_cfg.short_name,
+                }
+            )
+        except Exception as e:
+            logger.exception(f"Error setting identity: {e}")
+            return ErrorResponse.internal_error(f"Failed to set identity: {e}")
+
+    async def handle_cmd_pqc_status(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_PQC_STATUS request.
+
+        Queries PQC session status for a given peer. Returns security tier,
+        session state, and rekey metadata. If no PQC service or no session
+        exists, returns security_tier "rns_only" with null state fields.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        req = (
+            request
+            if isinstance(request, PQCStatusRequest)
+            else PQCStatusRequest()
+        )
+
+        if not req.peer_hash:
+            return ErrorResponse.invalid_request("peer_hash is required")
+
+        try:
+            pqc_service = getattr(self.daemon, "_pqc_service", None)
+            if pqc_service is None:
+                return ResultResponse(
+                    data={
+                        "security_tier": "rns_only",
+                        "session_state": None,
+                        "created_at": None,
+                        "last_rekeyed_at": None,
+                        "rekey_count": None,
+                    }
+                )
+
+            session_status = pqc_service.get_session_status(req.peer_hash)
+            if session_status is None:
+                return ResultResponse(
+                    data={
+                        "security_tier": "rns_only",
+                        "session_state": None,
+                        "created_at": None,
+                        "last_rekeyed_at": None,
+                        "rekey_count": None,
+                    }
+                )
+
+            return ResultResponse(data=session_status)
+        except Exception as e:
+            logger.exception(f"Error querying PQC status: {e}")
+            return ErrorResponse.internal_error(f"Failed to query PQC status: {e}")
 
     async def handle_cmd_sync_messages(self, request: IPCRequest) -> IPCResponse:
         """Handle CMD_SYNC_MESSAGES request.

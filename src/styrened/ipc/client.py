@@ -36,6 +36,7 @@ from styrened.ipc.messages import (
     CmdSendRequest,
     CmdSetAutoReplyRequest,
     CmdSetContactRequest,
+    CmdSetIdentityRequest,
     CmdSyncMessagesRequest,
     CmdTerminalCloseRequest,
     CmdTerminalInputRequest,
@@ -48,6 +49,7 @@ from styrened.ipc.messages import (
     IdentityInfo,
     IPCRequest,
     PingRequest,
+    QueryAttachmentRequest,
     QueryAutoReplyRequest,
     QueryConfigRequest,
     QueryContactsRequest,
@@ -64,6 +66,7 @@ from styrened.ipc.messages import (
     RebootResultInfo,
     RemoteStatusInfo,
     SelfUpdateResultInfo,
+    SubActivityRequest,
     SubDevicesRequest,
     SubMessagesRequest,
     UnsubRequest,
@@ -620,6 +623,9 @@ class ControlClient:
         title: str | None = None,
         delivery_method: str = "auto",
         reply_to_hash: str | None = None,
+        attachment_data_b64: str | None = None,
+        attachment_filename: str | None = None,
+        attachment_mime: str | None = None,
     ) -> dict[str, Any]:
         """Send a chat message to a peer.
 
@@ -629,6 +635,9 @@ class ControlClient:
             title: Optional message title.
             delivery_method: "auto", "direct", or "propagated".
             reply_to_hash: LXMF hash of message being replied to.
+            attachment_data_b64: Base64-encoded attachment data.
+            attachment_filename: Original filename.
+            attachment_mime: MIME type.
 
         Returns:
             Dict with message_id and status.
@@ -639,7 +648,22 @@ class ControlClient:
             title=title,
             delivery_method=delivery_method,
             reply_to_hash=reply_to_hash,
+            attachment_data_b64=attachment_data_b64,
+            attachment_filename=attachment_filename,
+            attachment_mime=attachment_mime,
         )
+        return await self._request(request)
+
+    async def query_attachment(self, message_id: int) -> dict[str, Any]:
+        """Get attachment data for a message.
+
+        Args:
+            message_id: Database ID of the message.
+
+        Returns:
+            Dict with data_b64, filename, mime, size.
+        """
+        request = QueryAttachmentRequest(message_id=message_id)
         return await self._request(request)
 
     async def mark_read(self, peer_hash: str) -> int:
@@ -742,6 +766,18 @@ class ControlClient:
             True if subscribed successfully.
         """
         data = await self._request(SubDevicesRequest())
+        return cast(bool, data.get("subscribed", False))
+
+    async def subscribe_activity(self) -> bool:
+        """Subscribe to unified activity events.
+
+        Receives all event types (messages, devices, config changes, etc.)
+        as EVENT_ACTIVITY frames for dashboard activity feed.
+
+        Returns:
+            True if subscribed successfully.
+        """
+        data = await self._request(SubActivityRequest())
         return cast(bool, data.get("subscribed", False))
 
     async def unsubscribe(self, subscription_type: str = "") -> bool:
@@ -857,6 +893,30 @@ class ControlClient:
                 mode=mode,
                 message=message,
                 cooldown=cooldown,
+            )
+        )
+
+    async def set_identity(
+        self,
+        display_name: str = "",
+        icon: str = "",
+        short_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Set operator identity appearance fields.
+
+        Args:
+            display_name: Human-readable name for announces.
+            icon: Emoji or short string for identity icon.
+            short_name: Optional short identifier (3-20 chars, lowercase).
+
+        Returns:
+            Dict with updated display_name, icon, short_name.
+        """
+        return await self._request(
+            CmdSetIdentityRequest(
+                display_name=display_name,
+                icon=icon,
+                short_name=short_name,
             )
         )
 
