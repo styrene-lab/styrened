@@ -349,6 +349,43 @@ class TestHandleMessageChatbot:
 
         assert len(handler._last_reply) == 0
 
+    @patch("styrened.services.auto_reply.LXMF_AVAILABLE", True)
+    @patch("styrened.services.auto_reply.RNS")
+    def test_chatbot_mode_skips_cooldown(self, mock_rns):
+        """Chatbot mode should respond to every message regardless of cooldown.
+
+        Template mode uses cooldown to avoid spamming the same static message.
+        Chatbot mode is conversational — silencing replies breaks the dialogue.
+        Bot-to-bot loop prevention is handled by the 'bot' field marker.
+        """
+        mock_rns.Transport.has_path.return_value = True
+        config = MockChatConfig(
+            auto_reply_mode=AutoReplyMode.CHATBOT,
+            auto_reply_cooldown=300,
+        )
+        handler = AutoReplyHandler(
+            config=config,
+            identity=MockIdentity(),
+            router=MockRouter(),
+        )
+
+        source = b"\x01\x02\x03\x04\x05\x06\x07\x08"
+
+        # Pre-record a very recent reply (simulates just having responded)
+        handler._record_reply(source)
+
+        msg = MagicMock()
+        msg.source_hash = source
+        msg.fields = {}
+        msg.content = b"follow-up message"
+
+        # In template mode this would be blocked by cooldown.
+        # Chatbot mode should still schedule a reply.
+        # Patch on the class (not instance) — __slots__ prevents instance patching.
+        with patch.object(AutoReplyHandler, "_schedule_chatbot_reply") as mock_schedule:
+            handler.handle_message(msg)
+            mock_schedule.assert_called_once_with(source)
+
     def test_disabled_mode_skips_all(self):
         """DISABLED mode should skip message entirely."""
         config = MockChatConfig(auto_reply_mode=AutoReplyMode.DISABLED)
