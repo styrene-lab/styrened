@@ -65,6 +65,15 @@ class NodeInfoPanel(Static):
     daemon_version: reactive[str] = reactive("")
     daemon_uptime: reactive[float] = reactive(0.0)
 
+    # Identity reactive vars
+    identity_display_name: reactive[str] = reactive("")
+    identity_icon: reactive[str] = reactive("")
+    identity_short_name: reactive[str | None] = reactive(None)
+    identity_hash: reactive[str] = reactive("")
+
+    # Security tier (PQC session status)
+    security_tier: reactive[str] = reactive("")
+
     # When True, skip local RNS/discovery queries (screen pushes daemon data)
     ipc_managed: reactive[bool] = reactive(False)
 
@@ -153,6 +162,35 @@ class NodeInfoPanel(Static):
                 lines.append(
                     f"  IPC: {SemanticSymbols.OFFLINE} [{cascade.dim}]disconnected[/]"
                 )
+
+        # === IDENTITY SECTION ===
+        if self.identity_display_name or self.identity_icon:
+            lines.append("")  # Blank line separator
+            lines.append(f"[{cascade.bright}]IDENTITY[/]")
+
+            # NAME: icon + display_name
+            name_parts = []
+            if self.identity_icon:
+                name_parts.append(self.identity_icon)
+            if self.identity_display_name:
+                name_parts.append(self.identity_display_name)
+            if name_parts:
+                lines.append(f"  NAME: [{cascade.medium}]{' '.join(name_parts)}[/]")
+
+            # ALIAS: short_name
+            if self.identity_short_name:
+                lines.append(f"  ALIAS: [{cascade.medium}]{self.identity_short_name}[/]")
+            else:
+                lines.append(f"  ALIAS: [{cascade.dim}]not set[/]")
+
+            # HASH: truncated identity hash
+            if self.identity_hash:
+                lines.append(f"  HASH: [{cascade.dim}]{self.identity_hash[:16]}[/]")
+
+            # SEC: PQC security tier
+            if self.security_tier:
+                tier_color = cascade.bright if "PQC" in self.security_tier.upper() else cascade.medium
+                lines.append(f"  SEC: [{tier_color}]{self.security_tier}[/]")
 
         # === RETICULUM SECTION ===
         lines.append("")  # Blank line separator
@@ -269,10 +307,16 @@ class NodeInfoPanel(Static):
 
     def _load_styrene_data(self) -> None:
         """Load Styrene mesh and hub configuration."""
-        # Get config for mode (always relevant, even in IPC mode)
+        # Get config for mode and identity (always relevant, even in IPC mode)
         try:
             config = load_config()
             self.mode = config.reticulum.mode.value
+
+            # Load identity appearance from config (non-IPC fallback)
+            if not self.ipc_managed and hasattr(config, "identity"):
+                self.identity_display_name = config.identity.display_name
+                self.identity_icon = config.identity.icon
+                self.identity_short_name = config.identity.short_name
         except Exception:
             self.mode = "standalone"
 

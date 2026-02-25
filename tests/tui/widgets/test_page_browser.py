@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from styrened.tui.services.app_lifecycle import LifecycleMode
-from styrened.tui.widgets.page_browser import PageBrowserWidget
+from styrened.tui.widgets.page_browser import PageBrowserWidget, _LinkClicked
 
 
 @pytest.fixture(autouse=True)
@@ -149,3 +149,123 @@ class TestPageBrowserLoadPage:
             await widget._load_page("/page/index.mu")
 
         assert widget.loading is False
+
+
+class TestPageBrowserLinkClick:
+    """Tests for micron link click handling."""
+
+    def test_same_node_link_navigates(self):
+        """Clicking a same-node link should call navigate()."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "run_worker"):
+            message = _LinkClicked("/page/about.mu")
+            widget.on__link_clicked(message)
+
+        assert "/page/index.mu" in widget._history
+
+    def test_colon_prefixed_link_navigates_same_node(self):
+        """NomadNet :/page/... links should navigate on the same node."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "run_worker"):
+            message = _LinkClicked(":/page/docs/architecture.mu")
+            widget.on__link_clicked(message)
+
+        assert "/page/index.mu" in widget._history
+
+    def test_colon_prefixed_link_strips_colon(self):
+        """The leading colon should be stripped before navigating."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "navigate", wraps=widget.navigate) as mock_nav, \
+             patch.object(widget, "run_worker"):
+            message = _LinkClicked(":/page/about.mu")
+            widget.on__link_clicked(message)
+
+        mock_nav.assert_called_once_with("/page/about.mu")
+
+    def test_colon_prefixed_relative_link_navigates(self):
+        """NomadNet :page.mu (no slash) links should navigate same-node."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "navigate", wraps=widget.navigate) as mock_nav, \
+             patch.object(widget, "run_worker"):
+            message = _LinkClicked(":page.mu")
+            widget.on__link_clicked(message)
+
+        mock_nav.assert_called_once_with("page.mu")
+
+    def test_bare_colon_is_noop(self):
+        """A bare colon should not navigate or crash."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "navigate") as mock_nav:
+            message = _LinkClicked(":")
+            widget.on__link_clicked(message)
+
+        mock_nav.assert_not_called()
+        assert widget._history == []
+
+    def test_empty_url_is_noop(self):
+        """An empty URL should not navigate or corrupt history."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "navigate") as mock_nav:
+            message = _LinkClicked("")
+            widget.on__link_clicked(message)
+
+        mock_nav.assert_not_called()
+        assert widget._history == []
+
+    def test_whitespace_url_is_noop(self):
+        """A whitespace-only URL should be treated as empty."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "navigate") as mock_nav:
+            message = _LinkClicked("  \t  ")
+            widget.on__link_clicked(message)
+
+        mock_nav.assert_not_called()
+
+    def test_cross_node_link_shows_warning(self):
+        """Cross-node links should notify, not navigate."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "notify") as mock_notify, \
+             patch.object(widget, "run_worker"):
+            message = _LinkClicked("deadbeef1234:/page/index.mu")
+            widget.on__link_clicked(message)
+
+        mock_notify.assert_called_once()
+        assert widget._history == []
+
+    def test_colon_in_path_segment_navigates(self):
+        """A colon inside a path segment (not prefix) should navigate."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "run_worker"):
+            message = _LinkClicked("/page/docs/rfc:2119.mu")
+            widget.on__link_clicked(message)
+
+        assert "/page/index.mu" in widget._history
+
+    def test_absolute_path_link_navigates(self):
+        """Absolute /page/ paths should navigate normally."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget.current_path = "/page/index.mu"
+
+        with patch.object(widget, "run_worker"):
+            message = _LinkClicked("/page/docs/overview.mu")
+            widget.on__link_clicked(message)
+
+        assert "/page/index.mu" in widget._history

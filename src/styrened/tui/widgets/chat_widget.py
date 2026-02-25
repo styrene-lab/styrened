@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+import atexit
 import datetime
 import logging
 import time
@@ -29,12 +30,35 @@ from textual.worker import Worker, WorkerState
 
 from styrened.ipc import IPCMessageType
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
-from styrened.tui.widgets.message_bubble import STATUS_ICONS, MessageBubble
+from styrened.tui.widgets.message_bubble import (
+    ATTACHMENT_ICONS,
+    STATUS_ICONS,
+    MessageBubble,
+    _human_size,
+)
 
 logger = logging.getLogger(__name__)
 
 # Re-export for backward compatibility
 __all__ = ["ChatWidget", "STATUS_ICONS"]
+
+# Track temp files for cleanup on exit
+_TEMP_FILES: set[str] = set()
+
+
+def _cleanup_temp_files() -> None:
+    """Remove temp attachment files on process exit."""
+    import os
+
+    for path in list(_TEMP_FILES):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    _TEMP_FILES.clear()
+
+
+atexit.register(_cleanup_temp_files)
 
 # Timeout for IPC send_chat call (seconds)
 _SEND_TIMEOUT = 15.0
@@ -49,7 +73,7 @@ _DELETE_CONFIRM_TIMEOUT = 3.0
 _SEARCH_DEBOUNCE = 0.3
 
 
-class ChatWidget(Widget):
+class ChatWidget(Widget, can_focus=True):
     """Widget for peer-to-peer chat messaging.
 
     Displays message history and provides input for sending messages.
@@ -71,9 +95,12 @@ class ChatWidget(Widget):
         Binding("slash", "open_search", "Search", show=True),
         Binding("r", "reply_to_message", "Reply", show=True),
         Binding("y", "copy_message", "Copy", show=True),
+        Binding("o", "open_attachment", "Open", show=True),
+        Binding("a", "attach_file", "Attach", show=True),
     ]
 
     loading: reactive[bool] = reactive(False)
+    security_tier: reactive[str] = reactive("")
 
     DEFAULT_CSS = """
     ChatWidget {
@@ -150,7 +177,7 @@ class ChatWidget(Widget):
         padding: 0 2;
     }
 
-    ChatWidget .message-bubble.--selected {
+    ChatWidget .message-bubble.--selected .bubble-text {
         background: $surface;
         text-style: bold;
     }
@@ -195,6 +222,9 @@ class ChatWidget(Widget):
         # Phase 6: Reply state
         self._reply_to: dict[str, Any] | None = None
 
+        # Attachment state
+        self._pending_attachment: dict[str, Any] | None = None
+
     @property
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
@@ -215,9 +245,9 @@ class ChatWidget(Widget):
             )
             return
 
-        # Search bar (hidden by default)
+        # Search bar (hidden and disabled by default to prevent focus stealing)
         with Horizontal(id="chat-search-bar", classes="hidden"):
-            yield Input(placeholder="Search messages...", id="search-input")
+            yield Input(placeholder="Search messages...", id="search-input", disabled=True)
             yield Static("", id="search-count")
 
         yield Vertical(id="chat-message-container")
@@ -327,7 +357,7 @@ class ChatWidget(Widget):
                         icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
                     ts_str = datetime.datetime.fromtimestamp(child.timestamp).strftime("%H:%M") if child.timestamp else ""
                     msg_text = f"[{cascade.medium} bold]ME[/]: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
-                    child.update(msg_text)
+                    child.update_text(msg_text)
                 return
 
     def _poll_fallback(self) -> None:
@@ -337,10 +367,32 @@ class ChatWidget(Widget):
             self.run_worker(self._refresh_messages(), group="chat-poll")
 
     def _set_status(self, text: str) -> None:
-        """Update the status line below messages."""
+        """Update the status line below messages.
+
+        When *text* is empty, the security-tier idle indicator is restored.
+        """
         try:
             status = self.query_one("#chat-status", Static)
-            status.update(text)
+            status.update(text or self._tier_label())
+        except Exception:
+            pass
+
+    def _tier_label(self) -> str:
+        """Build the idle security-tier Rich markup string."""
+        if not self.security_tier:
+            return ""
+        cascade = get_color_cascade()
+        color = cascade.bright if "PQC" in self.security_tier.upper() else cascade.medium
+        return f"[{color}]{self.security_tier}[/]"
+
+    def watch_security_tier(self, value: str) -> None:
+        """Update the idle status bar when the security tier changes."""
+        try:
+            status = self.query_one("#chat-status", Static)
+            current = str(status.renderable)
+            # Only overwrite if status bar is empty or showing previous tier
+            if not current or current == self._tier_label():
+                status.update(self._tier_label())
         except Exception:
             pass
 
@@ -410,6 +462,10 @@ class ChatWidget(Widget):
         read_by_recipient = msg.get("read_by_recipient", False)
         msg_id = msg.get("id", 0)
         timestamp = msg.get("timestamp", 0.0)
+        has_attachment = msg.get("has_attachment", False)
+        attachment_type = msg.get("attachment_type")
+        attachment_name = msg.get("attachment_name")
+        attachment_size = msg.get("attachment_size")
 
         parts: list[str] = []
 
@@ -435,6 +491,10 @@ class ChatWidget(Widget):
             sender = self.display_name or self.peer_hash[:8]
             parts.append(f"[{cascade.dim}]{sender}[/]: {content} [{cascade.dim}]{ts_str}[/]")
 
+        # Attachment indicator (images rendered inline by MessageBubble)
+        if has_attachment and not (attachment_type and attachment_type.startswith("image")):
+            parts.append(self._format_attachment_line(msg, cascade))
+
         msg_text = "\n".join(parts)
 
         return MessageBubble(
@@ -447,7 +507,22 @@ class ChatWidget(Widget):
             raw_content=content,
             timestamp=timestamp,
             read_by_recipient=read_by_recipient,
+            has_attachment=has_attachment,
+            attachment_type=attachment_type,
+            attachment_name=attachment_name,
+            attachment_size=attachment_size,
         )
+
+    def _format_attachment_line(self, msg: dict[str, Any], cascade: Any) -> str:
+        """Format the attachment indicator line for a message bubble."""
+        att_type = msg.get("attachment_type", "file")
+        icon = ATTACHMENT_ICONS.get(att_type, ATTACHMENT_ICONS["file"])
+        name = msg.get("attachment_name") or f"{att_type} attachment"
+        size = msg.get("attachment_size")
+        size_str = _human_size(size) if size else ""
+        if size_str:
+            return f"[{cascade.dim}]{icon} {name} ({size_str})[/]"
+        return f"[{cascade.dim}]{icon} {name}[/]"
 
     def _find_reply_preview(self, lxmf_hash: str) -> str:
         """Find a message preview by LXMF hash for reply context."""
@@ -455,8 +530,8 @@ class ChatWidget(Widget):
             container = self.query_one("#chat-message-container", Vertical)
             for child in container.query(MessageBubble):
                 if child.lxmf_hash == lxmf_hash:
-                    preview = child.content[:40]
-                    if len(child.content) > 40:
+                    preview = child.raw_content[:40]
+                    if len(child.raw_content) > 40:
                         preview += "..."
                     return preview
         except Exception:
@@ -479,6 +554,23 @@ class ChatWidget(Widget):
         if not message:
             return
 
+        # Handle attach mode: user entered a file path
+        if (
+            self._pending_attachment is not None
+            and self._pending_attachment.get("awaiting_path")
+        ):
+            event.input.value = ""
+            self.run_worker(
+                self._stage_attachment_from_path(message),
+                group="chat-attach",
+            )
+            # Restore placeholder
+            try:
+                event.input.placeholder = "Type a message..."
+            except Exception:
+                pass
+            return
+
         event.input.value = ""
 
         self._pending_messages.append(message)
@@ -488,6 +580,14 @@ class ChatWidget(Widget):
         if self._reply_to is not None:
             kwargs["reply_to_hash"] = self._reply_to.get("lxmf_hash")
             self._clear_reply()
+
+        # Include pending attachment if staged
+        if self._pending_attachment and not self._pending_attachment.get("awaiting_path"):
+            kwargs["attachment_data_b64"] = self._pending_attachment.get("data_b64")
+            kwargs["attachment_filename"] = self._pending_attachment.get("filename")
+            kwargs["attachment_mime"] = self._pending_attachment.get("mime")
+            self._pending_attachment = None
+            self._set_status("")
 
         self.run_worker(
             self._send_message(message, **kwargs),
@@ -589,7 +689,7 @@ class ChatWidget(Widget):
         for child in reversed(list(container.query(".--outgoing"))):
             if isinstance(child, MessageBubble):
                 msg_text = f"[{cascade.medium} bold]ME[/]: {content} {icon}"
-                child.update(msg_text)
+                child.update_text(msg_text)
                 child.update_status(status)
                 return
 
@@ -681,14 +781,25 @@ class ChatWidget(Widget):
         try:
             chat_input = self.query_one("#chat-input", Input)
             if chat_input.has_focus:
-                chat_input.blur()
+                self.focus()
             else:
                 chat_input.focus()
         except Exception:
             pass
 
     def action_escape_handler(self) -> None:
-        """Layered escape: cancel reply -> close search -> deselect -> pop screen."""
+        """Layered escape: cancel attachment -> cancel reply -> close search -> deselect -> pop screen."""
+        if self._pending_attachment is not None:
+            self._pending_attachment = None
+            self._set_status("")
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.placeholder = "Type a message..."
+                chat_input.value = ""
+            except Exception:
+                pass
+            return
+
         if self._reply_to is not None:
             self._clear_reply()
             return
@@ -815,6 +926,7 @@ class ChatWidget(Widget):
             bar = self.query_one("#chat-search-bar")
             bar.remove_class("hidden")
             search_input = self.query_one("#search-input", Input)
+            search_input.disabled = False
             search_input.focus()
         except Exception:
             pass
@@ -827,6 +939,7 @@ class ChatWidget(Widget):
             bar.add_class("hidden")
             search_input = self.query_one("#search-input", Input)
             search_input.value = ""
+            search_input.disabled = True
             count = self.query_one("#search-count", Static)
             count.update("")
         except Exception:
@@ -931,6 +1044,220 @@ class ChatWidget(Widget):
             self._set_status("[dim]Copied to clipboard[/]")
         except Exception:
             self._set_status("[red]Copy failed[/]")
+
+    # -------------------------------------------------------------------------
+    # Attachment actions
+    # -------------------------------------------------------------------------
+
+    def action_open_attachment(self) -> None:
+        """Open the attachment of the selected message (o key)."""
+        bubble = self._get_selected_bubble()
+        if bubble is None:
+            return
+
+        if not bubble.has_attachment:
+            self._set_status("[dim]No attachment on selected message[/]")
+            return
+
+        self.run_worker(
+            self._open_attachment(bubble.message_id),
+            group="chat-attachment",
+        )
+
+    @staticmethod
+    def _cleanup_temp_file(path: str) -> None:
+        """Remove a temp attachment file if it still exists."""
+        import os
+
+        try:
+            os.unlink(path)
+            _TEMP_FILES.discard(path)
+        except OSError:
+            pass
+
+    async def _open_attachment(self, message_id: int) -> None:
+        """Fetch attachment and open with system viewer."""
+        import os
+        import platform
+        import subprocess
+        import tempfile
+
+        bridge = self._ipc_bridge
+        if bridge is None:
+            self._set_status("[red]No daemon connection[/]")
+            return
+
+        try:
+            self._set_status("[dim]Fetching attachment...[/]")
+            import base64
+
+            result = await bridge.get_attachment(message_id)
+            data = base64.b64decode(result.get("data_b64", ""))
+            filename = result.get("filename") or "attachment"
+
+            # Write to temp file with correct extension
+            suffix = ""
+            if "." in filename:
+                suffix = "." + filename.rsplit(".", 1)[-1]
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=suffix, prefix="styrene_"
+            ) as f:
+                f.write(data)
+                tmp_path = f.name
+
+            # Track for cleanup
+            _TEMP_FILES.add(tmp_path)
+
+            # Open with system viewer
+            system = platform.system()
+            if system == "Darwin":
+                subprocess.Popen(["open", tmp_path])
+            elif system == "Windows":
+                os.startfile(tmp_path)  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", tmp_path])
+
+            # Schedule delayed cleanup (5 min) to let viewer open
+            self.set_timer(300, lambda: self._cleanup_temp_file(tmp_path))
+
+            self._set_status(f"[dim]Opened {filename}[/]")
+        except Exception as e:
+            logger.error(f"Failed to open attachment: {e}")
+            self._set_status(f"[red]Failed to open: {e}[/]")
+
+    def action_attach_file(self) -> None:
+        """Start attaching a file (a key).
+
+        If an attachment is already staged, cancel it.
+        Otherwise, prompt for a file path via the chat input.
+        """
+        if self._pending_attachment is not None:
+            self._pending_attachment = None
+            self._set_status("")
+            return
+
+        # Switch input to accept a file path
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.placeholder = "Enter file path to attach (Esc to cancel)..."
+            chat_input.value = ""
+            chat_input.focus()
+            self._set_status("[dim]Enter path to file, then press Enter[/]")
+            # Mark that we're in attach mode by setting a sentinel
+            self._pending_attachment = {"awaiting_path": True}
+        except Exception:
+            self._set_status("[red]Cannot access input[/]")
+
+    async def _stage_attachment_from_path(self, path_str: str) -> bool:
+        """Read a file and stage it as a pending attachment.
+
+        Runs file I/O in a thread executor to avoid blocking the event loop.
+
+        Args:
+            path_str: Path to the file to attach.
+
+        Returns:
+            True if file was staged successfully.
+        """
+        import base64
+        import mimetypes
+        from pathlib import Path
+
+        from styrened.services.attachment_store import DEFAULT_MAX_FILE_SIZE
+
+        path = Path(path_str.strip()).expanduser()
+        if not path.is_file():
+            self._set_status(f"[red]File not found: {path}[/]")
+            self._pending_attachment = None
+            return False
+
+        # Size pre-check before reading into RAM
+        try:
+            file_size = path.stat().st_size
+        except OSError as e:
+            self._set_status(f"[red]Cannot stat file: {e}[/]")
+            self._pending_attachment = None
+            return False
+
+        if file_size > DEFAULT_MAX_FILE_SIZE:
+            self._set_status(
+                f"[red]File too large: {_human_size(file_size)} "
+                f"(max {_human_size(DEFAULT_MAX_FILE_SIZE)})[/]"
+            )
+            self._pending_attachment = None
+            return False
+
+        try:
+            loop = asyncio.get_running_loop()
+            data = await loop.run_in_executor(None, path.read_bytes)
+            mime_type, _ = mimetypes.guess_type(str(path))
+            data_b64 = base64.b64encode(data).decode("ascii")
+
+            self._pending_attachment = {
+                "data_b64": data_b64,
+                "filename": path.name,
+                "mime": mime_type,
+            }
+
+            size_str = _human_size(len(data))
+            icon = ATTACHMENT_ICONS.get(
+                "image" if mime_type and mime_type.startswith("image/") else
+                "audio" if mime_type and mime_type.startswith("audio/") else
+                "file",
+                ATTACHMENT_ICONS["file"],
+            )
+            self._set_status(
+                f"[dim]{icon} {path.name} ({size_str}) | Press Esc to cancel[/]"
+            )
+
+            # Restore normal input placeholder
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.placeholder = "Type a message..."
+                chat_input.value = ""
+            except Exception:
+                pass
+
+            return True
+        except Exception as e:
+            self._set_status(f"[red]Failed to read file: {e}[/]")
+            self._pending_attachment = None
+            return False
+
+    # -------------------------------------------------------------------------
+    # Paste support
+    # -------------------------------------------------------------------------
+
+    def on_paste(self, event: Any) -> None:
+        """Handle paste events — stage file if a path to an image is pasted.
+
+        Dispatches the file check to a worker to avoid blocking on every paste.
+        """
+        text = getattr(event, "text", "")
+        if not text:
+            return
+
+        stripped = text.strip()
+        # Quick heuristic: only try file staging if it looks like a path
+        if stripped.startswith(("/", "~", ".")) or (len(stripped) > 2 and stripped[1] == ":"):
+            self.run_worker(
+                self._try_paste_as_file(stripped),
+                group="chat-paste",
+            )
+            event.prevent_default()
+
+    async def _try_paste_as_file(self, path_str: str) -> None:
+        """Check if pasted text is a path to an image and stage it."""
+        from pathlib import Path as PPath
+
+        loop = asyncio.get_running_loop()
+        path = PPath(path_str).expanduser()
+
+        is_file = await loop.run_in_executor(None, path.is_file)
+        if is_file and path.suffix.lower() in (
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+        ):
+            await self._stage_attachment_from_path(str(path))
 
     # -------------------------------------------------------------------------
     # Worker error handling

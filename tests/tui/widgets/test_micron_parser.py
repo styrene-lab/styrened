@@ -11,7 +11,6 @@ from styrened.tui.widgets.micron_parser import (
     MicronElement,
     TextStyle,
     _expand_color,
-    _parse_inline,
     parse_micron,
     render_to_rich,
 )
