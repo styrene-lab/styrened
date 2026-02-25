@@ -12,7 +12,6 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
-from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.worker import Worker
@@ -29,7 +28,6 @@ from styrened.tui.forge.models import (
 from styrened.tui.widgets.config_form import ConfigForm
 from styrened.tui.widgets.forge_log import ForgeLog
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
-
 
 # ---------------------------------------------------------------------------
 # Device catalog table

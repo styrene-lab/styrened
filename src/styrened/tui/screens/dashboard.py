@@ -16,6 +16,7 @@ from textual.widgets import DataTable, Footer, Header
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.models.messages import Message
 from styrened.tui.services.reticulum import discover_devices, start_discovery
+from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
@@ -28,7 +29,7 @@ class MeshDeviceTable(DataTable[str]):
     """Mesh device listing table - shows discovered devices."""
 
     def on_mount(self) -> None:
-        self.add_columns("NAME", "TYPE", "IDENTITY", "STATUS", "UNREAD", "LAST ANNOUNCE")
+        self.add_columns("NAME", "TYPE", "IDENTITY", "STATUS", "SEC", "UNREAD", "LAST ANNOUNCE")
         self.cursor_type = "row"
         self._load_data()
 
@@ -128,6 +129,7 @@ class MeshDeviceTable(DataTable[str]):
                 f"[{cascade.dim}]No Styrene nodes discovered[/]",
                 "-",
                 "-",
+                "-",
                 key="-",
             )
             return
@@ -181,11 +183,21 @@ class MeshDeviceTable(DataTable[str]):
             if device.announce_count > 1:
                 last_seen_text += f" ({device.announce_count})"
 
+            # Security tier (PQC status)
+            sec_tier = getattr(device, "_pqc_tier", None) or "---"
+            if sec_tier == "pqc_hybrid":
+                sec_text = f"[{cascade.bright}]PQC[/]"
+            elif sec_tier == "rns_only":
+                sec_text = f"[{cascade.medium}]RNS[/]"
+            else:
+                sec_text = f"[{cascade.dim}]---[/]"
+
             self.add_row(
                 name_text,
                 type_text,
                 identity_text,
                 status_text,
+                sec_text,
                 unread_text,
                 last_seen_text,
                 key=device.identity,
@@ -257,6 +269,7 @@ class DashboardScreen(Screen[None]):
             except Exception:
                 pass
             self.run_worker(self._fetch_daemon_status())
+            self.run_worker(self._subscribe_activity())
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
         """Handle screen resume - refresh themed panels.
@@ -363,6 +376,11 @@ class DashboardScreen(Screen[None]):
                 title="MESH DEVICES",
                 id="mesh-devices-panel",
             )
+            yield HighlightedPanel(
+                ActivityFeedWidget(id="activity-feed-widget"),
+                title="ACTIVITY",
+                id="activity-feed-panel",
+            )
         yield Footer()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -436,6 +454,32 @@ class DashboardScreen(Screen[None]):
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status())
 
+    async def _subscribe_activity(self) -> None:
+        """Subscribe to unified activity events and wire device events."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            from styrened.ipc import IPCMessageType
+
+            await bridge.subscribe_activity()
+            bridge.on_event(IPCMessageType.EVENT_ACTIVITY, self._on_activity_event)
+            bridge.on_event(IPCMessageType.EVENT_DEVICE, self._on_device_event)
+        except Exception:
+            pass
+
+    def _on_activity_event(self, event_type: Any, payload: dict) -> None:
+        """Handle incoming activity event — append to activity feed."""
+        try:
+            feed = self.query_one("#activity-feed-widget", ActivityFeedWidget)
+            feed.add_event(payload.get("event_type", "unknown"), payload)
+        except Exception:
+            pass
+
+    def _on_device_event(self, event_type: Any, payload: dict) -> None:
+        """Handle device event — reactively refresh device table."""
+        self._refresh_device_table()
+
     async def _fetch_daemon_status(self) -> None:
         """Fetch daemon status via IPC and push to NodeInfoPanel."""
         bridge = self._ipc_bridge
@@ -450,6 +494,17 @@ class DashboardScreen(Screen[None]):
             panel.rns_online = status.rns_initialized
             panel.interface_count = status.interface_count
             panel.styrene_mesh_count = status.styrene_node_count
+
+            # Fetch and push identity data
+            try:
+                identity = await bridge.get_identity()
+                panel.identity_display_name = identity.display_name
+                panel.identity_icon = identity.icon
+                panel.identity_short_name = identity.short_name
+                panel.identity_hash = identity.identity_hash
+            except Exception:
+                pass  # Identity info is non-critical
+
         except Exception:
             try:
                 panel = self.query_one(NodeInfoPanel)

@@ -438,6 +438,11 @@ Header {
     max-height: 5;
 }
 
+#activity-feed-panel {
+    height: auto;
+    max-height: 12;
+}
+
 /* === Local Dashboard Layout === */
 #dashboard-local-container {
     height: 1fr;

@@ -1,21 +1,17 @@
 """Tests for the rewritten ProvisionScreen."""
 
-from pathlib import Path
 
-import pytest
 
 from styrened.tui.forge.models import (
     DeviceProfile,
     DeviceSpecs,
-    DiskInfo,
     FlashTarget,
     ForgeConfig,
     MediaEvent,
     StageKey,
     load_device_catalog,
 )
-from styrened.tui.screens.provision import DeviceCatalogTable, DiskDetectTable, ProvisionScreen
-
+from styrened.tui.screens.provision import ProvisionScreen
 
 # ---------------------------------------------------------------------------
 # Helpers
