@@ -52,9 +52,23 @@ install:
 test:
     pytest tests/ --ignore=tests/k8s/
 
-# Run unit tests only
+# Run unit tests only (parallel, ~4s)
 test-unit:
-    pytest tests/test_*.py tests/unit/ -v
+    pytest tests/unit/ -n auto -q --tb=short
+
+# Run TUI tests only (parallel, ~2min)
+test-tui:
+    pytest tests/tui/ -n auto -q --tb=short
+
+# Fast smoke: unit + TUI widgets/services/models (~36s, 3200+ tests)
+# Skips slow Textual run_test() screen tests and navigation workflows
+test-fast:
+    pytest tests/unit/ tests/tui/ -n auto -q --tb=short \
+        --ignore=tests/tui/screens \
+        --ignore=tests/tui/test_navigation_workflows.py \
+        --ignore=tests/tui/integration \
+        --ignore=tests/tui/test_screens.py \
+        --ignore=tests/tui/test_app.py
 
 # Run local integration tests (no k8s)
 test-integration:
