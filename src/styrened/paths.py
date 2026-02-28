@@ -1,23 +1,32 @@
 """Deterministic path resolution for styrened.
 
-Single source of truth for all filesystem paths. Uses explicit XDG paths
-on all platforms — no platformdirs, same paths on macOS and Linux.
+Single source of truth for all filesystem paths. Follows the XDG Base
+Directory Specification — no platformdirs, same paths on macOS and Linux.
 
 Two modes, detected once at process start:
 
     USER (default):
-        config  ~/.config/styrene/
-        data    ~/.local/share/styrene/
-        cache   ~/.cache/styrene/
-        runtime $XDG_RUNTIME_DIR/styrened/
+        config  $XDG_CONFIG_HOME/styrene/    (default ~/.config/styrene/)
+        data    $XDG_DATA_HOME/styrene/      (default ~/.local/share/styrene/)
+        state   $XDG_STATE_HOME/styrene/     (default ~/.local/state/styrene/)
+        runtime $XDG_RUNTIME_DIR/styrened/   (default ~/.local/run/styrened/)
 
     SYSTEM (STYRENE_SYSTEM=1 or /etc/styrene/config.yaml exists):
         config  /etc/styrene/
         data    /var/lib/styrene/
-        cache   /var/cache/styrene/
+        state   /var/log/styrene/
         runtime /run/styrened/
 
-Any STYRENE_*_DIR env var overrides the corresponding directory.
+Override precedence (highest to lowest):
+    1. STYRENE_*_DIR   — per-directory override (e.g. STYRENE_CONFIG_DIR)
+    2. STYRENE_HOME    — unified base (config/, data/, state/, run/)
+    3. SYSTEM mode     — FHS paths
+    4. XDG_*_HOME      — XDG env vars (USER mode only)
+    5. XDG defaults    — ~/.config, ~/.local/share, etc.
+
+STYRENE_HOME is useful for containers where all state lives under
+a single mount: STYRENE_HOME=/app/data gives config/, data/, state/,
+run/ subdirectories.
 """
 
 import enum
@@ -47,41 +56,73 @@ def mode() -> Mode:
 # -- Directory resolvers -----------------------------------------------------
 
 
+def _home_base() -> Path | None:
+    """Return STYRENE_HOME base directory if set, else None."""
+    env = os.environ.get("STYRENE_HOME")
+    return Path(env) if env else None
+
+
 def config_dir() -> Path:
-    """Return the configuration directory."""
+    """Return the configuration directory ($XDG_CONFIG_HOME/styrene)."""
     override = os.environ.get("STYRENE_CONFIG_DIR")
     if override:
         return Path(override)
+    home = _home_base()
+    if home:
+        return home / "config"
     if mode() == Mode.SYSTEM:
         return Path("/etc/styrene")
-    return Path.home() / ".config" / "styrene"
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / "styrene"
 
 
 def data_dir() -> Path:
-    """Return the data directory."""
+    """Return the data directory ($XDG_DATA_HOME/styrene)."""
     override = os.environ.get("STYRENE_DATA_DIR")
     if override:
         return Path(override)
+    home = _home_base()
+    if home:
+        return home / "data"
     if mode() == Mode.SYSTEM:
         return Path("/var/lib/styrene")
-    return Path.home() / ".local" / "share" / "styrene"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+    return base / "styrene"
 
 
-def cache_dir() -> Path:
-    """Return the cache directory."""
-    override = os.environ.get("STYRENE_CACHE_DIR")
+def state_dir() -> Path:
+    """Return the state directory ($XDG_STATE_HOME/styrene).
+
+    Per XDG spec, state data persists between restarts but is not
+    important enough to back up (logs, history, recently-used).
+    """
+    override = os.environ.get("STYRENE_STATE_DIR")
     if override:
         return Path(override)
+    home = _home_base()
+    if home:
+        return home / "state"
     if mode() == Mode.SYSTEM:
-        return Path("/var/cache/styrene")
-    return Path.home() / ".cache" / "styrene"
+        return Path("/var/log/styrene")
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    return base / "styrene"
 
 
 def runtime_dir() -> Path:
-    """Return the runtime directory (for sockets, PID files)."""
+    """Return the runtime directory ($XDG_RUNTIME_DIR/styrened).
+
+    On Wayland sessions, XDG_RUNTIME_DIR is always set by the
+    compositor or session manager (typically /run/user/<uid>).
+    """
     override = os.environ.get("STYRENE_RUNTIME_DIR")
     if override:
         return Path(override)
+    home = _home_base()
+    if home:
+        return home / "run"
     if mode() == Mode.SYSTEM:
         return Path("/run/styrened")
     xdg = os.environ.get("XDG_RUNTIME_DIR")
@@ -91,8 +132,22 @@ def runtime_dir() -> Path:
 
 
 def log_dir() -> Path:
-    """Return the log directory."""
-    return data_dir() / "logs"
+    """Return the log directory (inside state_dir).
+
+    Moved from data_dir/logs to state_dir/logs in 0.10.7 per XDG spec.
+    Auto-migrates on first access.
+    """
+    canonical = state_dir() / "logs"
+    if not canonical.exists():
+        old = data_dir() / "logs"
+        try:
+            if old.exists() and any(old.iterdir()):
+                canonical.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old), str(canonical))
+                logger.info("Migrated log dir: %s -> %s", old, canonical)
+        except OSError:
+            pass
+    return canonical
 
 
 # -- Derived file paths ------------------------------------------------------
@@ -109,10 +164,21 @@ def tui_config_file() -> Path:
 
 
 def identity_file() -> Path:
-    """Operator identity key file."""
-    if mode() == Mode.SYSTEM:
-        return config_dir() / "identity"
-    return config_dir() / "operator.key"
+    """Operator identity key file.
+
+    Unified to "identity" in 0.10.7 (was "operator.key" in user mode,
+    "identity" in system mode). Auto-migrates on first access.
+    """
+    canonical = config_dir() / "identity"
+    if not canonical.exists():
+        old = config_dir() / "operator.key"
+        try:
+            if old.exists():
+                shutil.move(str(old), str(canonical))
+                logger.info("Migrated identity file: %s -> %s", old, canonical)
+        except OSError:
+            pass
+    return canonical
 
 
 def nodes_db() -> Path:
@@ -136,8 +202,22 @@ def lxmf_storage() -> Path:
 
 
 def fleet_inventory() -> Path:
-    """Fleet inventory file."""
-    return config_dir() / "fleet-inventory.yaml"
+    """Fleet inventory file.
+
+    Moved from config_dir to data_dir in 0.10.7 (mutable runtime state,
+    not human-edited configuration). Auto-migrates on first access.
+    """
+    canonical = data_dir() / "fleet-inventory.yaml"
+    if not canonical.exists():
+        old = config_dir() / "fleet-inventory.yaml"
+        try:
+            if old.exists():
+                canonical.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old), str(canonical))
+                logger.info("Migrated fleet inventory: %s -> %s", old, canonical)
+        except OSError:
+            pass
+    return canonical
 
 
 def control_socket() -> Path:
@@ -153,7 +233,7 @@ def control_socket() -> Path:
 
 def ensure_directories() -> None:
     """Create all standard directories."""
-    for d in (config_dir(), data_dir(), cache_dir(), log_dir()):
+    for d in (config_dir(), data_dir(), state_dir(), log_dir()):
         d.mkdir(parents=True, exist_ok=True)
 
 

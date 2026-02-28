@@ -282,6 +282,28 @@ class FileTransferService:
                     0, self._active_transfers.get(peer_hash, 1) - 1
                 )
 
+    _STALE_OFFER_TTL: float = 300.0  # 5 minutes
+
+    async def _cleanup_stale_offers(self) -> None:
+        """Remove pending inbound offers older than _STALE_OFFER_TTL seconds."""
+        now = time.time()
+        async with self._lock:
+            stale = [
+                rid for rid, pt in self._pending_inbound.items()
+                if (now - pt.created_at) > self._STALE_OFFER_TTL
+            ]
+            for rid in stale:
+                pt = self._pending_inbound.pop(rid)
+                # Also decrement active transfer count for stale offers
+                peer = pt.peer_hash
+                self._active_transfers[peer] = max(
+                    0, self._active_transfers.get(peer, 1) - 1
+                )
+                logger.debug(
+                    f"Cleaned up stale FILE_OFFER from {peer[:8]}: "
+                    f"{pt.filename} (age {now - pt.created_at:.0f}s)"
+                )
+
     async def _handle_file_offer(
         self,
         message: "LXMFMessage",
@@ -292,6 +314,7 @@ class FileTransferService:
         Stores the offer as pending. Does NOT auto-accept — a future
         TUI/API surface can present accept/reject UI.
         """
+        await self._cleanup_stale_offers()
         source_hash = message.source_hash
 
         try:
@@ -405,6 +428,14 @@ class FileTransferService:
                 )
                 return
 
+            # Verify the accepting peer is the one we sent the offer to
+            if outbound.peer_hash != source_hash:
+                logger.warning(
+                    f"FILE_ACCEPT peer mismatch: expected {outbound.peer_hash[:8]}, "
+                    f"got {source_hash[:8]}. Ignoring."
+                )
+                return
+
         logger.info(
             f"FILE_ACCEPT received from {source_hash[:8]}, "
             f"initiating RNS.Resource transfer for {outbound.filename}"
@@ -464,11 +495,37 @@ class FileTransferService:
         """Handle incoming RNS link for file transfer data plane."""
         import RNS
 
-        link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
+        link.set_resource_strategy(RNS.Link.ACCEPT_APP)
         link.set_resource_started_callback(self._on_resource_started)
         link.set_resource_concluded_callback(self._on_resource_concluded)
+        link.set_resource_callback(self._resource_filter)
 
         logger.debug(f"File transfer link established from {link}")
+
+    def _resource_filter(self, resource: "RNS.Resource") -> bool:
+        """Filter incoming resources: only accept if a matching pending transfer exists.
+
+        Called from RNS thread when ACCEPT_APP strategy is set.
+        Returns True to accept, False to reject.
+        """
+        # Check advertised size against our max_size limit (C4 defense-in-depth)
+        try:
+            advertised_size = resource.total_size
+            if advertised_size is not None and advertised_size > self._max_size:
+                logger.warning(
+                    f"Rejecting resource: advertised size {advertised_size} "
+                    f"exceeds max {self._max_size}"
+                )
+                return False
+        except AttributeError:
+            pass  # total_size may not be available at filter time
+
+        # Accept only if we have any pending inbound transfers
+        if self._pending_inbound:
+            return True
+
+        logger.warning("Rejecting resource: no pending inbound transfers")
+        return False
 
     def _on_resource_started(self, resource: "RNS.Resource") -> None:
         """Handle incoming resource transfer start."""
@@ -495,9 +552,28 @@ class FileTransferService:
             logger.warning(f"File transfer resource failed: {resource.status}")
             return
 
+        # Validate resource size before reading data into memory
+        try:
+            resource_size = resource.total_size
+            if resource_size is not None and resource_size > self._max_size:
+                logger.warning(
+                    f"Rejecting completed resource: size {resource_size} "
+                    f"exceeds max {self._max_size}"
+                )
+                return
+        except AttributeError:
+            pass  # total_size may not be available
+
         data = resource.data.read()
         if data is None or len(data) < _REQUEST_ID_PREFIX_LEN:
             logger.warning("File transfer resource had no data or missing request_id prefix")
+            return
+
+        if len(data) > self._max_size + _REQUEST_ID_PREFIX_LEN:
+            logger.warning(
+                f"Rejecting resource data: {len(data)} bytes exceeds "
+                f"max {self._max_size} + prefix"
+            )
             return
 
         # Extract request_id prefix for matching

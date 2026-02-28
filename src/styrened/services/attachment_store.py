@@ -151,6 +151,7 @@ class AttachmentStore:
         peer_dir = self._peer_dir(peer_hash)
 
         target = peer_dir / f"{message_id}_{safe_name}"
+        self._require_contained(target)
 
         # Atomic write: write to temp, then rename
         tmp = target.with_suffix(target.suffix + ".tmp")
@@ -246,6 +247,9 @@ class AttachmentStore:
 
         Returns:
             Number of files deleted.
+
+        Raises:
+            ValueError: If the constructed peer directory escapes the store.
         """
         peer_dir = self._base_dir / peer_hash[:PEER_DIR_PREFIX_LEN]
         if not peer_dir.exists():
@@ -253,6 +257,8 @@ class AttachmentStore:
             peer_dir = self._base_dir / peer_hash[:8]
         if not peer_dir.exists():
             return 0
+
+        self._require_contained(peer_dir)
 
         count = 0
         for f in peer_dir.iterdir():

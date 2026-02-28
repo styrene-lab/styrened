@@ -756,8 +756,8 @@ def ensure_operator_identity(
     Checks for an existing identity in priority order:
     0. YubiKey derivation (if identity_config.provider == "yubikey")
     1. Config override (explicit operator_identity_path)
-    2. /etc/styrene/identity (OS-level, generated at NixOS activation)
-    3. ~/.config/styrene/operator.key (user-level)
+    2. /etc/styrene/identity (system-level, generated at NixOS activation)
+    3. ~/.config/styrene/identity (user-level)
     4. Detect from LXMF apps (NomadNet, Sideband, MeshChat)
     5. Generate new at user-level path
 

@@ -173,7 +173,14 @@ class IPCEventBackend(NotificationBackend):
             }
             payload.update(event.metadata)
 
-            # Send to targeted event type if mapped
+            # Send to targeted event type if mapped.
+            # Only "new_message", "delivery_status", "device_discovered", and
+            # "device_updated" have targeted IPC channels (EVENT_MESSAGE,
+            # EVENT_DEVICE).  All other event types (announce_sent,
+            # rpc_received, config_changed, etc.) are intentionally routed
+            # ONLY to the unified EVENT_ACTIVITY feed.  TUI/GUI consumers
+            # that need specific event types should subscribe to
+            # EVENT_ACTIVITY and filter by event_type string.
             targeted_type = self._EVENT_ROUTING.get(event.event_type)
             if targeted_type is not None:
                 await self._control_server.broadcast_event(targeted_type, payload)
