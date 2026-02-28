@@ -11,8 +11,11 @@ Three modes:
 
 import asyncio
 import logging
+import shutil
 import signal
+import sys
 from enum import Enum
+from pathlib import Path
 from pathlib import Path
 
 from styrened.ipc import get_default_socket_path
@@ -158,18 +161,36 @@ class DaemonManager:
             self._process = None
             self._running = False
 
+    @staticmethod
+    def _find_styrened_binary() -> str:
+        """Locate the styrened binary.
+
+        Search order:
+            1. Same directory as the running Python interpreter (venv/bin)
+            2. System PATH via shutil.which
+        """
+        # Check next to sys.executable (handles venv installs)
+        candidate = Path(sys.executable).parent / "styrened"
+        if candidate.is_file():
+            return str(candidate)
+        found = shutil.which("styrened")
+        if found:
+            return found
+        raise FileNotFoundError("styrened binary not found on PATH or in venv")
+
     async def _spawn(self) -> bool:
         """Spawn styrened as a subprocess and wait for the socket."""
         logger.info("Spawning styrened daemon...")
 
         try:
+            styrened_bin = self._find_styrened_binary()
             self._process = await asyncio.create_subprocess_exec(
-                "styrened", "daemon",
+                styrened_bin, "daemon",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError:
-            logger.error("styrened binary not found on PATH")
+            logger.error("styrened binary not found on PATH or in venv")
             return False
         except Exception as e:
             logger.error(f"Failed to spawn daemon: {e}")

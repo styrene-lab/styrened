@@ -64,15 +64,6 @@ def get_data_dir() -> Path:
     return paths.data_dir()
 
 
-def get_cache_dir() -> Path:
-    """Return the cache directory path.
-
-    .. deprecated::
-        Use ``paths.cache_dir()`` directly.
-    """
-    return paths.cache_dir()
-
-
 def get_log_dir() -> Path:
     """Return the log directory path.
 
@@ -523,8 +514,10 @@ def _overlay_core_identity(config: StyreneConfig) -> None:
 
         core = load_core_config()
         config.core.identity = core.identity
-    except Exception:
-        pass  # Core config missing or unparseable — keep defaults
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).debug("Failed to overlay core identity: %s", e)
 
 
 def load_config() -> StyreneConfig:

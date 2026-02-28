@@ -225,6 +225,9 @@ class ChatWidget(Widget, can_focus=True):
         # Attachment state
         self._pending_attachment: dict[str, Any] | None = None
 
+        # Tracks whether the status bar is showing the idle tier label
+        self._status_is_tier: bool = False
+
     @property
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
@@ -373,7 +376,12 @@ class ChatWidget(Widget, can_focus=True):
         """
         try:
             status = self.query_one("#chat-status", Static)
-            status.update(text or self._tier_label())
+            if text:
+                status.update(text)
+                self._status_is_tier = False
+            else:
+                status.update(self._tier_label())
+                self._status_is_tier = True
         except Exception:
             pass
 
@@ -389,10 +397,10 @@ class ChatWidget(Widget, can_focus=True):
         """Update the idle status bar when the security tier changes."""
         try:
             status = self.query_one("#chat-status", Static)
-            current = str(status.renderable)
-            # Only overwrite if status bar is empty or showing previous tier
-            if not current or current == self._tier_label():
+            # Only overwrite if status bar is empty or already showing a tier
+            if not str(status.renderable) or self._status_is_tier:
                 status.update(self._tier_label())
+                self._status_is_tier = True
         except Exception:
             pass
 
@@ -1231,7 +1239,9 @@ class ChatWidget(Widget, can_focus=True):
     def on_paste(self, event: Any) -> None:
         """Handle paste events — stage file if a path to an image is pasted.
 
-        Dispatches the file check to a worker to avoid blocking on every paste.
+        Only prevents the default paste behavior when the path actually
+        resolves to an image file.  Non-image paths (or non-existent
+        paths) let the paste propagate so the text is inserted normally.
         """
         text = getattr(event, "text", "")
         if not text:
@@ -1240,11 +1250,19 @@ class ChatWidget(Widget, can_focus=True):
         stripped = text.strip()
         # Quick heuristic: only try file staging if it looks like a path
         if stripped.startswith(("/", "~", ".")) or (len(stripped) > 2 and stripped[1] == ":"):
-            self.run_worker(
-                self._try_paste_as_file(stripped),
-                group="chat-paste",
-            )
-            event.prevent_default()
+            # Check synchronously whether the suffix is an image extension
+            # before preventing default.  This avoids eating non-image pastes.
+            from pathlib import Path as _P
+
+            path = _P(stripped).expanduser()
+            if path.suffix.lower() in (
+                ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+            ):
+                event.prevent_default()
+                self.run_worker(
+                    self._try_paste_as_file(stripped),
+                    group="chat-paste",
+                )
 
     async def _try_paste_as_file(self, path_str: str) -> None:
         """Check if pasted text is a path to an image and stage it."""

@@ -233,7 +233,7 @@ This configuration is minimal and can be customized later.
                 f"Configuration created at {config_path}", success=True
             )
             # Schedule dismissal with result=True
-            self.set_timer(1.5, lambda: self.dismiss(True))
+            self.dismiss(True)
 
         except Exception as e:
             self._show_status(f"Failed to create config: {e}", success=False)

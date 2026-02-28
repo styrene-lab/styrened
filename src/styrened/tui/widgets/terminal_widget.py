@@ -319,7 +319,7 @@ class TerminalWidget(Widget, can_focus=True):
         if self._connected:
             self.run_worker(self._do_disconnect())
         else:
-            self.run_worker(self._do_connect())
+            self._do_connect()
 
     @work(exclusive=True)
     async def _do_connect(self) -> None:

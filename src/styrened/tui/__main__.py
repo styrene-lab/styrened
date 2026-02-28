@@ -143,10 +143,14 @@ Examples:
     if args.dashboard:
         import logging
 
+        from styrened import paths
+
+        log_file = paths.log_dir() / "dashboard.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
             level=logging.DEBUG,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            filename="/tmp/styrene-dashboard.log",
+            filename=str(log_file),
             filemode="w",
         )
 
@@ -186,10 +190,15 @@ Examples:
     else:
         # Setup logging for TUI mode
         import logging
+
+        from styrened import paths
+
+        log_file = paths.log_dir() / "tui.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
             level=logging.DEBUG,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            filename="/tmp/styrene.log",
+            filename=str(log_file),
             filemode="w",
         )
 

@@ -79,20 +79,32 @@ class SettingsScreen(Screen[None]):
         bridge = self._ipc_bridge
         if bridge is not None:
             # IPC mode: push to daemon (persists core-config + re-announces)
-            await bridge.set_identity(
-                display_name=display_name,
-                icon=icon,
-                short_name=short_name if short_name else "",
-            )
+            try:
+                await bridge.set_identity(
+                    display_name=display_name,
+                    icon=icon,
+                    short_name=short_name if short_name else "",
+                )
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).error(
+                    "Failed to save identity via IPC: %s", e
+                )
+                self.notify(
+                    f"Identity save failed (IPC): {e}",
+                    severity="warning",
+                )
+                # Continue saving TUI-local settings
         else:
             # Local mode: update core config directly
             try:
                 from styrened.services.config import load_core_config, save_core_config
 
                 core_cfg = load_core_config()
-                if display_name:
+                if display_name is not None:
                     core_cfg.identity.display_name = display_name
-                if icon:
+                if icon is not None:
                     core_cfg.identity.icon = icon
                 core_cfg.identity.short_name = (
                     short_name if short_name else None
@@ -476,6 +488,10 @@ class SettingsScreen(Screen[None]):
 
             if identity_display_name and len(identity_display_name) > 100:
                 self._show_error("Display name exceeds 100 characters")
+                return
+
+            if identity_icon and len(identity_icon) > 4:
+                self._show_error("Icon must be 4 characters or fewer")
                 return
 
             if identity_short_name and not validate_short_name(identity_short_name):

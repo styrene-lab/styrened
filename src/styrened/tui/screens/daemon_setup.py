@@ -169,7 +169,7 @@ class DaemonSetupScreen(Screen[bool]):
             # Verify daemon is reachable via IPC
             if await self._verify_ipc():
                 self._show_status("Service installed and daemon running")
-                self.set_timer(1.0, lambda: self.dismiss(True))
+                self.dismiss(True)
             else:
                 self._show_status(
                     "Service installed but daemon not yet reachable. "
@@ -193,7 +193,7 @@ class DaemonSetupScreen(Screen[bool]):
                 # Store reference so app can use it
                 self.app._daemon_manager_from_setup = manager  # type: ignore[attr-defined]
                 self._show_status("Daemon started")
-                self.set_timer(1.0, lambda: self.dismiss(True))
+                self.dismiss(True)
             else:
                 self._show_status(
                     "Failed to start daemon — check logs for details",
