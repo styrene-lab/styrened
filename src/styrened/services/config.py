@@ -19,6 +19,7 @@ from styrened.models.config import (
     CoreConfig,
     DeploymentMode,
     NotificationsConfig,
+    PeerConfig,
     PQCConfig,
     Profile,
     PropagationNodeConfig,
@@ -108,6 +109,12 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
     config = CoreConfig()
     config.profile = profile
     config.reticulum.mode = DeploymentMode.STANDALONE
+
+    # Default community hub — provides internet-accessible mesh connectivity
+    # for new installations. Can be removed or overridden in config.yaml.
+    config.reticulum.interfaces.peers = [
+        PeerConfig(host="rns.styrene.io", port=4242, name="Styrene Community Hub"),
+    ]
 
     if profile == Profile.OPERATOR:
         config.rpc.enabled = True

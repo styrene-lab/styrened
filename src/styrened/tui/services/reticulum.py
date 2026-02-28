@@ -365,6 +365,14 @@ def _generate_config_content(interface_type: str) -> str:
   [[Default Interface]]
     type = AutoInterface
     enabled = Yes
+
+  # Styrene Community Hub - Public transport node
+  # Provides access to the Styrene mesh network over the internet
+  [[Styrene Community Hub]]
+    type = TCPClientInterface
+    enabled = Yes
+    target_host = rns.styrene.io
+    target_port = 4242
 """
 
     elif interface_type == "tcp":
