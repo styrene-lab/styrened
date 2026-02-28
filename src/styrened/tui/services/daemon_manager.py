@@ -161,6 +161,18 @@ class DaemonManager:
             self._process = None
             self._running = False
 
+    async def restart(self) -> bool:
+        """Restart the daemon (shutdown then start).
+
+        Returns:
+            True if daemon restarted successfully, False otherwise.
+        """
+        logger.info("Restarting daemon...")
+        await self.shutdown()
+        # Brief pause for socket cleanup
+        await asyncio.sleep(0.5)
+        return await self.start()
+
     @staticmethod
     def _find_styrened_binary() -> str:
         """Locate the styrened binary.
