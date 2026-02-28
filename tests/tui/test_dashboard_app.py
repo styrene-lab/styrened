@@ -30,6 +30,7 @@ class TestDashboardFlag:
                 config=None,
                 remote=None,
                 dashboard=True,
+                reset=False,
             )
             mock_parse.return_value = mock_args
 
