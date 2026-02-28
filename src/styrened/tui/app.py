@@ -71,6 +71,7 @@ class StyreneApp(App[None]):
         Binding("b", "push_screen('contacts')", "Contacts", show=True),
         # Screen shortcuts (can be overridden by screens)
         Binding("p", "push_screen('provision')", "Provision", show=True),
+        Binding("ctrl+r", "restart_daemon", "Restart Daemon", show=False),
     ]
 
     SCREENS: ClassVar[dict[str, type[Screen[Any]]]] = {  # type: ignore[assignment]
@@ -471,6 +472,40 @@ class StyreneApp(App[None]):
     def action_toggle_help(self) -> None:
         """Toggle help overlay."""
         self.bell()  # Placeholder until help screen implemented
+
+    @work(exclusive=True, group="daemon_restart")
+    async def action_restart_daemon(self) -> None:
+        """Restart the daemon process via DaemonManager or system service."""
+        self.notify("Restarting daemon...", severity="information", timeout=3)
+
+        manager = getattr(self._lifecycle, "_daemon_manager", None)
+        if manager is not None:
+            success = await manager.restart()
+            if success:
+                self.notify("Daemon restarted", severity="information", timeout=5)
+            else:
+                self.notify("Restart failed — try: pkill -f 'styrened daemon' && styrened daemon &",
+                            severity="error", timeout=10)
+        else:
+            # No managed daemon — try killing and respawning
+            import subprocess
+            try:
+                subprocess.run(["pkill", "-f", "styrened daemon"], timeout=5)
+            except Exception:
+                pass
+
+            import asyncio
+            await asyncio.sleep(1)
+
+            from styrened.tui.services.daemon_manager import DaemonManager
+            manager = DaemonManager()
+            started = await manager.start()
+            if started:
+                self._lifecycle._daemon_manager = manager
+                self.notify("Daemon restarted", severity="information", timeout=5)
+            else:
+                self.notify("Could not restart daemon — run: styrened daemon &",
+                            severity="error", timeout=10)
 
     def watch_theme(self, old_theme: str, new_theme: str) -> None:
         """React to theme changes - refresh all themed components."""

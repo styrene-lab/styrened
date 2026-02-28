@@ -395,6 +395,21 @@ class SettingsScreen(Screen[None]):
                 title="DATA MANAGEMENT",
             )
 
+            # Daemon Management
+            yield HighlightedPanel(
+                Horizontal(
+                    Button("Restart Daemon", id="btn-restart-daemon", classes="setting-btn"),
+                    Button("Install as Service", id="btn-install-service", classes="setting-btn"),
+                    classes="setting-row",
+                ),
+                Static(
+                    "[dim]Restart applies after upgrades. "
+                    "Install as Service creates a launchd/systemd unit for boot persistence.[/dim]",
+                    classes="setting-description",
+                ),
+                title="DAEMON",
+            )
+
             # Action buttons
             with Horizontal(id="settings-actions"):
                 yield Button("Save", variant="primary", id="save-btn")
@@ -414,6 +429,17 @@ class SettingsScreen(Screen[None]):
     def action_cancel(self) -> None:
         """Cancel and return to previous screen."""
         self.dismiss()
+
+    @on(Button.Pressed, "#btn-restart-daemon")
+    def on_restart_daemon(self) -> None:
+        """Trigger daemon restart via app action."""
+        self.app.action_restart_daemon()
+
+    @on(Button.Pressed, "#btn-install-service")
+    def on_install_service_from_settings(self) -> None:
+        """Open daemon setup screen for service installation."""
+        from styrened.tui.screens.daemon_setup import DaemonSetupScreen
+        self.app.push_screen(DaemonSetupScreen())
 
     @on(Select.Changed, "#hub_select")
     def on_hub_select_changed(self, event: Select.Changed) -> None:
