@@ -94,6 +94,13 @@ Examples:
         help="Custom config file path",
     )
 
+    # Reset
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Reset all config to defaults, restart daemon, and launch TUI",
+    )
+
     # Remote mode
     parser.add_argument(
         "--remote",
@@ -138,6 +145,56 @@ Examples:
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+
+    # Reset mode — nuke configs, kill daemon, regenerate defaults
+    if args.reset:
+        print("This will reset ALL styrene and Reticulum config to defaults.")
+        print("Existing configs will be backed up as .bak files.")
+        confirm = input("Continue? [y/N] ").strip().lower()
+        if confirm not in ("y", "yes"):
+            print("Aborted.")
+            sys.exit(0)
+
+        import shutil
+        import subprocess
+        from pathlib import Path
+
+        from styrened import paths
+        from styrened.services.config import get_default_core_config, save_core_config
+        from styrened.services.reticulum import generate_rns_config
+
+        config_file = paths.config_file()
+        rns_config = Path.home() / ".reticulum" / "config"
+
+        # Back up existing configs
+        if config_file.exists():
+            bak = config_file.with_suffix(".yaml.bak")
+            shutil.copy2(config_file, bak)
+            print(f"Backed up {config_file} → {bak}")
+
+        if rns_config.exists():
+            bak = rns_config.with_suffix(".bak")
+            shutil.copy2(rns_config, bak)
+            print(f"Backed up {rns_config} → {bak}")
+
+        # Regenerate from defaults
+        default_config = get_default_core_config()
+        save_core_config(default_config)
+        print(f"Regenerated {config_file}")
+
+        rns_content = generate_rns_config(default_config)
+        rns_config.parent.mkdir(parents=True, exist_ok=True)
+        rns_config.write_text(rns_content)
+        print(f"Regenerated {rns_config}")
+
+        # Kill existing daemon
+        try:
+            subprocess.run(["pkill", "-f", "styrened daemon"], timeout=5)
+            print("Stopped running daemon")
+        except Exception:
+            pass
+
+        print("Config reset complete. Launching TUI...\n")
 
     # Dashboard mode - lightweight local status display
     if args.dashboard:

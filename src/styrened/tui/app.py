@@ -469,6 +469,15 @@ class StyreneApp(App[None]):
         # Proceed to dashboard
         self.push_screen("dashboard")
 
+    def action_toggle_dark(self) -> None:
+        """Override Textual's built-in dark/light toggle.
+
+        Styrene only supports dark mode. Prevent accidental theme switches
+        that would replace our custom theme with Textual's defaults.
+        """
+        if self.theme != STYRENE_THEME_KEY:
+            self.theme = STYRENE_THEME_KEY
+
     def action_toggle_help(self) -> None:
         """Toggle help overlay."""
         self.bell()  # Placeholder until help screen implemented
