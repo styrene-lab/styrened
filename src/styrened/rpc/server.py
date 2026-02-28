@@ -423,12 +423,18 @@ class RPCServer:
         # Dispatch to handler (handlers use asyncio.create_task internally)
         try:
             handler(source_hash, envelope)
-            # Emit activity event for RPC commands
+            # Emit activity event for RPC commands.
+            # Redact sensitive command names (EXEC, CONFIG_UPDATE, SELF_UPDATE)
+            # to avoid leaking operational details to the activity feed.
             if self._daemon is not None and hasattr(self._daemon, "_emit_activity_event"):
+                if msg_type in DANGEROUS_RPC_COMMANDS:
+                    redacted_category = "rpc_privileged"
+                else:
+                    redacted_category = "rpc_query"
                 self._daemon._emit_activity_event(
                     "rpc_received",
                     peer_hash=source_hash,
-                    metadata={"command": msg_type.name},
+                    metadata={"category": redacted_category},
                 )
         except Exception as e:
             logger.error(f"Error handling RPC request: {e}")
