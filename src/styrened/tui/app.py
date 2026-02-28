@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy.engine import Engine
+from textual import work
 from textual.app import App, ComposeResult
 
 if TYPE_CHECKING:
@@ -361,10 +362,12 @@ class StyreneApp(App[None]):
         """Mount handler - check daemon, initialize services, handle first-run.
 
         Flow:
-            1. Check if daemon is reachable via IPC ping
-            2. If no daemon → DaemonSetupScreen (install/start/skip)
-            3. If daemon OK → initialize services → FirstRunWizard or Dashboard
+            1. Check for updates (background, non-blocking)
+            2. Check if daemon is reachable via IPC ping
+            3. If no daemon → DaemonSetupScreen (install/start/skip)
+            4. If daemon OK → initialize services → FirstRunWizard or Dashboard
         """
+        self._check_for_updates()
         daemon_ok = await self._check_daemon()
         if not daemon_ok:
             self.log.info("No daemon detected - launching setup screen")
@@ -397,6 +400,23 @@ class StyreneApp(App[None]):
                 await client.disconnect()
         except Exception:
             return False
+
+    @work(thread=True, exclusive=True, group="update_check")
+    def _check_for_updates(self) -> None:
+        """Check PyPI for a newer version (runs in background thread)."""
+        from styrened import __version__
+        from styrened.tui.services.update_checker import check_for_update
+
+        result = check_for_update(__version__)
+        if result and result.update_available:
+            self.call_from_thread(
+                self.notify,
+                f"Update available: v{result.latest} (current: v{result.current})\n"
+                f"Run: [bold]pipx upgrade styrene[/bold]",
+                title="🔄 Update Available",
+                severity="information",
+                timeout=15,
+            )
 
     async def _on_daemon_setup_complete(self, result: bool | None) -> None:
         """Handle daemon setup screen result.
