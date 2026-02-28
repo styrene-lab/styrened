@@ -501,8 +501,9 @@ class StyreneApp(App[None]):
     async def action_announce(self) -> None:
         """Force an immediate announce to the mesh."""
         try:
-            if hasattr(self, "_ipc_bridge") and self._ipc_bridge:
-                await self._ipc_bridge.announce()
+            bridge = getattr(self._lifecycle, "ipc_bridge", None)
+            if bridge:
+                await bridge.announce()
                 self.notify("Announce sent", severity="information", timeout=3)
             else:
                 self.notify("No IPC connection", severity="warning", timeout=3)
