@@ -72,6 +72,7 @@ class StyreneApp(App[None]):
         # Screen shortcuts (can be overridden by screens)
         Binding("p", "push_screen('provision')", "Provision", show=True),
         Binding("ctrl+r", "restart_daemon", "Restart Daemon", show=False),
+        Binding("a", "announce", "Announce", show=True),
     ]
 
     SCREENS: ClassVar[dict[str, type[Screen[Any]]]] = {  # type: ignore[assignment]
@@ -495,6 +496,18 @@ class StyreneApp(App[None]):
     def action_toggle_help(self) -> None:
         """Toggle help overlay."""
         self.bell()  # Placeholder until help screen implemented
+
+    @work(exclusive=True, group="announce")
+    async def action_announce(self) -> None:
+        """Force an immediate announce to the mesh."""
+        try:
+            if hasattr(self, "_ipc_bridge") and self._ipc_bridge:
+                await self._ipc_bridge.announce()
+                self.notify("Announce sent", severity="information", timeout=3)
+            else:
+                self.notify("No IPC connection", severity="warning", timeout=3)
+        except Exception as e:
+            self.notify(f"Announce failed: {e}", severity="error", timeout=5)
 
     @work(exclusive=True, group="daemon_restart")
     async def action_restart_daemon(self) -> None:
