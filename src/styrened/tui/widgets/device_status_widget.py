@@ -66,11 +66,11 @@ class DeviceStatusWidget(Static):
         # OS line: combine os_id + os_version + arch
         os_parts: list[str] = []
         if s.os_id:
-            os_parts.append(s.os_id)
+            os_parts.append(str(s.os_id))
         if s.os_version:
-            os_parts.append(s.os_version)
+            os_parts.append(str(s.os_version))
         if s.arch:
-            os_parts.append(f"({s.arch})")
+            os_parts.append(f"({s.arch!s})")
         if os_parts:
             yield Static(f"  [bold]OS:[/]        {' '.join(os_parts)}", classes="status-field")
 

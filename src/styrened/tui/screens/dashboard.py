@@ -29,7 +29,7 @@ class MeshDeviceTable(DataTable[str]):
     """Mesh device listing table - shows discovered devices."""
 
     def on_mount(self) -> None:
-        self.add_columns("NAME", "TYPE", "IDENTITY", "STATUS", "SEC", "UNREAD", "LAST ANNOUNCE")
+        self.add_columns("NAME", "TYPE", "IDENTITY", "STATUS", "UNREAD", "LAST ANNOUNCE")
         self.cursor_type = "row"
         self._load_data()
 
@@ -129,7 +129,6 @@ class MeshDeviceTable(DataTable[str]):
                 f"[{cascade.dim}]No Styrene nodes discovered[/]",
                 "-",
                 "-",
-                "-",
                 key="-",
             )
             return
@@ -183,21 +182,11 @@ class MeshDeviceTable(DataTable[str]):
             if device.announce_count > 1:
                 last_seen_text += f" ({device.announce_count})"
 
-            # Security tier (PQC status)
-            sec_tier = getattr(device, "_pqc_tier", None) or "---"
-            if sec_tier == "pqc_hybrid":
-                sec_text = f"[{cascade.bright}]PQC[/]"
-            elif sec_tier == "rns_only":
-                sec_text = f"[{cascade.medium}]RNS[/]"
-            else:
-                sec_text = f"[{cascade.dim}]---[/]"
-
             self.add_row(
                 name_text,
                 type_text,
                 identity_text,
                 status_text,
-                sec_text,
                 unread_text,
                 last_seen_text,
                 key=device.identity,

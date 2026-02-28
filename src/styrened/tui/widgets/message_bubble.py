@@ -136,6 +136,18 @@ class MessageBubble(Widget):
             self.add_class("--has-attachment")
 
     @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge from app lifecycle.
+
+        Encapsulates the internal app structure access so callers
+        don't reach through ``app._lifecycle`` directly.
+        """
+        try:
+            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
+    @property
     def _is_image_attachment(self) -> bool:
         """Whether this bubble has an image attachment to render inline."""
         return (
@@ -169,12 +181,7 @@ class MessageBubble(Widget):
         preview.filename = self.attachment_name or ""
         preview.loading = True
 
-        try:
-            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
-        except Exception:
-            self._collapse_to_text_indicator()
-            return
-
+        bridge = self._ipc_bridge
         if bridge is None:
             self._collapse_to_text_indicator()
             return

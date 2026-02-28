@@ -127,6 +127,9 @@ class ImagePreview(Widget):
             except Exception:
                 pass
 
+    # Maximum pixel count for untrusted images (2000x2000)
+    _MAX_IMAGE_PIXELS = 4_000_000
+
     def _render_image(self, data: bytes) -> None:
         """Decode and display image data."""
         self._clear_image_content()
@@ -139,7 +142,12 @@ class ImagePreview(Widget):
 
         if _HAS_IMAGE_WIDGET and _HAS_PILLOW:
             try:
-                pil_img = PILImage.open(io.BytesIO(data))
+                saved_max = PILImage.MAX_IMAGE_PIXELS
+                PILImage.MAX_IMAGE_PIXELS = self._MAX_IMAGE_PIXELS
+                try:
+                    pil_img = PILImage.open(io.BytesIO(data))
+                finally:
+                    PILImage.MAX_IMAGE_PIXELS = saved_max
                 img_widget = TextualImage(pil_img)
                 img_widget.id = "image-render"
 
@@ -179,7 +187,12 @@ class ImagePreview(Widget):
 
         if _HAS_PILLOW:
             try:
-                pil_img = PILImage.open(io.BytesIO(data))
+                saved_max = PILImage.MAX_IMAGE_PIXELS
+                PILImage.MAX_IMAGE_PIXELS = self._MAX_IMAGE_PIXELS
+                try:
+                    pil_img = PILImage.open(io.BytesIO(data))
+                finally:
+                    PILImage.MAX_IMAGE_PIXELS = saved_max
                 w, h = pil_img.size
                 lines.append(f"Dimensions: {w}x{h}")
                 lines.append(f"Format: {pil_img.format or 'unknown'}")
