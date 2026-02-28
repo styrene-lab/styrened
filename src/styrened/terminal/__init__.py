@@ -40,7 +40,6 @@ from styrened.terminal.messages import (
     Error,
     Noop,
     StreamData,
-    TerminalMessage,
     TerminalMessageType,
     VersionInfo,
     WindowSize,
@@ -48,6 +47,9 @@ from styrened.terminal.messages import (
     register_message_types,
     serialize_message,
 )
+
+# Legacy alias — TerminalMessage was the old base class, now MessageBase
+from RNS.Channel import MessageBase as TerminalMessage
 from styrened.terminal.service import TerminalService, TerminalSession
 
 __all__ = [

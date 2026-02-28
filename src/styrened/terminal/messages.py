@@ -13,6 +13,9 @@ Wire Format:
     Messages are serialized with msgpack and sent via RNS Channel API.
     Each message type is registered with RNS.Channel.register_message_type().
 
+    For backward compatibility with v1.0 raw-packet mode, serialize_message()
+    and deserialize_message() provide the [type:1][packed_data:N] wire format.
+
 Usage:
     from styrened.terminal.messages import register_message_types, StreamData
 
@@ -24,11 +27,11 @@ Usage:
     channel.send(msg)
 """
 
-from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, cast
 
 import msgpack
+from RNS.Channel import MessageBase
 
 if TYPE_CHECKING:
     import RNS
@@ -45,43 +48,27 @@ class TerminalMessageType(IntEnum):
     ERROR = 5  # Error message
 
 
-class TerminalMessage:
-    """Base class for terminal data plane messages.
-
-    Subclasses must define:
-        MSGTYPE: TerminalMessageType value
-        pack(): Return msgpack-serializable representation
-        unpack(data): Class method to reconstruct from packed data
-    """
-
-    MSGTYPE: TerminalMessageType
-
-    def pack(self) -> bytes:
-        """Serialize message for transmission."""
-        raise NotImplementedError
-
-    @classmethod
-    def unpack(cls, data: bytes) -> "TerminalMessage":
-        """Deserialize message from received data."""
-        raise NotImplementedError
+# Legacy alias for backward compatibility
+TerminalMessage = MessageBase
 
 
-@dataclass
-class Noop(TerminalMessage):
+class Noop(MessageBase):
     """Keep-alive message for Link health monitoring."""
 
     MSGTYPE = TerminalMessageType.NOOP
 
+    def __init__(self) -> None:
+        pass
+
     def pack(self) -> bytes:
         return cast(bytes, msgpack.packb({}))
 
-    @classmethod
-    def unpack(cls, data: bytes) -> "Noop":
-        return cls()
+    def unpack(self, raw: bytes) -> None:  # type: ignore[override]
+        # Nothing to unpack for keep-alive
+        pass
 
 
-@dataclass
-class StreamData(TerminalMessage):
+class StreamData(MessageBase):
     """Terminal I/O data (stdin/stdout/stderr).
 
     Attributes:
@@ -97,9 +84,15 @@ class StreamData(TerminalMessage):
     STDOUT = 1
     STDERR = 2
 
-    stream: int
-    data: bytes
-    eof: bool = False
+    def __init__(
+        self,
+        stream: int = 0,
+        data: bytes = b"",
+        eof: bool = False,
+    ) -> None:
+        self.stream = stream
+        self.data = data
+        self.eof = eof
 
     def pack(self) -> bytes:
         return cast(
@@ -113,14 +106,11 @@ class StreamData(TerminalMessage):
             ),
         )
 
-    @classmethod
-    def unpack(cls, data: bytes) -> "StreamData":
-        d = msgpack.unpackb(data, raw=True)
-        return cls(
-            stream=d[b"s"] if b"s" in d else d["s"],
-            data=d[b"d"] if b"d" in d else d["d"],
-            eof=d.get(b"e", d.get("e", False)),
-        )
+    def unpack(self, raw: bytes) -> None:  # type: ignore[override]
+        d = msgpack.unpackb(raw, raw=True)
+        self.stream = d[b"s"] if b"s" in d else d["s"]
+        self.data = d[b"d"] if b"d" in d else d["d"]
+        self.eof = d.get(b"e", d.get("e", False))
 
     @property
     def is_stdin(self) -> bool:
@@ -135,8 +125,7 @@ class StreamData(TerminalMessage):
         return self.stream == self.STDERR
 
 
-@dataclass
-class WindowSize(TerminalMessage):
+class WindowSize(MessageBase):
     """Terminal window size change notification.
 
     Sent when client terminal is resized. Server uses this to
@@ -151,10 +140,17 @@ class WindowSize(TerminalMessage):
 
     MSGTYPE = TerminalMessageType.WINDOW_SIZE
 
-    rows: int
-    cols: int
-    xpixel: int = 0
-    ypixel: int = 0
+    def __init__(
+        self,
+        rows: int = 0,
+        cols: int = 0,
+        xpixel: int = 0,
+        ypixel: int = 0,
+    ) -> None:
+        self.rows = rows
+        self.cols = cols
+        self.xpixel = xpixel
+        self.ypixel = ypixel
 
     def pack(self) -> bytes:
         return cast(
@@ -169,19 +165,15 @@ class WindowSize(TerminalMessage):
             ),
         )
 
-    @classmethod
-    def unpack(cls, data: bytes) -> "WindowSize":
-        d = msgpack.unpackb(data, raw=True)
-        return cls(
-            rows=d[b"r"] if b"r" in d else d["r"],
-            cols=d[b"c"] if b"c" in d else d["c"],
-            xpixel=d.get(b"x", d.get("x", 0)),
-            ypixel=d.get(b"y", d.get("y", 0)),
-        )
+    def unpack(self, raw: bytes) -> None:  # type: ignore[override]
+        d = msgpack.unpackb(raw, raw=True)
+        self.rows = d[b"r"] if b"r" in d else d["r"]
+        self.cols = d[b"c"] if b"c" in d else d["c"]
+        self.xpixel = d.get(b"x", d.get("x", 0))
+        self.ypixel = d.get(b"y", d.get("y", 0))
 
 
-@dataclass
-class CommandExited(TerminalMessage):
+class CommandExited(MessageBase):
     """Process termination notification.
 
     Sent when the shell/command process exits.
@@ -193,8 +185,13 @@ class CommandExited(TerminalMessage):
 
     MSGTYPE = TerminalMessageType.COMMAND_EXITED
 
-    return_code: int
-    signal: int | None = None
+    def __init__(
+        self,
+        return_code: int = 0,
+        signal: int | None = None,
+    ) -> None:
+        self.return_code = return_code
+        self.signal = signal
 
     def pack(self) -> bytes:
         d: dict[str, Any] = {"rc": self.return_code}
@@ -202,17 +199,13 @@ class CommandExited(TerminalMessage):
             d["sig"] = self.signal
         return cast(bytes, msgpack.packb(d))
 
-    @classmethod
-    def unpack(cls, data: bytes) -> "CommandExited":
-        d = msgpack.unpackb(data, raw=True)
-        return cls(
-            return_code=d[b"rc"] if b"rc" in d else d["rc"],
-            signal=d.get(b"sig", d.get("sig")),
-        )
+    def unpack(self, raw: bytes) -> None:  # type: ignore[override]
+        d = msgpack.unpackb(raw, raw=True)
+        self.return_code = d[b"rc"] if b"rc" in d else d["rc"]
+        self.signal = d.get(b"sig", d.get("sig"))
 
 
-@dataclass
-class VersionInfo(TerminalMessage):
+class VersionInfo(MessageBase):
     """Protocol version handshake.
 
     Exchanged at Link establishment to ensure compatibility.
@@ -224,8 +217,13 @@ class VersionInfo(TerminalMessage):
 
     MSGTYPE = TerminalMessageType.VERSION_INFO
 
-    version: str = "1.0"
-    software: str = "styrened"
+    def __init__(
+        self,
+        version: str = "1.0",
+        software: str = "styrened",
+    ) -> None:
+        self.version = version
+        self.software = software
 
     def pack(self) -> bytes:
         return cast(
@@ -238,21 +236,15 @@ class VersionInfo(TerminalMessage):
             ),
         )
 
-    @classmethod
-    def unpack(cls, data: bytes) -> "VersionInfo":
-        d = msgpack.unpackb(data, raw=True)
-        return cls(
-            version=(d[b"v"] if b"v" in d else d["v"]).decode()
-            if isinstance(d.get(b"v", d.get("v")), bytes)
-            else d.get(b"v", d.get("v")),
-            software=(d[b"sw"] if b"sw" in d else d["sw"]).decode()
-            if isinstance(d.get(b"sw", d.get("sw")), bytes)
-            else d.get(b"sw", d.get("sw")),
-        )
+    def unpack(self, raw: bytes) -> None:  # type: ignore[override]
+        d = msgpack.unpackb(raw, raw=True)
+        v = d[b"v"] if b"v" in d else d["v"]
+        sw = d[b"sw"] if b"sw" in d else d["sw"]
+        self.version = v.decode() if isinstance(v, bytes) else v
+        self.software = sw.decode() if isinstance(sw, bytes) else sw
 
 
-@dataclass
-class Error(TerminalMessage):
+class Error(MessageBase):
     """Error message.
 
     Attributes:
@@ -263,9 +255,15 @@ class Error(TerminalMessage):
 
     MSGTYPE = TerminalMessageType.ERROR
 
-    message: str
-    code: int = 1
-    fatal: bool = False
+    def __init__(
+        self,
+        message: str = "",
+        code: int = 1,
+        fatal: bool = False,
+    ) -> None:
+        self.message = message
+        self.code = code
+        self.fatal = fatal
 
     def pack(self) -> bytes:
         return cast(
@@ -279,21 +277,18 @@ class Error(TerminalMessage):
             ),
         )
 
-    @classmethod
-    def unpack(cls, data: bytes) -> "Error":
-        d = msgpack.unpackb(data, raw=True)
+    def unpack(self, raw: bytes) -> None:  # type: ignore[override]
+        d = msgpack.unpackb(raw, raw=True)
         msg = d[b"m"] if b"m" in d else d["m"]
         if isinstance(msg, bytes):
             msg = msg.decode()
-        return cls(
-            message=msg,
-            code=d.get(b"c", d.get("c", 1)),
-            fatal=d.get(b"f", d.get("f", False)),
-        )
+        self.message = msg
+        self.code = d.get(b"c", d.get("c", 1))
+        self.fatal = d.get(b"f", d.get("f", False))
 
 
 # Message type registry for RNS Channel integration
-MESSAGE_TYPES: dict[TerminalMessageType, type[TerminalMessage]] = {
+MESSAGE_TYPES: dict[TerminalMessageType, type[MessageBase]] = {
     TerminalMessageType.NOOP: Noop,
     TerminalMessageType.STREAM_DATA: StreamData,
     TerminalMessageType.WINDOW_SIZE: WindowSize,
@@ -312,14 +307,12 @@ def register_message_types(channel: "RNS.Channel.Channel") -> None:
     Args:
         channel: RNS Channel to register message types with
     """
-    # RNS Channel uses a different registration pattern than raw messages
-    # For now, we'll handle serialization ourselves and use raw packets
-    # TODO: Integrate with RNS.MessageBase when available
-    pass
+    for msg_class in MESSAGE_TYPES.values():
+        channel.register_message_type(msg_class)
 
 
-def serialize_message(msg: TerminalMessage) -> bytes:
-    """Serialize a terminal message for transmission.
+def serialize_message(msg: MessageBase) -> bytes:
+    """Serialize a terminal message for transmission (v1.0 raw packet format).
 
     Args:
         msg: Message to serialize
@@ -330,8 +323,8 @@ def serialize_message(msg: TerminalMessage) -> bytes:
     return bytes([msg.MSGTYPE]) + msg.pack()
 
 
-def deserialize_message(data: bytes) -> TerminalMessage:
-    """Deserialize a terminal message from wire format.
+def deserialize_message(data: bytes) -> MessageBase:
+    """Deserialize a terminal message from wire format (v1.0 raw packet format).
 
     Args:
         data: Wire format bytes
@@ -351,4 +344,6 @@ def deserialize_message(data: bytes) -> TerminalMessage:
     if msg_class is None:
         raise ValueError(f"Unknown message type: {msg_type}")
 
-    return msg_class.unpack(data[1:])
+    instance = msg_class()
+    instance.unpack(data[1:])
+    return instance

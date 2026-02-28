@@ -48,6 +48,7 @@ from styrened.terminal.messages import (
     VersionInfo,
     WindowSize,
     deserialize_message,
+    register_message_types,
     serialize_message,
 )
 
@@ -91,6 +92,7 @@ class TerminalClientSession:
     identity_hash: str | None = None  # Identity hash for RNS.Identity.recall()
 
     link: "RNS.Link | None" = None
+    channel: "RNS.Channel.Channel | None" = None
     remote_version: VersionInfo | None = None
     exit_code: int | None = None
 
@@ -257,8 +259,8 @@ class TerminalClientSession:
             logger.error(f"Failed to send session_id: {e}", exc_info=True)
             return
 
-        # Send version info
-        version_msg = VersionInfo(version="1.0", software="styrene-client")
+        # Send version info (advertise v2.0 Channel support)
+        version_msg = VersionInfo(version="2.0", software="styrene-client")
         version_data = serialize_message(version_msg)
         logger.info(
             f"Sending version info ({len(version_data)} bytes): {version_data[:16].hex()}..."
@@ -321,6 +323,22 @@ class TerminalClientSession:
             elif isinstance(msg, VersionInfo):
                 self.remote_version = msg
                 logger.debug(f"Server version: {msg.version} ({msg.software})")
+
+                # Set up Channel if server supports v2.0
+                if msg.version >= "2.0" and self.link:
+                    try:
+                        channel = self.link.get_channel()
+                        register_message_types(channel)
+                        channel.add_message_handler(self._on_channel_message)
+                        self.channel = channel
+                        logger.info(
+                            f"Channel established (mdu={channel.mdu}, "
+                            f"server_version={msg.version})"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Channel setup failed, using raw packets: {e}")
+                        self.channel = None
+
                 # Mark as connected after version exchange (thread-safe)
                 self._thread_safe_event_set(self._connected)
 
@@ -335,8 +353,52 @@ class TerminalClientSession:
         except Exception as e:
             logger.error(f"Failed to handle terminal packet: {e}")
 
+    def _on_channel_message(self, message: "RNS.Channel.MessageBase") -> bool:
+        """Handle a message received via RNS Channel (v2.0 data plane).
+
+        Note: This callback runs in RNS's thread, not the asyncio event loop.
+
+        Args:
+            message: Received Channel message (already unpacked)
+
+        Returns:
+            True to indicate the message was consumed
+        """
+        try:
+            if isinstance(message, StreamData):
+                if message.is_stdout or message.is_stderr:
+                    if self.on_output:
+                        self.on_output(message.data)
+                    else:
+                        if message.is_stdout:
+                            sys.stdout.buffer.write(message.data)
+                            sys.stdout.buffer.flush()
+                        else:
+                            sys.stderr.buffer.write(message.data)
+                            sys.stderr.buffer.flush()
+
+            elif isinstance(message, CommandExited):
+                self.exit_code = message.return_code
+                self._thread_safe_event_set(self._exited)
+                if self.on_exit:
+                    self.on_exit(message.return_code)
+
+            elif isinstance(message, Error):
+                logger.error(f"Server error (channel): {message.message} (code={message.code})")
+                if self.on_error:
+                    self.on_error(message.message)
+                if message.fatal:
+                    self._thread_safe_event_set(self._exited)
+
+        except Exception as e:
+            logger.error(f"Failed to handle channel message: {e}")
+
+        return True
+
     def send_input(self, data: bytes) -> bool:
         """Send input data to remote terminal.
+
+        Uses Channel when available (v2.0), falls back to raw packets (v1.0).
 
         Args:
             data: Input bytes (stdin)
@@ -345,10 +407,21 @@ class TerminalClientSession:
             True if sent successfully
         """
         msg = StreamData(stream=StreamData.STDIN, data=data)
+        if self.channel:
+            if not self.channel.is_ready_to_send():
+                return False
+            try:
+                self.channel.send(msg)
+                return True
+            except Exception as e:
+                logger.error(f"Channel send failed: {e}")
+                return False
         return self._send_packet(serialize_message(msg))
 
     def send_resize(self, rows: int, cols: int, xpixel: int = 0, ypixel: int = 0) -> bool:
         """Send window resize to remote terminal.
+
+        Uses Channel when available (v2.0), falls back to raw packets (v1.0).
 
         Args:
             rows: New terminal rows
@@ -360,6 +433,15 @@ class TerminalClientSession:
             True if sent successfully
         """
         msg = WindowSize(rows=rows, cols=cols, xpixel=xpixel, ypixel=ypixel)
+        if self.channel:
+            if not self.channel.is_ready_to_send():
+                return False
+            try:
+                self.channel.send(msg)
+                return True
+            except Exception as e:
+                logger.error(f"Channel send failed: {e}")
+                return False
         return self._send_packet(serialize_message(msg))
 
     async def close(self) -> None:
@@ -445,7 +527,11 @@ class TerminalClientSession:
         return self.exit_code or 0
 
     async def _stdin_read_loop(self) -> None:
-        """Read from stdin and send to remote terminal."""
+        """Read from stdin and send to remote terminal.
+
+        When Channel is available (v2.0), applies backpressure via
+        is_ready_to_send() before each send.
+        """
         loop = asyncio.get_running_loop()
         stdin_fd = sys.stdin.fileno()
 
@@ -458,7 +544,16 @@ class TerminalClientSession:
                         lambda: os.read(stdin_fd, 1024),
                     )
                     if data:
-                        self.send_input(data)
+                        if self.channel:
+                            # Channel mode: backpressure
+                            while not self.channel.is_ready_to_send():
+                                if not self.link or self.link.status != 0x00:
+                                    return
+                                await asyncio.sleep(0.01)
+                            msg = StreamData(stream=StreamData.STDIN, data=data)
+                            self.channel.send(msg)
+                        else:
+                            self.send_input(data)
                     else:
                         # EOF on stdin
                         break
