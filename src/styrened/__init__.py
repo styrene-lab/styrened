@@ -20,7 +20,7 @@ from styrened import StyreneDaemon, main
 ```
 """
 
-__version__ = "0.10.7"
+__version__ = "0.10.8"
 
 # Path resolution
 from styrened import paths  # noqa: F401
@@ -105,7 +105,6 @@ from styrened.rpc import (
 # Service exports (path helpers are deprecated — use paths module directly)
 from styrened.services import (
     ensure_directories,
-    get_cache_dir,
     get_config_dir,
     get_data_dir,
     get_default_core_config,
@@ -183,7 +182,6 @@ __all__ = [
     "get_default_core_config",
     "get_config_dir",
     "get_data_dir",
-    "get_cache_dir",
     "get_log_dir",
     "ensure_directories",
     # Protocols
