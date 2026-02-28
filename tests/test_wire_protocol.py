@@ -113,3 +113,52 @@ def test_self_update_result_failure() -> None:
     payload_data = decode_payload(decoded.payload)
     assert payload_data["success"] is False
     assert "new_version" not in payload_data
+
+
+def test_file_offer_none_request_id_uses_no_correlation() -> None:
+    """create_file_offer with request_id=None should use NO_CORRELATION.
+
+    Regression test: create_file_offer previously passed request_id=None
+    through literally, while create_file_accept used NO_CORRELATION.
+    Both should now be consistent.
+    """
+    from styrened.models.styrene_wire import (
+        NO_CORRELATION,
+        create_file_offer,
+    )
+
+    envelope = create_file_offer(
+        filename="test.txt",
+        size=1024,
+        request_id=None,
+    )
+    assert envelope.request_id == NO_CORRELATION
+
+
+def test_file_offer_explicit_request_id_preserved() -> None:
+    """create_file_offer with explicit request_id should preserve it."""
+    import os
+
+    from styrened.models.styrene_wire import create_file_offer
+
+    rid = os.urandom(16)
+    envelope = create_file_offer(
+        filename="test.txt",
+        size=1024,
+        request_id=rid,
+    )
+    assert envelope.request_id == rid
+
+
+def test_file_accept_none_request_id_uses_no_correlation() -> None:
+    """create_file_accept with request_id=None should use NO_CORRELATION."""
+    from styrened.models.styrene_wire import (
+        NO_CORRELATION,
+        create_file_accept,
+    )
+
+    envelope = create_file_accept(
+        max_size=65536,
+        request_id=None,
+    )
+    assert envelope.request_id == NO_CORRELATION

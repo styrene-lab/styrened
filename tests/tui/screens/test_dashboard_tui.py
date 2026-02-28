@@ -126,6 +126,53 @@ class TestDashboardComposition:
                 assert device_table.row_count == 2
 
 
+class TestDeviceTableColumns:
+    """Tests for device table column structure."""
+
+    @pytest.mark.asyncio
+    async def test_table_has_no_sec_column(self, mock_devices):
+        """Device table should NOT have a SEC column (dead _pqc_tier removed)."""
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(DashboardScreen())
+                await pilot.pause()
+
+                screen = app.screen
+                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+
+                # Column count should be 6 (NAME, TYPE, IDENTITY, STATUS, UNREAD, LAST ANNOUNCE)
+                assert len(device_table.columns) == 6
+
+    @pytest.mark.asyncio
+    async def test_table_expected_columns(self):
+        """Device table should have exactly the expected columns."""
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.dashboard.discover_devices", return_value=[]
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(DashboardScreen())
+                await pilot.pause()
+
+                screen = app.screen
+                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+
+                # Extract column labels
+                col_labels = [str(col.label) for col in device_table.columns.values()]
+                assert "SEC" not in col_labels
+                assert "NAME" in col_labels
+                assert "TYPE" in col_labels
+                assert "IDENTITY" in col_labels
+                assert "STATUS" in col_labels
+                assert "UNREAD" in col_labels
+                assert "LAST ANNOUNCE" in col_labels
+
+
 class TestDashboardKeyboardBindings:
     """Test dashboard keyboard bindings with actual key presses."""
 

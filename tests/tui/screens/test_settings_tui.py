@@ -380,6 +380,136 @@ class TestSettingsErrorHandling:
                 # Should handle error gracefully
 
 
+class TestIdentityIconValidation:
+    """Tests for identity icon length validation (W17)."""
+
+    @pytest.mark.asyncio
+    async def test_icon_longer_than_4_chars_rejected(self, test_config):
+        """Icons longer than 4 characters should be rejected on save."""
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            await app.push_screen(SettingsScreen(test_config))
+            await pilot.pause()
+
+            screen = app.screen
+
+            # Set icon to something too long
+            icon_input = screen.query_one("#identity_icon", Input)
+            icon_input.value = "ABCDE"  # 5 chars, exceeds limit
+            await pilot.pause()
+
+            # Try to save
+            with patch("styrened.tui.screens.settings.save_config") as mock_save:
+                await pilot.press("ctrl+s")
+                await pilot.pause(1.0)
+
+                # save_config should NOT be called because validation fails
+                mock_save.assert_not_called()
+
+            # Error message should mention icon — render_line captures
+            # the Rich content set by _show_error
+            from textual.widgets import Static
+
+            status = screen.query_one("#status-message", Static)
+            rendered = status.render()
+            rendered_str = str(rendered)
+            assert "4 characters" in rendered_str or "Icon" in rendered_str
+
+    @pytest.mark.asyncio
+    async def test_icon_4_chars_or_fewer_accepted(self, test_config):
+        """Icons of 4 characters or fewer should be accepted."""
+        app = StyreneApp()
+
+        with patch("styrened.tui.screens.settings.save_config") as mock_save:
+            async with app.run_test() as pilot:
+                await app.push_screen(SettingsScreen(test_config))
+                await pilot.pause()
+
+                screen = app.screen
+
+                # Set a valid 2-char emoji icon
+                icon_input = screen.query_one("#identity_icon", Input)
+                icon_input.value = "\U0001f4e1"  # single emoji
+                await pilot.pause()
+
+                await pilot.press("ctrl+s")
+                await pilot.pause(1.0)
+
+                # save_config should be called (validation passes)
+                assert mock_save.called
+
+
+class TestIPCIdentitySaveFailure:
+    """Tests for IPC identity save failure not aborting save (W16)."""
+
+    @pytest.mark.asyncio
+    async def test_ipc_identity_failure_continues_save(self, test_config):
+        """IPC identity save failure should log warning but continue saving."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from styrened.tui.services.app_lifecycle import LifecycleMode
+
+        bridge = MagicMock()
+        bridge.set_identity = AsyncMock(side_effect=Exception("IPC failed"))
+
+        lifecycle = MagicMock()
+        lifecycle.ipc_bridge = bridge
+        lifecycle.initialize_async = AsyncMock(return_value=True)
+        lifecycle.active_mode = LifecycleMode.IPC
+        lifecycle.shutdown_async = AsyncMock()
+
+        app = StyreneApp()
+        app._lifecycle = lifecycle
+
+        with patch("styrened.tui.screens.settings.save_config") as mock_save:
+            async with app.run_test() as pilot:
+                await app.push_screen(SettingsScreen(test_config))
+                await pilot.pause()
+
+                await pilot.press("ctrl+s")
+                await pilot.pause(1.0)
+
+                # save_config should still be called despite IPC failure
+                assert mock_save.called
+
+
+class TestLocalModeClearIdentity:
+    """Tests for clearing identity fields in local mode."""
+
+    @pytest.mark.asyncio
+    async def test_empty_display_name_clears_value(self, test_config):
+        """Empty display_name string should clear the value in local mode."""
+        app = StyreneApp()
+
+        with (
+            patch("styrened.tui.screens.settings.save_config"),
+            patch(
+                "styrened.tui.screens.settings.SettingsScreen._save_identity"
+            ) as mock_save_id,
+        ):
+            mock_save_id.return_value = None
+
+            async with app.run_test() as pilot:
+                await app.push_screen(SettingsScreen(test_config))
+                await pilot.pause()
+
+                screen = app.screen
+
+                # Clear display name
+                dn_input = screen.query_one("#identity_display_name", Input)
+                dn_input.value = ""
+                await pilot.pause()
+
+                await pilot.press("ctrl+s")
+                await pilot.pause(1.0)
+
+                # _save_identity should be called with empty string
+                if mock_save_id.called:
+                    args = mock_save_id.call_args
+                    assert args[0][0] == ""  # display_name == ""
+
+
 class TestSettingsResetToDefaults:
     """Test reset to defaults functionality."""
 

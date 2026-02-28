@@ -113,6 +113,77 @@ class TestHumanSize:
 # ---------------------------------------------------------------------------
 
 
+class TestDecompressionBombProtection:
+    """Tests for PIL decompression bomb limit (W21)."""
+
+    def test_max_image_pixels_class_attribute(self):
+        """ImagePreview should have a _MAX_IMAGE_PIXELS class attribute."""
+        assert hasattr(ImagePreview, "_MAX_IMAGE_PIXELS")
+        assert ImagePreview._MAX_IMAGE_PIXELS == 4_000_000
+
+    def test_render_image_limits_max_pixels(self):
+        """_render_image should temporarily set MAX_IMAGE_PIXELS to the limit."""
+        if not _HAS_PILLOW:
+            pytest.skip("Pillow not installed")
+
+        from unittest.mock import patch as _patch
+
+        from PIL import Image as PILImageModule
+
+        original = PILImageModule.MAX_IMAGE_PIXELS
+        observed_limits: list[int | None] = []
+
+        real_open = PILImageModule.open
+
+        def spy_open(*args, **kwargs):
+            observed_limits.append(PILImageModule.MAX_IMAGE_PIXELS)
+            return real_open(*args, **kwargs)
+
+        # Create a tiny valid PNG
+        import io
+
+        img = PILImageModule.new("RGB", (2, 2), color="red")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        data = buf.getvalue()
+
+        widget = ImagePreview()
+
+        with _patch.object(PILImageModule, "open", side_effect=spy_open):
+            # Call will fail on mount (widget not mounted) but PIL.open will
+            # have been called first, so we can observe the limit.
+            try:
+                widget._render_image(data)
+            except Exception:
+                pass
+
+        # PIL.open was called with the restricted limit
+        assert len(observed_limits) > 0
+        assert observed_limits[0] == ImagePreview._MAX_IMAGE_PIXELS
+
+        # MAX_IMAGE_PIXELS should be restored to original
+        assert PILImageModule.MAX_IMAGE_PIXELS == original
+
+    def test_render_image_resets_on_exception(self):
+        """_render_image should restore MAX_IMAGE_PIXELS even on PIL failure."""
+        if not _HAS_PILLOW:
+            pytest.skip("Pillow not installed")
+
+        from PIL import Image as PILImageModule
+
+        original = PILImageModule.MAX_IMAGE_PIXELS
+
+        widget = ImagePreview()
+        # Pass invalid data — PIL.open will fail, but limit must be restored
+        try:
+            widget._render_image(b"not-a-valid-image")
+        except Exception:
+            pass
+
+        # MAX_IMAGE_PIXELS should be restored
+        assert PILImageModule.MAX_IMAGE_PIXELS == original
+
+
 class TestBubbleComposition:
     """Test MessageBubble.compose() yields correct children."""
 

@@ -837,6 +837,82 @@ class TestReadReceipts:
         assert count == 0
 
 
+class TestUpdateAttachmentPath:
+    """Tests for update_attachment_path with lock safety."""
+
+    def test_update_attachment_path_success(self, conversation_service, peer_hash):
+        """update_attachment_path updates the path of an existing message."""
+        msg_id = conversation_service.save_incoming_message(
+            peer_hash, "With attachment"
+        )
+
+        result = conversation_service.update_attachment_path(
+            msg_id, "/tmp/attachments/test.txt"
+        )
+
+        assert result is True
+        messages = conversation_service.get_messages(peer_hash, limit=1)
+        assert len(messages) == 1
+        assert messages[0].attachment_path == "/tmp/attachments/test.txt"
+
+    def test_update_attachment_path_not_found(self, conversation_service):
+        """update_attachment_path returns False for nonexistent message."""
+        result = conversation_service.update_attachment_path(99999, "/tmp/nope.txt")
+        assert result is False
+
+    def test_update_attachment_path_acquires_lock(self, conversation_service, peer_hash):
+        """update_attachment_path acquires _lock during mutation.
+
+        Regression test: this method previously skipped the lock, which
+        could lead to race conditions with concurrent save_incoming_message.
+        """
+        import threading
+
+        msg_id = conversation_service.save_incoming_message(
+            peer_hash, "Lock test"
+        )
+
+        # Acquire the lock externally and verify update_attachment_path blocks
+        lock_acquired_by_test = threading.Event()
+        update_completed = threading.Event()
+
+        def hold_lock():
+            with conversation_service._lock:
+                lock_acquired_by_test.set()
+                # Hold the lock until the update call is likely blocked
+                update_completed.wait(timeout=2.0)
+
+        holder = threading.Thread(target=hold_lock, daemon=True)
+        holder.start()
+        lock_acquired_by_test.wait(timeout=2.0)
+
+        # Now call update_attachment_path in another thread; it should block
+        result_holder = []
+
+        def do_update():
+            result = conversation_service.update_attachment_path(
+                msg_id, "/tmp/updated.txt"
+            )
+            result_holder.append(result)
+
+        updater = threading.Thread(target=do_update, daemon=True)
+        updater.start()
+
+        # Give the updater a moment to try and block
+        updater.join(timeout=0.2)
+        # If the updater completed immediately, the lock is NOT being acquired
+        assert not result_holder, (
+            "update_attachment_path should block while _lock is held"
+        )
+
+        # Release the lock
+        update_completed.set()
+        holder.join(timeout=2.0)
+        updater.join(timeout=2.0)
+
+        assert result_holder == [True]
+
+
 class TestStaleDeliveryCleanup:
     """Tests for cleanup_stale_deliveries functionality."""
 

@@ -1,9 +1,45 @@
 """Unit tests for PQC session layer daemon integration."""
 
+import sys
 from unittest.mock import MagicMock, patch
 
 from styrened.models.config import CoreConfig
 from styrened.models.mesh_device import DeviceType, MeshDevice
+
+
+class TestPQCImportGuard:
+    """C5: pqc_crypto import guard prevents ImportError when liboqs missing."""
+
+    def test_pqc_available_fallback_returns_false(self) -> None:
+        """When crypto.pqc_crypto is unavailable, pqc_available() returns False.
+
+        The daemon module uses a try/except to guard the import and
+        provides a lambda fallback.  This test verifies that fallback
+        by temporarily hiding the module and forcing a re-import.
+        """
+        # Save references so we can restore after the test
+        daemon_mod = sys.modules.pop("styrened.daemon", None)
+        crypto_mod = sys.modules.pop("styrened.crypto.pqc_crypto", None)
+
+        try:
+            # Block the crypto module so the import fails
+            sys.modules["styrened.crypto.pqc_crypto"] = None  # type: ignore[assignment]
+
+            # Re-import daemon; it should fall back to lambda: False
+            import importlib
+
+            import styrened.daemon as dm
+
+            importlib.reload(dm)
+
+            assert dm.pqc_available() is False
+        finally:
+            # Restore original module state
+            sys.modules.pop("styrened.crypto.pqc_crypto", None)
+            if crypto_mod is not None:
+                sys.modules["styrened.crypto.pqc_crypto"] = crypto_mod
+            if daemon_mod is not None:
+                sys.modules["styrened.daemon"] = daemon_mod
 
 
 class TestPQCServiceCreation:

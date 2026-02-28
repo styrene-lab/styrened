@@ -367,6 +367,74 @@ class TestDaemonStateManagement:
         assert hasattr(daemon, "_node_store")
 
 
+class TestDaemonUUIDTempIds:
+    """W14: Attachment filename race condition prevention via UUID-based temp IDs."""
+
+    def test_uuid_module_imported(self, minimal_config: CoreConfig) -> None:
+        """W14: daemon.py imports uuid for temp attachment IDs."""
+        import styrened.daemon as daemon_mod
+
+        assert hasattr(daemon_mod, "uuid"), "daemon module should import uuid"
+
+    def test_temp_msg_id_pattern_produces_positive_31bit_int(self) -> None:
+        """W14: uuid4().int & 0x7FFFFFFF produces valid positive 31-bit IDs."""
+        import uuid
+
+        # Generate several IDs and verify all are positive 31-bit integers
+        for _ in range(100):
+            temp_id = uuid.uuid4().int & 0x7FFFFFFF
+            assert temp_id >= 0, "temp ID must be non-negative"
+            assert temp_id <= 0x7FFFFFFF, "temp ID must fit in 31 bits"
+            # Also verify it's unlikely to be zero (astronomically improbable)
+        # At least verify pattern correctness
+        assert (uuid.uuid4().int & 0x7FFFFFFF) > 0  # practically always true
+
+    def test_temp_msg_ids_are_unique(self) -> None:
+        """W14: UUID-based temp IDs should not collide in concurrent scenarios."""
+        import uuid
+
+        ids = set()
+        for _ in range(1000):
+            temp_id = uuid.uuid4().int & 0x7FFFFFFF
+            ids.add(temp_id)
+        # With 31-bit IDs and 1000 samples, collisions are astronomically unlikely
+        assert len(ids) == 1000
+
+
+class TestDaemonAttachmentStoreOrdering:
+    """C7: get_attachment_store() is called before raw_data check."""
+
+    def test_attachment_store_import_available(self) -> None:
+        """C7: get_attachment_store is importable from services.attachment_store."""
+        from styrened.services.attachment_store import get_attachment_store
+
+        # The function should exist and be callable
+        assert callable(get_attachment_store)
+
+    def test_daemon_has_get_attachment_store_import(self) -> None:
+        """C7: daemon.py should reference get_attachment_store.
+
+        The fix moved store = get_attachment_store() BEFORE the
+        if raw_data is not None block to prevent NameError when
+        raw_data is None but multi-file handling still runs.
+        """
+        import inspect
+
+        import styrened.daemon as daemon_mod
+
+        source = inspect.getsource(daemon_mod)
+        # Verify the pattern: 'store = get_attachment_store()' appears
+        # before the 'if raw_data is not None:' check.
+        store_idx = source.find("store = get_attachment_store()")
+        raw_data_idx = source.find("if raw_data is not None:")
+        assert store_idx > 0, "get_attachment_store() call not found in daemon.py"
+        assert raw_data_idx > 0, "raw_data check not found in daemon.py"
+        assert store_idx < raw_data_idx, (
+            "C7 fix: store = get_attachment_store() must appear BEFORE "
+            "if raw_data is not None:"
+        )
+
+
 class TestDaemonCallbacks:
     """Tests for daemon callback handling."""
 

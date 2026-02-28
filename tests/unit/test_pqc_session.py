@@ -498,3 +498,182 @@ class TestHandleRekey:
         mock_protocol.send_typed_message.assert_called_once()
         kw = mock_protocol.send_typed_message.call_args[1]
         assert kw["message_type"] == StyreneMessageType.PQC_INITIATE
+
+    @pytest.mark.asyncio
+    async def test_rekey_ignored_without_active_session(
+        self, service: PQCSessionService, mock_protocol: MagicMock, kem_mocks: None
+    ) -> None:
+        """PQC_REKEY from peer with no active session is ignored (W3)."""
+        peer = "e" * 32
+        # No active key for this peer
+
+        await service.handle_rekey(
+            _make_message(peer),
+            _make_envelope(StyreneMessageType.PQC_REKEY, b""),
+        )
+
+        mock_protocol.send_typed_message.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# MitM peer_hash verification (C2)
+# ---------------------------------------------------------------------------
+
+
+class TestPeerHashVerification:
+    """Verify handle_respond and handle_confirm reject mismatched peer_hash."""
+
+    @pytest.mark.asyncio
+    async def test_respond_from_wrong_peer_rejected(self, kem_mocks: None) -> None:
+        """PQC_RESPOND from different peer than INITIATE target is rejected (C2)."""
+        proto = MagicMock()
+        proto.send_typed_message = AsyncMock()
+        proto.register_handler = MagicMock()
+
+        svc = PQCSessionService(proto, PQCConfig())
+        peer_b = "b" * 32
+        impersonator = "c" * 32
+
+        await svc.initiate_session(peer_b)
+        initiate_kw = proto.send_typed_message.call_args[1]
+        initiate_data = decode_payload(initiate_kw["payload"])
+
+        # Craft a RESPOND that appears to come from impersonator, not peer_b
+        resp_x25519_pub, _ = x25519_generate_keypair()
+        respond_payload = encode_payload({
+            "session_id": initiate_data["session_id"],
+            "x25519_pub": resp_x25519_pub,
+            "kem_ct": _FAKE_KEM_CT,
+            "hmac": b"\x00" * 32,
+        })
+
+        proto.send_typed_message.reset_mock()
+
+        await svc.handle_respond(
+            _make_message(impersonator),  # Wrong peer
+            _make_envelope(StyreneMessageType.PQC_RESPOND, respond_payload),
+        )
+
+        # Should NOT have sent PQC_CONFIRM
+        proto.send_typed_message.assert_not_called()
+        # Pending state should be cleaned up
+        session_id = initiate_data["session_id"]
+        if isinstance(session_id, str):
+            session_id = session_id.encode("latin-1")
+        assert session_id not in svc._pending
+
+    @pytest.mark.asyncio
+    async def test_confirm_from_wrong_peer_rejected(self, kem_mocks: None) -> None:
+        """PQC_CONFIRM from different peer than INITIATE source is rejected (C2)."""
+        proto_a = MagicMock()
+        proto_a.send_typed_message = AsyncMock()
+        proto_a.register_handler = MagicMock()
+        proto_b = MagicMock()
+        proto_b.send_typed_message = AsyncMock()
+        proto_b.register_handler = MagicMock()
+
+        config = PQCConfig()
+        svc_a = PQCSessionService(proto_a, config)
+        svc_b = PQCSessionService(proto_b, config)
+
+        peer_a = "a" * 32
+        peer_b = "b" * 32
+        impersonator = "d" * 32
+
+        # A initiates to B
+        await svc_a.initiate_session(peer_b)
+        initiate_kw = proto_a.send_typed_message.call_args[1]
+
+        # B handles INITIATE (from peer_a)
+        await svc_b.handle_initiate(
+            _make_message(peer_a),
+            _make_envelope(StyreneMessageType.PQC_INITIATE, initiate_kw["payload"]),
+        )
+        respond_kw = proto_b.send_typed_message.call_args[1]
+
+        # A handles RESPOND (from peer_b)
+        await svc_a.handle_respond(
+            _make_message(peer_b),
+            _make_envelope(StyreneMessageType.PQC_RESPOND, respond_kw["payload"]),
+        )
+        confirm_kw = proto_a.send_typed_message.call_args[1]
+
+        # Get session_id from the confirm payload to check cleanup
+        confirm_data = decode_payload(confirm_kw["payload"])
+        session_id = confirm_data["session_id"]
+        if isinstance(session_id, str):
+            session_id = session_id.encode("latin-1")
+
+        # Impersonator sends the CONFIRM to B instead of peer_a
+        await svc_b.handle_confirm(
+            _make_message(impersonator),  # Wrong peer
+            _make_envelope(StyreneMessageType.PQC_CONFIRM, confirm_kw["payload"]),
+        )
+
+        # B should NOT have established the session
+        assert impersonator not in svc_b._active_keys
+        # Pending state should be cleaned up
+        assert session_id not in svc_b._pending
+
+
+# ---------------------------------------------------------------------------
+# Pending TTL sweep (W4)
+# ---------------------------------------------------------------------------
+
+
+class TestPendingTTL:
+    """Verify expired pending handshakes are swept."""
+
+    @pytest.mark.asyncio
+    async def test_expired_pending_swept_on_initiate(
+        self, service: PQCSessionService, kem_mocks: None
+    ) -> None:
+        """Stale _pending entries are removed when handle_initiate runs (W4)."""
+        from styrened.services.pqc_session import _HandshakeState
+
+        stale_sid = b"\xaa" * 16
+        service._pending[stale_sid] = _HandshakeState(
+            session_id=stale_sid,
+            role="initiator",
+            x25519_pub=b"\x00" * 32,
+            x25519_priv=b"\x00" * 32,
+            peer_hash="stale" + "0" * 27,
+            created_at=time.time() - 120,  # 2 minutes ago, past 60s TTL
+        )
+
+        # Trigger sweep via handle_initiate with a valid INITIATE message
+        x25519_pub, _ = x25519_generate_keypair()
+        payload = encode_payload({
+            "session_id": b"\xbb" * 16,
+            "x25519_pub": x25519_pub,
+            "kem_pub": _FAKE_KEM_PUB,
+        })
+        await service.handle_initiate(
+            _make_message("f" * 32),
+            _make_envelope(StyreneMessageType.PQC_INITIATE, payload),
+        )
+
+        # Stale entry should be gone
+        assert stale_sid not in service._pending
+
+    @pytest.mark.asyncio
+    async def test_fresh_pending_not_swept(
+        self, service: PQCSessionService, kem_mocks: None
+    ) -> None:
+        """Fresh _pending entries are NOT swept (W4)."""
+        from styrened.services.pqc_session import _HandshakeState
+
+        fresh_sid = b"\xcc" * 16
+        service._pending[fresh_sid] = _HandshakeState(
+            session_id=fresh_sid,
+            role="initiator",
+            x25519_pub=b"\x00" * 32,
+            x25519_priv=b"\x00" * 32,
+            peer_hash="fresh" + "0" * 27,
+            created_at=time.time(),  # just now
+        )
+
+        service._sweep_expired_pending()
+
+        # Fresh entry should still be present
+        assert fresh_sid in service._pending

@@ -301,6 +301,37 @@ class TestPathContainment:
         assert loaded == data
 
 
+class TestSavePathContainment:
+    """Tests for save() path containment (C1)."""
+
+    def test_save_normal_filename_succeeds(self, store: AttachmentStore):
+        """Normal save() calls succeed with containment check."""
+        path = store.save("aabbccdd1122334455667788", 1, "normal.txt", b"data")
+        assert path.exists()
+
+    def test_save_traversal_filename_is_sanitized(self, store: AttachmentStore):
+        """Filenames with path traversal are sanitized before containment check."""
+        # The sanitizer strips directory components, so ../../etc/passwd becomes passwd
+        path = store.save("aabbccdd1122334455667788", 1, "../../etc/passwd", b"data")
+        assert path.exists()
+        assert ".." not in str(path)
+
+
+class TestDeleteForPeerContainment:
+    """Tests for delete_for_peer() containment (W10)."""
+
+    def test_delete_for_peer_normal_succeeds(self, store: AttachmentStore):
+        """Normal delete_for_peer() works with containment check."""
+        store.save("aabbccdd1122334455667788", 1, "file.txt", b"data")
+        count = store.delete_for_peer("aabbccdd1122334455667788")
+        assert count == 1
+
+    def test_delete_for_peer_nonexistent_returns_zero(self, store: AttachmentStore):
+        """delete_for_peer() for nonexistent peer returns 0 (exits before containment check)."""
+        count = store.delete_for_peer("ffffffff0000000011111111")
+        assert count == 0
+
+
 class TestPeerDirPrefix:
     """Tests for 16-char peer directory prefix (Batch 3c)."""
 

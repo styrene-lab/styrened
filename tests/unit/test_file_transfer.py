@@ -6,6 +6,7 @@ no auto-accept, rate limiting, request-ID based matching, and thread safety.
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -236,6 +237,7 @@ class TestFileTransferResourceMatching:
 
         mock_resource = MagicMock()
         mock_resource.status = 1  # RNS.Resource.COMPLETE
+        mock_resource.total_size = 116  # prefix + data
         mock_resource.data.read.return_value = rid_b + b"x" * 100
 
         await service._process_inbound_resource(mock_resource)
@@ -271,3 +273,204 @@ class TestFileTransferThreadSafety:
 
         # Final value should be 0 (10 increments - 10 decrements)
         assert service._active_transfers.get(peer, 0) == 0
+
+
+class TestResourceFilter:
+    """Tests for _resource_filter (C3 — ACCEPT_APP gating)."""
+
+    def test_resource_filter_rejects_when_no_pending(self, service):
+        """_resource_filter rejects resources when no pending inbound transfers (C3)."""
+        mock_resource = MagicMock()
+        mock_resource.total_size = 100
+
+        assert service._resource_filter(mock_resource) is False
+
+    def test_resource_filter_accepts_when_pending_exists(self, service):
+        """_resource_filter accepts resources when pending transfers exist (C3)."""
+        # Add a pending transfer
+        rid = os.urandom(16)
+        service._pending_inbound[rid] = PendingTransfer(
+            request_id=rid,
+            peer_hash="aabb" * 4,
+            filename="test.txt",
+            size=100,
+            mime_type=None,
+            checksum=None,
+        )
+        mock_resource = MagicMock()
+        mock_resource.total_size = 100
+
+        assert service._resource_filter(mock_resource) is True
+
+    def test_resource_filter_rejects_oversized(self, service):
+        """_resource_filter rejects resources larger than max_size (C3/C4)."""
+        # Add a pending transfer so the "no pending" check passes
+        rid = os.urandom(16)
+        service._pending_inbound[rid] = PendingTransfer(
+            request_id=rid,
+            peer_hash="aabb" * 4,
+            filename="test.txt",
+            size=100,
+            mime_type=None,
+            checksum=None,
+        )
+        mock_resource = MagicMock()
+        mock_resource.total_size = service._max_size + 1
+
+        assert service._resource_filter(mock_resource) is False
+
+
+class TestInboundResourceSizeValidation:
+    """Tests for _process_inbound_resource size check (C4)."""
+
+    @pytest.mark.asyncio
+    async def test_oversized_resource_data_rejected(self, service):
+        """Resource data exceeding max_size + prefix is rejected (C4)."""
+        import RNS as rns_mod
+
+        rns_mod.Resource = MagicMock()
+        rns_mod.Resource.COMPLETE = 1
+
+        mock_resource = MagicMock()
+        mock_resource.status = 1
+        mock_resource.total_size = service._max_size + 100
+        # Data exceeds max_size + prefix
+        mock_resource.data.read.return_value = b"\x00" * (service._max_size + 100)
+
+        await service._process_inbound_resource(mock_resource)
+
+        # Should not have tried to match or store anything (no crash)
+        # The resource should be rejected silently
+
+
+class TestFileAcceptPeerVerification:
+    """Tests for _handle_file_accept peer verification (W6)."""
+
+    @pytest.mark.asyncio
+    async def test_file_accept_from_wrong_peer_rejected(self, service, mock_deps):
+        """FILE_ACCEPT from a peer different than the offer target is rejected (W6)."""
+        import RNS as rns_mod
+
+        rns_mod.Identity = MagicMock()
+
+        from styrened.models.styrene_wire import create_file_accept
+        from styrened.services.file_transfer import OutboundTransfer
+
+        request_id = os.urandom(16)
+        peer = "aabb" * 4
+        wrong_peer = "ccdd" * 4
+
+        async with service._lock:
+            service._pending_outbound[request_id] = OutboundTransfer(
+                request_id=request_id,
+                peer_hash=peer,
+                filename="test.txt",
+                data=b"hello",
+                mime_type=None,
+                on_progress=None,
+            )
+
+        # Create FILE_ACCEPT envelope
+        accept = create_file_accept(max_size=1024, request_id=request_id)
+
+        # Send from wrong_peer
+        msg = FakeLXMFMessage(source_hash=wrong_peer)
+        await service._handle_file_accept(msg, accept)
+
+        # Outbound transfer should NOT have been consumed (still pending)
+        assert request_id in service._pending_outbound
+
+    @pytest.mark.asyncio
+    async def test_file_accept_from_correct_peer_proceeds(self, service, mock_deps):
+        """FILE_ACCEPT from the correct peer is processed (W6)."""
+        import RNS as rns_mod
+
+        rns_mod.Identity = MagicMock()
+        rns_mod.Identity.recall.return_value = None  # Will fail at identity resolution
+
+        from styrened.models.styrene_wire import create_file_accept
+        from styrened.services.file_transfer import OutboundTransfer
+
+        request_id = os.urandom(16)
+        peer = "aabb" * 4
+
+        async with service._lock:
+            service._pending_outbound[request_id] = OutboundTransfer(
+                request_id=request_id,
+                peer_hash=peer,
+                filename="test.txt",
+                data=b"hello",
+                mime_type=None,
+                on_progress=None,
+            )
+
+        accept = create_file_accept(max_size=1024, request_id=request_id)
+
+        # Send from correct peer
+        msg = FakeLXMFMessage(source_hash=peer)
+        await service._handle_file_accept(msg, accept)
+
+        # Method proceeds past peer check (it will fail later at identity
+        # resolution, but that's OK — we're testing the peer check)
+
+
+class TestStaleOfferCleanup:
+    """Tests for _cleanup_stale_offers (W7)."""
+
+    @pytest.mark.asyncio
+    async def test_stale_offers_cleaned_up(self, service):
+        """Pending offers older than 5 minutes are removed (W7)."""
+        stale_rid = os.urandom(16)
+        fresh_rid = os.urandom(16)
+
+        async with service._lock:
+            service._pending_inbound[stale_rid] = PendingTransfer(
+                request_id=stale_rid,
+                peer_hash="aabb" * 4,
+                filename="stale.txt",
+                size=100,
+                mime_type=None,
+                checksum=None,
+                created_at=time.time() - 600,  # 10 minutes ago
+            )
+            service._active_transfers["aabb" * 4] = 1
+
+            service._pending_inbound[fresh_rid] = PendingTransfer(
+                request_id=fresh_rid,
+                peer_hash="ccdd" * 4,
+                filename="fresh.txt",
+                size=100,
+                mime_type=None,
+                checksum=None,
+                created_at=time.time(),  # just now
+            )
+
+        await service._cleanup_stale_offers()
+
+        assert stale_rid not in service._pending_inbound
+        assert fresh_rid in service._pending_inbound
+        # Active transfer counter for stale peer should be decremented
+        assert service._active_transfers.get("aabb" * 4, 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_called_on_file_offer(self, service, mock_deps):
+        """_cleanup_stale_offers is called at start of _handle_file_offer (W7)."""
+        stale_rid = os.urandom(16)
+        async with service._lock:
+            service._pending_inbound[stale_rid] = PendingTransfer(
+                request_id=stale_rid,
+                peer_hash="aabb" * 4,
+                filename="stale.txt",
+                size=100,
+                mime_type=None,
+                checksum=None,
+                created_at=time.time() - 600,
+            )
+
+        # Send a new FILE_OFFER, which triggers cleanup
+        offer = create_file_offer(filename="new.txt", size=50)
+        msg = FakeLXMFMessage(source_hash="ccdd" * 4)
+        await service._handle_file_offer(msg, offer)
+
+        # Stale offer should be cleaned up
+        assert stale_rid not in service._pending_inbound

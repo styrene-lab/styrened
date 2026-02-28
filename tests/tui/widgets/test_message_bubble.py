@@ -128,6 +128,33 @@ class TestMessageBubbleStatusUpdate:
         assert bubble.status == "delivered"
 
 
+class TestIPCBridgeAccessor:
+    """Tests for _ipc_bridge property encapsulation."""
+
+    def test_ipc_bridge_returns_none_without_app(self):
+        """_ipc_bridge should return None when not mounted in an app."""
+        bubble = MessageBubble("test", message_id=1)
+        assert bubble._ipc_bridge is None
+
+    def test_ipc_bridge_returns_none_when_lifecycle_missing(self):
+        """_ipc_bridge should return None when app has no _lifecycle."""
+        from unittest.mock import MagicMock
+
+        bubble = MessageBubble("test", message_id=1)
+        # Mock app without _lifecycle attribute
+        mock_app = MagicMock(spec=[])
+        try:
+            bubble._app = mock_app
+        except Exception:
+            pass
+        # Should return None, not raise
+        assert bubble._ipc_bridge is None
+
+    def test_ipc_bridge_property_exists(self):
+        """MessageBubble should have an _ipc_bridge property."""
+        assert hasattr(MessageBubble, "_ipc_bridge")
+
+
 class TestStatusIcons:
     """Tests for status icon constants."""
 
