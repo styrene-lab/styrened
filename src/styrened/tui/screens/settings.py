@@ -400,11 +400,13 @@ class SettingsScreen(Screen[None]):
                 Horizontal(
                     Button("Restart Daemon", id="btn-restart-daemon", classes="setting-btn"),
                     Button("Install as Service", id="btn-install-service", classes="setting-btn"),
+                    Button("Reset to Defaults", variant="warning", id="btn-reset-config", classes="setting-btn"),
                     classes="setting-row",
                 ),
                 Static(
                     "[dim]Restart applies after upgrades. "
-                    "Install as Service creates a launchd/systemd unit for boot persistence.[/dim]",
+                    "Install as Service creates a launchd/systemd unit for boot persistence. "
+                    "Reset regenerates all config files from defaults and restarts the daemon.[/dim]",
                     classes="setting-description",
                 ),
                 title="DAEMON",
@@ -440,6 +442,50 @@ class SettingsScreen(Screen[None]):
         """Open daemon setup screen for service installation."""
         from styrened.tui.screens.daemon_setup import DaemonSetupScreen
         self.app.push_screen(DaemonSetupScreen())
+
+    @on(Button.Pressed, "#btn-reset-config")
+    def on_reset_config(self) -> None:
+        """Reset all config files to defaults and restart daemon."""
+        self.run_worker(self._reset_config())
+
+    async def _reset_config(self) -> None:
+        """Regenerate config files from defaults and restart the daemon."""
+        import shutil
+        from styrened import paths
+        from styrened.services.config import get_default_core_config, save_core_config
+        from styrened.services.reticulum import generate_rns_config
+
+        try:
+            # Back up existing configs
+            config_dir = paths.config_dir()
+            config_file = paths.config_file()
+            if config_file.exists():
+                shutil.copy2(config_file, config_file.with_suffix(".yaml.bak"))
+
+            rns_config = Path.home() / ".reticulum" / "config"
+            if rns_config.exists():
+                shutil.copy2(rns_config, rns_config.with_suffix(".bak"))
+
+            # Regenerate styrene config from defaults
+            default_config = get_default_core_config()
+            save_core_config(default_config)
+
+            # Regenerate RNS config from default core config
+            rns_content = generate_rns_config(default_config)
+            rns_config.parent.mkdir(parents=True, exist_ok=True)
+            rns_config.write_text(rns_content)
+
+            self.notify(
+                "Config reset to defaults (backups saved as .bak)",
+                severity="information",
+                timeout=5,
+            )
+
+            # Restart daemon to pick up new config
+            self.app.action_restart_daemon()
+
+        except Exception as e:
+            self.notify(f"Reset failed: {e}", severity="error", timeout=10)
 
     @on(Select.Changed, "#hub_select")
     def on_hub_select_changed(self, event: Select.Changed) -> None:
