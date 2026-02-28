@@ -642,23 +642,15 @@ class TestHubProfileEdgeCases:
     # 3. Hub profile validation
     # ---------------------------------------------------------------
 
-    def test_hub_defaults_fail_validation_no_interfaces(self) -> None:
-        """Hub profile defaults have no server/peers -- validation should flag this.
+    def test_hub_defaults_have_community_hub_peer(self) -> None:
+        """Hub profile defaults include the community hub peer.
 
-        Hub mode requires server or peer connectivity, but get_profile_defaults
-        does not set up any interfaces. This is by design (user must configure
-        connectivity) but validation should catch it.
+        All profiles get the default Styrene Community Hub peer so new
+        installs have outbound connectivity out of the box.
         """
         config = get_profile_defaults(Profile.HUB)
-        errors = validate_core_config(config)
-
-        # Should have at least the hub-mode-requires-connectivity error
-        hub_mode_errors = [
-            e for e in errors if e.field == "reticulum.mode" and "hub" in e.message.lower()
-        ]
-        assert len(hub_mode_errors) > 0, (
-            f"Expected hub mode validation error, got: {[str(e) for e in errors]}"
-        )
+        peer_hosts = [p.host for p in config.reticulum.interfaces.peers]
+        assert "rns.styrene.io" in peer_hosts
 
     def test_hub_defaults_also_flag_propagation_node_name(self) -> None:
         """Hub defaults enable propagation_node but don't set a name.
