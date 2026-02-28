@@ -1170,3 +1170,139 @@ class TestIPCHandlersPQCStatus:
         assert isinstance(response, ResultResponse)
         assert response.data["security_tier"] == "rns_only"
         assert response.data["session_state"] is None
+
+
+class TestAsyncioGetRunningLoop:
+    """W22: handlers.py uses asyncio.get_running_loop() instead of deprecated get_event_loop()."""
+
+    def test_handlers_source_uses_get_running_loop(self):
+        """W22: handlers.py should use get_running_loop, not get_event_loop."""
+        import inspect
+
+        import styrened.ipc.handlers as handlers_mod
+
+        source = inspect.getsource(handlers_mod)
+        # Verify the fix: get_running_loop should be present
+        assert "get_running_loop()" in source, (
+            "handlers.py should use asyncio.get_running_loop()"
+        )
+        # Verify the deprecated call is NOT present
+        assert "get_event_loop()" not in source, (
+            "handlers.py should NOT use deprecated asyncio.get_event_loop()"
+        )
+
+
+class TestRPCActivityRedaction:
+    """W18: RPC command names are redacted in activity feed events."""
+
+    def test_dangerous_rpc_commands_set_contents(self):
+        """DANGEROUS_RPC_COMMANDS includes EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE."""
+        from styrened.models.styrene_wire import StyreneMessageType
+        from styrened.rpc.server import DANGEROUS_RPC_COMMANDS
+
+        assert StyreneMessageType.EXEC in DANGEROUS_RPC_COMMANDS
+        assert StyreneMessageType.REBOOT in DANGEROUS_RPC_COMMANDS
+        assert StyreneMessageType.CONFIG_UPDATE in DANGEROUS_RPC_COMMANDS
+        assert StyreneMessageType.SELF_UPDATE in DANGEROUS_RPC_COMMANDS
+
+    def test_safe_rpc_commands_not_in_dangerous_set(self):
+        """STATUS_REQUEST and PING are NOT in DANGEROUS_RPC_COMMANDS."""
+        from styrened.models.styrene_wire import StyreneMessageType
+        from styrened.rpc.server import DANGEROUS_RPC_COMMANDS
+
+        assert StyreneMessageType.PING not in DANGEROUS_RPC_COMMANDS
+        assert StyreneMessageType.STATUS_REQUEST not in DANGEROUS_RPC_COMMANDS
+
+    @pytest.mark.asyncio
+    async def test_activity_event_uses_redacted_category_for_dangerous(self):
+        """W18: EXEC command emits 'rpc_privileged' category, not command name."""
+        from styrened.models.styrene_wire import (
+            NO_CORRELATION,
+            StyreneEnvelope,
+            StyreneMessageType,
+        )
+        from styrened.rpc.server import RPCServer
+
+        mock_protocol = MagicMock()
+        mock_protocol.register_handler = MagicMock()
+
+        server = RPCServer(
+            mock_protocol,
+            enable_dangerous_commands=True,
+        )
+        server._running = True
+
+        # Mock daemon with activity event tracker
+        activity_events = []
+        mock_daemon = MagicMock()
+        mock_daemon._emit_activity_event = lambda evt, peer_hash="", metadata=None: (
+            activity_events.append((evt, peer_hash, metadata or {}))
+        )
+        server._daemon = mock_daemon
+
+        # Create a fake EXEC envelope
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.EXEC,
+            payload=b"",
+            request_id=NO_CORRELATION,
+        )
+
+        # Build a mock LXMF message
+        mock_message = MagicMock()
+        mock_message.source_hash = "a" * 32
+
+        # Override the handler to avoid actual EXEC execution
+        server._handlers[StyreneMessageType.EXEC] = MagicMock()
+
+        await server._protocol_handler(mock_message, envelope)
+
+        # Verify activity was emitted with redacted category
+        assert len(activity_events) == 1
+        event_type, peer_hash, metadata = activity_events[0]
+        assert event_type == "rpc_received"
+        assert metadata["category"] == "rpc_privileged"
+        # Ensure raw command name is NOT leaked
+        assert "command" not in metadata
+
+    @pytest.mark.asyncio
+    async def test_activity_event_uses_rpc_query_for_safe_commands(self):
+        """W18: STATUS_REQUEST emits 'rpc_query' category."""
+        from styrened.models.styrene_wire import (
+            NO_CORRELATION,
+            StyreneEnvelope,
+            StyreneMessageType,
+        )
+        from styrened.rpc.server import RPCServer
+
+        mock_protocol = MagicMock()
+        mock_protocol.register_handler = MagicMock()
+
+        server = RPCServer(mock_protocol)
+        server._running = True
+
+        activity_events = []
+        mock_daemon = MagicMock()
+        mock_daemon._emit_activity_event = lambda evt, peer_hash="", metadata=None: (
+            activity_events.append((evt, peer_hash, metadata or {}))
+        )
+        server._daemon = mock_daemon
+
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.STATUS_REQUEST,
+            payload=b"",
+            request_id=NO_CORRELATION,
+        )
+
+        mock_message = MagicMock()
+        mock_message.source_hash = "b" * 32
+
+        server._handlers[StyreneMessageType.STATUS_REQUEST] = MagicMock()
+
+        await server._protocol_handler(mock_message, envelope)
+
+        assert len(activity_events) == 1
+        _, _, metadata = activity_events[0]
+        assert metadata["category"] == "rpc_query"
+        assert "command" not in metadata

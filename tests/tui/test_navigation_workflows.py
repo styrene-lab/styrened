@@ -169,6 +169,10 @@ class TestKeyboardWorkflows:
                 disk_used=1000000,
                 disk_total=10000000,
                 services=[],
+                os_id="Linux",
+                os_version="6.1",
+                arch="aarch64",
+                format_uptime=Mock(return_value="1h 0m"),
             )
         )
         app.rpc_client = mock_rpc_client
@@ -445,6 +449,10 @@ class TestErrorRecovery:
                     disk_used=1000000,
                     disk_total=10000000,
                     services=[],
+                    os_id="Linux",
+                    os_version="6.1",
+                    arch="aarch64",
+                    format_uptime=Mock(return_value="1h 0m"),
                 ),
             ]
         )

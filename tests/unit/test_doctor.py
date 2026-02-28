@@ -396,7 +396,7 @@ class TestCheckPaths:
     @patch("styrened.services.doctor.paths")
     def test_all_dirs_exist_writable(self, mock_paths):
         """Should report OK when all directories exist and are writable."""
-        for attr in ("config_dir", "data_dir", "cache_dir", "runtime_dir"):
+        for attr in ("config_dir", "data_dir", "state_dir", "runtime_dir"):
             mock_dir = MagicMock(spec=Path)
             mock_dir.exists.return_value = True
             getattr(mock_paths, attr).return_value = mock_dir
@@ -410,7 +410,7 @@ class TestCheckPaths:
     @patch("styrened.services.doctor.paths")
     def test_missing_dir(self, mock_paths):
         """Should warn when a directory is missing."""
-        for attr in ("config_dir", "data_dir", "cache_dir", "runtime_dir"):
+        for attr in ("config_dir", "data_dir", "state_dir", "runtime_dir"):
             mock_dir = MagicMock(spec=Path)
             mock_dir.exists.return_value = False
             getattr(mock_paths, attr).return_value = mock_dir
@@ -422,7 +422,7 @@ class TestCheckPaths:
     @patch("styrened.services.doctor.paths")
     def test_not_writable_dir(self, mock_paths):
         """Should report ERROR when a directory is not writable."""
-        for attr in ("config_dir", "data_dir", "cache_dir", "runtime_dir"):
+        for attr in ("config_dir", "data_dir", "state_dir", "runtime_dir"):
             mock_dir = MagicMock(spec=Path)
             mock_dir.exists.return_value = True
             getattr(mock_paths, attr).return_value = mock_dir

@@ -80,10 +80,20 @@ def pytest_runtest_call(item: pytest.Item) -> None:
 
 @pytest.fixture
 def app():
-    """Create a fresh StyreneApp instance for testing."""
+    """Create a fresh StyreneApp instance for testing.
+
+    Patches _check_daemon to return True so tests don't get stuck on
+    DaemonSetupScreen.  Tests that need to exercise the setup screen
+    should create their own un-patched StyreneApp.
+    """
+    from unittest.mock import AsyncMock, patch
+
     from styrened.tui.app import StyreneApp
 
-    return StyreneApp()
+    app = StyreneApp()
+    # Bypass daemon reachability check so the app lands on DashboardScreen
+    app._check_daemon = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    return app
 
 
 @pytest.fixture

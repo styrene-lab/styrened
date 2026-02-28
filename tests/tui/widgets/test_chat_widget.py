@@ -1147,6 +1147,134 @@ class TestInlineTimestamps:
 # -------------------------------------------------------------------------
 
 
+class TestPasteHandler:
+    """Tests for paste handler not eating non-image paths (W15)."""
+
+    def test_paste_non_image_path_does_not_prevent_default(self):
+        """Pasting a non-image file path should not prevent the default paste."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = "/tmp/document.txt"
+        widget.on_paste(event)
+        event.prevent_default.assert_not_called()
+
+    def test_paste_image_path_prevents_default(self):
+        """Pasting an image file path should prevent the default paste."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = "/tmp/photo.png"
+        widget.run_worker = MagicMock()  # Prevent actual worker
+        widget.on_paste(event)
+        event.prevent_default.assert_called_once()
+
+    def test_paste_non_path_text_does_not_prevent_default(self):
+        """Pasting ordinary text should not prevent the default paste."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = "Hello world"
+        widget.on_paste(event)
+        event.prevent_default.assert_not_called()
+
+    def test_paste_empty_text_does_nothing(self):
+        """Pasting empty text should do nothing."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = ""
+        widget.on_paste(event)
+        event.prevent_default.assert_not_called()
+
+    def test_paste_jpeg_path_prevents_default(self):
+        """Pasting a .jpeg path should prevent default."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = "~/images/photo.jpeg"
+        widget.run_worker = MagicMock()
+        widget.on_paste(event)
+        event.prevent_default.assert_called_once()
+
+    def test_paste_pdf_path_does_not_prevent_default(self):
+        """Pasting a .pdf path should not prevent default."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = "/home/user/doc.pdf"
+        widget.on_paste(event)
+        event.prevent_default.assert_not_called()
+
+    def test_paste_windows_path_non_image_does_not_prevent(self):
+        """Pasting a Windows-style non-image path should not prevent default."""
+        widget = ChatWidget(peer_hash="test_hash")
+        event = MagicMock()
+        event.text = "C:\\Users\\me\\doc.txt"
+        widget.on_paste(event)
+        event.prevent_default.assert_not_called()
+
+
+class TestSecurityTierWatch:
+    """Tests for watch_security_tier not clobbering transient status."""
+
+    def test_status_is_tier_initially_false(self):
+        """_status_is_tier should start as False."""
+        widget = ChatWidget(peer_hash="test_hash")
+        assert widget._status_is_tier is False
+
+    @pytest.mark.asyncio
+    async def test_set_status_empty_sets_tier_flag(self):
+        """_set_status('') should set _status_is_tier to True."""
+        lifecycle = _make_mock_lifecycle()
+
+        app = StyreneApp()
+        app._lifecycle = lifecycle
+
+        async with app.run_test() as pilot:
+            screen = ConversationScreen(peer_hash="peer_xyz")
+            await app.push_screen(screen)
+            await pilot.pause()
+
+            chat_widget = screen.query_one(ChatWidget)
+            chat_widget._set_status("")
+            assert chat_widget._status_is_tier is True
+
+    @pytest.mark.asyncio
+    async def test_set_status_with_text_clears_tier_flag(self):
+        """_set_status('some text') should set _status_is_tier to False."""
+        lifecycle = _make_mock_lifecycle()
+
+        app = StyreneApp()
+        app._lifecycle = lifecycle
+
+        async with app.run_test() as pilot:
+            screen = ConversationScreen(peer_hash="peer_xyz")
+            await app.push_screen(screen)
+            await pilot.pause()
+
+            chat_widget = screen.query_one(ChatWidget)
+            chat_widget._set_status("[red]Error[/]")
+            assert chat_widget._status_is_tier is False
+
+    @pytest.mark.asyncio
+    async def test_watch_security_tier_does_not_overwrite_transient_status(self):
+        """watch_security_tier should NOT overwrite a transient status message."""
+        lifecycle = _make_mock_lifecycle()
+
+        app = StyreneApp()
+        app._lifecycle = lifecycle
+
+        async with app.run_test() as pilot:
+            screen = ConversationScreen(peer_hash="peer_xyz")
+            await app.push_screen(screen)
+            await pilot.pause()
+
+            chat_widget = screen.query_one(ChatWidget)
+            # Set a transient status (like "Sending...")
+            chat_widget._set_status("[dim]Sending...[/]")
+            assert chat_widget._status_is_tier is False
+
+            # Now change security_tier — should NOT overwrite
+            chat_widget.security_tier = "PQC_HYBRID"
+            # _status_is_tier should still be False
+            assert chat_widget._status_is_tier is False
+
+
 class TestCopyToClipboard:
     """Tests for copy message to clipboard."""
 

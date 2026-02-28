@@ -898,3 +898,100 @@ class TestPQCConfigLoading:
         loaded = load_core_config(config_file)
         assert loaded.pqc.enabled is True
         assert loaded.pqc.rekey_interval_hours == 24
+
+    def test_pqc_rekey_interval_string_value_falls_back_to_default(
+        self, tmp_path: Path
+    ) -> None:
+        """W12: Non-numeric rekey_interval_hours falls back to 24."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "pqc:\n  rekey_interval_hours: 'not_a_number'\n"
+        )
+        loaded = load_core_config(config_file)
+        assert loaded.pqc.rekey_interval_hours == 24
+
+    def test_pqc_rekey_interval_none_value_falls_back_to_default(
+        self, tmp_path: Path
+    ) -> None:
+        """W12: null rekey_interval_hours falls back to 24."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("pqc:\n  rekey_interval_hours: null\n")
+        loaded = load_core_config(config_file)
+        # null resolves to None in YAML, int(None) raises TypeError
+        assert loaded.pqc.rekey_interval_hours == 24
+
+    def test_pqc_rekey_interval_valid_int_preserved(
+        self, tmp_path: Path
+    ) -> None:
+        """W12: Valid integer rekey_interval_hours is preserved."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("pqc:\n  rekey_interval_hours: 48\n")
+        loaded = load_core_config(config_file)
+        assert loaded.pqc.rekey_interval_hours == 48
+
+    def test_pqc_rekey_interval_float_string_falls_back_to_default(
+        self, tmp_path: Path
+    ) -> None:
+        """W12: Float-string rekey_interval_hours falls back to 24."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "pqc:\n  rekey_interval_hours: '3.14'\n"
+        )
+        loaded = load_core_config(config_file)
+        assert loaded.pqc.rekey_interval_hours == 24
+
+
+class TestAuthorizedIdentitiesHexValidation:
+    """Tests for hex validation of api.auth.authorized_identities (W11)."""
+
+    def test_valid_hex_identity_accepted(self, tmp_path: Path) -> None:
+        """A valid 32-char hex identity is accepted."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+api:
+  auth:
+    authorized_identities:
+      - "aabbccdd11223344aabbccdd11223344"
+""")
+        config = load_core_config(config_file)
+        assert "aabbccdd11223344aabbccdd11223344" in config.api.auth.authorized_identities
+
+    def test_non_hex_identity_rejected(self, tmp_path: Path) -> None:
+        """A 32-char string with non-hex characters is rejected (W11)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+api:
+  auth:
+    authorized_identities:
+      - "zzzzzzzz11223344aabbccdd11223344"
+""")
+        config = load_core_config(config_file)
+        assert len(config.api.auth.authorized_identities) == 0
+
+    def test_mixed_valid_invalid_identities(self, tmp_path: Path) -> None:
+        """Only valid hex identities are kept; non-hex are filtered out (W11)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+api:
+  auth:
+    authorized_identities:
+      - "aabbccdd11223344aabbccdd11223344"
+      - "not_valid_hex_but_len_is_32char"
+      - "1234567890abcdef1234567890abcdef"
+""")
+        config = load_core_config(config_file)
+        assert "aabbccdd11223344aabbccdd11223344" in config.api.auth.authorized_identities
+        assert "1234567890abcdef1234567890abcdef" in config.api.auth.authorized_identities
+        assert len(config.api.auth.authorized_identities) == 2
+
+    def test_uppercase_hex_identity_accepted(self, tmp_path: Path) -> None:
+        """Uppercase hex characters are accepted (W11)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+api:
+  auth:
+    authorized_identities:
+      - "AABBCCDD11223344AABBCCDD11223344"
+""")
+        config = load_core_config(config_file)
+        assert "AABBCCDD11223344AABBCCDD11223344" in config.api.auth.authorized_identities

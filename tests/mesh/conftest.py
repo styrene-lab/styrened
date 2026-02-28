@@ -22,6 +22,7 @@ import pytest_asyncio
 from tests.harness.ipc_client import (
     MeshControlClient,
     poll_for_message,
+    poll_for_status,
 )
 from tests.harness.ipc_client import (
     wait_for_ping as _wait_for_ping,
@@ -29,6 +30,19 @@ from tests.harness.ipc_client import (
 from tests.harness.ipc_client import (
     warmup_path as _warmup_path,
 )
+
+
+def _extract_content(content: object) -> str:
+    """Extract plain-text string from an LXMF message content field.
+
+    Content may arrive as ``str``, ``bytes``, or a ``dict`` with a
+    ``"text"`` key depending on the transport layer.
+    """
+    if isinstance(content, bytes):
+        return content.decode("utf-8", errors="replace")
+    if isinstance(content, dict):
+        return str(content.get("text", content))
+    return str(content)
 
 logger = logging.getLogger(__name__)
 

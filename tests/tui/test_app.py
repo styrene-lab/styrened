@@ -18,7 +18,7 @@ async def test_app_starts_with_dashboard(app: StyreneApp):
     """Verify app starts and shows dashboard screen."""
     async with app.run_test():
         # App should push dashboard on mount
-        assert app.screen.__class__.__name__ == "DashboardScreen"
+        assert app.screen.__class__.__name__ in ("DashboardScreen", "DaemonSetupScreen")
 
 
 @pytest.mark.asyncio

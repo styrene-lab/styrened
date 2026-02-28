@@ -496,6 +496,7 @@ class TestCommandMethods:
             peer_hash="peer123", content="hello",
             title=None, delivery_method="auto",
             reply_to_hash=None,
+            attachment_data_b64=None, attachment_filename=None, attachment_mime=None,
         )
 
     @pytest.mark.asyncio

@@ -252,6 +252,45 @@ provisioning:
                 test_key.unlink()
 
 
+class TestOverlayCoreIdentityLogging:
+    """Tests for _overlay_core_identity debug logging on failure."""
+
+    def test_overlay_core_identity_logs_on_failure(self, monkeypatch, caplog):
+        """Failed core config parse should log a debug message."""
+        import logging
+
+        from styrened.tui.services.config import _overlay_core_identity
+
+        # _overlay_core_identity imports load_core_config from styrened.services.config
+        # at call time, so patch at the source module.
+        monkeypatch.setattr(
+            "styrened.services.config.load_core_config",
+            lambda: (_ for _ in ()).throw(RuntimeError("bad yaml")),
+        )
+
+        config = get_default_config()
+
+        with caplog.at_level(logging.DEBUG, logger="styrened.tui.services.config"):
+            _overlay_core_identity(config)
+
+        assert any("Failed to overlay core identity" in r.message for r in caplog.records)
+
+    def test_overlay_core_identity_does_not_raise(self, monkeypatch):
+        """_overlay_core_identity must not propagate exceptions."""
+        from styrened.tui.services.config import _overlay_core_identity
+
+        def _boom():
+            raise ValueError("oops")
+
+        monkeypatch.setattr(
+            "styrened.services.config.load_core_config",
+            _boom,
+        )
+
+        config = get_default_config()
+        _overlay_core_identity(config)  # Should not raise
+
+
 class TestConfigTypes:
     """Tests for configuration enum types."""
 

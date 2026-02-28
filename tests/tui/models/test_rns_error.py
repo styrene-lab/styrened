@@ -47,7 +47,7 @@ class TestRNSErrorState:
         state = RNSErrorState(category=RNSErrorCategory.IDENTITY_CORRUPT)
         assert state.title == "Identity Corrupt"
         assert "invalid" in state.description.lower()
-        assert "operator.key" in state.recovery
+        assert "identity" in state.recovery
 
     def test_state_stores_exception_details(self) -> None:
         """Verify state stores exception type and message."""
@@ -140,7 +140,7 @@ class TestRNSErrorRecoveryGuidance:
         """Verify identity corrupt recovery tells user to delete key."""
         state = RNSErrorState(category=RNSErrorCategory.IDENTITY_CORRUPT)
         assert "Delete" in state.recovery or "delete" in state.recovery.lower()
-        assert "operator.key" in state.recovery
+        assert "identity" in state.recovery
 
     def test_not_configured_recovery_mentions_wizard(self) -> None:
         """Verify not configured recovery mentions setup wizard."""

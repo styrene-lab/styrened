@@ -60,6 +60,9 @@ def mock_daemon():
     daemon.config.chat.persist_messages = True
     daemon.config.api.enabled = False
     daemon.config.api.port = 8080
+    daemon.config.identity.display_name = "Test Node"
+    daemon.config.identity.icon = "🔧"
+    daemon.config.identity.short_name = "test"
 
     daemon.lifecycle = MagicMock()
     daemon.lifecycle._initialized = True
@@ -71,17 +74,43 @@ def mock_daemon():
 
 @pytest.fixture
 async def running_server(mock_daemon, socket_path):
-    """Start a real ControlServer on a temp socket with service patches."""
-    with (
+    """Start a real ControlServer on a temp socket with service patches.
+
+    Patches remain active for the lifetime of the fixture so that IPC
+    request handlers (e.g. query_status → discover_devices) can resolve
+    during tests, not just during server startup.
+    """
+    mock_rns_transport = MagicMock()
+    mock_rns_transport.interfaces = []
+    mock_rns_transport.transport_enabled = False
+    mock_rns_transport.active_links = []
+
+    mock_hub = MagicMock()
+    mock_hub.status.value = "disabled"
+    mock_hub.hub_address = None
+
+    mock_lxmf_router = MagicMock()
+    mock_lxmf_router.propagation_enabled = False
+    mock_daemon._lxmf_service.router = mock_lxmf_router
+
+    patches = (
         patch("styrened.services.reticulum.discover_devices", return_value=[]),
         patch("styrened.services.node_store.get_node_store", return_value=None),
         patch("styrened.services.lxmf_service.get_lxmf_service", return_value=None),
         patch("styrened.services.reticulum.get_operator_identity", return_value="test_identity"),
-    ):
+        patch.dict("sys.modules", {"RNS": MagicMock(Transport=mock_rns_transport)}),
+        patch("styrened.services.hub_connection.get_hub_connection", return_value=mock_hub),
+    )
+    for p in patches:
+        p.start()
+    try:
         server = ControlServer(mock_daemon, socket_path)
         await server.start()
         yield server
         await server.stop()
+    finally:
+        for p in patches:
+            p.stop()
 
 
 # ===================================================================
@@ -258,11 +287,21 @@ class TestBridgeReconnection:
     @pytest.mark.asyncio
     async def test_reconnects_after_server_restart(self, mock_daemon, socket_path):
         """Bridge reconnects after server restart."""
+        mock_rns_transport = MagicMock()
+        mock_rns_transport.interfaces = []
+        mock_rns_transport.transport_enabled = False
+        mock_rns_transport.active_links = []
+        mock_hub = MagicMock()
+        mock_hub.status.value = "disabled"
+        mock_hub.hub_address = None
+        mock_daemon._lxmf_service.router.propagation_enabled = False
         with (
             patch("styrened.services.reticulum.discover_devices", return_value=[]),
             patch("styrened.services.node_store.get_node_store", return_value=None),
             patch("styrened.services.lxmf_service.get_lxmf_service", return_value=None),
             patch("styrened.services.reticulum.get_operator_identity", return_value="test_identity"),
+            patch.dict("sys.modules", {"RNS": MagicMock(Transport=mock_rns_transport)}),
+            patch("styrened.services.hub_connection.get_hub_connection", return_value=mock_hub),
         ):
             # Start server
             server = ControlServer(mock_daemon, socket_path)

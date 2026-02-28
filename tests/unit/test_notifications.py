@@ -387,6 +387,80 @@ class TestIPCEventBackendRouting:
             )
 
     @pytest.mark.asyncio
+    async def test_ipc_backend_routes_delivery_status_to_event_message(self):
+        """delivery_status events broadcast as EVENT_MESSAGE (targeted channel)."""
+        from styrened.ipc.protocol import IPCMessageType
+
+        mock_server = MagicMock()
+        mock_server.broadcast_event = AsyncMock()
+        backend = IPCEventBackend(mock_server)
+
+        event = _make_event(event_type="delivery_status")
+        await backend.dispatch(event)
+
+        event_types = [
+            call[0][0] for call in mock_server.broadcast_event.call_args_list
+        ]
+        assert IPCMessageType.EVENT_MESSAGE in event_types
+        assert IPCMessageType.EVENT_ACTIVITY in event_types
+
+    @pytest.mark.asyncio
+    async def test_ipc_backend_routes_device_updated_to_event_device(self):
+        """device_updated events broadcast as EVENT_DEVICE (targeted channel)."""
+        from styrened.ipc.protocol import IPCMessageType
+
+        mock_server = MagicMock()
+        mock_server.broadcast_event = AsyncMock()
+        backend = IPCEventBackend(mock_server)
+
+        event = _make_event(event_type="device_updated")
+        await backend.dispatch(event)
+
+        event_types = [
+            call[0][0] for call in mock_server.broadcast_event.call_args_list
+        ]
+        assert IPCMessageType.EVENT_DEVICE in event_types
+        assert IPCMessageType.EVENT_ACTIVITY in event_types
+
+    @pytest.mark.asyncio
+    async def test_ipc_backend_routes_announce_sent_to_activity_only(self):
+        """W1: announce_sent events ONLY go to EVENT_ACTIVITY (not targeted)."""
+        from styrened.ipc.protocol import IPCMessageType
+
+        mock_server = MagicMock()
+        mock_server.broadcast_event = AsyncMock()
+        backend = IPCEventBackend(mock_server)
+
+        event = _make_event(event_type="announce_sent")
+        await backend.dispatch(event)
+
+        event_types = [
+            call[0][0] for call in mock_server.broadcast_event.call_args_list
+        ]
+        assert IPCMessageType.EVENT_ACTIVITY in event_types
+        assert IPCMessageType.EVENT_MESSAGE not in event_types
+        assert IPCMessageType.EVENT_DEVICE not in event_types
+
+    @pytest.mark.asyncio
+    async def test_ipc_backend_routes_rpc_received_to_activity_only(self):
+        """W1: rpc_received events ONLY go to EVENT_ACTIVITY (not targeted)."""
+        from styrened.ipc.protocol import IPCMessageType
+
+        mock_server = MagicMock()
+        mock_server.broadcast_event = AsyncMock()
+        backend = IPCEventBackend(mock_server)
+
+        event = _make_event(event_type="rpc_received")
+        await backend.dispatch(event)
+
+        event_types = [
+            call[0][0] for call in mock_server.broadcast_event.call_args_list
+        ]
+        assert IPCMessageType.EVENT_ACTIVITY in event_types
+        assert IPCMessageType.EVENT_MESSAGE not in event_types
+        assert IPCMessageType.EVENT_DEVICE not in event_types
+
+    @pytest.mark.asyncio
     async def test_ipc_backend_preserves_message_payload(self):
         """Regression: payload structure unchanged for EVENT_MESSAGE."""
         from styrened.ipc.protocol import IPCMessageType

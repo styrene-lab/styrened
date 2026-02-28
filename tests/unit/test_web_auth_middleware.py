@@ -202,7 +202,7 @@ class TestPathExemptions:
     """Certain paths are always exempt from auth."""
 
     def test_auth_endpoints_always_exempt(self) -> None:
-        """/api/auth/* paths bypass authentication."""
+        """/api/auth/status path bypasses authentication."""
         app, _ = _create_app(auth_enabled=True, exempt_localhost=False)
         client = TestClient(app)
         resp = client.get("/api/auth/status")
@@ -214,6 +214,54 @@ class TestPathExemptions:
         client = TestClient(app)
         resp = client.get("/static/index.html")
         assert resp.status_code == 200
+
+    def test_auth_challenge_exempt(self) -> None:
+        """/api/auth/challenge path bypasses authentication (W23)."""
+        app, _ = _create_app(auth_enabled=True, exempt_localhost=False)
+
+        @app.post("/api/auth/challenge")
+        async def challenge():
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.post("/api/auth/challenge")
+        assert resp.status_code == 200
+
+    def test_auth_verify_exempt(self) -> None:
+        """/api/auth/verify path bypasses authentication (W23)."""
+        app, _ = _create_app(auth_enabled=True, exempt_localhost=False)
+
+        @app.post("/api/auth/verify")
+        async def verify():
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.post("/api/auth/verify")
+        assert resp.status_code == 200
+
+    def test_auth_logout_exempt(self) -> None:
+        """/api/auth/logout path bypasses authentication (W23)."""
+        app, _ = _create_app(auth_enabled=True, exempt_localhost=False)
+
+        @app.post("/api/auth/logout")
+        async def logout():
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.post("/api/auth/logout")
+        assert resp.status_code == 200
+
+    def test_arbitrary_auth_subpath_not_exempt(self) -> None:
+        """Arbitrary /api/auth/<subpath> is NOT exempt (W23 tightening)."""
+        app, _ = _create_app(auth_enabled=True, exempt_localhost=False)
+
+        @app.get("/api/auth/admin/escalate")
+        async def fake_escalation():
+            return {"escalated": True}
+
+        client = TestClient(app)
+        resp = client.get("/api/auth/admin/escalate")
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +294,110 @@ class TestLocalhostExemption:
         client = TestClient(app)
         resp = client.get("/api/devices")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Tests: PublicModeMiddleware + auth interaction (C6)
+# ---------------------------------------------------------------------------
+
+
+class TestPublicModeAuthExemption:
+    """Auth endpoints must be accessible even in public mode (C6)."""
+
+    def _create_public_mode_app(self) -> tuple[FastAPI, SessionStore]:
+        """Create a minimal app with PublicModeMiddleware and auth endpoints."""
+        from styrened.web.middleware import PublicModeMiddleware
+
+        app = FastAPI()
+        store = SessionStore()
+
+        daemon = MagicMock()
+        daemon.config = FakeDaemonConfig(
+            api=FakeAPIConfig(
+                auth=FakeAuthConfig(enabled=True),
+                public_mode=True,
+            ),
+        )
+        app.state.daemon = daemon
+
+        # Order: PublicModeMiddleware runs before AuthMiddleware
+        # Starlette processes middleware in reverse add order
+        app.add_middleware(PublicModeMiddleware)
+        app.add_middleware(AuthMiddleware, session_store=store)
+
+        @app.post("/api/auth/challenge")
+        async def challenge():
+            return {"challenge": "test_nonce"}
+
+        @app.post("/api/auth/verify")
+        async def verify():
+            return {"token": "test_token"}
+
+        @app.get("/api/auth/status")
+        async def auth_status():
+            return {"authenticated": False}
+
+        @app.post("/api/auth/logout")
+        async def logout():
+            return {"logged_out": True}
+
+        @app.get("/api/devices")
+        async def devices():
+            return {"devices": []}
+
+        return app, store
+
+    def test_auth_challenge_accessible_in_public_mode(self) -> None:
+        """POST /api/auth/challenge is not blocked by PublicModeMiddleware (C6)."""
+        app, _ = self._create_public_mode_app()
+        client = TestClient(app)
+        resp = client.post("/api/auth/challenge")
+        assert resp.status_code == 200
+
+    def test_auth_verify_accessible_in_public_mode(self) -> None:
+        """POST /api/auth/verify is not blocked by PublicModeMiddleware (C6)."""
+        app, _ = self._create_public_mode_app()
+        client = TestClient(app)
+        resp = client.post("/api/auth/verify")
+        assert resp.status_code == 200
+
+    def test_auth_status_accessible_in_public_mode(self) -> None:
+        """GET /api/auth/status is accessible in public mode (C6)."""
+        app, _ = self._create_public_mode_app()
+        client = TestClient(app)
+        resp = client.get("/api/auth/status")
+        assert resp.status_code == 200
+
+    def test_auth_logout_accessible_in_public_mode(self) -> None:
+        """POST /api/auth/logout is not blocked by PublicModeMiddleware (C6)."""
+        app, _ = self._create_public_mode_app()
+        client = TestClient(app)
+        resp = client.post("/api/auth/logout")
+        assert resp.status_code == 200
+
+    def test_non_auth_post_blocked_in_public_mode(self) -> None:
+        """Non-auth POST is blocked by public mode even with a valid session.
+
+        Tests that PublicModeMiddleware blocks write operations while
+        allowing auth endpoints through.
+        """
+        app, store = self._create_public_mode_app()
+
+        # Add a POST endpoint to test
+        @app.post("/api/devices")
+        async def create_device():
+            return {"created": True}
+
+        # Create a valid session to bypass AuthMiddleware
+        session = store.create("test_identity_hash_000000000000")
+        client = TestClient(app)
+
+        # POST should be blocked by PublicModeMiddleware (403, not 401)
+        resp = client.post(
+            "/api/devices",
+            headers={"Authorization": f"Bearer {session.token}"},
+        )
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
