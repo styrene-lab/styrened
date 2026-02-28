@@ -499,7 +499,7 @@ class StyreneApp(App[None]):
 
             from styrened.tui.services.daemon_manager import DaemonManager
             manager = DaemonManager()
-            started = await manager.start()
+            started = await manager.ensure_running()
             if started:
                 self._lifecycle._daemon_manager = manager
                 self.notify("Daemon restarted", severity="information", timeout=5)
