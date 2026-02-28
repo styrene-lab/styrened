@@ -29,6 +29,10 @@ class PublicModeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         if path.startswith("/api/"):
+            # Auth endpoints must always be accessible (even in public mode)
+            if path.startswith("/api/auth/"):
+                return await call_next(request)
+
             daemon = request.app.state.daemon
             if daemon.config.api.public_mode:
                 # Block private endpoints entirely (all methods)

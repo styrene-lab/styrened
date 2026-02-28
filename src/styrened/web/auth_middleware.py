@@ -58,8 +58,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not (path.startswith("/api/") or path == "/events"):
             return await call_next(request)
 
-        # Auth endpoints are always accessible
-        if path.startswith("/api/auth/"):
+        # Auth endpoints are always accessible (tightened to exact set)
+        if path in {
+            "/api/auth/challenge",
+            "/api/auth/verify",
+            "/api/auth/logout",
+            "/api/auth/session",
+            "/api/auth/status",
+        }:
             return await call_next(request)
 
         # Read config per-request for live reload
@@ -71,6 +77,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Localhost exemption
+        # NOTE: exempt_localhost checks request.client.host only (the TCP
+        # peer address). It does NOT inspect X-Forwarded-For or similar
+        # proxy headers. When running behind a reverse proxy, all requests
+        # appear to originate from the proxy's address. Do NOT enable
+        # exempt_localhost behind a reverse proxy without additional
+        # configuration to verify the real client address.
         client_host = request.client.host if request.client else None
         if auth_config.exempt_localhost and _is_loopback(client_host):
             return await call_next(request)
