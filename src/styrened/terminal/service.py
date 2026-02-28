@@ -35,7 +35,7 @@ import termios
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from styrened.models.styrene_wire import (
     StyreneEnvelope,
@@ -52,6 +52,7 @@ from styrened.terminal.messages import (
     VersionInfo,
     WindowSize,
     deserialize_message,
+    register_message_types,
     serialize_message,
 )
 
@@ -152,6 +153,8 @@ class TerminalSession:
     master_fd: int
     child_pid: int
     link: "RNS.Link | None" = None
+    channel: "RNS.Channel.Channel | None" = field(default=None, repr=False)
+    protocol_version: str = "1.0"
     term_type: str = "xterm-256color"
     rows: int = 24
     cols: int = 80
@@ -1465,6 +1468,63 @@ class TerminalService:
                 f"data_len={len(data)} error={e}"
             )
 
+    def _on_channel_message(self, session: TerminalSession, message: "RNS.Channel.MessageBase") -> bool:
+        """Handle a message received via RNS Channel (v2.0 data plane).
+
+        Dispatches typed Channel messages to appropriate handlers.
+
+        Args:
+            session: Terminal session that received the message
+            message: Received Channel message (already unpacked by Channel)
+
+        Returns:
+            True to indicate the message was consumed
+        """
+        session_hex = session.session_id.hex()[:16]
+        session.update_activity()
+
+        try:
+            if isinstance(message, StreamData):
+                if message.is_stdin:
+                    try:
+                        bytes_written = os.write(session.master_fd, message.data)
+                        logger.debug(
+                            f"[METRICS] channel_stdin session={session_hex} "
+                            f"bytes={len(message.data)} written={bytes_written}"
+                        )
+                    except OSError as e:
+                        logger.error(
+                            f"[METRICS] channel_pty_write_error session={session_hex} "
+                            f"bytes={len(message.data)} error={e}"
+                        )
+
+            elif isinstance(message, WindowSize):
+                logger.debug(
+                    f"[METRICS] channel_window_size session={session_hex} "
+                    f"size={message.cols}x{message.rows}"
+                )
+                session.set_window_size(message.rows, message.cols, message.xpixel, message.ypixel)
+
+            elif isinstance(message, VersionInfo):
+                logger.debug(
+                    f"[METRICS] channel_version_info session={session_hex} "
+                    f"version={message.version} software={message.software}"
+                )
+
+            else:
+                logger.debug(
+                    f"[METRICS] channel_unknown_message session={session_hex} "
+                    f"type={type(message).__name__}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[METRICS] channel_message_handler_error session={session_hex} "
+                f"type={type(message).__name__} error={e}"
+            )
+
+        return True
+
     async def _async_verify_and_associate(
         self,
         link: "RNS.Link",
@@ -1554,21 +1614,66 @@ class TerminalService:
                 f"identity={session.source_identity[:16]} pid={session.child_pid}"
             )
 
-            # Start PTY read loop
-            session._read_task = asyncio.create_task(self._pty_read_loop(session))
-
-            # Send version info
-            version_msg = VersionInfo(version="1.0", software="styrened")
-            self._send_link_packet(link, serialize_message(version_msg))
-            logger.debug(f"[METRICS] version_info_sent session={session_hex} version=1.0")
-
             # Process any packets that arrived during association
+            # (may include VersionInfo from client needed for Channel setup)
             pending = getattr(link, "_pending_packets", [])
+            client_version = "1.0"
+            remaining_pending: list[tuple[bytes, Any]] = []
             if pending:
                 logger.debug(f"[METRICS] processing_pending_packets count={len(pending)}")
                 link._pending_packets = []
                 for pending_data, pending_packet in pending:
-                    self._on_link_packet(link, pending_data, pending_packet)
+                    # Check for VersionInfo in pending packets
+                    try:
+                        msg = deserialize_message(pending_data)
+                        if isinstance(msg, VersionInfo):
+                            client_version = msg.version
+                            logger.debug(
+                                f"[METRICS] client_version_from_pending session={session_hex} "
+                                f"version={msg.version} software={msg.software}"
+                            )
+                            continue  # Consumed
+                    except Exception:
+                        pass
+                    remaining_pending.append((pending_data, pending_packet))
+
+            # Set up Channel if both sides support v2.0
+            server_version = "2.0"
+            if client_version >= "2.0":
+                try:
+                    channel = link.get_channel()
+                    register_message_types(channel)
+                    channel.add_message_handler(
+                        lambda msg: self._on_channel_message(session, msg)
+                    )
+                    session.channel = channel
+                    session.protocol_version = "2.0"
+                    logger.info(
+                        f"[METRICS] channel_established session={session_hex} "
+                        f"mdu={channel.mdu} client_version={client_version}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[METRICS] channel_setup_failed session={session_hex} "
+                        f"error={e} falling_back_to_raw_packets"
+                    )
+                    server_version = "1.0"
+            else:
+                server_version = "1.0"
+
+            # Send version info (always via raw packet — handshake stays on raw path)
+            version_msg = VersionInfo(version=server_version, software="styrened")
+            self._send_link_packet(link, serialize_message(version_msg))
+            logger.debug(
+                f"[METRICS] version_info_sent session={session_hex} version={server_version}"
+            )
+
+            # Start PTY read loop
+            session._read_task = asyncio.create_task(self._pty_read_loop(session))
+
+            # Dispatch remaining pending packets
+            for pending_data, pending_packet in remaining_pending:
+                self._on_link_packet(link, pending_data, pending_packet)
 
             # Clear association flags
             session._association_pending = False
@@ -1609,31 +1714,39 @@ class TerminalService:
         else:
             logger.debug(f"[METRICS] link_closed_unassociated reason_code={reason}")
 
-    def _get_max_payload_size(self, link: "RNS.Link") -> int:
+    def _get_max_payload_size(self, session: TerminalSession) -> int:
         """Calculate maximum payload size for StreamData messages.
 
-        Accounts for message framing overhead:
-        - 1 byte: message type
-        - 1 byte: stream type
-        - 2 bytes: data length prefix (msgpack)
-        - Additional msgpack overhead for larger payloads
+        In Channel mode, uses Channel.mdu minus msgpack framing overhead.
+        In raw packet mode, uses Link MTU minus framing overhead.
 
         Args:
-            link: RNS Link to check MTU
+            session: Terminal session to check payload limits for
 
         Returns:
             Maximum data bytes that can be sent in a single StreamData message
         """
-        mtu: int = link.get_mtu()
-        # Reserve space for StreamData message framing
-        # msgpack overhead: 1 (fixmap) + 1 (type key) + 1 (type val) + 1 (stream key) + 1 (stream val)
-        #                 + 1 (data key) + 3 (bin header for data up to 65535 bytes)
-        # Total overhead: ~10 bytes, use 32 for safety margin
-        overhead = 32
-        return max(64, mtu - overhead)  # Minimum 64 bytes per chunk
+        if session.channel:
+            # Channel mode: mdu is the max pack() result size
+            # Reserve 20 bytes for msgpack framing overhead within pack()
+            return max(64, session.channel.mdu - 20)
+        else:
+            # Raw packet mode: use link MTU
+            if not session.link:
+                return 64
+            mtu: int = session.link.get_mtu()
+            # Reserve space for StreamData message framing
+            # msgpack overhead: 1 (fixmap) + keys/vals + bin header
+            # Plus 1 byte for message type prefix
+            # Total overhead: ~10 bytes, use 32 for safety margin
+            overhead = 32
+            return max(64, mtu - overhead)  # Minimum 64 bytes per chunk
 
     async def _pty_read_loop(self, session: TerminalSession) -> None:
         """Read from PTY and send to client via Link.
+
+        When Channel is available (v2.0), uses Channel.send() with backpressure
+        via is_ready_to_send(). Falls back to raw packets for v1.0 sessions.
 
         Args:
             session: Session to read from
@@ -1643,9 +1756,11 @@ class TerminalService:
         total_bytes_read = 0
         read_count = 0
         chunk_count = 0
+        backpressure_waits = 0
 
         logger.debug(
-            f"[METRICS] pty_read_loop_started session={session_hex} buffer_size={PTY_READ_SIZE}"
+            f"[METRICS] pty_read_loop_started session={session_hex} "
+            f"buffer_size={PTY_READ_SIZE} mode={'channel' if session.channel else 'raw'}"
         )
 
         try:
@@ -1663,18 +1778,30 @@ class TerminalService:
                         # Update activity on output
                         session.update_activity()
 
-                        # Chunk data to respect Link MTU
-                        max_payload = self._get_max_payload_size(session.link)
+                        # Chunk data to respect payload limits
+                        max_payload = self._get_max_payload_size(session)
                         for i in range(0, len(data), max_payload):
                             chunk = data[i : i + max_payload]
                             chunk_count += 1
                             msg = StreamData(stream=StreamData.STDOUT, data=chunk)
-                            self._send_link_packet(session.link, serialize_message(msg))
+
+                            if session.channel:
+                                # Channel mode: backpressure via is_ready_to_send()
+                                while not session.channel.is_ready_to_send():
+                                    if not session.link or session.link.status != 0x00:
+                                        return
+                                    backpressure_waits += 1
+                                    await asyncio.sleep(0.01)
+                                session.channel.send(msg)
+                            else:
+                                # Raw packet mode (v1.0 fallback)
+                                self._send_link_packet(session.link, serialize_message(msg))
 
                         logger.debug(
                             f"[METRICS] stdout_data session={session_hex} "
                             f"bytes={len(data)} chunks={chunk_count} "
                             f"total_bytes={total_bytes_read} read_count={read_count}"
+                            f"{f' bp_waits={backpressure_waits}' if backpressure_waits else ''}"
                         )
                     else:
                         # EOF - shell exited
@@ -1706,7 +1833,8 @@ class TerminalService:
 
         logger.debug(
             f"[METRICS] pty_read_loop_ended session={session_hex} "
-            f"total_bytes={total_bytes_read} read_count={read_count} chunk_count={chunk_count}"
+            f"total_bytes={total_bytes_read} read_count={read_count} "
+            f"chunk_count={chunk_count} backpressure_waits={backpressure_waits}"
         )
 
     def _close_session(
@@ -1757,9 +1885,13 @@ class TerminalService:
         if session.link and session.link.status == 0x00:  # ACTIVE
             try:
                 msg = CommandExited(return_code=exit_code)
-                self._send_link_packet(session.link, serialize_message(msg))
+                if session.channel and session.channel.is_ready_to_send():
+                    session.channel.send(msg)
+                else:
+                    self._send_link_packet(session.link, serialize_message(msg))
                 logger.debug(
-                    f"[METRICS] command_exited_sent session={session_hex} exit_code={exit_code}"
+                    f"[METRICS] command_exited_sent session={session_hex} "
+                    f"exit_code={exit_code} via={'channel' if session.channel else 'raw'}"
                 )
             except Exception as e:
                 logger.debug(
