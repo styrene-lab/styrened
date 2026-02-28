@@ -169,7 +169,23 @@ class StyreneApp(App[None]):
         os.environ.setdefault("COLORTERM", "truecolor")
         os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
 
+        # CRITICAL: Textual builds the stylesheet during super().__init__()
+        # using get_css_variables(), which reads self.theme to resolve
+        # CSS variables like $background, $primary, etc. If our custom
+        # theme isn't registered and active by then, the stylesheet gets
+        # built with Textual's default theme values (wrong colors).
+        #
+        # We pre-populate the theme registry and set the reactive default
+        # BEFORE super().__init__() so the stylesheet sees our colors.
+        self._registered_themes = {STYRENE_THEME_KEY: create_styrene_theme()}
+        self.__class__._default_theme = STYRENE_THEME_KEY
+
         super().__init__()
+
+        # Ensure theme is active (reactive may reset during init)
+        if self.theme != STYRENE_THEME_KEY:
+            self.register_theme(create_styrene_theme())
+            self.theme = STYRENE_THEME_KEY
 
         # Store CLI overrides
         self._mode_override = mode
@@ -189,9 +205,7 @@ class StyreneApp(App[None]):
         # Apply CLI overrides to config
         self._apply_cli_overrides()
 
-        # Register and apply styrene brand theme
-        self.register_theme(create_styrene_theme())
-        self.theme = STYRENE_THEME_KEY
+        # Apply color cascade for non-CSS theme consumers
         set_color_cascade(create_styrene_cascade())
 
         # Initialize defaults for service-layer attributes
