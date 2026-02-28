@@ -1094,7 +1094,7 @@ def create_file_offer(
         version=STYRENE_VERSION,
         message_type=StyreneMessageType.FILE_OFFER,
         payload=encode_payload(payload),
-        request_id=request_id,
+        request_id=request_id if request_id else NO_CORRELATION,
     )
 
 

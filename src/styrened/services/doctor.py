@@ -530,7 +530,7 @@ def check_paths() -> list[Finding]:
     dirs_to_check = [
         ("Config", paths.config_dir()),
         ("Data", paths.data_dir()),
-        ("Cache", paths.cache_dir()),
+        ("State", paths.state_dir()),
         ("Runtime", paths.runtime_dir()),
     ]
 

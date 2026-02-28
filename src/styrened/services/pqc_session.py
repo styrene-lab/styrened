@@ -51,11 +51,13 @@ class _HandshakeState:
     role: str  # "initiator" or "responder"
     x25519_pub: bytes
     x25519_priv: bytes
+    peer_hash: str = ""
     kem_pub: bytes | None = None
     kem_sk: bytes | None = None
     kem_shared: bytes | None = None
     peer_x25519_pub: bytes | None = None
     derived_key: bytes | None = None
+    created_at: float = 0.0
 
 
 class PQCSessionService:
@@ -95,8 +97,10 @@ class PQCSessionService:
             role="initiator",
             x25519_pub=x25519_pub,
             x25519_priv=x25519_priv,
+            peer_hash=peer_hash,
             kem_pub=kem_pub,
             kem_sk=kem_sk,
+            created_at=time.time(),
         )
         self._pending[session.session_id] = state
 
@@ -121,6 +125,23 @@ class PQCSessionService:
             asyncio.run(self.initiate_session(peer_hash))
 
     # ------------------------------------------------------------------
+    # Pending handshake housekeeping
+    # ------------------------------------------------------------------
+
+    _PENDING_TTL: float = 60.0  # seconds
+
+    def _sweep_expired_pending(self) -> None:
+        """Remove pending handshake entries older than _PENDING_TTL seconds."""
+        now = time.time()
+        expired = [
+            sid for sid, state in self._pending.items()
+            if state.created_at > 0 and (now - state.created_at) > self._PENDING_TTL
+        ]
+        for sid in expired:
+            logger.debug(f"Sweeping expired pending handshake {sid.hex()[:16]}")
+            del self._pending[sid]
+
+    # ------------------------------------------------------------------
     # Incoming message handlers
     # ------------------------------------------------------------------
 
@@ -128,6 +149,8 @@ class PQCSessionService:
         """Handle incoming PQC_INITIATE."""
         peer_hash: str = message.source_hash
         data = decode_payload(envelope.payload)
+
+        self._sweep_expired_pending()
 
         session_id = _ensure_bytes(data["session_id"])
         peer_x25519_pub = _ensure_bytes(data["x25519_pub"])
@@ -159,9 +182,11 @@ class PQCSessionService:
             role="responder",
             x25519_pub=x25519_pub,
             x25519_priv=x25519_priv,
+            peer_hash=peer_hash,
             kem_shared=kem_shared,
             peer_x25519_pub=peer_x25519_pub,
             derived_key=derived_key,
+            created_at=time.time(),
         )
 
         payload = encode_payload({
@@ -187,9 +212,20 @@ class PQCSessionService:
         kem_ct = _ensure_bytes(data["kem_ct"])
         peer_hmac = _ensure_bytes(data["hmac"])
 
+        self._sweep_expired_pending()
+
         state = self._pending.get(session_id)
         if state is None or state.role != "initiator":
             logger.warning(f"No pending initiator handshake for session {session_id.hex()[:16]}")
+            return
+
+        # Verify the responding peer matches the peer we initiated with
+        if state.peer_hash and state.peer_hash != peer_hash:
+            logger.warning(
+                f"PQC RESPOND peer_hash mismatch: expected {state.peer_hash[:16]}, "
+                f"got {peer_hash[:16]}. Possible MitM — rejecting."
+            )
+            del self._pending[session_id]
             return
 
         # Decapsulate KEM ciphertext with our secret key
@@ -242,6 +278,15 @@ class PQCSessionService:
             logger.warning(f"No pending responder handshake for session {session_id.hex()[:16]}")
             return
 
+        # Verify the confirming peer matches the peer who initiated
+        if state.peer_hash and state.peer_hash != peer_hash:
+            logger.warning(
+                f"PQC CONFIRM peer_hash mismatch: expected {state.peer_hash[:16]}, "
+                f"got {peer_hash[:16]}. Possible MitM — rejecting."
+            )
+            del self._pending[session_id]
+            return
+
         # Verify initiator's CONFIRM HMAC
         expected_hmac = _compute_hmac(
             state.derived_key, b"PQC_CONFIRM", session_id, state.peer_x25519_pub
@@ -263,8 +308,18 @@ class PQCSessionService:
         logger.info(f"PQC session established (responder) with {peer_hash[:16]}...")
 
     async def handle_rekey(self, message: Any, envelope: Any) -> None:
-        """Handle incoming PQC_REKEY — start a fresh handshake."""
+        """Handle incoming PQC_REKEY — start a fresh handshake.
+
+        Only honors rekey from peers with an active (established) session.
+        Ignores rekey requests from unknown peers to prevent unauthenticated
+        session initiation.
+        """
         peer_hash: str = message.source_hash
+        if peer_hash not in self._active_keys:
+            logger.warning(
+                f"PQC rekey ignored from {peer_hash[:16]}...: no active session"
+            )
+            return
         logger.info(f"PQC rekey requested by {peer_hash[:16]}...")
         await self.initiate_session(peer_hash)
 

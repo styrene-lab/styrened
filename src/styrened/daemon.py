@@ -28,6 +28,7 @@ import logging
 import signal
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -43,7 +44,10 @@ except ImportError:
 if TYPE_CHECKING:
     from styrened.models.mesh_device import MeshDevice
 
-from styrened.crypto.pqc_crypto import pqc_available
+try:
+    from styrened.crypto.pqc_crypto import pqc_available
+except ImportError:
+    pqc_available = lambda: False  # noqa: E731
 from styrened.models.config import CoreConfig
 from styrened.models.mesh_device import DeviceType
 from styrened.services.auto_reply import AutoReplyHandler
@@ -337,6 +341,9 @@ class StyreneDaemon:
             return
 
         try:
+            # initiate_session_sync() is non-blocking: it schedules the async
+            # handshake via loop.create_task(), so it is safe to call from this
+            # synchronous discovery callback without blocking the event loop.
             self._pqc_service.initiate_session_sync(device.destination_hash)
         except Exception as e:
             logger.warning(f"PQC auto-initiate failed for {device.destination_hash[:16]}...: {e}")
@@ -712,10 +719,16 @@ class StyreneDaemon:
                             if isinstance(first, (list, tuple)) and len(first) >= 2:
                                 raw_data = first[1] if isinstance(first[1], bytes) else None
 
+                    store = get_attachment_store()
+                    # Use a UUID-based temp identifier instead of message_id=0
+                    # to avoid filename collisions when multiple attachments
+                    # arrive concurrently.  The file is renamed to the real
+                    # msg_id after the DB commit returns it.
+                    temp_msg_id = uuid.uuid4().int & 0x7FFFFFFF  # positive 31-bit int
+
                     if raw_data is not None:
-                        store = get_attachment_store()
                         saved_path = store.save(
-                            source_hash, 0, att_filename, raw_data, mime=attachment_mime
+                            source_hash, temp_msg_id, att_filename, raw_data, mime=attachment_mime
                         )
                         attachment_path = str(saved_path)
                         logger.debug(f"Saved attachment: {att_filename} ({len(raw_data)} bytes)")
@@ -732,7 +745,7 @@ class StyreneDaemon:
                                     if extra_data is not None:
                                         try:
                                             store.save(
-                                                source_hash, 0, extra_name, extra_data, mime=extra_mime
+                                                source_hash, temp_msg_id, extra_name, extra_data, mime=extra_mime
                                             )
                                             logger.debug(
                                                 f"Saved additional attachment {idx}: "

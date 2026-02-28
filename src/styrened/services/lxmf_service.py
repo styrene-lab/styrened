@@ -232,6 +232,35 @@ class LXMFService:
             # fix in LXMF to guard against None identity. See: https://github.com/markqvist/LXMF
             self._router = LXMF.LXMRouter(**router_kwargs)
 
+            # Monkey-patch: guard get_outbound_propagation_cost() against None
+            # propagation node. Upstream LXMF passes the None return from
+            # get_outbound_propagation_node() straight into RNS.Transport.request_path(),
+            # which crashes with:
+            #   TypeError: unsupported operand type(s) for +: 'NoneType' and 'bytes'
+            # The caller (process_deferred_stamps, line ~2466) already handles a None
+            # return gracefully, so returning None early is safe.
+            # Workaround for: styrene-lab/styrened#9
+            _original_get_outbound_propagation_cost = (
+                self._router.get_outbound_propagation_cost
+            )
+
+            def _patched_get_outbound_propagation_cost() -> "int | None":
+                if self._router.get_outbound_propagation_node() is None:
+                    logger.debug(
+                        "[LXMF] get_outbound_propagation_cost() called with no "
+                        "outbound propagation node configured — returning None"
+                    )
+                    return None
+                return _original_get_outbound_propagation_cost()
+
+            self._router.get_outbound_propagation_cost = (
+                _patched_get_outbound_propagation_cost
+            )
+            logger.info(
+                "[LXMF] Applied monkey-patch for get_outbound_propagation_cost() "
+                "None propagation node guard"
+            )
+
             # Set outbound propagation node if configured
             if lxmf_config is not None and lxmf_config.propagation_destination:
                 try:

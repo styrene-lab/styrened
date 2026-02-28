@@ -824,6 +824,7 @@ class ConversationService:
         """Update the attachment_path of a message.
 
         Called after rename_for_message to update the stored path.
+        Acquires _lock consistent with other mutation methods.
 
         Args:
             message_id: Database ID of the message
@@ -832,13 +833,14 @@ class ConversationService:
         Returns:
             True if message was found and updated
         """
-        with Session(self._db_engine) as session:
-            msg = session.query(Message).filter(Message.id == message_id).first()
-            if msg is None:
-                return False
+        with self._lock:
+            with Session(self._db_engine) as session:
+                msg = session.query(Message).filter(Message.id == message_id).first()
+                if msg is None:
+                    return False
 
-            msg.attachment_path = path
-            session.commit()
+                msg.attachment_path = path
+                session.commit()
 
         return True
 

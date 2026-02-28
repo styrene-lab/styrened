@@ -2,7 +2,6 @@
 
 from styrened.services.config import (
     ensure_directories,
-    get_cache_dir,
     get_config_dir,
     get_data_dir,
     get_default_core_config,
@@ -19,7 +18,6 @@ from styrened.services.conversation_service import (
 
 __all__ = [
     "ensure_directories",
-    "get_cache_dir",
     "get_config_dir",
     "get_data_dir",
     "get_default_core_config",

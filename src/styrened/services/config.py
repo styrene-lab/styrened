@@ -74,15 +74,6 @@ def get_data_dir() -> Path:
     return paths.data_dir()
 
 
-def get_cache_dir() -> Path:
-    """Return the cache directory path.
-
-    .. deprecated::
-        Use ``paths.cache_dir()`` directly.
-    """
-    return paths.cache_dir()
-
-
 def get_log_dir() -> Path:
     """Return the log directory path.
 
@@ -377,7 +368,9 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             if "authorized_identities" in auth and isinstance(auth["authorized_identities"], list):
                 authorized = set()
                 for ident in auth["authorized_identities"]:
-                    if isinstance(ident, str) and len(ident) == 32:
+                    if isinstance(ident, str) and len(ident) == 32 and all(
+                        c in "0123456789abcdef" for c in ident.lower()
+                    ):
                         authorized.add(ident)
                 config.api.auth.authorized_identities = authorized
 
@@ -546,9 +539,22 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     # Parse pqc section
     if "pqc" in data and isinstance(data["pqc"], dict):
         pqc = data["pqc"]
+
+        # Parse rekey_interval_hours with error handling for non-numeric values
+        rekey_interval_hours = 24  # default
+        try:
+            rekey_interval_hours = int(pqc.get("rekey_interval_hours", 24))
+        except (ValueError, TypeError):
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                f"Invalid pqc.rekey_interval_hours value "
+                f"{pqc.get('rekey_interval_hours')!r}, using default 24"
+            )
+
         config.pqc = PQCConfig(
             enabled=_parse_bool(pqc.get("enabled", True)),
-            rekey_interval_hours=int(pqc.get("rekey_interval_hours", 24)),
+            rekey_interval_hours=rekey_interval_hours,
             require_pqc_for_rpc=_parse_bool(pqc.get("require_pqc_for_rpc", False)),
             auto_initiate=_parse_bool(pqc.get("auto_initiate", True)),
         )

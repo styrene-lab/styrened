@@ -1343,7 +1343,7 @@ class IPCHandlers:
                                 if node and node.is_styrene_node:
                                     is_styrene = True
                             if is_styrene:
-                                loop = asyncio.get_event_loop()
+                                loop = asyncio.get_running_loop()
                                 loop.create_task(
                                     self.daemon._file_transfer_service.send_file(
                                         req.peer_hash,

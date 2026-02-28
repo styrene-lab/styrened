@@ -144,7 +144,7 @@ class CoreLifecycle:
         try:
             # Pass only the explicit config override (None if not set).
             # _resolve_identity_path handles the full resolution chain:
-            # config override -> /etc/styrene/identity -> ~/.config/styrene/operator.key
+            # config override -> paths.identity_file()
             ensure_operator_identity(
                 config_path=self.config.reticulum.operator_identity_path,
                 identity_config=self.config.identity,
