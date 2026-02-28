@@ -171,7 +171,7 @@ class DaemonManager:
         await self.shutdown()
         # Brief pause for socket cleanup
         await asyncio.sleep(0.5)
-        return await self.start()
+        return await self.ensure_running()
 
     @staticmethod
     def _find_styrened_binary() -> str:
