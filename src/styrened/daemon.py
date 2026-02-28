@@ -1535,9 +1535,31 @@ class StyreneDaemon:
         announce_interval = self.config.reticulum.announce_interval
         logger.info(f"Starting run loop with announce_interval={announce_interval}s")
 
+        # Announce immediately on startup so peers discover us without
+        # waiting for the first interval to elapse.
+        try:
+            if self._operator_destination:
+                self._announce()
+                logger.info("Initial announce sent on startup")
+        except Exception as e:
+            logger.warning(f"Initial announce failed: {e}")
+
+        # Eager discovery: re-announce at short intervals for the first
+        # 2 minutes so newly-connected peers see us quickly, then fall
+        # back to the normal interval.
+        eager_interval = 15  # seconds
+        eager_duration = 120  # seconds
+        import time as _time
+        startup_time = _time.monotonic()
+
         while self._running:
-            logger.debug(f"Run loop sleeping for {announce_interval}s...")
-            await asyncio.sleep(announce_interval)
+            elapsed = _time.monotonic() - startup_time
+            if elapsed < eager_duration:
+                sleep_time = eager_interval
+            else:
+                sleep_time = announce_interval
+            logger.debug(f"Run loop sleeping for {sleep_time}s...")
+            await asyncio.sleep(sleep_time)
             logger.info(f"Run loop woke up, _running={self._running}")
 
             # Re-announce presence using _announce() (shared with IPC/API)
