@@ -160,6 +160,13 @@ class StyreneApp(App[None]):
             config_path: Custom config file path.
             remote_url: Remote Styrene API URL (alternative to local RNS).
         """
+        # Force truecolor so our theme renders correctly in all terminals.
+        # Without this, Textual/Rich auto-detection may fall back to ANSI
+        # colors and the terminal's own palette overrides our background.
+        import os
+        os.environ.setdefault("COLORTERM", "truecolor")
+        os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
+
         super().__init__()
 
         # Store CLI overrides
