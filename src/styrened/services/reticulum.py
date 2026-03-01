@@ -858,10 +858,24 @@ def ensure_operator_identity(
     return str(identity.hash.hex())
 
 
+def _load_identity_config() -> Any:
+    """Load IdentityConfig from core config, if available.
+
+    Returns:
+        IdentityConfig or None if config can't be loaded.
+    """
+    try:
+        from styrened.services.config import load_core_config
+        return load_core_config().identity
+    except Exception:
+        return None
+
+
 def get_operator_identity_object() -> Any:
     """Get the operator identity as RNS.Identity object.
 
-    Checks system path (/etc/styrene/identity) before user path.
+    Provider-aware: uses YubiKey derivation when provider == "yubikey",
+    otherwise loads from file (system/user path).
 
     Returns:
         RNS.Identity object, or None if not initialized or RNS not available.
@@ -869,6 +883,24 @@ def get_operator_identity_object() -> Any:
     if not RNS:
         return None
 
+    identity_config = _load_identity_config()
+
+    # YubiKey provider: derive from hardware token
+    if identity_config and getattr(identity_config, "provider", "file") == "yubikey":
+        try:
+            from styrened.services.yubikey import derive_identity_bytes
+            yk_config = identity_config.yubikey
+            identity_bytes = derive_identity_bytes(
+                credential_id_b64=yk_config.credential_id,
+                rp_id=yk_config.rp_id,
+                require_touch=yk_config.require_touch,
+            )
+            return RNS.Identity.from_bytes(identity_bytes)
+        except Exception as e:
+            logger.warning(f"YubiKey identity derivation failed: {e}")
+            return None
+
+    # File provider: resolve from disk
     identity_path = _resolve_identity_path()
     if not identity_path:
         return None
@@ -879,28 +911,30 @@ def get_operator_identity_object() -> Any:
 def get_operator_identity() -> str | None:
     """Get the operator identity hash if it exists.
 
-    Checks system path (/etc/styrene/identity) before user path.
+    Provider-aware: uses YubiKey derivation when provider == "yubikey",
+    otherwise loads from file (system/user path).
 
     Returns:
         Hex-encoded identity hash (32 hex characters), or None if identity
-        file doesn't exist or RNS is unavailable to compute the hash.
+        is unavailable.
     """
-    identity_path = _resolve_identity_path()
-    if not identity_path:
-        return None
-
     if not RNS:
         logger.warning("RNS library not available, cannot compute identity hash")
         return None
 
     try:
-        identity = RNS.Identity.from_file(str(identity_path))
-        if identity is None:
-            logger.warning(f"RNS could not parse identity file: {identity_path}")
-            return None
+        identity = get_operator_identity_object()
+    except Exception as e:
+        logger.warning(f"Failed to load operator identity: {e}")
+        return None
+
+    if identity is None:
+        return None
+
+    try:
         return str(identity.hash.hex())
     except Exception as e:
-        logger.warning(f"Failed to load identity from {identity_path}: {e}")
+        logger.warning(f"Failed to get identity hash: {e}")
         return None
 
 

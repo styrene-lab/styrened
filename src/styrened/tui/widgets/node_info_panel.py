@@ -301,6 +301,7 @@ class NodeInfoPanel(Static):
     def _load_styrene_data(self) -> None:
         """Load Styrene mesh and hub configuration."""
         # Get config for mode and identity (always relevant, even in IPC mode)
+        config = None
         try:
             config = load_config()
             self.mode = config.reticulum.mode.value
@@ -313,14 +314,21 @@ class NodeInfoPanel(Static):
         except Exception:
             self.mode = "standalone"
 
-        # Load operator identity hash (works in both modes)
+        # Load operator identity hash and security tier (works in both modes)
         if not self.identity_hash:
             try:
                 from styrened.services.reticulum import get_operator_identity
                 op_hash = get_operator_identity()
                 if op_hash:
                     self.identity_hash = op_hash
-                    self.security_tier = "X25519"
+                    # Security tier reflects identity provider
+                    provider = "file"
+                    if config and hasattr(config, "identity"):
+                        provider = getattr(config.identity, "provider", "file")
+                    if provider == "yubikey":
+                        self.security_tier = "YubiKey/FIDO2"
+                    else:
+                        self.security_tier = "X25519"
             except Exception:
                 pass
 
