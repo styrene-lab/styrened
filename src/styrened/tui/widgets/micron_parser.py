@@ -670,11 +670,17 @@ def _parse_form_field(text: str, start: int) -> tuple[MicronElement | None, int]
     return element, (end - start + 2 + 1)
 
 
-def render_to_rich(elements: list[MicronElement]) -> str:
+def render_to_rich(
+    elements: list[MicronElement],
+    form_state: dict[str, str] | None = None,
+) -> str:
     """Convert parsed micron elements to a Rich markup string.
 
     Args:
         elements: List of MicronElement objects from parse_micron().
+        form_state: Optional dict of field_name → current_value for form
+            fields.  When provided, field displays reflect user edits and
+            fields become clickable for editing.
 
     Returns:
         Rich markup string suitable for display in a Static widget.
@@ -729,20 +735,52 @@ def render_to_rich(elements: list[MicronElement]) -> str:
         elif elem.element_type == ElementType.LINK:
             label = _escape(elem.content) or _escape(elem.url)
             url_safe = elem.url.replace("\\", "\\\\").replace("'", "\\'")
-            lines.append(
-                f"[@click=\"navigate_link('{url_safe}')\"]"
-                f"[underline]{label}[/underline]"
-                f"[/]"
-            )
+            if elem.link_fields:
+                # Form submit link — collect named fields and submit
+                fields_safe = elem.link_fields.replace("\\", "\\\\").replace("'", "\\'")
+                lines.append(
+                    f"[@click=\"submit_form('{url_safe}', '{fields_safe}')\"]"
+                    f"[underline]{label}[/underline]"
+                    f"[/]"
+                )
+            else:
+                lines.append(
+                    f"[@click=\"navigate_link('{url_safe}')\"]"
+                    f"[underline]{label}[/underline]"
+                    f"[/]"
+                )
 
         elif elem.element_type == ElementType.FORM_FIELD:
+            # Use form_state if available, otherwise use default
+            current_value = (
+                form_state.get(elem.field_name, elem.field_value)
+                if form_state is not None
+                else elem.field_value
+            )
+            # Populate form_state for later collection
+            if form_state is not None and elem.field_name not in form_state:
+                form_state[elem.field_name] = elem.field_value
+
+            name_safe = elem.field_name.replace("\\", "\\\\").replace("'", "\\'")
+            val_safe = current_value.replace("\\", "\\\\").replace("'", "\\'")
+
             if elem.field_type == FieldType.TEXT:
-                lines.append(f"[{elem.field_name}: {_escape(elem.field_value)}]")
+                display_val = _escape(current_value) or "…"
+                lines.append(
+                    f"[@click=\"edit_field('{name_safe}', '{val_safe}')\"]"
+                    f"[underline]\\[{_escape(elem.field_name)}: {display_val}][/underline]"
+                    f"[/]"
+                )
             elif elem.field_type == FieldType.PASSWORD:
-                lines.append(f"[{elem.field_name}: {'*' * len(elem.field_value)}]")
+                display_val = "•" * len(current_value) if current_value else "…"
+                lines.append(
+                    f"[@click=\"edit_field('{name_safe}', '{val_safe}')\"]"
+                    f"[underline]\\[{_escape(elem.field_name)}: {display_val}][/underline]"
+                    f"[/]"
+                )
             elif elem.field_type == FieldType.CHECKBOX:
                 check = "x" if elem.field_checked else " "
-                lines.append(f"[{check}] {_escape(elem.content)}")
+                lines.append(f"\\[{check}] {_escape(elem.content)}")
             elif elem.field_type == FieldType.RADIO:
                 dot = "*" if elem.field_checked else " "
                 lines.append(f"({dot}) {_escape(elem.content)}")
