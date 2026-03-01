@@ -167,8 +167,11 @@ class StyreneApp(App[None]):
         # Without this, Textual/Rich auto-detection may fall back to ANSI
         # colors and the terminal's own palette overrides our background.
         import os
-        os.environ.setdefault("COLORTERM", "truecolor")
-        os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
+        # Force truecolor — setdefault is a no-op if the variable exists
+        # with ANY value (including "" or "256color"), causing Rich/Textual
+        # to quantize our hex colors to 256-color palette (duller teal).
+        os.environ["COLORTERM"] = "truecolor"
+        os.environ["TEXTUAL_COLOR_SYSTEM"] = "truecolor"
 
         # CRITICAL: Textual builds the stylesheet during super().__init__()
         # using get_css_variables(), which reads self.theme to resolve
