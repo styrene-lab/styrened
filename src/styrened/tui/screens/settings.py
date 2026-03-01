@@ -193,6 +193,13 @@ class SettingsScreen(Screen[None]):
                             title="TRANSPORT",
                         )
                         yield HighlightedPanel(
+                            Horizontal(
+                                Static("[b]Name[/b]", classes="peer-name-input peer-header"),
+                                Static("[b]Host[/b]", classes="peer-host-input peer-header"),
+                                Static("[b]Port[/b]", classes="peer-port-input peer-header"),
+                                Static("", classes="peer-remove-btn"),
+                                classes="peer-header-row",
+                            ),
                             *self._compose_peer_rows(),
                             Horizontal(
                                 Button(
