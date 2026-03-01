@@ -100,8 +100,10 @@ class MeshDeviceTable(DataTable[str]):
             if d.device_type == DeviceType.STYRENE_NODE
         ]
 
-        # Exclude lost nodes from the dashboard (ExplorationScreen shows all)
-        devices = [d for d in devices if d.status != NodeStatus.LOST]
+        # Deduplicate by identity — same node announces on multiple destinations
+        # (operator + LXMF) and we only want one row per physical node.
+        from styrened.services.reticulum import _deduplicate_by_identity
+        devices = _deduplicate_by_identity(devices)
 
         # Get unread message counts
         unread_counts = self._get_unread_counts()
