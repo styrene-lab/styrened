@@ -287,11 +287,16 @@ class TestSaveCoreConfigRoundTrip:
         assert loaded.reticulum.interfaces.server.enabled is True
         assert loaded.reticulum.interfaces.server.listen_ip == "192.168.1.1"
         assert loaded.reticulum.interfaces.server.port == 5555
-        assert len(loaded.reticulum.interfaces.peers) == 2
+        # Explicit peers preserved at start, well-known hubs merged as disabled
         assert loaded.reticulum.interfaces.peers[0].host == "10.0.0.1"
         assert loaded.reticulum.interfaces.peers[0].name == "Hub Alpha"
         assert loaded.reticulum.interfaces.peers[1].host == "10.0.0.2"
         assert loaded.reticulum.interfaces.peers[1].port == 4243
+        # Well-known hubs appended (disabled)
+        from styrened.models.config import WELL_KNOWN_HUBS
+        assert len(loaded.reticulum.interfaces.peers) == 2 + len(WELL_KNOWN_HUBS)
+        for merged_peer in loaded.reticulum.interfaces.peers[2:]:
+            assert merged_peer.enabled is False
 
     def test_yubikey_config_round_trip(self, tmp_path: Path) -> None:
         """YubiKey identity config survives round-trip."""
