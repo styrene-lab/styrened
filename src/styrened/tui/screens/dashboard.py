@@ -285,8 +285,9 @@ class DashboardScreen(Screen[None]):
         try:
             tree_widget = self.query_one("#mesh-device-tree", MeshDeviceTree)
             tree_widget.refresh_data()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Tree refresh failed: {e}", exc_info=True)
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status())
@@ -351,8 +352,10 @@ class DashboardScreen(Screen[None]):
         try:
             node_info = self.query_one(NodeInfoPanel)
             node_info.refresh_data()
-        except Exception:
-            pass
+        except Exception as e:
+            self.notify(f"NodeInfo refresh error: {e}", severity="error")
+
+        self.notify("Dashboard refreshed", severity="information")
 
         try:
             activity = self.query_one(ActivityFeedWidget)
