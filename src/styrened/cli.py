@@ -1220,7 +1220,7 @@ async def _cmd_update_async(args: argparse.Namespace) -> int:
 
 
 # -----------------------------------------------------------------------------
-# Subcommand: announce
+# Subcommand: restart
 # -----------------------------------------------------------------------------
 
 
@@ -1246,7 +1246,7 @@ def cmd_restart(args: argparse.Namespace) -> int:
     print("Stopping daemon...")
 
     result = subprocess.run(
-        ["pkill", "-f", "styrened daemon"],
+        ["pkill", "-f", r"^.*/styrened daemon"],
         capture_output=True,
     )
 
@@ -1260,7 +1260,7 @@ def cmd_restart(args: argparse.Namespace) -> int:
 
     # Check if it came back
     check = subprocess.run(
-        ["pgrep", "-f", "styrened daemon"],
+        ["pgrep", "-f", r"^.*/styrened daemon"],
         capture_output=True,
     )
     if check.returncode == 0:
