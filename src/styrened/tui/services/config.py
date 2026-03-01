@@ -254,6 +254,16 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
                         )
                 config.reticulum.interfaces.peers = peers
 
+            # Merge missing well-known hubs (disabled) for existing installs
+            from styrened.models.config import WELL_KNOWN_HUBS
+            import copy
+            existing_hosts = {(p.host, p.port) for p in config.reticulum.interfaces.peers}
+            for hub in WELL_KNOWN_HUBS:
+                if (hub.host, hub.port) not in existing_hosts:
+                    new_hub = copy.deepcopy(hub)
+                    new_hub.enabled = False
+                    config.reticulum.interfaces.peers.append(new_hub)
+
         if "hub_enabled" in ret_data:
             config.reticulum.hub_enabled = bool(ret_data["hub_enabled"])
         if "hub_address" in ret_data:
