@@ -101,6 +101,13 @@ Examples:
         help="Reset all config to defaults, restart daemon, and launch TUI",
     )
 
+    # Self-upgrade
+    parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Upgrade styrene to the latest version from PyPI",
+    )
+
     # Remote mode
     parser.add_argument(
         "--remote",
@@ -145,6 +152,34 @@ Examples:
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+
+    # Self-upgrade mode
+    if args.upgrade:
+        import subprocess
+
+        print("Upgrading styrene...")
+        # Detect if running under pipx (venv lives under ~/.local/pipx/venvs/)
+        exe = sys.executable
+        pipx_venvs = os.path.join(
+            os.environ.get("PIPX_HOME", os.path.expanduser("~/.local/pipx")),
+            "venvs",
+        )
+        if pipx_venvs in exe:
+            cmd = ["pipx", "upgrade", "styrene"]
+        else:
+            cmd = [exe, "-m", "pip", "install", "--upgrade", "styrene"]
+
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            print("\n✅ Upgrade complete. Restarting daemon...")
+            # Kill existing daemon so launchd/user restarts with new version
+            subprocess.run(["pkill", "-f", "styrened daemon"], capture_output=True)
+            import time
+            time.sleep(1)
+            print("Run 'styrene' to launch the updated TUI.")
+        else:
+            print("\n❌ Upgrade failed.", file=sys.stderr)
+        sys.exit(result.returncode)
 
     # Reset mode — nuke configs, kill daemon, regenerate defaults
     if args.reset:
