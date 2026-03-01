@@ -477,8 +477,19 @@ release new_version: validate
     git commit -m "chore: bump version to {{ new_version }}"
     just tag-release
     @echo ""
-    @echo "Release prepared. To publish:"
-    @echo "  git push origin main --tags"
+    @echo "Release prepared. Publishing..."
+    git push origin main --tags
+    just publish
+
+# Build wheel+sdist and publish to PyPI immediately
+publish:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist/
+    .venv/bin/python -m build
+    .venv/bin/python -m twine upload dist/*
+    echo ""
+    echo "✓ Published $(cat VERSION) to PyPI"
 
 # ─── Development Helpers ────────────────────────────────────────────────────
 
