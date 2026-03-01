@@ -77,6 +77,7 @@ class StyreneDaemon:
         self.lifecycle = CoreLifecycle(config)
         self._running = False
         self._start_time = time.time()
+        self._eager_start_time: float = 0.0  # Reset in _run_loop and on reconnect
         self._api_server: Any = None
         self._api_task: asyncio.Task[None] | None = None
         self._rpc_server: Any = None
@@ -299,6 +300,12 @@ class StyreneDaemon:
 
         # Re-initialize operator destination
         self._init_operator_destination()
+
+        # Re-enter eager discovery phase (15s intervals for 2 minutes)
+        # so peers rediscover us quickly after network change
+        import time as _time
+        self._eager_start_time = _time.monotonic()
+        logger.info("[RECONNECT] Re-entering eager discovery phase")
 
         # Trigger a re-announce to make ourselves visible again
         if self._operator_destination:
@@ -1549,14 +1556,15 @@ class StyreneDaemon:
 
         # Eager discovery: re-announce at short intervals for the first
         # 2 minutes so newly-connected peers see us quickly, then fall
-        # back to the normal interval.
+        # back to the normal interval.  Also re-enters eager mode after
+        # network reconnection (startup_time is reset by reconnect handler).
         eager_interval = 15  # seconds
         eager_duration = 120  # seconds
         import time as _time
-        startup_time = _time.monotonic()
+        self._eager_start_time = _time.monotonic()
 
         while self._running:
-            elapsed = _time.monotonic() - startup_time
+            elapsed = _time.monotonic() - self._eager_start_time
             if elapsed < eager_duration:
                 sleep_time = eager_interval
             else:
