@@ -10,7 +10,7 @@ import pytest
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.app import StyreneApp
-from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTable
+from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
 
@@ -320,7 +320,7 @@ class TestUserWorkflows:
 
                 # Devices should be displayed
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 # Should show 2 devices
                 assert device_table.row_count == 2
 
@@ -581,7 +581,7 @@ class TestPerformance:
 
                 # Should render without hanging
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 assert device_table.row_count == 100
 
     @pytest.mark.asyncio

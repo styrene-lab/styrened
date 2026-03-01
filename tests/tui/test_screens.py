@@ -10,9 +10,9 @@ async def test_dashboard_has_device_table(app: StyreneApp):
     """Verify dashboard contains the device table."""
     async with app.run_test():
         # Query on the current screen (dashboard), not app
-        table = app.screen.query_one("#mesh-device-table")
+        table = app.screen.query_one("#mesh-device-tree")
         assert table is not None
-        assert table.__class__.__name__ == "MeshDeviceTable"
+        assert table.__class__.__name__ == "MeshDeviceTree"
 
 
 @pytest.mark.asyncio

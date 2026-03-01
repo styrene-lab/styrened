@@ -458,3 +458,88 @@ class TestGetNodeStoreSingleton:
 
         # Cleanup
         ns._node_store = None
+
+
+class TestDiscoveredVia:
+    """Tests for the discovered_via field on MeshDevice + NodeStore."""
+
+    def test_mesh_device_discovered_via_default_none(self):
+        """MeshDevice.discovered_via defaults to None."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+        d = MeshDevice(
+            destination_hash="a" * 32,
+            identity_hash="b" * 32,
+            name="test",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=1000,
+        )
+        assert d.discovered_via is None
+
+    def test_mesh_device_discovered_via_set(self):
+        """MeshDevice.discovered_via can be set."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+        d = MeshDevice(
+            destination_hash="a" * 32,
+            identity_hash="b" * 32,
+            name="test",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=1000,
+            discovered_via="Styrene Community Hub",
+        )
+        assert d.discovered_via == "Styrene Community Hub"
+
+    def test_node_store_persists_discovered_via(self, tmp_path):
+        """NodeStore round-trips discovered_via through SQLite."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.services.node_store import NodeStore
+        store = NodeStore(db_path=tmp_path / "test.db")
+        d = MeshDevice(
+            destination_hash="a" * 32,
+            identity_hash="b" * 32,
+            name="test-node",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=1000,
+            discovered_via="TCPInterface: rns.styrene.io",
+        )
+        store.save_node(d)
+        loaded = store.get_node_by_destination("a" * 32)
+        assert loaded is not None
+        assert loaded.discovered_via == "TCPInterface: rns.styrene.io"
+
+    def test_node_store_discovered_via_not_overwritten_with_none(self, tmp_path):
+        """COALESCE keeps existing discovered_via when update has None."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.services.node_store import NodeStore
+        store = NodeStore(db_path=tmp_path / "test.db")
+        d1 = MeshDevice(
+            destination_hash="a" * 32,
+            identity_hash="b" * 32,
+            name="test-node",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=1000,
+            discovered_via="Styrene Community Hub",
+        )
+        store.save_node(d1)
+        # Second save with no discovered_via should preserve the first
+        d2 = MeshDevice(
+            destination_hash="a" * 32,
+            identity_hash="b" * 32,
+            name="test-node",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=2000,
+            discovered_via=None,
+        )
+        store.save_node(d2)
+        loaded = store.get_node_by_destination("a" * 32)
+        assert loaded is not None
+        assert loaded.discovered_via == "Styrene Community Hub"
+
+    def test_node_store_index_exists(self, tmp_path):
+        """idx_discovered_via index is created."""
+        from styrened.services.node_store import init_db
+        conn = init_db(tmp_path / "test.db")
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_discovered_via'"
+        ).fetchall()
+        conn.close()
+        assert len(rows) == 1

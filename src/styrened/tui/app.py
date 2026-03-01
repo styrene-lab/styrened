@@ -598,16 +598,16 @@ class StyreneApp(App[None]):
     def _refresh_themed_panels(self) -> None:
         """Refresh panels that use Rich markup with cascade colors."""
         # Import here to avoid circular imports
-        from styrened.tui.screens.dashboard import MeshDeviceTable
+        from styrened.tui.screens.dashboard import MeshDeviceTree
         from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
         # Refresh NodeInfoPanel
         for panel in self.query(NodeInfoPanel):
             panel.refresh_data()
 
-        # Refresh MeshDeviceTable
-        for table in self.query(MeshDeviceTable):
-            table.refresh_data()
+        # Refresh MeshDeviceTree
+        for tree in self.query(MeshDeviceTree):
+            tree.refresh_data()
 
     async def on_shutdown(self) -> None:
         """Cleanup on app exit.

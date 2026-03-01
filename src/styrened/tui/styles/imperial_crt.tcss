@@ -724,6 +724,29 @@ TabPane {
     padding: 1;
 }
 
+/* === Mesh Device Tree === */
+MeshDeviceTree {
+    background: transparent;
+}
+
+MeshDeviceTree > .tree--cursor {
+    background: $surface;
+    color: $primary;
+    text-style: bold;
+}
+
+MeshDeviceTree > .tree--highlight {
+    background: $background;
+}
+
+MeshDeviceTree > .tree--guides {
+    color: $border;
+}
+
+MeshDeviceTree > .tree--guides-hover {
+    color: $panel;
+}
+
 /* === Device Detail Layout === */
 #mesh-device-detail-container {
     height: 1fr;
