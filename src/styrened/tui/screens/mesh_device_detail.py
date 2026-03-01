@@ -102,12 +102,11 @@ class MeshInfoWidget(Static):
         if self.device.version:
             yield Static(f"[bold]Version:[/] {self.device.version}", classes="info-field")
 
-        # Action buttons
+        # Action buttons (ASCII labels — emoji cause width issues in terminals)
         with Horizontal(classes="info-actions"):
-            yield Button("💬 Message", id="btn-message", variant="primary")
-            yield Button("➕ Contact", id="btn-add-contact", variant="success")
-            yield Button("📋 Copy Hash", id="btn-copy-hash", variant="default")
-            yield Button("🚫 Block", id="btn-block", variant="error")
+            yield Button("Message", id="btn-message", variant="primary")
+            yield Button("Add Contact", id="btn-add-contact", variant="success")
+            yield Button("Copy Hash", id="btn-copy-hash", variant="default")
 
 
 class MeshDeviceDetailScreen(Screen[None]):
@@ -322,8 +321,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             self.action_add_contact()
         elif str(event.button.id) == "btn-copy-hash":
             self.action_copy_hash()
-        elif str(event.button.id) == "btn-block":
-            self._block_peer()
+
 
     async def action_refresh_status(self) -> None:
         """Refresh device status via RPC call."""
@@ -420,17 +418,6 @@ class MeshDeviceDetailScreen(Screen[None]):
             tabs.active = "chat"
         except Exception:
             pass
-
-    def _block_peer(self) -> None:
-        """Block this peer (placeholder — not yet implemented)."""
-        if not self.device:
-            return
-        self.notify(
-            f"Blocking not yet implemented for {self.device.name}",
-            title="Coming Soon",
-            severity="warning",
-            timeout=3,
-        )
 
     def action_copy_hash(self) -> None:
         """Copy the device identity hash to the clipboard."""

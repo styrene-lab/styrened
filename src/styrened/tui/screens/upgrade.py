@@ -14,6 +14,25 @@ from textual.widgets import Button, Log, Static
 
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 
+# Use a specific match pattern for pkill to avoid killing unrelated processes.
+# The anchored regex matches the actual daemon invocation, not grep/editor buffers.
+_DAEMON_PKILL_PATTERN = r"^.*/styrened daemon"
+
+
+def _kill_daemon() -> None:
+    """Kill the running styrened daemon process.
+
+    Uses a specific pattern to avoid killing unrelated processes.
+    """
+    try:
+        subprocess.run(
+            ["pkill", "-f", _DAEMON_PKILL_PATTERN],
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
 
 class UpgradeScreen(ModalScreen[bool]):
     """Modal screen for upgrading styrene to the latest version.
@@ -67,6 +86,7 @@ class UpgradeScreen(ModalScreen[bool]):
         super().__init__()
         self._current = current
         self._latest = latest
+        self._upgrading = False
 
     def compose(self) -> ComposeResult:
         cascade = get_color_cascade()
@@ -102,12 +122,19 @@ class UpgradeScreen(ModalScreen[bool]):
             self.dismiss(False)
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        # Don't dismiss if upgrade is in progress
+        if not self._upgrading:
+            self.dismiss(False)
 
     @staticmethod
     def _build_upgrade_cmd() -> list[str]:
         """Determine the right upgrade command (pipx vs pip)."""
         exe = sys.executable
+        # Check PIPX_BIN_DIR (set by pipx itself inside managed venvs),
+        # then fall back to path heuristic using PIPX_HOME or default.
+        pipx_bin_dir = os.environ.get("PIPX_BIN_DIR", "")
+        if pipx_bin_dir:
+            return ["pipx", "upgrade", "styrene"]
         pipx_venvs = os.path.join(
             os.environ.get("PIPX_HOME", os.path.expanduser("~/.local/pipx")),
             "venvs",
@@ -118,6 +145,7 @@ class UpgradeScreen(ModalScreen[bool]):
 
     def _start_upgrade(self) -> None:
         """Disable buttons, show log, kick off background worker."""
+        self._upgrading = True
         self.query_one("#btn-upgrade", Button).disabled = True
         self.query_one("#btn-cancel", Button).disabled = True
         log_widget = self.query_one("#upgrade-log", Log)
@@ -125,13 +153,22 @@ class UpgradeScreen(ModalScreen[bool]):
         log_widget.write_line("Starting upgrade...")
         self._do_upgrade()
 
+    def _safe_log(self, message: str) -> None:
+        """Write to the log widget if the screen is still mounted."""
+        try:
+            if not self.is_mounted:
+                return
+            log = self.query_one("#upgrade-log", Log)
+            log.write_line(message)
+        except Exception:
+            pass
+
     @work(thread=True, exclusive=True)
     def _do_upgrade(self) -> None:
         """Run the upgrade subprocess in a background thread."""
         cmd = self._build_upgrade_cmd()
-        log = self.query_one("#upgrade-log", Log)
 
-        self.app.call_from_thread(log.write_line, f"$ {' '.join(cmd)}\n")
+        self.app.call_from_thread(self._safe_log, f"$ {' '.join(cmd)}\n")
 
         try:
             result = subprocess.run(
@@ -143,35 +180,47 @@ class UpgradeScreen(ModalScreen[bool]):
 
             output = result.stdout + result.stderr
             for line in output.splitlines():
-                self.app.call_from_thread(log.write_line, line)
+                self.app.call_from_thread(self._safe_log, line)
 
             if result.returncode == 0:
-                self.app.call_from_thread(log.write_line, "\n✅ Upgrade complete!")
-                self.app.call_from_thread(log.write_line, "Restarting daemon...")
-                subprocess.run(["pkill", "-f", "styrened daemon"], capture_output=True)
-                self.app.call_from_thread(self._swap_to_restart)
+                self.app.call_from_thread(self._safe_log, "\n✅ Upgrade complete!")
+                self.app.call_from_thread(self._safe_log, "Restarting daemon...")
+                _kill_daemon()
+                self.app.call_from_thread(self._finish_success)
             else:
                 self.app.call_from_thread(
-                    log.write_line,
+                    self._safe_log,
                     f"\n❌ Upgrade failed (exit code {result.returncode})",
                 )
-                self.app.call_from_thread(self._swap_to_close)
+                self.app.call_from_thread(self._finish_failure)
 
         except subprocess.TimeoutExpired:
-            self.app.call_from_thread(log.write_line, "\n❌ Upgrade timed out")
-            self.app.call_from_thread(self._swap_to_close)
+            self.app.call_from_thread(self._safe_log, "\n❌ Upgrade timed out")
+            self.app.call_from_thread(self._finish_failure)
         except Exception as e:
-            self.app.call_from_thread(log.write_line, f"\n❌ Error: {e}")
-            self.app.call_from_thread(self._swap_to_close)
+            self.app.call_from_thread(self._safe_log, f"\n❌ Error: {e}")
+            self.app.call_from_thread(self._finish_failure)
 
-    def _swap_to_restart(self) -> None:
-        """Replace action buttons with a restart prompt."""
-        actions = self.query_one("#upgrade-actions", Horizontal)
-        actions.remove_children()
-        actions.mount(Button("Restart TUI", id="btn-restart", variant="success"))
+    def _finish_success(self) -> None:
+        """Replace action buttons with a restart prompt (guarded)."""
+        self._upgrading = False
+        if not self.is_mounted:
+            return
+        try:
+            actions = self.query_one("#upgrade-actions", Horizontal)
+            actions.remove_children()
+            actions.mount(Button("Restart TUI", id="btn-restart", variant="success"))
+        except Exception:
+            pass
 
-    def _swap_to_close(self) -> None:
-        """Replace action buttons with a close button."""
-        actions = self.query_one("#upgrade-actions", Horizontal)
-        actions.remove_children()
-        actions.mount(Button("Close", id="btn-close", variant="default"))
+    def _finish_failure(self) -> None:
+        """Replace action buttons with a close button (guarded)."""
+        self._upgrading = False
+        if not self.is_mounted:
+            return
+        try:
+            actions = self.query_one("#upgrade-actions", Horizontal)
+            actions.remove_children()
+            actions.mount(Button("Close", id="btn-close", variant="default"))
+        except Exception:
+            pass

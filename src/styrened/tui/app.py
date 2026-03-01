@@ -1,5 +1,6 @@
 """Styrene TUI Application."""
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -163,37 +164,30 @@ class StyreneApp(App[None]):
             config_path: Custom config file path.
             remote_url: Remote Styrene API URL (alternative to local RNS).
         """
-        # Force truecolor so our theme renders correctly in all terminals.
-        # Without this, Textual/Rich auto-detection may fall back to ANSI
-        # colors and the terminal's own palette overrides our background.
-        import os
-        # Force truecolor — setdefault is a no-op if the variable exists
-        # with ANY value (including "" or "256color"), causing Rich/Textual
-        # to quantize our hex colors to 256-color palette (duller teal).
-        os.environ["COLORTERM"] = "truecolor"
-        os.environ["TEXTUAL_COLOR_SYSTEM"] = "truecolor"
+        # Force truecolor rendering.  Respect terminals that genuinely
+        # cannot do truecolor (TERM=linux, TERM=dumb) but override
+        # ambiguous or missing COLORTERM values.
+        term = os.environ.get("TERM", "")
+        if term not in ("linux", "dumb"):
+            os.environ["COLORTERM"] = "truecolor"
+            os.environ["TEXTUAL_COLOR_SYSTEM"] = "truecolor"
 
         # CRITICAL: Textual builds the stylesheet during super().__init__()
-        # using get_css_variables(), which reads self.theme to resolve
-        # CSS variables like $background, $primary, etc. If our custom
-        # theme isn't registered and active by then, the stylesheet gets
-        # built with Textual's default theme values (wrong colors).
+        # using get_css_variables(), which reads self.theme and self.dark
+        # to resolve CSS variables.  Our theme is dark-only — if Textual
+        # auto-detects OS light mode, it uses light theme defaults for the
+        # initial stylesheet build, producing a broken palette.
         #
-        # We pre-populate the theme registry and set the reactive default
-        # BEFORE super().__init__() so the stylesheet sees our colors.
+        # Pre-populate the theme registry, default theme, AND dark flag
+        # BEFORE super().__init__() so the single stylesheet build is correct.
         self._registered_themes = {STYRENE_THEME_KEY: create_styrene_theme()}
         self.__class__._default_theme = STYRENE_THEME_KEY
+        self._dark = True  # Bypass reactive; set underlying attribute
 
         super().__init__()
 
-        # Force dark mode — our theme is dark-only. Textual auto-detects
-        # system light/dark mode and will use light theme defaults if the
-        # OS or terminal is in light mode. We have no light variant, so
-        # light mode produces a Frankenstein palette (our Rich markup hex
-        # colors on Textual's default light backgrounds).
+        # Ensure theme and dark mode survived init (reactive may reset)
         self.dark = True
-
-        # Ensure theme is active (reactive may reset during init)
         if self.theme != STYRENE_THEME_KEY:
             self.register_theme(create_styrene_theme())
             self.theme = STYRENE_THEME_KEY
@@ -448,13 +442,7 @@ class StyreneApp(App[None]):
         def _on_upgrade_result(should_restart: bool | None) -> None:
             if should_restart:
                 # Exit TUI so user re-launches with the new version
-                self.notify(
-                    "Relaunch [bold]styrene[/bold] to use the new version.",
-                    title="Upgrade Applied",
-                    severity="information",
-                    timeout=5,
-                )
-                self.set_timer(2.0, self.exit)
+                self.exit(message="Relaunch 'styrene' to use the new version.")
 
         self.push_screen(UpgradeScreen(current, latest), callback=_on_upgrade_result)
 
@@ -551,7 +539,7 @@ class StyreneApp(App[None]):
             # No managed daemon — try killing and respawning
             import subprocess
             try:
-                subprocess.run(["pkill", "-f", "styrened daemon"], timeout=5)
+                subprocess.run(["pkill", "-f", r"^.*/styrened daemon"], timeout=5)
             except Exception:
                 pass
 

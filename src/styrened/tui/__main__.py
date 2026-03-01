@@ -167,9 +167,15 @@ Examples:
         import time as _time
 
         print("Stopping daemon...")
-        subprocess.run(["pkill", "-f", "styrened daemon"], capture_output=True)
+        subprocess.run(
+            ["pkill", "-f", r"^.*/styrened daemon"],
+            capture_output=True,
+        )
         _time.sleep(2)
-        check = subprocess.run(["pgrep", "-f", "styrened daemon"], capture_output=True)
+        check = subprocess.run(
+            ["pgrep", "-f", r"^.*/styrened daemon"],
+            capture_output=True,
+        )
         if check.returncode == 0:
             print("✅ Daemon restarted.")
         else:
@@ -182,13 +188,15 @@ Examples:
         import subprocess
 
         print("Upgrading styrene...")
-        # Detect if running under pipx (venv lives under ~/.local/pipx/venvs/)
+        # Detect if running under pipx.  Check PIPX_BIN_DIR first (set by
+        # pipx inside managed venvs), then fall back to path heuristic.
         exe = sys.executable
+        pipx_bin_dir = os.environ.get("PIPX_BIN_DIR", "")
         pipx_venvs = os.path.join(
             os.environ.get("PIPX_HOME", os.path.expanduser("~/.local/pipx")),
             "venvs",
         )
-        if pipx_venvs in exe:
+        if pipx_bin_dir or pipx_venvs in exe:
             cmd = ["pipx", "upgrade", "styrene"]
         else:
             cmd = [exe, "-m", "pip", "install", "--upgrade", "styrene"]
@@ -196,8 +204,10 @@ Examples:
         result = subprocess.run(cmd)
         if result.returncode == 0:
             print("\n✅ Upgrade complete. Restarting daemon...")
-            # Kill existing daemon so launchd/user restarts with new version
-            subprocess.run(["pkill", "-f", "styrened daemon"], capture_output=True)
+            subprocess.run(
+                ["pkill", "-f", r"^.*/styrened daemon"],
+                capture_output=True,
+            )
             import time
             time.sleep(1)
             print("Run 'styrene' to launch the updated TUI.")
@@ -248,7 +258,7 @@ Examples:
 
         # Kill existing daemon
         try:
-            subprocess.run(["pkill", "-f", "styrened daemon"], timeout=5)
+            subprocess.run(["pkill", "-f", r"^.*/styrened daemon"], timeout=5)
             print("Stopped running daemon")
         except Exception:
             pass
