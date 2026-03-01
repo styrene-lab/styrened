@@ -7,12 +7,9 @@ Tests the redesigned Network tab that manages:
 - Config persistence to core-config.yaml + ~/.reticulum/config regeneration
 """
 
-import pytest
-
 from styrened.models.config import (
     CoreConfig,
     DeploymentMode,
-    InterfaceConfig,
     PeerConfig,
     ServerInterfaceConfig,
 )
