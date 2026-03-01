@@ -441,6 +441,7 @@ Header {
 #dashboard-container {
     height: 1fr;
     overflow-y: auto;
+    background: $background;
 }
 
 /* Node info: compact two-column layout */
