@@ -152,6 +152,11 @@ class PeerConfig:
 # Source: https://github.com/markqvist/Reticulum/wiki/Community-Node-List
 # These are offered as optional peers during first-run setup and in
 # Settings > Network > Peers alongside the Styrene Community Hub.
+# LXMF propagation destination hash for the Styrene Community Hub.
+# Derived from the hub's persistent LXMF identity (/app/.lxmf on PVC).
+# Stable across pod restarts. Update only if the hub identity is rotated.
+COMMUNITY_HUB_PROPAGATION_HASH: str = "0db6cb465cb2bb3279f32e27ac7da24b"
+
 WELL_KNOWN_HUBS: list[PeerConfig] = [
     PeerConfig(host="rns.styrene.io", port=4242, name="Styrene Community Hub", enabled=True),
     PeerConfig(host="dublin.connect.reticulum.network", port=4965, name="RNS Dublin", enabled=False),

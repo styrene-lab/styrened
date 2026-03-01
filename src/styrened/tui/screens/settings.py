@@ -10,7 +10,13 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Input, Label, Select, Static, Switch, TabbedContent, TabPane
 
-from styrened.models.config import DeploymentMode, PeerConfig, validate_short_name
+from styrened.models.config import (
+    COMMUNITY_HUB_PROPAGATION_HASH,
+    WELL_KNOWN_HUBS,
+    DeploymentMode,
+    PeerConfig,
+    validate_short_name,
+)
 from styrened.tui.models.config import (
     ConfigValidationError,
     GatewayMode,
@@ -167,6 +173,24 @@ class SettingsScreen(Screen[None]):
                     with VerticalScroll(classes="settings-tab-scroll"):
                         yield HighlightedPanel(
                             Horizontal(
+                                Label("Connect:", classes="setting-label"),
+                                Switch(
+                                    value=self._community_hub_enabled(),
+                                    id="community_hub_enabled",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "rns.styrene.io:4242 — public Reticulum transport + LXMF "
+                                "store-and-forward delivery for offline recipients. "
+                                "Enabled by default for all Styrene installs.",
+                                classes="setting-description",
+                            ),
+                            title="STYRENE COMMUNITY HUB",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
                                 Label("Mode:", classes="setting-label"),
                                 Select(
                                     [(m.value.title(), m) for m in DeploymentMode],
@@ -232,6 +256,26 @@ class SettingsScreen(Screen[None]):
                             ),
                             title="PEERS",
                             id="peers-panel",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Propagation Node:", classes="setting-label"),
+                                Input(
+                                    value=self.config.core.lxmf.propagation_destination or "",
+                                    placeholder="32-char hex hash (leave blank for none)",
+                                    id="propagation_destination",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "LXMF propagation node for store-and-forward delivery. "
+                                "Set automatically when Community Hub is enabled. "
+                                "Custom: paste the 32-char hex hash of your preferred propagation node. "
+                                "Blank: messages only deliver when recipient is online.",
+                                classes="setting-description",
+                            ),
+                            title="PROPAGATION",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -475,6 +519,14 @@ class SettingsScreen(Screen[None]):
 
             yield Static("", id="status-message")
 
+    def _community_hub_enabled(self) -> bool:
+        """True if the community hub peer is present and enabled in the peers list."""
+        community_host = WELL_KNOWN_HUBS[0].host  # rns.styrene.io
+        return any(
+            p.host == community_host and p.enabled
+            for p in self.config.reticulum.interfaces.peers
+        )
+
     @staticmethod
     def _match_announce_interval(seconds: int) -> int:
         """Find the closest matching preset for an announce interval value."""
@@ -661,6 +713,20 @@ class SettingsScreen(Screen[None]):
         if widget and "peer-row" in widget.classes:
             widget.remove()
 
+    @on(Switch.Changed, "#community_hub_enabled")
+    def on_community_hub_toggle(self, event: Switch.Changed) -> None:
+        """When Community Hub is toggled, sync the propagation destination field."""
+        try:
+            prop_input = self.query_one("#propagation_destination", Input)
+            if event.value:
+                prop_input.value = COMMUNITY_HUB_PROPAGATION_HASH
+            else:
+                # Clear if it was the community hub hash; leave custom values alone
+                if prop_input.value == COMMUNITY_HUB_PROPAGATION_HASH:
+                    prop_input.value = ""
+        except Exception:
+            pass
+
     @on(Switch.Changed, "#server_enabled")
     def on_server_toggle(self, event: Switch.Changed) -> None:
         """Show/hide server IP and port fields."""
@@ -819,6 +885,11 @@ class SettingsScreen(Screen[None]):
                 self._show_error("Invalid announce interval selection")
                 return
 
+            # Community Hub — ensure peer and propagation_destination are in sync
+            community_hub_on = self.query_one("#community_hub_enabled", Switch).value
+            community_host = WELL_KNOWN_HUBS[0].host  # rns.styrene.io
+            community_port = WELL_KNOWN_HUBS[0].port
+
             # Read Peers from dynamic rows
             peers: list[PeerConfig] = []
             for row in self.query(".peer-row"):
@@ -840,7 +911,42 @@ class SettingsScreen(Screen[None]):
                 enabled_toggles = list(row.query(".peer-enabled-toggle"))
                 enabled = enabled_toggles[0].value if enabled_toggles else True
                 peers.append(PeerConfig(host=host, port=port, name=name or None, enabled=enabled))
+            # Apply community hub peer state
+            if community_hub_on:
+                # Ensure community hub is present and enabled
+                has_hub = any(p.host == community_host for p in peers)
+                if not has_hub:
+                    peers.insert(
+                        0,
+                        PeerConfig(
+                            host=community_host,
+                            port=community_port,
+                            name="Styrene Community Hub",
+                            enabled=True,
+                        ),
+                    )
+                else:
+                    # Mark it enabled
+                    for p in peers:
+                        if p.host == community_host:
+                            p.enabled = True
+            else:
+                # Disable (but keep) the community hub peer if present
+                for p in peers:
+                    if p.host == community_host:
+                        p.enabled = False
+
             self.config.core.reticulum.interfaces.peers = peers
+
+            # Read propagation destination
+            prop_dest = self.query_one("#propagation_destination", Input).value.strip()
+            if prop_dest:
+                if len(prop_dest) != 32 or not all(c in "0123456789abcdef" for c in prop_dest.lower()):
+                    self._show_error("Propagation node must be a 32-character hex hash")
+                    return
+                self.config.core.lxmf.propagation_destination = prop_dest
+            else:
+                self.config.core.lxmf.propagation_destination = None
 
             # Read AutoInterface
             self.config.core.reticulum.interfaces.auto = self.query_one(
