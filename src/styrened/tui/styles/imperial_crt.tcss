@@ -446,7 +446,7 @@ Header {
 /* Node info: compact, auto height with upper bound */
 #node-info-panel {
     height: auto;
-    max-height: 16;
+    max-height: 20;
 }
 
 /* Mesh devices table: fills remaining vertical space */
