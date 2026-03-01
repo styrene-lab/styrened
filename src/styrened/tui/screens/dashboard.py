@@ -166,19 +166,17 @@ class MeshDeviceTree(Tree[str]):
         # Name
         name = f"[{cascade.bright} bold]{device.name}[/]"
 
-        # Identity (truncated)
-        ident = f"[{cascade.dim}]{device.destination_hash[:12]}…[/]"
-
         # Unread badge
         unread = unread_counts.get(device.identity, 0)
-        unread_text = f"  [{cascade.bright} bold]({unread})[/]" if unread > 0 else ""
+        unread_text = f" [{cascade.bright} bold]✉{unread}[/]" if unread > 0 else ""
 
-        # Last seen
-        last_seen = f"[{cascade.dim}]{device.last_seen_display}[/]"
+        # Last seen (compact)
+        seen = device.last_seen_display
         if device.announce_count > 1:
-            last_seen = f"[{cascade.dim}]{device.last_seen_display} ({device.announce_count})[/]"
+            seen += f"×{device.announce_count}"
+        last_seen = f"[{cascade.dim}]{seen}[/]"
 
-        return f"{status} {name}  {ident}  {last_seen}{unread_text}"
+        return f"{status} {name}  {last_seen}{unread_text}"
 
     def _select_by_identity(self, identity: str) -> None:
         """Move cursor to the node matching the given identity."""
