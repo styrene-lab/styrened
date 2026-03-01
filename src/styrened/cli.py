@@ -1224,6 +1224,54 @@ async def _cmd_update_async(args: argparse.Namespace) -> int:
 # -----------------------------------------------------------------------------
 
 
+def cmd_restart(args: argparse.Namespace) -> int:
+    """Restart the daemon process (preserves identity and config).
+
+    Sends SIGTERM to the running daemon. If managed by launchd (macOS)
+    or systemd, it will be restarted automatically with the currently
+    installed version.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+    """
+    import subprocess
+    import time
+
+    from styrened import __version__
+
+    print(f"styrened v{__version__}")
+    print("Stopping daemon...")
+
+    result = subprocess.run(
+        ["pkill", "-f", "styrened daemon"],
+        capture_output=True,
+    )
+
+    if result.returncode != 0:
+        print("No running daemon found.", file=sys.stderr)
+        return 1
+
+    # Wait for restart (launchd KeepAlive / systemd Restart=always)
+    print("Waiting for daemon to restart...")
+    time.sleep(2)
+
+    # Check if it came back
+    check = subprocess.run(
+        ["pgrep", "-f", "styrened daemon"],
+        capture_output=True,
+    )
+    if check.returncode == 0:
+        print("✅ Daemon restarted successfully.")
+    else:
+        print("⚠️  Daemon stopped but did not auto-restart.")
+        print("   Start manually: styrened daemon")
+
+    return 0
+
+
 def cmd_announce(args: argparse.Namespace) -> int:
     """Trigger an announce of local identity.
 
@@ -2496,6 +2544,10 @@ def create_parser() -> argparse.ArgumentParser:
     # announce
     announce_parser = subparsers.add_parser("announce", help="Trigger local announce")
     announce_parser.set_defaults(func=cmd_announce)
+
+    # restart
+    restart_parser = subparsers.add_parser("restart", help="Restart the daemon (preserves identity and config)")
+    restart_parser.set_defaults(func=cmd_restart)
 
     # identity
     identity_parser = subparsers.add_parser("identity", help="Show operator identity")
