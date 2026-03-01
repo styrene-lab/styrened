@@ -18,6 +18,24 @@ from styrened.tui.models.config import (
     StyreneConfig,
 )
 from styrened.tui.services.config import save_config, validate_config
+
+# Announce interval presets: (label, seconds)
+ANNOUNCE_INTERVALS: list[tuple[str, int]] = [
+    ("15s", 15),
+    ("30s", 30),
+    ("45s", 45),
+    ("1m", 60),
+    ("2m", 120),
+    ("5m", 300),
+    ("10m", 600),
+    ("15m", 900),
+    ("30m", 1800),
+    ("1h", 3600),
+    ("2h", 7200),
+    ("4h", 14400),
+    ("8h", 28800),
+    ("1d", 86400),
+]
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 
 
@@ -162,7 +180,7 @@ class SettingsScreen(Screen[None]):
                                     [(m.value.title(), m) for m in DeploymentMode],
                                     value=self.config.reticulum.mode,
                                     id="deployment_mode",
-                                    classes="setting-input",
+                                    classes="setting-select",
                                 ),
                                 classes="setting-row",
                             ),
@@ -172,17 +190,20 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.reticulum.resolve_transport_enabled(),
                                     id="enable_transport",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
                             Horizontal(
                                 Label("Announce Interval:", classes="setting-label"),
-                                Input(
-                                    value=str(self.config.reticulum.announce_interval),
-                                    placeholder="300",
+                                Select(
+                                    [(label, secs) for label, secs in ANNOUNCE_INTERVALS],
+                                    value=self._match_announce_interval(
+                                        self.config.reticulum.announce_interval
+                                    ),
                                     id="announce_interval",
-                                    classes="setting-input",
+                                    classes="setting-select",
+                                    allow_blank=False,
                                 ),
                                 classes="setting-row",
                             ),
@@ -227,7 +248,7 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.reticulum.interfaces.auto,
                                     id="auto_interface",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
@@ -246,7 +267,7 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.reticulum.interfaces.server.enabled,
                                     id="server_enabled",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
@@ -256,7 +277,7 @@ class SettingsScreen(Screen[None]):
                                     value=self.config.reticulum.interfaces.server.listen_ip,
                                     placeholder="0.0.0.0",
                                     id="server_listen_ip",
-                                    classes="setting-input",
+                                    classes="setting-input-narrow",
                                 ),
                                 classes="setting-row",
                                 id="server-ip-row",
@@ -267,7 +288,7 @@ class SettingsScreen(Screen[None]):
                                     value=str(self.config.reticulum.interfaces.server.port),
                                     placeholder="4242",
                                     id="server_port",
-                                    classes="setting-input",
+                                    classes="setting-input-narrow",
                                 ),
                                 classes="setting-row",
                                 id="server-port-row",
@@ -286,7 +307,7 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.mesh.enable,
                                     id="mesh_enable",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
@@ -296,7 +317,7 @@ class SettingsScreen(Screen[None]):
                                     value=self.config.mesh.mesh_id,
                                     placeholder="styrene",
                                     id="mesh_id",
-                                    classes="setting-input",
+                                    classes="setting-input-narrow",
                                 ),
                                 classes="setting-row",
                             ),
@@ -306,7 +327,7 @@ class SettingsScreen(Screen[None]):
                                     value=str(self.config.mesh.channel),
                                     placeholder="6",
                                     id="channel",
-                                    classes="setting-input",
+                                    classes="setting-input-narrow",
                                 ),
                                 classes="setting-row",
                             ),
@@ -316,7 +337,7 @@ class SettingsScreen(Screen[None]):
                                     [(mode.value, mode) for mode in GatewayMode],
                                     value=self.config.mesh.gateway_mode,
                                     id="gateway_mode",
-                                    classes="setting-input",
+                                    classes="setting-select",
                                 ),
                                 classes="setting-row",
                             ),
@@ -353,7 +374,7 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.fleet.auto_sync_inventory,
                                     id="auto_sync_inventory",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
@@ -396,7 +417,7 @@ class SettingsScreen(Screen[None]):
                                     [(level.value, level) for level in LogLevel],
                                     value=self.config.tui.log_level,
                                     id="log_level",
-                                    classes="setting-input",
+                                    classes="setting-select",
                                 ),
                                 classes="setting-row",
                             ),
@@ -406,7 +427,7 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.tui.show_hardware_panel,
                                     id="show_hardware_panel",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
@@ -416,7 +437,7 @@ class SettingsScreen(Screen[None]):
                                     "",
                                     self.config.tui.confirm_destructive,
                                     id="confirm_destructive",
-                                    classes="setting-input",
+                                    classes="setting-checkbox",
                                 ),
                                 classes="setting-row",
                             ),
@@ -467,6 +488,16 @@ class SettingsScreen(Screen[None]):
                 yield Button("Cancel", variant="default", id="cancel-btn")
 
             yield Static("", id="status-message")
+
+    @staticmethod
+    def _match_announce_interval(seconds: int) -> int:
+        """Find the closest matching preset for an announce interval value."""
+        for _label, secs in ANNOUNCE_INTERVALS:
+            if secs == seconds:
+                return secs
+        # Find closest preset
+        closest = min(ANNOUNCE_INTERVALS, key=lambda x: abs(x[1] - seconds))
+        return closest[1]
 
     def _compose_peer_rows(self) -> list:
         """Generate peer input rows from current config."""
@@ -785,11 +816,11 @@ class SettingsScreen(Screen[None]):
             transport_enabled = self.query_one("#enable_transport", Checkbox).value
             self.config.core.reticulum.enable_transport = transport_enabled
 
-            announce_str = self.query_one("#announce_interval", Input).value.strip()
-            try:
-                self.config.core.reticulum.announce_interval = int(announce_str)
-            except ValueError:
-                self._show_error("Invalid announce interval (must be a number)")
+            announce_select = self.query_one("#announce_interval", Select)
+            if isinstance(announce_select.value, int):
+                self.config.core.reticulum.announce_interval = announce_select.value
+            else:
+                self._show_error("Invalid announce interval selection")
                 return
 
             # Read Peers from dynamic rows

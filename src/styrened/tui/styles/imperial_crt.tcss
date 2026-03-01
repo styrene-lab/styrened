@@ -466,19 +466,41 @@ Header {
     height: auto;
     min-height: 3;
     margin-bottom: 1;
+    align: left middle;
 }
 
 .setting-label {
-    width: auto;
-    min-width: 20;
-    max-width: 30;
-    padding-right: 2;
+    width: 22;
+    min-width: 22;
+    content-align-horizontal: right;
+    padding-right: 1;
     color: $primary;
 }
 
+/* Full-width text inputs (paths, hostnames, names) */
 .setting-input {
     width: 1fr;
     min-width: 20;
+}
+
+/* Narrow inputs (ports, channels, numeric values) */
+.setting-input-narrow {
+    width: 16;
+    min-width: 12;
+    max-width: 20;
+}
+
+/* Select dropdowns — don't need full width */
+.setting-select {
+    width: 40;
+    min-width: 30;
+    max-width: 50;
+}
+
+/* Checkboxes — just the toggle, no stretch */
+.setting-checkbox {
+    width: auto;
+    min-width: 0;
 }
 
 .setting-description {
