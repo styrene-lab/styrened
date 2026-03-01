@@ -488,7 +488,7 @@ publish:
     VERSION=$(cat VERSION)
     rm -rf dist/
     .venv/bin/python -m build
-    .venv/bin/python -m twine upload dist/*
+    .venv/bin/python -m twine upload --skip-existing dist/*
     echo ""
     echo "✓ Published $VERSION to PyPI"
     # Notify styrene-pypi meta-package to sync version immediately.
