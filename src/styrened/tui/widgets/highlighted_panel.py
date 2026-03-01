@@ -65,7 +65,7 @@ class HighlightedPanel(Vertical):
     }
 
     HighlightedPanel > .hp-content {
-        height: 1fr;
+        height: auto;
         width: 100%;
         padding: 0 1;
         border-left: solid $panel;

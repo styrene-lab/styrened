@@ -456,11 +456,19 @@ Header {
     min-height: 6;
 }
 
+#mesh-devices-panel > .hp-content {
+    height: 1fr;
+}
+
 /* Activity feed: smaller portion, grows with content */
 #activity-feed-panel {
     height: 1fr;
     min-height: 4;
     max-height: 16;
+}
+
+#activity-feed-panel > .hp-content {
+    height: 1fr;
 }
 
 /* === Local Dashboard Layout === */
