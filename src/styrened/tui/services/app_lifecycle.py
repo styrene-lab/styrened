@@ -267,7 +267,7 @@ class StyreneLifecycle:
         Sends announce with Styrene node format including version and capabilities.
         """
         try:
-            import socket
+
 
             # Get operator destination
             identity = get_operator_identity_object()
@@ -284,8 +284,10 @@ class StyreneLifecycle:
                 logger.warning("Failed to get destination for announce")
                 return
 
-            # Build announce data: styrene:<hostname>:<version>:<capabilities>:<lxmf_dest>
-            hostname = socket.gethostname()
+            # Build announce data using identity config (same format as daemon)
+            display_name = self.config.identity.display_name
+            short_name = self.config.identity.short_name or ""
+
             try:
                 version = get_version("styrened")
             except Exception:
@@ -310,18 +312,16 @@ class StyreneLifecycle:
             except Exception:
                 pass
 
-            # Short name and system fingerprint
             from styrened.services.system_info import get_system_fingerprint
 
-            short_name = hostname[:2].upper() if hostname else "SN"
             fingerprint = get_system_fingerprint()
 
-            # Format: styrene:<hostname>:<version>:<caps>:<lxmf_dest>:<short_name>:<fingerprint>
-            announce_data = f"styrene:{hostname}:{version}:{capabilities_str}:{lxmf_dest}:{short_name}:{fingerprint}"
+            # Format: styrene:<display_name>:<version>:<caps>:<lxmf_dest>:<short_name>:<fingerprint>
+            announce_data = f"styrene:{display_name}:{version}:{capabilities_str}:{lxmf_dest}:{short_name}:{fingerprint}"
 
             # Send announce
             destination.announce(announce_data.encode("utf-8"))
-            logger.info(f"Announced as Styrene node: {hostname} (v{version})")
+            logger.info(f"Announced as Styrene node: {display_name} (v{version})")
 
         except Exception as e:
             logger.warning(f"Failed to announce Styrene node: {e}")
