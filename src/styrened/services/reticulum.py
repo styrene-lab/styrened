@@ -1189,19 +1189,59 @@ def discover_devices() -> list[MeshDevice]:
     return list(_announce_handler.discovered_devices.values())
 
 
+def _deduplicate_by_identity(devices: list[MeshDevice]) -> list[MeshDevice]:
+    """Deduplicate devices by identity_hash.
+
+    The same node announces on multiple destinations (operator + LXMF).
+    Keep the entry with the richest metadata (prefer STYRENE_NODE type,
+    then most recent announce, then most announce counts).
+
+    Also filters out devices that have been LOST for more than 30 minutes
+    to prevent stale ghosts from cluttering the device table.
+    """
+    from datetime import datetime as _dt
+    cutoff = _dt.now().timestamp() - 1800  # 30 minutes
+
+    by_identity: dict[str, MeshDevice] = {}
+    for device in devices:
+        # Skip stale ghosts — LOST for more than 30 minutes
+        if device.last_announce < cutoff:
+            continue
+        key = device.identity_hash or device.destination_hash
+        existing = by_identity.get(key)
+        if existing is None:
+            by_identity[key] = device
+        else:
+            # Prefer STYRENE_NODE over other types
+            if device.is_styrene_node and not existing.is_styrene_node:
+                by_identity[key] = device
+            elif device.is_styrene_node == existing.is_styrene_node:
+                # Same type — prefer most recent announce
+                if device.last_announce > existing.last_announce:
+                    by_identity[key] = device
+            # Merge LXMF destination if the winner doesn't have one
+            winner = by_identity[key]
+            if not winner.lxmf_destination_hash and device.lxmf_destination_hash:
+                winner.lxmf_destination_hash = device.lxmf_destination_hash
+    return list(by_identity.values())
+
+
 def get_styrene_devices() -> list[MeshDevice]:
-    """Get list of discovered Styrene nodes.
+    """Get list of discovered Styrene nodes, deduplicated by identity.
 
     Returns only devices identified as Styrene nodes via announce data.
+    Nodes that announce on multiple destinations (operator + LXMF) are
+    merged into a single entry.
 
     Returns:
         List of MeshDevice objects for Styrene nodes only.
     """
     if not _announce_handler:
         return []
-    return [
+    styrene = [
         device for device in _announce_handler.discovered_devices.values() if device.is_styrene_node
     ]
+    return _deduplicate_by_identity(styrene)
 
 
 def get_rnodes() -> list[MeshDevice]:
