@@ -143,8 +143,8 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             Static(
-                                "[dim]Controls how this node appears in mesh announces. "
-                                "Other LXMF clients (Sideband, NomadNet) will see these values.[/dim]",
+                                "Controls how this node appears in mesh announces. "
+                                "Other LXMF clients (Sideband, NomadNet) will see these values.",
                                 classes="setting-description",
                             ),
                             title="OPERATOR IDENTITY",
@@ -185,9 +185,9 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             Static(
-                                "[dim]Standalone: own transport, no shared instance. "
+                                "Standalone: own transport, no shared instance. "
                                 "Hub: transport node accepting connections. "
-                                "Peer: connects to shared RNS instance.[/dim]",
+                                "Peer: connects to shared RNS instance.",
                                 classes="setting-description",
                             ),
                             title="TRANSPORT",
@@ -203,9 +203,9 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             Static(
-                                "[dim]TCP connections to remote Reticulum nodes. "
+                                "TCP connections to remote Reticulum nodes. "
                                 "Each peer becomes a TCPClientInterface in ~/.reticulum/config. "
-                                "Changes take effect on save (daemon restart required).[/dim]",
+                                "Changes take effect on save (daemon restart required).",
                                 classes="setting-description",
                             ),
                             title="PEERS",
@@ -223,9 +223,9 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             Static(
-                                "[dim]UDP multicast discovery on local network. "
+                                "UDP multicast discovery on local network. "
                                 "Disabled by default — can cause errors on VPN/tunnel interfaces. "
-                                "Enable only if your network adapters are stable.[/dim]",
+                                "Enable only if your network adapters are stable.",
                                 classes="setting-description",
                             ),
                             title="LOCAL DISCOVERY",
@@ -264,8 +264,8 @@ class SettingsScreen(Screen[None]):
                                 id="server-port-row",
                             ),
                             Static(
-                                "[dim]Accept incoming TCP connections from other nodes. "
-                                "Required for Hub mode. Creates a TCPServerInterface.[/dim]",
+                                "Accept incoming TCP connections from other nodes. "
+                                "Required for Hub mode. Creates a TCPServerInterface.",
                                 classes="setting-description",
                             ),
                             title="SERVER",
@@ -426,9 +426,9 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             Static(
-                                "[dim]Restart applies after upgrades. "
+                                "Restart applies after upgrades. "
                                 "Install as Service creates a launchd/systemd unit for boot persistence. "
-                                "Reset regenerates all config files from defaults and restarts the daemon.[/dim]",
+                                "Reset regenerates all config files from defaults and restarts the daemon.",
                                 classes="setting-description",
                             ),
                             title="DAEMON",
@@ -445,8 +445,8 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             Static(
-                                "[dim]Removes all discovered nodes from persistent storage. "
-                                "New announces will repopulate the list.[/dim]",
+                                "Removes all discovered nodes from persistent storage. "
+                                "New announces will repopulate the list.",
                                 classes="setting-description",
                             ),
                             title="DATA",
