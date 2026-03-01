@@ -15,10 +15,10 @@ class TestBuildUpgradeCmd:
     """Tests for UpgradeScreen._build_upgrade_cmd()."""
 
     def test_detects_pipx_via_bin_dir_env(self):
-        """PIPX_BIN_DIR env var triggers pipx upgrade."""
+        """PIPX_BIN_DIR env var triggers pipx upgrade with eager strategy."""
         with patch.dict(os.environ, {"PIPX_BIN_DIR": "/home/user/.local/bin"}):
             cmd = UpgradeScreen._build_upgrade_cmd()
-        assert cmd == ["pipx", "upgrade", "styrene"]
+        assert cmd == ["pipx", "upgrade", "styrene", "--pip-args=--upgrade-strategy=eager"]
 
     def test_detects_pipx_via_path_heuristic(self):
         """sys.executable under ~/.local/pipx/venvs/ triggers pipx upgrade."""
@@ -27,15 +27,15 @@ class TestBuildUpgradeCmd:
             os.environ.pop("PIPX_BIN_DIR", None)
             with patch.object(sys, "executable", fake_exe):
                 cmd = UpgradeScreen._build_upgrade_cmd()
-        assert cmd == ["pipx", "upgrade", "styrene"]
+        assert cmd == ["pipx", "upgrade", "styrene", "--pip-args=--upgrade-strategy=eager"]
 
     def test_falls_back_to_pip(self):
-        """Non-pipx executable uses pip."""
+        """Non-pipx executable uses pip with eager strategy."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PIPX_BIN_DIR", None)
             with patch.object(sys, "executable", "/usr/bin/python3"):
                 cmd = UpgradeScreen._build_upgrade_cmd()
-        assert cmd == ["/usr/bin/python3", "-m", "pip", "install", "--upgrade", "styrene"]
+        assert cmd == ["/usr/bin/python3", "-m", "pip", "install", "--upgrade", "--upgrade-strategy=eager", "styrene"]
 
     def test_respects_custom_pipx_home(self):
         """Custom PIPX_HOME is used in path check."""
@@ -45,7 +45,7 @@ class TestBuildUpgradeCmd:
             os.environ.pop("PIPX_BIN_DIR", None)
             with patch.object(sys, "executable", fake_exe):
                 cmd = UpgradeScreen._build_upgrade_cmd()
-        assert cmd == ["pipx", "upgrade", "styrene"]
+        assert cmd == ["pipx", "upgrade", "styrene", "--pip-args=--upgrade-strategy=eager"]
 
 
 class TestDaemonPkillPattern:
