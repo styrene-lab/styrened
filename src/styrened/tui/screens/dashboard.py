@@ -201,7 +201,8 @@ class MeshDeviceTree(Tree[str]):
     def refresh_data(self) -> None:
         """Refresh device data."""
         self._load_data()
-        self.refresh()
+        self._clear_line_cache()
+        self.refresh(layout=True)
 
 
 class DashboardScreen(Screen[None]):
