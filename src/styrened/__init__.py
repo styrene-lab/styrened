@@ -20,7 +20,7 @@ from styrened import StyreneDaemon, main
 ```
 """
 
-__version__ = "0.10.68"
+__version__ = "0.10.69"
 
 # Path resolution
 from styrened import paths  # noqa: F401
