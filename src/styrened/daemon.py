@@ -301,6 +301,10 @@ class StyreneDaemon:
         # Re-initialize operator destination
         self._init_operator_destination()
 
+        # Clear stale page browser links and force path re-discovery
+        if self._page_browser_service is not None:
+            self._page_browser_service.handle_reconnection()
+
         # Re-enter eager discovery phase (15s intervals for 2 minutes)
         # so peers rediscover us quickly after network change
         import time as _time
