@@ -443,22 +443,23 @@ Header {
     overflow-y: auto;
 }
 
-/* Node info: compact, auto height with upper bound */
+/* Node info: compact two-column layout */
 #node-info-panel {
     height: auto;
     max-height: 20;
 }
 
-/* Mesh devices table: fills remaining vertical space */
+/* Mesh devices tree: takes majority of remaining space */
 #mesh-devices-panel {
-    height: 1fr;
-    min-height: 8;
+    height: 2fr;
+    min-height: 6;
 }
 
-/* Activity feed: compact at the bottom */
+/* Activity feed: smaller portion, grows with content */
 #activity-feed-panel {
-    height: auto;
-    max-height: 14;
+    height: 1fr;
+    min-height: 4;
+    max-height: 16;
 }
 
 /* === Local Dashboard Layout === */
