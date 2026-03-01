@@ -163,10 +163,12 @@ class TestCoreConfigPeerRoundTrip:
         save_core_config(config, config_path)
         loaded = load_core_config(config_path)
 
-        assert len(loaded.reticulum.interfaces.peers) == 1
+        # Explicit peer preserved at start, well-known hubs merged as disabled
         assert loaded.reticulum.interfaces.peers[0].host == "relay.example.com"
         assert loaded.reticulum.interfaces.peers[0].port == 9999
         assert loaded.reticulum.interfaces.peers[0].name == "Test Relay"
+        from styrened.models.config import WELL_KNOWN_HUBS
+        assert len(loaded.reticulum.interfaces.peers) == 1 + len(WELL_KNOWN_HUBS)
         assert loaded.reticulum.interfaces.auto is True
         assert loaded.reticulum.interfaces.server.enabled is True
         assert loaded.reticulum.interfaces.server.listen_ip == "127.0.0.1"
