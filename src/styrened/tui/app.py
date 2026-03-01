@@ -435,14 +435,36 @@ class StyreneApp(App[None]):
                 result.latest,
             )
 
+    def _restart_tui(self) -> None:
+        """Shut down the Textual app and re-exec the TUI process."""
+        import shutil
+
+        def _do_exec() -> None:
+            # Find the 'styrene' entry point — prefer the one that launched us
+            argv0 = sys.argv[0]
+            # If argv0 is a module path (-m), re-exec via python -m
+            if argv0.endswith("__main__.py") or not os.path.isfile(argv0):
+                exe = shutil.which("styrene") or sys.executable
+                if exe == sys.executable:
+                    os.execvp(exe, [exe, "-m", "styrened.tui"])
+                else:
+                    os.execvp(exe, [exe])
+            else:
+                os.execvp(argv0, [argv0])
+
+        # Exit Textual cleanly, then exec in the exit callback
+        self.exit(result=None)
+        # Schedule exec after event loop teardown
+        import atexit
+        atexit.register(_do_exec)
+
     def _show_upgrade_screen(self, current: str, latest: str) -> None:
         """Push the upgrade modal screen."""
         from styrened.tui.screens.upgrade import UpgradeScreen
 
         def _on_upgrade_result(should_restart: bool | None) -> None:
             if should_restart:
-                # Exit TUI so user re-launches with the new version
-                self.exit(message="Relaunch 'styrene' to use the new version.")
+                self._restart_tui()
 
         self.push_screen(UpgradeScreen(current, latest), callback=_on_upgrade_result)
 

@@ -65,6 +65,8 @@ class UpgradeScreen(ModalScreen[bool]):
         height: 12;
         margin: 1 0;
         display: none;
+        background: $surface;
+        border: none;
     }
 
     #upgrade-actions {
