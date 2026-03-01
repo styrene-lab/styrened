@@ -186,6 +186,13 @@ class StyreneApp(App[None]):
 
         super().__init__()
 
+        # Force dark mode — our theme is dark-only. Textual auto-detects
+        # system light/dark mode and will use light theme defaults if the
+        # OS or terminal is in light mode. We have no light variant, so
+        # light mode produces a Frankenstein palette (our Rich markup hex
+        # colors on Textual's default light backgrounds).
+        self.dark = True
+
         # Ensure theme is active (reactive may reset during init)
         if self.theme != STYRENE_THEME_KEY:
             self.register_theme(create_styrene_theme())
