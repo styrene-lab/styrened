@@ -65,11 +65,11 @@ class UpgradeScreen(ModalScreen[bool]):
         height: 12;
         margin: 1 0;
         display: none;
-        background: $surface;
+        background: transparent;
         border: none;
-        scrollbar-background: $surface;
-        scrollbar-color: $text-muted 30%;
-        scrollbar-size-vertical: 1;
+        scrollbar-background: transparent;
+        scrollbar-color: transparent;
+        scrollbar-size-vertical: 0;
     }
 
     #upgrade-actions {
