@@ -300,6 +300,17 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                         )
                 config.reticulum.interfaces.peers = peers
 
+            # Merge any missing well-known hubs (disabled) so existing installs
+            # see them in Settings > Network > Peers without manual addition.
+            from styrened.models.config import WELL_KNOWN_HUBS
+            existing_hosts = {(p.host, p.port) for p in config.reticulum.interfaces.peers}
+            for hub in WELL_KNOWN_HUBS:
+                if (hub.host, hub.port) not in existing_hosts:
+                    import copy
+                    new_hub = copy.deepcopy(hub)
+                    new_hub.enabled = False  # Don't auto-enable for existing installs
+                    config.reticulum.interfaces.peers.append(new_hub)
+
     # Parse rpc section
     if "rpc" in data and isinstance(data["rpc"], dict):
         rpc = data["rpc"]
