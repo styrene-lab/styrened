@@ -147,7 +147,7 @@ class UpgradeScreen(ModalScreen[bool]):
         if pipx_bin_dir or pipx_venvs in exe:
             return [
                 "pipx", "upgrade", "styrene",
-                "--pip-args", "--upgrade-strategy=eager",
+                "--pip-args=--upgrade-strategy=eager",
             ]
         return [exe, "-m", "pip", "install", "--upgrade", "--upgrade-strategy=eager", "styrene"]
 
