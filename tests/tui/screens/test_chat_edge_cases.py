@@ -142,7 +142,7 @@ class TestBoundaryConditions:
                 await pilot.pause()
 
                 # Dashboard should render without crashing
-                table = app.screen.query_one("#mesh-device-table", DataTable)
+                table = app.screen.query_one("#mesh-device-tree", DataTable)
                 assert table.row_count == 1
 
     @pytest.mark.asyncio

@@ -170,6 +170,13 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
         # Column already exists, this is expected
         pass
 
+    # Schema migration: Add discovered_via column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE nodes ADD COLUMN discovered_via TEXT")
+        logger.debug("Added discovered_via column to nodes table")
+    except sqlite3.OperationalError:
+        pass
+
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
@@ -184,6 +191,11 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     # This enables efficient identity_hash lookup when sending to LXMF destinations
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_lxmf_destination_hash ON nodes(lxmf_destination_hash)
+    """)
+
+    # Index on discovered_via for dashboard grouping by interface
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_discovered_via ON nodes(discovered_via)
     """)
 
     # Paths table for Reticulum path snapshots
@@ -305,8 +317,9 @@ class NodeStore:
                     INSERT INTO nodes (
                         destination_hash, identity_hash, name, device_type,
                         last_announce, announce_count, capabilities, version,
-                        lxmf_destination_hash, short_name, system_fingerprint, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                        lxmf_destination_hash, short_name, system_fingerprint,
+                        discovered_via, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
                     ON CONFLICT(destination_hash) DO UPDATE SET
                         identity_hash = excluded.identity_hash,
                         name = excluded.name,
@@ -318,6 +331,7 @@ class NodeStore:
                         lxmf_destination_hash = excluded.lxmf_destination_hash,
                         short_name = excluded.short_name,
                         system_fingerprint = excluded.system_fingerprint,
+                        discovered_via = COALESCE(excluded.discovered_via, nodes.discovered_via),
                         updated_at = strftime('%s', 'now')
                     """,
                     (
@@ -332,6 +346,7 @@ class NodeStore:
                         device.lxmf_destination_hash,
                         device.short_name,
                         device.system_fingerprint,
+                        device.discovered_via,
                     ),
                 )
                 conn.commit()
@@ -812,6 +827,12 @@ class NodeStore:
         except (KeyError, IndexError):
             pass
 
+        discovered_via = None
+        try:
+            discovered_via = row["discovered_via"]
+        except (KeyError, IndexError):
+            pass
+
         try:
             raw_type = row["device_type"]
             # Handle legacy "styrene_node" values from pre-0.10 databases
@@ -833,6 +854,7 @@ class NodeStore:
             lxmf_destination_hash=lxmf_dest,
             short_name=short_name,
             system_fingerprint=system_fingerprint,
+            discovered_via=discovered_via,
         )
 
     def get_connection_count(self) -> int:

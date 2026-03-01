@@ -73,6 +73,7 @@ class MeshDevice:
     lxmf_destination_hash: str | None = None
     short_name: str | None = None
     system_fingerprint: str | None = None
+    discovered_via: str | None = None  # Interface name that received this announce
 
     # Legacy alias for backwards compatibility
     @property

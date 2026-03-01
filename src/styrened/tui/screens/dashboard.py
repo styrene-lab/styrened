@@ -9,9 +9,9 @@ from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container
-from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header
+from textual.widgets import Footer, Header, Tree
+from textual.widgets.tree import TreeNode
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.models.messages import Message
@@ -24,24 +24,31 @@ if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
 
 
+class MeshDeviceTree(Tree[str]):
+    """Mesh device tree — groups discovered devices by receiving interface."""
 
-class MeshDeviceTable(DataTable[str]):
-    """Mesh device listing table - shows discovered devices."""
+    DEFAULT_CSS = """
+    MeshDeviceTree {
+        height: 1fr;
+        min-height: 5;
+        background: transparent;
+        scrollbar-background: transparent;
+        scrollbar-color: $border;
+        scrollbar-size-vertical: 1;
+    }
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__("Mesh Devices", **kwargs)
+        self.show_root = False
+        self.guide_depth = 3
 
     def on_mount(self) -> None:
-        self.add_columns("NAME", "TYPE", "IDENTITY", "STATUS", "UNREAD", "LAST ANNOUNCE")
-        self.cursor_type = "row"
         self._load_data()
 
     def _get_unread_counts(self) -> dict[str, int]:
-        """Get unread message counts per device identity.
-
-        Returns:
-            Dictionary mapping device identity to unread count.
-        """
+        """Get unread message counts per device identity."""
         unread_counts: dict[str, int] = {}
-
-        # Get app reference for database access
         try:
             app: StyreneApp = self.app  # type: ignore[assignment]
             if app.db_engine is None or not app.local_identity_hash:
@@ -49,7 +56,6 @@ class MeshDeviceTable(DataTable[str]):
         except Exception:
             return unread_counts
 
-        # Query unread messages (status="pending" and destination is local)
         with Session(app.db_engine) as session:
             messages = (
                 session.query(Message)
@@ -60,8 +66,6 @@ class MeshDeviceTable(DataTable[str]):
                 )
                 .all()
             )
-
-            # Count by source (the sender's identity)
             for msg in messages:
                 source = msg.source_hash
                 unread_counts[source] = unread_counts.get(source, 0) + 1
@@ -69,146 +73,132 @@ class MeshDeviceTable(DataTable[str]):
         return unread_counts
 
     def _load_data(self) -> None:
-        """Load device data from mesh discovery.
-
-        Uses incremental updates to preserve cursor selection:
-        1. Track current selection before update
-        2. Build new row data without clearing
-        3. Update existing rows, add new ones, remove stale ones
-        4. Restore cursor position
-        """
-        # Load historical data from NodeStore first
+        """Load device data and rebuild tree grouped by interface."""
+        # Load historical + live data
         try:
             from styrened.services.node_store import get_node_store
-
             stored_nodes = get_node_store().get_styrene_nodes()
         except Exception:
             stored_nodes = []
 
-        # Get live discovered devices
         live_nodes = discover_devices()
 
-        # Merge historical and live data (live takes precedence for duplicates)
         all_devices_dict = {n.destination_hash: n for n in stored_nodes}
         all_devices_dict.update({n.destination_hash: n for n in live_nodes})
 
-        # Filter to ONLY Styrene mesh devices
-        # All other device types (RNODE, GENERIC, UNKNOWN) belong in the Exploration screen
+        # Filter to Styrene nodes only
         devices = [
-            d
-            for d in all_devices_dict.values()
+            d for d in all_devices_dict.values()
             if d.device_type == DeviceType.STYRENE_NODE
         ]
 
-        # Deduplicate by identity — same node announces on multiple destinations
-        # (operator + LXMF) and we only want one row per physical node.
         from styrened.services.reticulum import _deduplicate_by_identity
         devices = _deduplicate_by_identity(devices)
 
-        # Get unread message counts
         unread_counts = self._get_unread_counts()
+        cascade = get_color_cascade()
 
-        # Track current selection to restore after update
-        selected_key: str | None = None
-        if self.cursor_row is not None and self.row_count > 0:
-            try:
-                cell_key = self.coordinate_to_cell_key(Coordinate(self.cursor_row, 0))
-                if cell_key and cell_key.row_key:
-                    selected_key = str(cell_key.row_key.value)
-            except Exception:
-                pass
+        # Track selected node to restore after rebuild
+        selected_identity: str | None = None
+        if self.cursor_node and self.cursor_node.data:
+            selected_identity = self.cursor_node.data
 
-        # Clear and rebuild (simpler than incremental for now, but preserves selection)
+        # Clear and rebuild
         self.clear()
 
         if not devices:
-            # Add a message row if no Styrene devices discovered
-            cascade = get_color_cascade()
-            self.add_row(
-                "-",
-                "-",
-                "-",
+            self.root.add_leaf(
                 f"[{cascade.dim}]No Styrene nodes discovered[/]",
-                "-",
-                "-",
-                key="-",
+                data=None,
             )
             return
 
-        # Sort by last announce (most recent first)
-        devices_sorted = sorted(devices, key=lambda d: d.last_announce, reverse=True)
+        # Group devices by discovered_via interface
+        groups: dict[str, list[MeshDevice]] = {}
+        for device in devices:
+            key = device.discovered_via or "_direct"
+            groups.setdefault(key, []).append(device)
 
-        # Get cascade for dynamic theming
-        cascade = get_color_cascade()
+        # Sort groups: named interfaces first (alpha), _direct last
+        sorted_keys = sorted(
+            groups.keys(),
+            key=lambda k: (k == "_direct", k.lower()),
+        )
 
-        for device in devices_sorted:
-            # Device type display - use cascade colors
-            # bright for important (styrene), medium for normal, dim for generic
-            type_icons = {
-                DeviceType.STYRENE_NODE: f"[{cascade.bright}]STYRENE[/]",
-                DeviceType.RNODE: f"[{cascade.medium}]RNODE[/]",
-                DeviceType.GENERIC: f"[{cascade.dim}]GENERIC[/]",
-                DeviceType.UNKNOWN: f"[{cascade.dim}]UNKNOWN[/]",
-            }
-            type_text = type_icons.get(device.device_type, f"[{cascade.dim}]?[/]")
+        for group_key in sorted_keys:
+            group_devices = sorted(
+                groups[group_key],
+                key=lambda d: d.last_announce,
+                reverse=True,
+            )
 
-            # Status using cascade colors
-            # Active = medium, Stale = dim, Lost = dim (symbols differentiate)
-            status_colors = {
-                NodeStatus.ACTIVE: cascade.medium,
-                NodeStatus.STALE: cascade.dim,
-                NodeStatus.LOST: cascade.dim,
-            }
-            status_color = status_colors.get(device.status, cascade.medium)
-            status_text = f"[{status_color}]{device.status.value.upper()}[/]"
-
-            # Identity with more characters for uniqueness (first 16 chars instead of 8)
-            identity_text = device.destination_hash[:16] + "..."
-
-            # Name styling based on type - use cascade colors
-            if device.is_styrene_node:
-                name_text = f"[{cascade.bright} bold]{device.name}[/]"
-            elif device.is_rnode:
-                name_text = f"[{cascade.medium}]{device.name}[/]"
+            # Interface header node
+            if group_key == "_direct":
+                label = f"[{cascade.dim}]Direct / Unknown[/]"
             else:
-                name_text = f"[{cascade.dim}]{device.name}[/]"
+                label = f"[{cascade.medium} bold]{group_key}[/]"
 
-            # Unread message count
-            unread = unread_counts.get(device.identity, 0)
-            unread_text = (
-                f"[{cascade.bright} bold]{unread}[/]" if unread > 0 else f"[{cascade.dim}]-[/]"
-            )
+            branch = self.root.add(label, data=None, expand=True)
 
-            # Show announce count in last seen if > 1
-            last_seen_text = device.last_seen_display
-            if device.announce_count > 1:
-                last_seen_text += f" ({device.announce_count})"
+            for device in group_devices:
+                line = self._format_device_line(device, cascade, unread_counts)
+                branch.add_leaf(line, data=device.identity)
 
-            self.add_row(
-                name_text,
-                type_text,
-                identity_text,
-                status_text,
-                unread_text,
-                last_seen_text,
-                key=device.identity,
-            )
+        # Restore selection
+        if selected_identity:
+            self._select_by_identity(selected_identity)
 
-        # Restore cursor selection if possible
-        if selected_key and self.row_count > 0:
-            # Find the row with the previously selected key
-            for row_idx in range(self.row_count):
-                try:
-                    cell_key = self.coordinate_to_cell_key(Coordinate(row_idx, 0))
-                    if (
-                        cell_key
-                        and cell_key.row_key
-                        and str(cell_key.row_key.value) == selected_key
-                    ):
-                        self.cursor_coordinate = Coordinate(row_idx, 0)
-                        break
-                except Exception:
-                    pass
+    def _format_device_line(
+        self,
+        device: MeshDevice,
+        cascade: Any,
+        unread_counts: dict[str, int],
+    ) -> str:
+        """Format a single device as a rich-text tree leaf label."""
+        # Status indicator
+        status_syms = {
+            NodeStatus.ACTIVE: f"[{cascade.bright}]●[/]",
+            NodeStatus.STALE: f"[{cascade.dim}]◐[/]",
+            NodeStatus.LOST: f"[{cascade.dim}]○[/]",
+        }
+        status = status_syms.get(device.status, f"[{cascade.dim}]?[/]")
+
+        # Name
+        name = f"[{cascade.bright} bold]{device.name}[/]"
+
+        # Identity (truncated)
+        ident = f"[{cascade.dim}]{device.destination_hash[:12]}…[/]"
+
+        # Unread badge
+        unread = unread_counts.get(device.identity, 0)
+        unread_text = f"  [{cascade.bright} bold]({unread})[/]" if unread > 0 else ""
+
+        # Last seen
+        last_seen = f"[{cascade.dim}]{device.last_seen_display}[/]"
+        if device.announce_count > 1:
+            last_seen = f"[{cascade.dim}]{device.last_seen_display} ({device.announce_count})[/]"
+
+        return f"{status} {name}  {ident}  {last_seen}{unread_text}"
+
+    def _select_by_identity(self, identity: str) -> None:
+        """Move cursor to the node matching the given identity."""
+        for node in self._tree_walk(self.root):
+            if node.data == identity:
+                self.select_node(node)
+                return
+
+    def _tree_walk(self, node: TreeNode[str]) -> list[TreeNode[str]]:
+        """Recursively walk all tree nodes."""
+        result = [node]
+        for child in node.children:
+            result.extend(self._tree_walk(child))
+        return result
+
+    def get_selected_identity(self) -> str | None:
+        """Get the identity of the currently selected leaf node."""
+        if self.cursor_node and self.cursor_node.data:
+            return str(self.cursor_node.data)
+        return None
 
     def refresh_data(self) -> None:
         """Refresh device data."""
@@ -218,8 +208,6 @@ class MeshDeviceTable(DataTable[str]):
 class DashboardScreen(Screen[None]):
     """Main dashboard screen showing fleet overview."""
 
-    # Screen-specific bindings - see docs/KEYMAP.md
-    # Note: 'p' for Provision is inherited from App, listed here for footer display
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("enter", "select_device", "Details"),
         Binding("c", "open_chat", "Chat"),
@@ -227,9 +215,8 @@ class DashboardScreen(Screen[None]):
         Binding("e", "open_exploration", "Explore", show=True),
     ]
 
-    # Debounce settings for discovery callbacks
     _last_discovery_refresh: float = 0.0
-    _discovery_debounce_seconds: float = 2.0  # Min time between discovery-triggered refreshes
+    _discovery_debounce_seconds: float = 2.0
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -241,45 +228,31 @@ class DashboardScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Start device discovery when dashboard mounts."""
-        # Start announce listener for device discovery
         start_discovery(callback=self._on_device_discovered)
-
-        # Set up periodic refresh of device table (15s is enough for status updates)
-        # Discovery callbacks handle new devices immediately (with debounce)
         self.set_interval(15.0, self._refresh_device_table)
-
-        # Set up periodic hub connection retry
         self.set_interval(30.0, self._retry_hub_connection)
 
-        # IPC mode: activate daemon section and fetch initial status
         if self._ipc_bridge is not None:
             try:
                 panel = self.query_one(NodeInfoPanel)
                 panel.ipc_managed = True
-                panel.daemon_connected = False  # Activates DAEMON section
+                panel.daemon_connected = False
             except Exception:
                 pass
             self.run_worker(self._fetch_daemon_status())
             self.run_worker(self._subscribe_activity())
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
-        """Handle screen resume - refresh themed panels.
-
-        When returning from another screen (like settings), the theme may have
-        changed. Refresh all panels that use Rich markup with cascade colors.
-        """
-        # Refresh HighlightedPanel borders
+        """Handle screen resume - refresh themed panels."""
         for panel in self.query(HighlightedPanel):
             panel.refresh_theme()
 
-        # Refresh content panels that use cascade colors in Rich markup
         node_info_panel = self.query_one(NodeInfoPanel)
         node_info_panel.refresh_data()
 
-        for table in self.query(MeshDeviceTable):
-            table.refresh_data()
+        for tree in self.query(MeshDeviceTree):
+            tree.refresh_data()
 
-        # Refresh daemon status in IPC mode
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status())
 
@@ -295,62 +268,26 @@ class DashboardScreen(Screen[None]):
                 hub_connection.set_announce_interval(config.reticulum.hub_announce_interval)
 
                 if not hub_connection.is_connected:
-                    hub_connection.retry_connection()
+                    hub_connection.connect(config.reticulum.hub_address)
         except Exception:
             pass
 
     def _on_device_discovered(self, device: MeshDevice) -> None:
-        """Called when new device discovered via announce.
-
-        This runs in RNS callback thread - use call_from_thread for UI updates.
-
-        Args:
-            device: Discovered MeshDevice object.
-        """
-        try:
-            self.app.call_from_thread(self._add_discovered_device, device)
-        except RuntimeError:
-            # Already on main thread (e.g., in tests)
-            self._add_discovered_device(device)
-
-    def _add_discovered_device(self, device: MeshDevice) -> None:
-        """Add discovered device to mesh (runs on main thread).
-
-        Debounces refresh to avoid constant table rebuilds when many
-        announces arrive in quick succession.
-
-        Args:
-            device: MeshDevice object.
-        """
+        """Handle newly discovered device - refresh table with debounce."""
         import time
-
-        # Notify for important device types (always show these)
-        if device.is_styrene_node:
-            self.notify(
-                f"Styrene node: {device.name}",
-                severity="information",
-            )
-        elif device.is_rnode:
-            self.notify(
-                f"RNode: {device.name}",
-                severity="information",
-            )
-
-        # Debounce table refresh to avoid constant rebuilds
         now = time.time()
         if now - self._last_discovery_refresh >= self._discovery_debounce_seconds:
             self._last_discovery_refresh = now
-            self._refresh_device_table()
+            self.call_from_thread(self._refresh_device_table)
 
     def _refresh_device_table(self) -> None:
-        """Refresh the device table with current mesh discoveries."""
+        """Refresh the device tree."""
         try:
-            table_widget = self.query_one("#mesh-device-table", MeshDeviceTable)
-            table_widget.refresh_data()
+            tree_widget = self.query_one("#mesh-device-tree", MeshDeviceTree)
+            tree_widget.refresh_data()
         except Exception:
             pass
 
-        # Also refresh daemon status in IPC mode
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status())
 
@@ -363,7 +300,7 @@ class DashboardScreen(Screen[None]):
                 id="node-info-panel",
             )
             yield HighlightedPanel(
-                MeshDeviceTable(id="mesh-device-table"),
+                MeshDeviceTree(id="mesh-device-tree"),
                 title="MESH DEVICES",
                 id="mesh-devices-panel",
             )
@@ -374,37 +311,23 @@ class DashboardScreen(Screen[None]):
             )
         yield Footer()
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle DataTable enter key - navigate to device detail screen.
-
-        The DataTable consumes enter key events when cursor_type="row",
-        emitting RowSelected instead of letting the screen binding fire.
-        """
-        if event.row_key and event.row_key.value and event.row_key.value != "-":
-            device_identity = str(event.row_key.value)
+    def on_tree_node_selected(self, event: Tree.NodeSelected[str]) -> None:
+        """Handle tree node selection (enter key on a leaf)."""
+        if event.node.data:
+            device_identity = str(event.node.data)
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-
             self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
 
     def _get_selected_identity(self) -> str | None:
-        """Get the identity of the currently selected row."""
-        table = self.query_one("#mesh-device-table", DataTable)
-        if table.cursor_row is not None:
-            cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
-            if cell_key and cell_key.row_key and cell_key.row_key.value != "-":
-                return str(cell_key.row_key.value)
-        return None
+        """Get the identity of the currently selected tree node."""
+        tree = self.query_one("#mesh-device-tree", MeshDeviceTree)
+        return tree.get_selected_identity()
 
     def action_select_device(self) -> None:
-        """Handle device selection - navigate to device detail screen.
-
-        Fallback action for the enter binding. When DataTable is focused,
-        on_data_table_row_selected handles it instead.
-        """
+        """Handle device selection."""
         device_identity = self._get_selected_identity()
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-
             self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
 
     def action_open_chat(self) -> None:
@@ -412,7 +335,6 @@ class DashboardScreen(Screen[None]):
         device_identity = self._get_selected_identity()
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-
             self.app.push_screen(
                 MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
             )
@@ -420,93 +342,62 @@ class DashboardScreen(Screen[None]):
     def action_open_exploration(self) -> None:
         """Open exploration screen for all Reticulum announces."""
         from styrened.tui.screens.exploration import ExplorationScreen
-
         self.app.push_screen(ExplorationScreen())
 
     def action_refresh(self) -> None:
         """Refresh all data on the dashboard."""
-        self.notify("Refreshing...", title="Refresh")
+        self._refresh_device_table()
 
-        # Refresh node info panel
         try:
-            node_info_widget = self.query_one("#node-info-panel-widget", NodeInfoPanel)
-            node_info_widget.refresh_data()
+            node_info = self.query_one(NodeInfoPanel)
+            node_info.refresh_data()
         except Exception:
             pass
 
-        # Refresh device table
         try:
-            table_widget = self.query_one("#mesh-device-table", MeshDeviceTable)
-            table_widget.refresh_data()
+            activity = self.query_one(ActivityFeedWidget)
+            activity.clear()
         except Exception:
             pass
 
-        # Refresh daemon status in IPC mode
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status())
 
-        # Check for updates (same as startup)
-        try:
-            self.app._check_for_updates()  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
-    async def _subscribe_activity(self) -> None:
-        """Subscribe to unified activity events and wire device events."""
-        bridge = self._ipc_bridge
-        if bridge is None:
-            return
-        try:
-            from styrened.ipc import IPCMessageType
-
-            await bridge.subscribe_activity()
-            bridge.on_event(IPCMessageType.EVENT_ACTIVITY, self._on_activity_event)
-            bridge.on_event(IPCMessageType.EVENT_DEVICE, self._on_device_event)
-        except Exception:
-            pass
-
-    def _on_activity_event(self, event_type: Any, payload: dict) -> None:
-        """Handle incoming activity event — append to activity feed."""
-        try:
-            feed = self.query_one("#activity-feed-widget", ActivityFeedWidget)
-            feed.add_event(payload.get("event_type", "unknown"), payload)
-        except Exception:
-            pass
-
-    def _on_device_event(self, event_type: Any, payload: dict) -> None:
-        """Handle device event — reactively refresh device table."""
-        self._refresh_device_table()
-
     async def _fetch_daemon_status(self) -> None:
-        """Fetch daemon status via IPC and push to NodeInfoPanel."""
+        """Fetch daemon status via IPC bridge."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
         try:
             status = await bridge.get_status()
-            panel = self.query_one(NodeInfoPanel)
-            panel.daemon_connected = True
-            panel.daemon_version = status.daemon_version
-            panel.daemon_uptime = status.uptime
-            panel.rns_online = status.rns_initialized
-            panel.interface_count = status.interface_count
-            panel.styrene_mesh_count = status.styrene_node_count
-
-            # Fetch and push identity data
             try:
-                identity = await bridge.get_identity()
-                panel.identity_display_name = identity.display_name
-                panel.identity_icon = identity.icon
-                panel.identity_short_name = identity.short_name
-                panel.identity_hash = identity.identity_hash
+                panel = self.query_one(NodeInfoPanel)
+                panel.daemon_connected = True
+                if hasattr(status, "uptime"):
+                    panel.daemon_uptime = status.uptime
             except Exception:
-                pass  # Identity info is non-critical
-
+                pass
         except Exception:
             try:
                 panel = self.query_one(NodeInfoPanel)
                 panel.daemon_connected = False
-                panel.rns_online = False
             except Exception:
                 pass
 
+    async def _subscribe_activity(self) -> None:
+        """Subscribe to activity events via IPC."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            async for event in bridge.subscribe_events():
+                try:
+                    activity_widget = self.query_one(ActivityFeedWidget)
+                    activity_widget.add_event(
+                        event.get("type", "unknown"),
+                        event,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass

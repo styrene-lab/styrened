@@ -11,7 +11,7 @@ import pytest
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.app import StyreneApp
-from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTable
+from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
 
 
 @pytest.fixture(autouse=True)
@@ -86,7 +86,7 @@ class TestDashboardComposition:
             assert isinstance(screen, DashboardScreen)
 
             # Check for device table widget
-            device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+            device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
             assert device_table is not None
             assert device_table.id == "mesh-device-table"
 
@@ -101,7 +101,7 @@ class TestDashboardComposition:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Table should have 1 row (placeholder message)
                 assert device_table.row_count == 1
@@ -120,7 +120,7 @@ class TestDashboardComposition:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Should have 2 rows (2 devices)
                 assert device_table.row_count == 2
@@ -142,7 +142,7 @@ class TestDeviceTableColumns:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Column count should be 6 (NAME, TYPE, IDENTITY, STATUS, UNREAD, LAST ANNOUNCE)
                 assert len(device_table.columns) == 6
@@ -160,7 +160,7 @@ class TestDeviceTableColumns:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Extract column labels
                 col_labels = [str(col.label) for col in device_table.columns.values()]
@@ -190,7 +190,7 @@ class TestDashboardKeyboardBindings:
 
                 # Get initial row count
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 initial_count = device_table.row_count
 
                 # Press 'r' to refresh
@@ -198,7 +198,7 @@ class TestDashboardKeyboardBindings:
                 await pilot.pause()
 
                 # Table should still exist (refresh completed)
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 assert device_table is not None
                 assert device_table.row_count == initial_count
 
@@ -271,7 +271,7 @@ class TestDashboardDeviceSelection:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Initial cursor position
                 initial_row = device_table.cursor_row
@@ -323,7 +323,7 @@ class TestDashboardAsyncUpdates:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Initial state (devices loaded on mount)
                 initial_calls = call_count["count"]
@@ -352,7 +352,7 @@ class TestDashboardAsyncUpdates:
 
                 # Table renders successfully with devices
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 assert device_table.row_count == 2
 
 
@@ -415,7 +415,7 @@ class TestDashboardScreenLifecycle:
 
                 # on_mount should have loaded devices
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 assert device_table.row_count == 2
 
     @pytest.mark.asyncio
@@ -440,7 +440,7 @@ class TestDashboardLostNodeFiltering:
 
     @pytest.mark.asyncio
     async def test_mesh_device_table_excludes_lost_nodes(self):
-        """MeshDeviceTable should not display devices with LOST status."""
+        """MeshDeviceTree should not display devices with LOST status."""
         now = int(datetime.now().timestamp())
 
         active_device = MeshDevice(
@@ -493,7 +493,7 @@ class TestDashboardLostNodeFiltering:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-table", MeshDeviceTable)
+                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
                 # Should have 2 rows (active + stale), NOT 3 (lost excluded)
                 assert device_table.row_count == 2

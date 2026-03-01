@@ -115,7 +115,7 @@ class TestDashboardMessageIndicators:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                table = app.screen.query_one("#mesh-device-table", DataTable)
+                table = app.screen.query_one("#mesh-device-tree", DataTable)
                 column_labels = [str(col.label) for col in table.columns.values()]
 
                 # Should have UNREAD or MESSAGES column
@@ -166,7 +166,7 @@ class TestDashboardMessageIndicators:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                table = app.screen.query_one("#mesh-device-table", DataTable)
+                table = app.screen.query_one("#mesh-device-tree", DataTable)
 
                 # Find unread count for node-01
                 # The table should show "3" in the unread column for node01_identity_hash
@@ -196,7 +196,7 @@ class TestDashboardMessageIndicators:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                table = app.screen.query_one("#mesh-device-table", DataTable)
+                table = app.screen.query_one("#mesh-device-tree", DataTable)
                 row_data = self._get_row_data(table, "node01_identity_hash")
 
                 unread_value = str(row_data.get("unread", row_data.get("messages", "")))
@@ -232,7 +232,7 @@ class TestDashboardMessageIndicators:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                table = app.screen.query_one("#mesh-device-table", DataTable)
+                table = app.screen.query_one("#mesh-device-tree", DataTable)
 
                 # The unread cell should have Rich markup for highlighting
                 row_data = self._get_row_data(table, "node01_identity_hash")

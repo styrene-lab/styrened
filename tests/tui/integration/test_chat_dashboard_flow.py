@@ -278,7 +278,7 @@ class TestDashboardUnreadDisplay:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                table = app.screen.query_one("#mesh-device-table", DataTable)
+                table = app.screen.query_one("#mesh-device-tree", DataTable)
 
                 # The table should reflect:
                 # - node-01: 3 unread
