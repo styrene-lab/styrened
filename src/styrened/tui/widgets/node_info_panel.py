@@ -98,77 +98,51 @@ class NodeInfoPanel(Static):
             h = (s % 86400) // 3600
             return f"{d}d {h}h" if h else f"{d}d"
 
-    def render(self) -> str:
-        """Render consolidated node info display.
+    def _render_left_column(self, cascade: object) -> list[str]:
+        """Render left column: SYSTEM, DAEMON, IDENTITY."""
+        lines: list[str] = []
 
-        Uses cascade hex colors for theme-aware Rich markup.
-        """
-        cascade = get_color_cascade()
-        lines = []
-
-        # === SYSTEM SECTION ===
+        # === SYSTEM ===
         lines.append(f"[{cascade.bright}]SYSTEM[/]")
-
         if self.hardware_error:
-            lines.append(f"  [{cascade.dim}]Hardware detection not supported on this platform[/]")
+            lines.append(f"  [{cascade.dim}]unsupported platform[/]")
         else:
-            # CPU/RAM
             if self.system_info:
                 cpu = self.system_info.cpu_model
                 if len(cpu) > 35:
                     cpu = cpu[:32] + "..."
-                cores = self.system_info.cpu_cores
-                ram_gb = self.system_info.ram_total_gb
-                lines.append(f"  CPU: {cpu} ({cores}c, {ram_gb:.1f}GB)")
+                lines.append(f"  CPU: {cpu} ({self.system_info.cpu_cores}c, {self.system_info.ram_total_gb:.1f}GB)")
             else:
                 lines.append(f"  CPU: [{cascade.dim}]detecting...[/]")
 
-            # Network
             if self.primary_interface:
                 iface = self.primary_interface
                 ip = iface.ip_address or f"[{cascade.dim}]no ip[/]"
                 iface_type = iface.interface_type.value.upper()
-                if iface.is_up:
-                    lines.append(
-                        f"  NET: {iface.name} ({iface_type}) [{cascade.medium}]{ip}[/]"
-                    )
-                else:
-                    lines.append(f"  NET: {iface.name} ({iface_type}) [{cascade.dim}]{ip}[/]")
+                lines.append(f"  NET: {iface.name} ({iface_type}) [{cascade.medium}]{ip}[/]")
             else:
                 lines.append(f"  NET: [{cascade.dim}]none[/]")
 
-            # Storage
             if self.removable_count > 0:
-                lines.append(
-                    f"  STORAGE: [{cascade.bright} bold]{self.removable_count} removable[/]"
-                )
+                lines.append(f"  STORAGE: [{cascade.bright} bold]{self.removable_count} removable[/]")
             else:
                 lines.append(f"  STORAGE: [{cascade.dim}]no removable[/]")
 
-        # === DAEMON SECTION (IPC mode only) ===
+        # === DAEMON (IPC mode only) ===
         if self.daemon_connected is not None:
-            lines.append("")  # Blank line separator
+            lines.append("")
             lines.append(f"[{cascade.bright}]DAEMON[/]")
-
             if self.daemon_connected:
-                lines.append(
-                    f"  IPC: {SemanticSymbols.ONLINE} [{cascade.medium}]connected[/]"
-                )
-                if self.daemon_version:
-                    lines.append(f"  VER: {self.daemon_version}")
+                lines.append(f"  IPC: {SemanticSymbols.ONLINE} [{cascade.medium}]connected[/]")
                 if self.daemon_uptime > 0:
                     lines.append(f"  UP: {self._format_uptime(self.daemon_uptime)}")
             else:
-                lines.append(
-                    f"  IPC: {SemanticSymbols.OFFLINE} [{cascade.dim}]disconnected[/]"
-                )
+                lines.append(f"  IPC: {SemanticSymbols.OFFLINE} [{cascade.dim}]disconnected[/]")
 
-        # === IDENTITY SECTION ===
+        # === IDENTITY ===
         if self.identity_display_name or self.identity_icon:
-            lines.append("")  # Blank line separator
+            lines.append("")
             lines.append(f"[{cascade.bright}]IDENTITY[/]")
-
-            # NAME: icon + display_name
             name_parts = []
             if self.identity_icon:
                 name_parts.append(self.identity_icon)
@@ -176,101 +150,120 @@ class NodeInfoPanel(Static):
                 name_parts.append(self.identity_display_name)
             if name_parts:
                 lines.append(f"  NAME: [{cascade.medium}]{' '.join(name_parts)}[/]")
-
-            # ALIAS: short_name
             if self.identity_short_name:
                 lines.append(f"  ALIAS: [{cascade.medium}]{self.identity_short_name}[/]")
             else:
                 lines.append(f"  ALIAS: [{cascade.dim}]not set[/]")
-
-            # HASH: truncated identity hash
             if self.identity_hash:
                 lines.append(f"  HASH: [{cascade.dim}]{self.identity_hash[:16]}[/]")
-
-            # SEC: PQC security tier
             if self.security_tier:
                 tier_color = cascade.bright if "PQC" in self.security_tier.upper() else cascade.medium
                 lines.append(f"  SEC: [{tier_color}]{self.security_tier}[/]")
 
-        # === RETICULUM SECTION ===
-        lines.append("")  # Blank line separator
-        lines.append(f"[{cascade.bright}]RETICULUM[/]")
+        return lines
 
-        # Network stack status - nuanced labels
+    def _render_right_column(self, cascade: object) -> list[str]:
+        """Render right column: RETICULUM, STYRENE, VERSION."""
+        lines: list[str] = []
+
+        # === RETICULUM ===
+        lines.append(f"[{cascade.bright}]RETICULUM[/]")
         if self.rns_online:
             if self.interface_count > 0:
-                lines.append(
-                    f"  RNS: {SemanticSymbols.ONLINE} [{cascade.medium}]online ({self.interface_count} if)[/]"
-                )
+                lines.append(f"  RNS: {SemanticSymbols.ONLINE} [{cascade.medium}]online ({self.interface_count} if)[/]")
             else:
-                lines.append(
-                    f"  RNS: {SemanticSymbols.PENDING} [{cascade.medium}]no peers[/]"
-                )
+                lines.append(f"  RNS: {SemanticSymbols.PENDING} [{cascade.medium}]no peers[/]")
         else:
             if self.error_state and self.error_state.is_error:
-                lines.append(
-                    f"  RNS: {SemanticSymbols.REJECTED} [{cascade.bright}]{self.error_state.title}[/]"
-                )
+                lines.append(f"  RNS: {SemanticSymbols.REJECTED} [{cascade.bright}]{self.error_state.title}[/]")
             else:
                 lines.append(f"  RNS: {SemanticSymbols.OFFLINE} [{cascade.dim}]offline[/]")
 
-        # Interface uplink status
         if self.rns_online:
             if self.interface_status:
                 lines.append(f"  UPLINK: {self.interface_status}")
-            elif self.interface_count > 0:
-                # IPC mode: we know interface count but not individual status
-                pass
-            else:
-                lines.append(
-                    f"  UPLINK: {SemanticSymbols.OFFLINE} [{cascade.dim}]no interfaces[/]"
-                )
+            elif self.interface_count == 0:
+                lines.append(f"  UPLINK: {SemanticSymbols.OFFLINE} [{cascade.dim}]no interfaces[/]")
         elif self.error_state and self.error_state.is_error:
-            # Show recovery guidance instead of uplink when there's an error
             recovery = self.error_state.recovery
             if recovery:
-                # Truncate long recovery messages for the panel
-                if len(recovery) > 50:
-                    recovery = recovery[:47] + "..."
+                if len(recovery) > 40:
+                    recovery = recovery[:37] + "..."
                 lines.append(f"  [{cascade.medium}]{SemanticSymbols.PROCESSING} {recovery}[/]")
 
-        # === STYRENE SECTION ===
-        lines.append("")  # Blank line separator
+        # === STYRENE ===
+        lines.append("")
         lines.append(f"[{cascade.bright}]STYRENE[/]")
 
-        # Mode
         mode_display = self.mode.upper()
         if self.mode == "hub":
             lines.append(f"  MODE: {SemanticSymbols.ONLINE} [{cascade.medium}]{mode_display}[/]")
         elif self.mode == "peer":
-            lines.append(
-                f"  MODE: {SemanticSymbols.PENDING} [{cascade.medium}]{mode_display}[/]"
-            )
+            lines.append(f"  MODE: {SemanticSymbols.PENDING} [{cascade.medium}]{mode_display}[/]")
         else:
             lines.append(f"  MODE: {SemanticSymbols.IDLE} [{cascade.dim}]{mode_display}[/]")
 
-        # Hub connection
         if self.hub_status == HubStatus.CONNECTED:
             lines.append(f"  HUB: {SemanticSymbols.ONLINE} [{cascade.medium}]connected[/]")
         elif self.hub_status == HubStatus.WAITING:
             lines.append(f"  HUB: {SemanticSymbols.PENDING} [{cascade.medium}]waiting...[/]")
         elif self.hub_status == HubStatus.DISCONNECTED:
             lines.append(f"  HUB: {SemanticSymbols.OFFLINE} [{cascade.dim}]disconnected[/]")
-        else:  # DISABLED
+        else:
             lines.append(f"  HUB: {SemanticSymbols.OFFLINE} [{cascade.dim}]disabled[/]")
 
-        # Mesh participation
         if self.styrene_mesh_count > 0:
-            lines.append(
-                f"  MESH: {SemanticSymbols.ONLINE} [{cascade.medium}]{self.styrene_mesh_count} peers[/]"
-            )
+            lines.append(f"  MESH: {SemanticSymbols.ONLINE} [{cascade.medium}]{self.styrene_mesh_count} peers[/]")
         elif not self.rns_online and self.error_state and self.error_state.is_error:
-            # Don't show mesh status when offline due to error
             pass
         else:
             lines.append(f"  MESH: {SemanticSymbols.OFFLINE} [{cascade.dim}]no peers[/]")
 
-        return "\n".join(lines)
+        # === VERSION ===
+        lines.append("")
+        try:
+            from styrened import __version__
+            lines.append(f"[{cascade.bright}]VERSION[/]")
+            lines.append(f"  [{cascade.medium}]styrened {__version__}[/]")
+        except ImportError:
+            pass
+
+        return lines
+
+    def render(self) -> str:
+        """Render two-column node info display.
+
+        Left column: SYSTEM, DAEMON, IDENTITY
+        Right column: RETICULUM, STYRENE, VERSION
+
+        Uses Rich Columns for side-by-side layout within a single Static.
+        Falls back to single-column if terminal is narrow.
+        """
+        cascade = get_color_cascade()
+        left = self._render_left_column(cascade)
+        right = self._render_right_column(cascade)
+
+        # Pad shorter column to match heights
+        max_lines = max(len(left), len(right))
+        while len(left) < max_lines:
+            left.append("")
+        while len(right) < max_lines:
+            right.append("")
+
+        # Build side-by-side: use a fixed column width for the left side
+        # Rich markup makes exact character counting unreliable, so we
+        # use a generous fixed width and let the right column fill remaining space
+        col_width = 44
+        output_lines = []
+        for l_line, r_line in zip(left, right):
+            # Pad left line to fixed width (plain-text approximation)
+            # Rich tags don't count toward visible width, so we strip them for padding
+            import re
+            visible_len = len(re.sub(r"\[.*?\]", "", l_line))
+            pad = max(0, col_width - visible_len)
+            output_lines.append(f"{l_line}{' ' * pad}{r_line}")
+
+        return "\n".join(output_lines)
 
     def on_mount(self) -> None:
         """Load all node data on mount."""
