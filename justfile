@@ -485,11 +485,20 @@ release new_version: validate
 publish:
     #!/usr/bin/env bash
     set -euo pipefail
+    VERSION=$(cat VERSION)
     rm -rf dist/
     .venv/bin/python -m build
     .venv/bin/python -m twine upload dist/*
     echo ""
-    echo "✓ Published $(cat VERSION) to PyPI"
+    echo "✓ Published $VERSION to PyPI"
+    # Notify styrene-pypi meta-package to sync version immediately.
+    # Bypasses hourly cron + PyPI CDN staleness on GitHub Actions runners.
+    echo "Notifying styrene-pypi to sync to $VERSION..."
+    gh api repos/styrene-lab/styrene-pypi/dispatches \
+      -f event_type=styrened-release \
+      -f "client_payload[version]=$VERSION" \
+      && echo "✓ styrene-pypi sync triggered" \
+      || echo "⚠ styrene-pypi dispatch failed (non-fatal)"
 
 # ─── Development Helpers ────────────────────────────────────────────────────
 
