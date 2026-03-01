@@ -10,8 +10,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TabbedContent, TabPane
 
-from styrened.models.config import validate_short_name
-from styrened.services.hub_connection import STYRENE_HUB_ADDRESS
+from styrened.models.config import DeploymentMode, PeerConfig, validate_short_name
 from styrened.tui.models.config import (
     ConfigValidationError,
     GatewayMode,
@@ -20,14 +19,6 @@ from styrened.tui.models.config import (
 )
 from styrened.tui.services.config import save_config, validate_config
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
-
-# Known Reticulum hubs for LXMF fleet coordination
-
-KNOWN_HUBS = {
-    "none": ("None (Disabled)", None),
-    "styrene": ("Styrene Community Hub", STYRENE_HUB_ADDRESS),  # brutus cluster hub
-    "custom": ("Custom Hub...", None),
-}
 
 
 class SettingsScreen(Screen[None]):
@@ -113,26 +104,6 @@ class SettingsScreen(Screen[None]):
             except Exception as e:
                 self._show_error(f"Failed to save identity: {e}")
 
-    def _get_hub_key_from_address(self, address: str | None) -> str:
-        """Determine which hub key matches the given address.
-
-        Args:
-            address: Hub LXMF address to match.
-
-        Returns:
-            Hub key ("none", "styrene", or "custom").
-        """
-        if not address:
-            return "none"
-
-        # Check if address matches a known hub
-        for key, (_, hub_address) in KNOWN_HUBS.items():
-            if hub_address and hub_address == address:
-                return key
-
-        # Unknown address = custom
-        return "custom"
-
     def compose(self) -> ComposeResult:
         """Compose the settings screen layout."""
         with Vertical(id="settings-outer"):
@@ -184,61 +155,120 @@ class SettingsScreen(Screen[None]):
                     with VerticalScroll(classes="settings-tab-scroll"):
                         yield HighlightedPanel(
                             Horizontal(
-                                Label("Hub:", classes="setting-label"),
+                                Label("Mode:", classes="setting-label"),
                                 Select(
-                                    [(label, key) for key, (label, _) in KNOWN_HUBS.items()],
-                                    value=self._get_hub_key_from_address(
-                                        self.config.reticulum.hub_address
-                                    ),
-                                    id="hub_select",
+                                    [(m.value.title(), m) for m in DeploymentMode],
+                                    value=self.config.reticulum.mode,
+                                    id="deployment_mode",
                                     classes="setting-input",
                                 ),
                                 classes="setting-row",
                             ),
                             Horizontal(
-                                Label("Custom Hub Address:", classes="setting-label"),
-                                Input(
-                                    value=self.config.reticulum.hub_address or "",
-                                    placeholder="32-char hex LXMF address",
-                                    id="hub_address",
-                                    classes="setting-input",
-                                ),
-                                classes="setting-row",
-                                id="custom-hub-row",
-                            ),
-                            Horizontal(
-                                Label("Hub Announce Interval:", classes="setting-label"),
-                                Input(
-                                    value=str(self.config.reticulum.hub_announce_interval),
-                                    placeholder="60",
-                                    id="hub_announce_interval",
-                                    classes="setting-input",
-                                ),
-                                classes="setting-row",
-                            ),
-                            Horizontal(
-                                Label("Auto Initialize:", classes="setting-label"),
+                                Label("Enable Transport:", classes="setting-label"),
                                 Checkbox(
                                     "",
-                                    self.config.reticulum.auto_initialize,
-                                    id="auto_initialize",
+                                    self.config.reticulum.resolve_transport_enabled(),
+                                    id="enable_transport",
                                     classes="setting-input",
                                 ),
                                 classes="setting-row",
                             ),
                             Horizontal(
-                                Label("Config Path Override:", classes="setting-label"),
+                                Label("Announce Interval:", classes="setting-label"),
                                 Input(
-                                    value=str(
-                                        self.config.reticulum.config_path_override or ""
-                                    ),
-                                    placeholder="/path/to/reticulum/config",
-                                    id="config_path_override",
+                                    value=str(self.config.reticulum.announce_interval),
+                                    placeholder="300",
+                                    id="announce_interval",
                                     classes="setting-input",
                                 ),
                                 classes="setting-row",
                             ),
-                            title="RETICULUM",
+                            Static(
+                                "[dim]Standalone: own transport, no shared instance. "
+                                "Hub: transport node accepting connections. "
+                                "Peer: connects to shared RNS instance.[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="TRANSPORT",
+                        )
+                        yield HighlightedPanel(
+                            *self._compose_peer_rows(),
+                            Horizontal(
+                                Button(
+                                    "+ Add Peer",
+                                    id="btn-add-peer",
+                                    classes="setting-btn",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "[dim]TCP connections to remote Reticulum nodes. "
+                                "Each peer becomes a TCPClientInterface in ~/.reticulum/config. "
+                                "Changes take effect on save (daemon restart required).[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="PEERS",
+                            id="peers-panel",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("AutoInterface:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.reticulum.interfaces.auto,
+                                    id="auto_interface",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "[dim]UDP multicast discovery on local network. "
+                                "Disabled by default — can cause errors on VPN/tunnel interfaces. "
+                                "Enable only if your network adapters are stable.[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="LOCAL DISCOVERY",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Server Interface:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.reticulum.interfaces.server.enabled,
+                                    id="server_enabled",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Listen IP:", classes="setting-label"),
+                                Input(
+                                    value=self.config.reticulum.interfaces.server.listen_ip,
+                                    placeholder="0.0.0.0",
+                                    id="server_listen_ip",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                                id="server-ip-row",
+                            ),
+                            Horizontal(
+                                Label("Listen Port:", classes="setting-label"),
+                                Input(
+                                    value=str(self.config.reticulum.interfaces.server.port),
+                                    placeholder="4242",
+                                    id="server_port",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                                id="server-port-row",
+                            ),
+                            Static(
+                                "[dim]Accept incoming TCP connections from other nodes. "
+                                "Required for Hub mode. Creates a TCPServerInterface.[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="SERVER",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -429,9 +459,49 @@ class SettingsScreen(Screen[None]):
 
             yield Static("", id="status-message")
 
+    def _compose_peer_rows(self) -> list:
+        """Generate peer input rows from current config."""
+        rows = []
+        for i, peer in enumerate(self.config.reticulum.interfaces.peers):
+            rows.append(
+                Horizontal(
+                    Input(
+                        value=peer.name or "",
+                        placeholder="Name (optional)",
+                        id=f"peer_name_{i}",
+                        classes="peer-name-input",
+                    ),
+                    Input(
+                        value=peer.host,
+                        placeholder="host or IP",
+                        id=f"peer_host_{i}",
+                        classes="peer-host-input",
+                    ),
+                    Input(
+                        value=str(peer.port),
+                        placeholder="4242",
+                        id=f"peer_port_{i}",
+                        classes="peer-port-input",
+                    ),
+                    Button(
+                        "✕",
+                        id=f"btn-remove-peer-{i}",
+                        classes="peer-remove-btn",
+                        variant="error",
+                    ),
+                    classes="peer-row",
+                    id=f"peer-row-{i}",
+                )
+            )
+        return rows
+
+    def _peer_count(self) -> int:
+        """Count current peer rows in the DOM."""
+        return len(list(self.query(".peer-row")))
+
     def on_mount(self) -> None:
-        """Set initial visibility of custom hub address field."""
-        self._update_custom_hub_visibility()
+        """Set initial visibility of server fields."""
+        self._update_server_visibility()
 
     def action_save(self) -> None:
         """Save configuration."""
@@ -496,28 +566,72 @@ class SettingsScreen(Screen[None]):
         except Exception as e:
             self.notify(f"Reset failed: {e}", severity="error", timeout=10)
 
-    @on(Select.Changed, "#hub_select")
-    def on_hub_select_changed(self, event: Select.Changed) -> None:
-        """Handle hub selection change to show/hide custom address input.
-
-        Args:
-            event: Selection change event.
-        """
-        self._update_custom_hub_visibility()
-
-    def _update_custom_hub_visibility(self) -> None:
-        """Show or hide the custom hub address input based on selection."""
+    @on(Button.Pressed, "#btn-add-peer")
+    def on_add_peer(self) -> None:
+        """Add a new peer row to the peers panel."""
+        idx = self._peer_count()
+        new_row = Horizontal(
+            Input(
+                value="",
+                placeholder="Name (optional)",
+                id=f"peer_name_{idx}",
+                classes="peer-name-input",
+            ),
+            Input(
+                value="",
+                placeholder="host or IP",
+                id=f"peer_host_{idx}",
+                classes="peer-host-input",
+            ),
+            Input(
+                value="4242",
+                placeholder="4242",
+                id=f"peer_port_{idx}",
+                classes="peer-port-input",
+            ),
+            Button(
+                "✕",
+                id=f"btn-remove-peer-{idx}",
+                classes="peer-remove-btn",
+                variant="error",
+            ),
+            classes="peer-row",
+            id=f"peer-row-{idx}",
+        )
+        # Mount before the Add Peer button
         try:
-            hub_select = self.query_one("#hub_select", Select)
-            custom_row = self.query_one("#custom-hub-row")
-
-            # Show custom input only when "custom" is selected
-            if hub_select.value == "custom":
-                custom_row.remove_class("hidden")
+            add_btn_row = self.query_one("#btn-add-peer").parent
+            if add_btn_row:
+                add_btn_row.mount(new_row, before=0)  # type: ignore[arg-type]
             else:
-                custom_row.add_class("hidden")
+                self.query_one("#peers-panel").mount(new_row)
         except Exception:
-            # Widgets not yet mounted
+            pass
+
+    @on(Button.Pressed, ".peer-remove-btn")
+    def on_remove_peer(self, event: Button.Pressed) -> None:
+        """Remove a peer row."""
+        # Walk up to the peer-row container and remove it
+        widget = event.button.parent
+        if widget and "peer-row" in widget.classes:
+            widget.remove()
+
+    @on(Checkbox.Changed, "#server_enabled")
+    def on_server_toggle(self, event: Checkbox.Changed) -> None:
+        """Show/hide server IP and port fields."""
+        self._update_server_visibility()
+
+    def _update_server_visibility(self) -> None:
+        """Show or hide server config fields based on server enabled checkbox."""
+        try:
+            enabled = self.query_one("#server_enabled", Checkbox).value
+            for row_id in ("#server-ip-row", "#server-port-row"):
+                row = self.query_one(row_id)
+                if enabled:
+                    row.remove_class("hidden")
+                else:
+                    row.add_class("hidden")
+        except Exception:
             pass
 
     @on(Button.Pressed, "#save-btn")
@@ -645,43 +759,60 @@ class SettingsScreen(Screen[None]):
 
             self.config.mesh.gateway_mode = gateway_mode_select.value
 
-            # Read Reticulum settings
-            config_override = self.query_one("#config_path_override", Input).value.strip()
-            self.config.reticulum.config_path_override = (
-                Path(config_override).expanduser() if config_override else None
-            )
+            # Read Transport settings
+            mode_select = self.query_one("#deployment_mode", Select)
+            if isinstance(mode_select.value, DeploymentMode):
+                self.config.core.reticulum.mode = mode_select.value
 
-            self.config.reticulum.auto_initialize = self.query_one(
-                "#auto_initialize", Checkbox
+            transport_enabled = self.query_one("#enable_transport", Checkbox).value
+            self.config.core.reticulum.enable_transport = transport_enabled
+
+            announce_str = self.query_one("#announce_interval", Input).value.strip()
+            try:
+                self.config.core.reticulum.announce_interval = int(announce_str)
+            except ValueError:
+                self._show_error("Invalid announce interval (must be a number)")
+                return
+
+            # Read Peers from dynamic rows
+            peers: list[PeerConfig] = []
+            for row in self.query(".peer-row"):
+                host_inputs = list(row.query(".peer-host-input"))
+                port_inputs = list(row.query(".peer-port-input"))
+                name_inputs = list(row.query(".peer-name-input"))
+                if not host_inputs:
+                    continue
+                host = host_inputs[0].value.strip()
+                if not host:
+                    continue  # Skip empty rows
+                try:
+                    port = int(port_inputs[0].value.strip()) if port_inputs else 4242
+                except ValueError:
+                    self._show_error(f"Invalid port for peer '{host}'")
+                    return
+                name = name_inputs[0].value.strip() if name_inputs else None
+                peers.append(PeerConfig(host=host, port=port, name=name or None))
+            self.config.core.reticulum.interfaces.peers = peers
+
+            # Read AutoInterface
+            self.config.core.reticulum.interfaces.auto = self.query_one(
+                "#auto_interface", Checkbox
             ).value
 
-            # Read hub selection
-            hub_select = self.query_one("#hub_select", Select)
-            hub_key = str(hub_select.value) if hub_select.value else "none"
+            # Read Server interface
+            from styrened.models.config import ServerInterfaceConfig
 
-            if hub_key == "none":
-                # Hub disabled
-                self.config.reticulum.hub_enabled = False
-                self.config.reticulum.hub_address = None
-            elif hub_key == "custom":
-                # Custom hub - read from input
-                hub_address = self.query_one("#hub_address", Input).value.strip()
-                self.config.reticulum.hub_enabled = bool(hub_address)
-                self.config.reticulum.hub_address = hub_address or ""
-            else:
-                # Known hub - use predefined address
-                hub_info = KNOWN_HUBS.get(hub_key, (None, None))
-                hub_address = (hub_info[1] if hub_info else "") or ""
-                self.config.reticulum.hub_enabled = True
-                self.config.reticulum.hub_address = hub_address
-
-            # Read hub announce interval
-            interval_str = self.query_one("#hub_announce_interval", Input).value.strip()
+            server_enabled = self.query_one("#server_enabled", Checkbox).value
+            server_ip = self.query_one("#server_listen_ip", Input).value.strip() or "0.0.0.0"
+            server_port_str = self.query_one("#server_port", Input).value.strip()
             try:
-                self.config.reticulum.hub_announce_interval = int(interval_str)
+                server_port = int(server_port_str)
             except ValueError:
-                self._show_error("Invalid hub announce interval (must be a number)")
+                self._show_error("Invalid server port (must be a number)")
                 return
+            self.config.core.reticulum.interfaces.server = ServerInterfaceConfig(
+                enabled=server_enabled, listen_ip=server_ip, port=server_port,
+            )
 
             # Validate configuration
             errors = validate_config(self.config)
@@ -693,16 +824,21 @@ class SettingsScreen(Screen[None]):
             # Save to file
             save_config(self.config)
 
-            # If hub settings changed, retry connection
-            if self.config.reticulum.hub_enabled and self.config.reticulum.hub_address:
-                from styrened.services.hub_connection import get_hub_connection
+            # Persist network settings to core-config.yaml and regenerate
+            # ~/.reticulum/config so RNS picks up the changes on restart.
+            try:
+                from styrened.services.config import save_core_config
+                from styrened.services.reticulum import generate_rns_config
 
-                hub_connection = get_hub_connection()
-                hub_connection.set_announce_interval(self.config.reticulum.hub_announce_interval)
+                save_core_config(self.config.core)
 
-                if not hub_connection.retry_connection():
-                    # If connection failed, start waiting timer
-                    hub_connection.start_waiting()
+                rns_content = generate_rns_config(self.config.core)
+                rns_config_path = Path.home() / ".reticulum" / "config"
+                rns_config_path.parent.mkdir(parents=True, exist_ok=True)
+                rns_config_path.write_text(rns_content)
+            except Exception as e:
+                self._show_error(f"Failed to write network config: {e}")
+                return
 
             # Show success and dismiss.  dismiss() returns an AwaitComplete
             # that raises ScreenError when awaited from the screen's own
