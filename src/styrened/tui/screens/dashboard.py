@@ -211,7 +211,7 @@ class DashboardScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("enter", "select_device", "Details"),
         Binding("c", "open_chat", "Chat"),
-        Binding("r", "refresh", "Refresh"),
+        Binding("r", "refresh", "Refresh", priority=True),
         Binding("e", "open_exploration", "Explore", show=True),
     ]
 
@@ -354,6 +354,8 @@ class DashboardScreen(Screen[None]):
             node_info.refresh_data()
         except Exception:
             pass
+
+        self.notify("Refreshed")
 
         try:
             activity = self.query_one(ActivityFeedWidget)
