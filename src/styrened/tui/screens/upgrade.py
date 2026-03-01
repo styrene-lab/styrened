@@ -130,20 +130,26 @@ class UpgradeScreen(ModalScreen[bool]):
 
     @staticmethod
     def _build_upgrade_cmd() -> list[str]:
-        """Determine the right upgrade command (pipx vs pip)."""
+        """Determine the right upgrade command (pipx vs pip).
+
+        For pipx, uses --pip-args with eager upgrade strategy so that
+        transitive dependencies (styrened) are always pulled to latest,
+        not just when the version constraint forces it.
+        """
         exe = sys.executable
         # Check PIPX_BIN_DIR (set by pipx itself inside managed venvs),
         # then fall back to path heuristic using PIPX_HOME or default.
         pipx_bin_dir = os.environ.get("PIPX_BIN_DIR", "")
-        if pipx_bin_dir:
-            return ["pipx", "upgrade", "styrene"]
         pipx_venvs = os.path.join(
             os.environ.get("PIPX_HOME", os.path.expanduser("~/.local/pipx")),
             "venvs",
         )
-        if pipx_venvs in exe:
-            return ["pipx", "upgrade", "styrene"]
-        return [exe, "-m", "pip", "install", "--upgrade", "styrene"]
+        if pipx_bin_dir or pipx_venvs in exe:
+            return [
+                "pipx", "upgrade", "styrene",
+                "--pip-args", "--upgrade-strategy=eager",
+            ]
+        return [exe, "-m", "pip", "install", "--upgrade", "--upgrade-strategy=eager", "styrene"]
 
     def _start_upgrade(self) -> None:
         """Disable buttons, show log, kick off background worker."""
