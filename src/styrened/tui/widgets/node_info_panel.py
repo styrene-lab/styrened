@@ -305,8 +305,8 @@ class NodeInfoPanel(Static):
             config = load_config()
             self.mode = config.reticulum.mode.value
 
-            # Load identity appearance from config (non-IPC fallback)
-            if not self.ipc_managed and hasattr(config, "identity"):
+            # Load identity appearance from config (always — identity is local config, not daemon state)
+            if hasattr(config, "identity"):
                 self.identity_display_name = config.identity.display_name
                 self.identity_icon = config.identity.icon
                 self.identity_short_name = config.identity.short_name
