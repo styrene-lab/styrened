@@ -426,13 +426,27 @@ class StyreneApp(App[None]):
         result = check_for_update(__version__)
         if result and result.update_available:
             self.call_from_thread(
-                self.notify,
-                f"Update available: v{result.latest} (current: v{result.current})\n"
-                f"Run: [bold]pipx upgrade styrene[/bold]",
-                title="🔄 Update Available",
-                severity="information",
-                timeout=15,
+                self._show_upgrade_screen,
+                result.current,
+                result.latest,
             )
+
+    def _show_upgrade_screen(self, current: str, latest: str) -> None:
+        """Push the upgrade modal screen."""
+        from styrened.tui.screens.upgrade import UpgradeScreen
+
+        def _on_upgrade_result(should_restart: bool | None) -> None:
+            if should_restart:
+                # Exit TUI so user re-launches with the new version
+                self.notify(
+                    "Relaunch [bold]styrene[/bold] to use the new version.",
+                    title="Upgrade Applied",
+                    severity="information",
+                    timeout=5,
+                )
+                self.set_timer(2.0, self.exit)
+
+        self.push_screen(UpgradeScreen(current, latest), callback=_on_upgrade_result)
 
     async def _on_daemon_setup_complete(self, result: bool | None) -> None:
         """Handle daemon setup screen result.
