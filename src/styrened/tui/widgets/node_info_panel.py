@@ -313,6 +313,17 @@ class NodeInfoPanel(Static):
         except Exception:
             self.mode = "standalone"
 
+        # Load operator identity hash (works in both modes)
+        if not self.identity_hash:
+            try:
+                from styrened.services.reticulum import get_operator_identity
+                op_hash = get_operator_identity()
+                if op_hash:
+                    self.identity_hash = op_hash
+                    self.security_tier = "X25519"
+            except Exception:
+                pass
+
         # In IPC mode, dashboard pushes mesh count and hub status from daemon
         if self.ipc_managed:
             return
