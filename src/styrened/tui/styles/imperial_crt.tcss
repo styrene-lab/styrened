@@ -497,10 +497,13 @@ Header {
     max-width: 50;
 }
 
-/* Checkboxes — just the toggle, no stretch */
+/* Switch toggles — compact, no stretch */
 .setting-checkbox {
     width: auto;
     min-width: 0;
+    border: none;
+    background: transparent;
+    padding: 0;
 }
 
 .setting-description {
@@ -536,6 +539,30 @@ Header {
 .peer-port-input {
     width: 1fr;
     max-width: 14;
+}
+
+.peer-status-col {
+    width: 3;
+    min-width: 3;
+    max-width: 3;
+    content-align: center middle;
+    padding: 0;
+}
+
+.peer-status-unknown {
+    color: #4a5568;
+}
+
+.peer-status-new {
+    color: #7a9a9a;
+}
+
+.peer-status-up {
+    color: #00f0d3;
+}
+
+.peer-status-down {
+    color: #e06060;
 }
 
 .peer-remove-btn {
