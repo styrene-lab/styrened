@@ -244,7 +244,10 @@ class MeshDeviceDetailScreen(Screen[None]):
             self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
 
     async def _auto_fetch_status(self) -> None:
-        """Silently fetch status on mount (no toast on success)."""
+        """Silently fetch status on mount (no toast on success).
+
+        Falls back to announce-derived info if RPC is unavailable.
+        """
         try:
             status_widget = self.query_one("#status-widget", DeviceStatusWidget)
         except Exception:
@@ -262,8 +265,22 @@ class MeshDeviceDetailScreen(Screen[None]):
             status_widget.status = response
             status_widget.error = None
         except Exception:
-            # Silent failure on auto-fetch — user can manually refresh
-            pass
+            # RPC unavailable — populate from announce data instead
+            if self.device:
+                from styrened.rpc.messages import StatusResponse
+
+                fallback = StatusResponse(
+                    hostname=self.device.name,
+                    styrened_version=self.device.version or "",
+                    services=self.device.capabilities or [],
+                    uptime=-1,  # sentinel: unknown
+                    ip="unknown (no RPC link)",
+                    disk_total=0,
+                    disk_used=0,
+                )
+                status_widget.status = fallback
+                status_widget.error = None
+            # else leave as loading placeholder
         finally:
             status_widget.loading = False
 

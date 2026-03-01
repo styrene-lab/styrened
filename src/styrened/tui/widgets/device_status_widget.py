@@ -74,7 +74,10 @@ class DeviceStatusWidget(Static):
         if os_parts:
             yield Static(f"  [bold]OS:[/]        {' '.join(os_parts)}", classes="status-field")
 
-        yield Static(f"  [bold]Uptime:[/]    {s.format_uptime()}", classes="status-field")
+        if s.uptime == -1:
+            yield Static("  [bold]Uptime:[/]    [dim]unknown (no RPC link)[/]", classes="status-field")
+        else:
+            yield Static(f"  [bold]Uptime:[/]    {s.format_uptime()}", classes="status-field")
 
         if s.styrened_version:
             yield Static(
@@ -103,15 +106,16 @@ class DeviceStatusWidget(Static):
         else:
             yield Static("  [bold]Services:[/]   [dim]none[/]", classes="status-field")
 
-        # -- Storage section --
-        yield Static(
-            "[bold]-- Storage --------------------------------------------------------[/]",
-            classes="status-section-header",
-        )
-        yield Static(
-            f"  [bold]Disk:[/]  {s.format_disk_usage()}",
-            classes="status-field",
-        )
+        # -- Storage section -- (only if data available)
+        if s.disk_total > 0:
+            yield Static(
+                "[bold]-- Storage --------------------------------------------------------[/]",
+                classes="status-section-header",
+            )
+            yield Static(
+                f"  [bold]Disk:[/]  {s.format_disk_usage()}",
+                classes="status-field",
+            )
 
     def watch_status(self, status: StatusResponse | None) -> None:
         """React to status changes by re-composing widget."""
