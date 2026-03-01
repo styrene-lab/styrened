@@ -114,16 +114,29 @@ RichLog, Log {
 /* === Selection Controls === */
 Switch {
     margin-right: 2;
-    background: transparent;
+    border: tall $border;
+    background: $background;
+}
+
+Switch:focus {
+    border: tall $primary;
 }
 
 Switch > .switch--slider {
-    background: $surface;
+    background: $panel-darken-2;
     color: $border;
 }
 
 Switch.-on > .switch--slider {
     color: $primary;
+}
+
+Switch:hover > .switch--slider {
+    color: $panel;
+}
+
+Switch:hover.-on > .switch--slider {
+    color: $success;
 }
 
 Checkbox {
@@ -525,11 +538,10 @@ Header {
 }
 
 /* Switch toggles — compact, no stretch */
+/* Switch toggles in settings — compact sizing, keep track visible */
 .setting-checkbox {
     width: auto;
     min-width: 0;
-    border: none;
-    background: transparent;
     padding: 0;
 }
 
