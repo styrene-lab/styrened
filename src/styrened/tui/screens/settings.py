@@ -6,9 +6,9 @@ from typing import Any, ClassVar
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TabbedContent, TabPane
 
 from styrened.models.config import validate_short_name
 from styrened.services.hub_connection import STYRENE_HUB_ADDRESS
@@ -135,289 +135,298 @@ class SettingsScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         """Compose the settings screen layout."""
-        with VerticalScroll(id="settings-container"):
-            # Operator Identity
-            yield HighlightedPanel(
-                Horizontal(
-                    Label("Display Name:", classes="setting-label"),
-                    Input(
-                        value=self.config.identity.display_name,
-                        placeholder="Anonymous Styrene",
-                        id="identity_display_name",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Icon:", classes="setting-label"),
-                    Input(
-                        value=self.config.identity.icon,
-                        placeholder="🔗",
-                        id="identity_icon",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Short Name:", classes="setting-label"),
-                    Input(
-                        value=self.config.identity.short_name or "",
-                        placeholder="alice (3-20 chars, lowercase)",
-                        id="identity_short_name",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Static(
-                    "[dim]Controls how this node appears in mesh announces. "
-                    "Other LXMF clients (Sideband, NomadNet) will see these values.[/dim]",
-                    classes="setting-description",
-                ),
-                title="OPERATOR IDENTITY",
-            )
+        with Vertical(id="settings-outer"):
+            with TabbedContent(id="settings-tabs"):
+                # ── Tab 1: Identity ──────────────────────────────────────
+                with TabPane("Identity", id="tab-identity"):
+                    with VerticalScroll(classes="settings-tab-scroll"):
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Display Name:", classes="setting-label"),
+                                Input(
+                                    value=self.config.identity.display_name,
+                                    placeholder="Anonymous Styrene",
+                                    id="identity_display_name",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Icon:", classes="setting-label"),
+                                Input(
+                                    value=self.config.identity.icon,
+                                    placeholder="🔗",
+                                    id="identity_icon",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Short Name:", classes="setting-label"),
+                                Input(
+                                    value=self.config.identity.short_name or "",
+                                    placeholder="alice (3-20 chars, lowercase)",
+                                    id="identity_short_name",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "[dim]Controls how this node appears in mesh announces. "
+                                "Other LXMF clients (Sideband, NomadNet) will see these values.[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="OPERATOR IDENTITY",
+                        )
 
-            # TUI Settings
-            yield HighlightedPanel(
-                Horizontal(
-                    Label("Log Level:", classes="setting-label"),
-                    Select(
-                        [(level.value, level) for level in LogLevel],
-                        value=self.config.tui.log_level,
-                        id="log_level",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Show Hardware Panel:", classes="setting-label"),
-                    Checkbox(
-                        "",
-                        self.config.tui.show_hardware_panel,
-                        id="show_hardware_panel",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Confirm Destructive:", classes="setting-label"),
-                    Checkbox(
-                        "",
-                        self.config.tui.confirm_destructive,
-                        id="confirm_destructive",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                title="TUI SETTINGS",
-            )
+                # ── Tab 2: Network ───────────────────────────────────────
+                with TabPane("Network", id="tab-network"):
+                    with VerticalScroll(classes="settings-tab-scroll"):
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Hub:", classes="setting-label"),
+                                Select(
+                                    [(label, key) for key, (label, _) in KNOWN_HUBS.items()],
+                                    value=self._get_hub_key_from_address(
+                                        self.config.reticulum.hub_address
+                                    ),
+                                    id="hub_select",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Custom Hub Address:", classes="setting-label"),
+                                Input(
+                                    value=self.config.reticulum.hub_address or "",
+                                    placeholder="32-char hex LXMF address",
+                                    id="hub_address",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                                id="custom-hub-row",
+                            ),
+                            Horizontal(
+                                Label("Hub Announce Interval:", classes="setting-label"),
+                                Input(
+                                    value=str(self.config.reticulum.hub_announce_interval),
+                                    placeholder="60",
+                                    id="hub_announce_interval",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Auto Initialize:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.reticulum.auto_initialize,
+                                    id="auto_initialize",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Config Path Override:", classes="setting-label"),
+                                Input(
+                                    value=str(
+                                        self.config.reticulum.config_path_override or ""
+                                    ),
+                                    placeholder="/path/to/reticulum/config",
+                                    id="config_path_override",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            title="RETICULUM",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Enable Mesh:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.mesh.enable,
+                                    id="mesh_enable",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Mesh ID:", classes="setting-label"),
+                                Input(
+                                    value=self.config.mesh.mesh_id,
+                                    placeholder="styrene",
+                                    id="mesh_id",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Channel:", classes="setting-label"),
+                                Input(
+                                    value=str(self.config.mesh.channel),
+                                    placeholder="6",
+                                    id="channel",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Gateway Mode:", classes="setting-label"),
+                                Select(
+                                    [(mode.value, mode) for mode in GatewayMode],
+                                    value=self.config.mesh.gateway_mode,
+                                    id="gateway_mode",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            title="BATMAN-ADV MESH",
+                        )
 
-            # Fleet Settings
-            yield HighlightedPanel(
-                Horizontal(
-                    Label("Edge Fleet Path:", classes="setting-label"),
-                    Input(
-                        value=str(self.config.fleet.edge_fleet_path or ""),
-                        placeholder="/path/to/edge-fleet",
-                        id="edge_fleet_path",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Inventory File:", classes="setting-label"),
-                    Input(
-                        value=self.config.fleet.inventory_file,
-                        placeholder="inventory/devices.yaml",
-                        id="inventory_file",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Auto Sync Inventory:", classes="setting-label"),
-                    Checkbox(
-                        "",
-                        self.config.fleet.auto_sync_inventory,
-                        id="auto_sync_inventory",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                title="FLEET SETTINGS",
-            )
+                # ── Tab 3: Fleet ─────────────────────────────────────────
+                with TabPane("Fleet", id="tab-fleet"):
+                    with VerticalScroll(classes="settings-tab-scroll"):
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Edge Fleet Path:", classes="setting-label"),
+                                Input(
+                                    value=str(self.config.fleet.edge_fleet_path or ""),
+                                    placeholder="/path/to/edge-fleet",
+                                    id="edge_fleet_path",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Inventory File:", classes="setting-label"),
+                                Input(
+                                    value=self.config.fleet.inventory_file,
+                                    placeholder="inventory/devices.yaml",
+                                    id="inventory_file",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Auto Sync Inventory:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.fleet.auto_sync_inventory,
+                                    id="auto_sync_inventory",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            title="FLEET",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Hostname Prefix:", classes="setting-label"),
+                                Input(
+                                    value=self.config.provisioning.default_hostname_prefix,
+                                    placeholder="node",
+                                    id="default_hostname_prefix",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("SSH Key Paths:", classes="setting-label"),
+                                Input(
+                                    value=", ".join(
+                                        str(p)
+                                        for p in self.config.provisioning.ssh_key_paths
+                                    ),
+                                    placeholder="~/.ssh/id_ed25519.pub, ~/.ssh/id_rsa.pub",
+                                    id="ssh_key_paths",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            title="PROVISIONING DEFAULTS",
+                        )
 
-            # Provisioning Defaults
-            yield HighlightedPanel(
-                Horizontal(
-                    Label("Hostname Prefix:", classes="setting-label"),
-                    Input(
-                        value=self.config.provisioning.default_hostname_prefix,
-                        placeholder="node",
-                        id="default_hostname_prefix",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("SSH Key Paths:", classes="setting-label"),
-                    Input(
-                        value=", ".join(str(p) for p in self.config.provisioning.ssh_key_paths),
-                        placeholder="~/.ssh/id_ed25519.pub, ~/.ssh/id_rsa.pub",
-                        id="ssh_key_paths",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                title="PROVISIONING DEFAULTS",
-            )
+                # ── Tab 4: System ────────────────────────────────────────
+                with TabPane("System", id="tab-system"):
+                    with VerticalScroll(classes="settings-tab-scroll"):
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Log Level:", classes="setting-label"),
+                                Select(
+                                    [(level.value, level) for level in LogLevel],
+                                    value=self.config.tui.log_level,
+                                    id="log_level",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Show Hardware Panel:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.tui.show_hardware_panel,
+                                    id="show_hardware_panel",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Confirm Destructive:", classes="setting-label"),
+                                Checkbox(
+                                    "",
+                                    self.config.tui.confirm_destructive,
+                                    id="confirm_destructive",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            title="TUI",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Button("Restart Daemon", id="btn-restart-daemon", classes="setting-btn"),
+                                Button("Install as Service", id="btn-install-service", classes="setting-btn"),
+                                Button(
+                                    "Reset to Defaults",
+                                    variant="warning",
+                                    id="btn-reset-config",
+                                    classes="setting-btn",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "[dim]Restart applies after upgrades. "
+                                "Install as Service creates a launchd/systemd unit for boot persistence. "
+                                "Reset regenerates all config files from defaults and restarts the daemon.[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="DAEMON",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Clear Node History:", classes="setting-label"),
+                                Button(
+                                    "Clear All Nodes",
+                                    variant="warning",
+                                    id="clear-nodes-btn",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "[dim]Removes all discovered nodes from persistent storage. "
+                                "New announces will repopulate the list.[/dim]",
+                                classes="setting-description",
+                            ),
+                            title="DATA",
+                        )
 
-            # Mesh Defaults
-            yield HighlightedPanel(
-                Horizontal(
-                    Label("Enable Mesh:", classes="setting-label"),
-                    Checkbox(
-                        "",
-                        self.config.mesh.enable,
-                        id="mesh_enable",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Mesh ID:", classes="setting-label"),
-                    Input(
-                        value=self.config.mesh.mesh_id,
-                        placeholder="styrene",
-                        id="mesh_id",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Channel:", classes="setting-label"),
-                    Input(
-                        value=str(self.config.mesh.channel),
-                        placeholder="6",
-                        id="channel",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Gateway Mode:", classes="setting-label"),
-                    Select(
-                        [(mode.value, mode) for mode in GatewayMode],
-                        value=self.config.mesh.gateway_mode,
-                        id="gateway_mode",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                title="MESH DEFAULTS",
-            )
-
-            # Reticulum Settings
-            yield HighlightedPanel(
-                Horizontal(
-                    Label("Config Path Override:", classes="setting-label"),
-                    Input(
-                        value=str(self.config.reticulum.config_path_override or ""),
-                        placeholder="/path/to/reticulum/config",
-                        id="config_path_override",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Auto Initialize:", classes="setting-label"),
-                    Checkbox(
-                        "",
-                        self.config.reticulum.auto_initialize,
-                        id="auto_initialize",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Hub:", classes="setting-label"),
-                    Select(
-                        [(label, key) for key, (label, _) in KNOWN_HUBS.items()],
-                        value=self._get_hub_key_from_address(self.config.reticulum.hub_address),
-                        id="hub_select",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Horizontal(
-                    Label("Custom Hub Address:", classes="setting-label"),
-                    Input(
-                        value=self.config.reticulum.hub_address or "",
-                        placeholder="32-char hex LXMF address",
-                        id="hub_address",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                    id="custom-hub-row",
-                ),
-                Horizontal(
-                    Label("Hub Announce Interval:", classes="setting-label"),
-                    Input(
-                        value=str(self.config.reticulum.hub_announce_interval),
-                        placeholder="60",
-                        id="hub_announce_interval",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                title="RETICULUM SETTINGS",
-            )
-
-            # Data Management
-            yield HighlightedPanel(
-                Horizontal(
-                    Label(
-                        "Clear Node History:",
-                        classes="setting-label",
-                    ),
-                    Button(
-                        "Clear All Nodes",
-                        variant="warning",
-                        id="clear-nodes-btn",
-                        classes="setting-input",
-                    ),
-                    classes="setting-row",
-                ),
-                Static(
-                    "[dim]Removes all discovered nodes from persistent storage. "
-                    "New announces will repopulate the list.[/dim]",
-                    classes="setting-description",
-                ),
-                title="DATA MANAGEMENT",
-            )
-
-            # Daemon Management
-            yield HighlightedPanel(
-                Horizontal(
-                    Button("Restart Daemon", id="btn-restart-daemon", classes="setting-btn"),
-                    Button("Install as Service", id="btn-install-service", classes="setting-btn"),
-                    Button("Reset to Defaults", variant="warning", id="btn-reset-config", classes="setting-btn"),
-                    classes="setting-row",
-                ),
-                Static(
-                    "[dim]Restart applies after upgrades. "
-                    "Install as Service creates a launchd/systemd unit for boot persistence. "
-                    "Reset regenerates all config files from defaults and restarts the daemon.[/dim]",
-                    classes="setting-description",
-                ),
-                title="DAEMON",
-            )
-
-            # Action buttons
+            # Action bar — outside tabs, always visible
             with Horizontal(id="settings-actions"):
                 yield Button("Save", variant="primary", id="save-btn")
                 yield Button("Cancel", variant="default", id="cancel-btn")
 
-            # Status message
             yield Static("", id="status-message")
 
     def on_mount(self) -> None:

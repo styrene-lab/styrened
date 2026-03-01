@@ -432,9 +432,20 @@ Header {
 }
 
 /* === Settings Screen === */
-#settings-container {
-    height: auto;
-    overflow-y: auto;
+#settings-outer {
+    height: 1fr;
+}
+
+#settings-tabs {
+    height: 1fr;
+}
+
+#settings-tabs TabPane {
+    padding: 0;
+}
+
+.settings-tab-scroll {
+    height: 1fr;
     padding: 1 2;
 }
 
