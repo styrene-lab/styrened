@@ -530,13 +530,13 @@ class SettingsScreen(Screen[None]):
     async def _reset_config(self) -> None:
         """Regenerate config files from defaults and restart the daemon."""
         import shutil
+
         from styrened import paths
         from styrened.services.config import get_default_core_config, save_core_config
         from styrened.services.reticulum import generate_rns_config
 
         try:
             # Back up existing configs
-            config_dir = paths.config_dir()
             config_file = paths.config_file()
             if config_file.exists():
                 shutil.copy2(config_file, config_file.with_suffix(".yaml.bak"))
