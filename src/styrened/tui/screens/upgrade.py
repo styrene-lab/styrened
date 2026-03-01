@@ -131,7 +131,7 @@ class UpgradeScreen(ModalScreen[bool]):
         cmd = self._build_upgrade_cmd()
         log = self.query_one("#upgrade-log", Log)
 
-        self.call_from_thread(log.write_line, f"$ {' '.join(cmd)}\n")
+        self.app.call_from_thread(log.write_line, f"$ {' '.join(cmd)}\n")
 
         try:
             result = subprocess.run(
@@ -143,26 +143,26 @@ class UpgradeScreen(ModalScreen[bool]):
 
             output = result.stdout + result.stderr
             for line in output.splitlines():
-                self.call_from_thread(log.write_line, line)
+                self.app.call_from_thread(log.write_line, line)
 
             if result.returncode == 0:
-                self.call_from_thread(log.write_line, "\n✅ Upgrade complete!")
-                self.call_from_thread(log.write_line, "Restarting daemon...")
+                self.app.call_from_thread(log.write_line, "\n✅ Upgrade complete!")
+                self.app.call_from_thread(log.write_line, "Restarting daemon...")
                 subprocess.run(["pkill", "-f", "styrened daemon"], capture_output=True)
-                self.call_from_thread(self._swap_to_restart)
+                self.app.call_from_thread(self._swap_to_restart)
             else:
-                self.call_from_thread(
+                self.app.call_from_thread(
                     log.write_line,
                     f"\n❌ Upgrade failed (exit code {result.returncode})",
                 )
-                self.call_from_thread(self._swap_to_close)
+                self.app.call_from_thread(self._swap_to_close)
 
         except subprocess.TimeoutExpired:
-            self.call_from_thread(log.write_line, "\n❌ Upgrade timed out")
-            self.call_from_thread(self._swap_to_close)
+            self.app.call_from_thread(log.write_line, "\n❌ Upgrade timed out")
+            self.app.call_from_thread(self._swap_to_close)
         except Exception as e:
-            self.call_from_thread(log.write_line, f"\n❌ Error: {e}")
-            self.call_from_thread(self._swap_to_close)
+            self.app.call_from_thread(log.write_line, f"\n❌ Error: {e}")
+            self.app.call_from_thread(self._swap_to_close)
 
     def _swap_to_restart(self) -> None:
         """Replace action buttons with a restart prompt."""
