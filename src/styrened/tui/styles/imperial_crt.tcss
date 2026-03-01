@@ -487,6 +487,16 @@ Header {
     color: #7a9a9a;
 }
 
+.peer-header-row {
+    height: 1;
+    margin-bottom: 0;
+}
+
+.peer-header {
+    color: #7a9a9a;
+    padding: 0 1;
+}
+
 .peer-row {
     height: auto;
     min-height: 3;
@@ -494,23 +504,21 @@ Header {
 }
 
 .peer-name-input {
-    width: 20;
-    min-width: 16;
+    width: 2fr;
 }
 
 .peer-host-input {
-    width: 1fr;
-    min-width: 20;
+    width: 2fr;
 }
 
 .peer-port-input {
-    width: 12;
-    min-width: 10;
+    width: 1fr;
+    max-width: 14;
 }
 
 .peer-remove-btn {
-    width: 6;
-    min-width: 6;
+    width: 5;
+    min-width: 5;
 }
 
 #settings-actions {
