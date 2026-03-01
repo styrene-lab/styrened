@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TabbedContent, TabPane
+from textual.widgets import Button, Input, Label, Select, Static, Switch, TabbedContent, TabPane
 
 from styrened.models.config import DeploymentMode, PeerConfig, validate_short_name
 from styrened.tui.models.config import (
@@ -186,9 +186,8 @@ class SettingsScreen(Screen[None]):
                             ),
                             Horizontal(
                                 Label("Enable Transport:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.reticulum.resolve_transport_enabled(),
+                                Switch(
+                                    value=self.config.reticulum.resolve_transport_enabled(),
                                     id="enable_transport",
                                     classes="setting-checkbox",
                                 ),
@@ -217,6 +216,7 @@ class SettingsScreen(Screen[None]):
                         )
                         yield HighlightedPanel(
                             Horizontal(
+                                Static("", classes="peer-status-col"),
                                 Static("[b]Name[/b]", classes="peer-name-input peer-header"),
                                 Static("[b]Host[/b]", classes="peer-host-input peer-header"),
                                 Static("[b]Port[/b]", classes="peer-port-input peer-header"),
@@ -244,9 +244,8 @@ class SettingsScreen(Screen[None]):
                         yield HighlightedPanel(
                             Horizontal(
                                 Label("AutoInterface:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.reticulum.interfaces.auto,
+                                Switch(
+                                    value=self.config.reticulum.interfaces.auto,
                                     id="auto_interface",
                                     classes="setting-checkbox",
                                 ),
@@ -263,9 +262,8 @@ class SettingsScreen(Screen[None]):
                         yield HighlightedPanel(
                             Horizontal(
                                 Label("Server Interface:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.reticulum.interfaces.server.enabled,
+                                Switch(
+                                    value=self.config.reticulum.interfaces.server.enabled,
                                     id="server_enabled",
                                     classes="setting-checkbox",
                                 ),
@@ -303,9 +301,8 @@ class SettingsScreen(Screen[None]):
                         yield HighlightedPanel(
                             Horizontal(
                                 Label("Enable Mesh:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.mesh.enable,
+                                Switch(
+                                    value=self.config.mesh.enable,
                                     id="mesh_enable",
                                     classes="setting-checkbox",
                                 ),
@@ -370,9 +367,8 @@ class SettingsScreen(Screen[None]):
                             ),
                             Horizontal(
                                 Label("Auto Sync Inventory:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.fleet.auto_sync_inventory,
+                                Switch(
+                                    value=self.config.fleet.auto_sync_inventory,
                                     id="auto_sync_inventory",
                                     classes="setting-checkbox",
                                 ),
@@ -423,9 +419,8 @@ class SettingsScreen(Screen[None]):
                             ),
                             Horizontal(
                                 Label("Show Hardware Panel:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.tui.show_hardware_panel,
+                                Switch(
+                                    value=self.config.tui.show_hardware_panel,
                                     id="show_hardware_panel",
                                     classes="setting-checkbox",
                                 ),
@@ -433,9 +428,8 @@ class SettingsScreen(Screen[None]):
                             ),
                             Horizontal(
                                 Label("Confirm Destructive:", classes="setting-label"),
-                                Checkbox(
-                                    "",
-                                    self.config.tui.confirm_destructive,
+                                Switch(
+                                    value=self.config.tui.confirm_destructive,
                                     id="confirm_destructive",
                                     classes="setting-checkbox",
                                 ),
@@ -505,6 +499,7 @@ class SettingsScreen(Screen[None]):
         for i, peer in enumerate(self.config.reticulum.interfaces.peers):
             rows.append(
                 Horizontal(
+                    Static("●", classes="peer-status-col peer-status-unknown"),
                     Input(
                         value=peer.name or "",
                         placeholder="Name (optional)",
@@ -619,6 +614,7 @@ class SettingsScreen(Screen[None]):
         """Add a new peer row to the peers panel."""
         idx = self._peer_count()
         new_row = Horizontal(
+            Static("●", classes="peer-status-col peer-status-new"),
             Input(
                 value="",
                 placeholder="Name (optional)",
@@ -665,15 +661,15 @@ class SettingsScreen(Screen[None]):
         if widget and "peer-row" in widget.classes:
             widget.remove()
 
-    @on(Checkbox.Changed, "#server_enabled")
-    def on_server_toggle(self, event: Checkbox.Changed) -> None:
+    @on(Switch.Changed, "#server_enabled")
+    def on_server_toggle(self, event: Switch.Changed) -> None:
         """Show/hide server IP and port fields."""
         self._update_server_visibility()
 
     def _update_server_visibility(self) -> None:
         """Show or hide server config fields based on server enabled checkbox."""
         try:
-            enabled = self.query_one("#server_enabled", Checkbox).value
+            enabled = self.query_one("#server_enabled", Switch).value
             for row_id in ("#server-ip-row", "#server-port-row"):
                 row = self.query_one(row_id)
                 if enabled:
@@ -754,8 +750,8 @@ class SettingsScreen(Screen[None]):
 
             # Read TUI settings
             log_level_select = self.query_one("#log_level", Select)
-            show_hardware = self.query_one("#show_hardware_panel", Checkbox)
-            confirm_destructive = self.query_one("#confirm_destructive", Checkbox)
+            show_hardware = self.query_one("#show_hardware_panel", Switch)
+            confirm_destructive = self.query_one("#confirm_destructive", Switch)
 
             if not isinstance(log_level_select.value, LogLevel):
                 self._show_error("Invalid log level selection")
@@ -773,7 +769,7 @@ class SettingsScreen(Screen[None]):
                 "#inventory_file", Input
             ).value.strip()
             self.config.fleet.auto_sync_inventory = self.query_one(
-                "#auto_sync_inventory", Checkbox
+                "#auto_sync_inventory", Switch
             ).value
 
             # Read Provisioning defaults
@@ -791,7 +787,7 @@ class SettingsScreen(Screen[None]):
                 self.config.provisioning.ssh_key_paths = []
 
             # Read Mesh defaults
-            self.config.mesh.enable = self.query_one("#mesh_enable", Checkbox).value
+            self.config.mesh.enable = self.query_one("#mesh_enable", Switch).value
             self.config.mesh.mesh_id = self.query_one("#mesh_id", Input).value.strip()
 
             channel_str = self.query_one("#channel", Input).value.strip()
@@ -813,7 +809,7 @@ class SettingsScreen(Screen[None]):
             if isinstance(mode_select.value, DeploymentMode):
                 self.config.core.reticulum.mode = mode_select.value
 
-            transport_enabled = self.query_one("#enable_transport", Checkbox).value
+            transport_enabled = self.query_one("#enable_transport", Switch).value
             self.config.core.reticulum.enable_transport = transport_enabled
 
             announce_select = self.query_one("#announce_interval", Select)
@@ -845,13 +841,13 @@ class SettingsScreen(Screen[None]):
 
             # Read AutoInterface
             self.config.core.reticulum.interfaces.auto = self.query_one(
-                "#auto_interface", Checkbox
+                "#auto_interface", Switch
             ).value
 
             # Read Server interface
             from styrened.models.config import ServerInterfaceConfig
 
-            server_enabled = self.query_one("#server_enabled", Checkbox).value
+            server_enabled = self.query_one("#server_enabled", Switch).value
             server_ip = self.query_one("#server_listen_ip", Input).value.strip() or "0.0.0.0"
             server_port_str = self.query_one("#server_port", Input).value.strip()
             try:

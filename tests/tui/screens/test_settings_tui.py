@@ -6,7 +6,7 @@ Tests form rendering, validation, persistence, and keyboard interactions.
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Checkbox, Input, Select
+from textual.widgets import Input, Select, Switch
 
 from styrened.tui.app import StyreneApp
 from styrened.tui.models.config import StyreneConfig
@@ -59,9 +59,9 @@ class TestSettingsComposition:
             selects = list(screen.query(Select))
             assert len(selects) > 0, "Settings should have Select widgets"
 
-            # Check for Checkbox widgets
-            checkboxes = list(screen.query(Checkbox))
-            assert len(checkboxes) > 0, "Settings should have Checkbox widgets"
+            # Check for Switch widgets
+            switches = list(screen.query(Switch))
+            assert len(switches) > 0, "Settings should have Switch widgets"
 
     @pytest.mark.asyncio
     async def test_settings_loads_current_config(self, test_config):
