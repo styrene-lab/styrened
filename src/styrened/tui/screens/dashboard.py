@@ -352,10 +352,8 @@ class DashboardScreen(Screen[None]):
         try:
             node_info = self.query_one(NodeInfoPanel)
             node_info.refresh_data()
-        except Exception as e:
-            self.notify(f"NodeInfo refresh error: {e}", severity="error")
-
-        self.notify("Dashboard refreshed", severity="information")
+        except Exception:
+            pass
 
         try:
             activity = self.query_one(ActivityFeedWidget)

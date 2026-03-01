@@ -78,18 +78,32 @@ class SettingsScreen(Screen[None]):
     async def _save_identity(
         self, display_name: str, icon: str, short_name: str
     ) -> None:
-        """Persist identity fields to daemon config.
+        """Persist identity fields to core config and optionally notify daemon.
 
-        In IPC mode, sends a CMD_SET_IDENTITY to the daemon which handles
-        persistence and re-announce. In local mode, updates core config
-        directly.
-
-        Must be awaited so the IPC roundtrip completes before the screen
-        is dismissed.
+        Always writes to core-config.yaml directly (identity is a local
+        setting). Additionally notifies the daemon via IPC if connected,
+        so it can re-announce with the new identity.
         """
+        # Always persist to core config (source of truth for identity)
+        try:
+            from styrened.services.config import load_core_config, save_core_config
+
+            core_cfg = load_core_config()
+            if display_name is not None:
+                core_cfg.identity.display_name = display_name
+            if icon is not None:
+                core_cfg.identity.icon = icon
+            core_cfg.identity.short_name = (
+                short_name if short_name else None
+            )
+            save_core_config(core_cfg)
+        except Exception as e:
+            self._show_error(f"Failed to save identity: {e}")
+            return
+
+        # If IPC is active, also notify the daemon so it re-announces
         bridge = self._ipc_bridge
         if bridge is not None:
-            # IPC mode: push to daemon (persists core-config + re-announces)
             try:
                 await bridge.set_identity(
                     display_name=display_name,
@@ -98,31 +112,9 @@ class SettingsScreen(Screen[None]):
                 )
             except Exception as e:
                 import logging
-
-                logging.getLogger(__name__).error(
-                    "Failed to save identity via IPC: %s", e
+                logging.getLogger(__name__).debug(
+                    "Failed to notify daemon of identity change via IPC: %s", e
                 )
-                self.notify(
-                    f"Identity save failed (IPC): {e}",
-                    severity="warning",
-                )
-                # Continue saving TUI-local settings
-        else:
-            # Local mode: update core config directly
-            try:
-                from styrened.services.config import load_core_config, save_core_config
-
-                core_cfg = load_core_config()
-                if display_name is not None:
-                    core_cfg.identity.display_name = display_name
-                if icon is not None:
-                    core_cfg.identity.icon = icon
-                core_cfg.identity.short_name = (
-                    short_name if short_name else None
-                )
-                save_core_config(core_cfg)
-            except Exception as e:
-                self._show_error(f"Failed to save identity: {e}")
 
     def compose(self) -> ComposeResult:
         """Compose the settings screen layout."""
