@@ -114,16 +114,17 @@ RichLog, Log {
 /* === Selection Controls === */
 Switch {
     margin-right: 2;
-    border: tall $border;
     background: $background;
+    border: none;
+    height: 1;
 }
 
 Switch:focus {
-    border: tall $primary;
+    background: $surface;
 }
 
 Switch > .switch--slider {
-    background: $panel-darken-2;
+    background: $panel;
     color: $border;
 }
 
