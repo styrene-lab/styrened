@@ -121,13 +121,10 @@ def get_default_config() -> StyreneConfig:
     config.reticulum.hub_address = "6fc8bf22aa293588c9bf8d7488102e95"
     config.reticulum.hub_announce_interval = 60
 
-    # Add TCP client interface to connect to hub
-    hub_peer = PeerConfig(
-        host="rns.styrene.io",
-        port=4242,
-        name="Styrene Community Hub"
-    )
-    config.reticulum.interfaces.peers.append(hub_peer)
+    # Well-known public hubs — Styrene enabled, others available to toggle
+    import copy
+    from styrened.models.config import WELL_KNOWN_HUBS
+    config.reticulum.interfaces.peers = copy.deepcopy(WELL_KNOWN_HUBS)
 
     return config
 
@@ -252,6 +249,7 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
                                 host=str(peer_data["host"]),
                                 port=int(peer_data.get("port", 4242)),
                                 name=peer_data.get("name"),
+                                enabled=bool(peer_data.get("enabled", True)),
                             )
                         )
                 config.reticulum.interfaces.peers = peers

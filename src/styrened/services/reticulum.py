@@ -1371,8 +1371,10 @@ def generate_rns_config(config: CoreConfig, client_only: bool = False) -> str:
         lines.append(f"listen_port = {config.reticulum.interfaces.server.port}")
         lines.append("")
 
-    # TCPClientInterface (peers) - hub/fleet connections prioritized
+    # TCPClientInterface (peers) - only enabled peers written to RNS config
     for i, peer in enumerate(config.reticulum.interfaces.peers):
+        if not peer.enabled:
+            continue
         interface_name = peer.name or f"Peer {i + 1}"
         lines.append(f"[[{interface_name}]]")
         lines.append("type = TCPClientInterface")

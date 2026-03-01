@@ -208,7 +208,7 @@ class SettingsScreen(Screen[None]):
                         )
                         yield HighlightedPanel(
                             Horizontal(
-                                Static("", classes="peer-status-col"),
+                                Static("[b]On[/b]", classes="peer-enabled-col peer-header"),
                                 Static("[b]Name[/b]", classes="peer-name-input peer-header"),
                                 Static("[b]Host[/b]", classes="peer-host-input peer-header"),
                                 Static("[b]Port[/b]", classes="peer-port-input peer-header"),
@@ -491,7 +491,11 @@ class SettingsScreen(Screen[None]):
         for i, peer in enumerate(self.config.reticulum.interfaces.peers):
             rows.append(
                 Horizontal(
-                    Static("●", classes="peer-status-col peer-status-unknown"),
+                    Switch(
+                        value=peer.enabled,
+                        id=f"peer_enabled_{i}",
+                        classes="setting-checkbox peer-enabled-toggle",
+                    ),
                     Input(
                         value=peer.name or "",
                         placeholder="Name (optional)",
@@ -606,7 +610,11 @@ class SettingsScreen(Screen[None]):
         """Add a new peer row to the peers panel."""
         idx = self._peer_count()
         new_row = Horizontal(
-            Static("●", classes="peer-status-col peer-status-new"),
+            Switch(
+                value=True,
+                id=f"peer_enabled_{idx}",
+                classes="setting-checkbox peer-enabled-toggle",
+            ),
             Input(
                 value="",
                 placeholder="Name (optional)",
@@ -828,7 +836,10 @@ class SettingsScreen(Screen[None]):
                     self._show_error(f"Invalid port for peer '{host}'")
                     return
                 name = name_inputs[0].value.strip() if name_inputs else None
-                peers.append(PeerConfig(host=host, port=port, name=name or None))
+                # Read enabled toggle
+                enabled_toggles = list(row.query(".peer-enabled-toggle"))
+                enabled = enabled_toggles[0].value if enabled_toggles else True
+                peers.append(PeerConfig(host=host, port=port, name=name or None, enabled=enabled))
             self.config.core.reticulum.interfaces.peers = peers
 
             # Read AutoInterface

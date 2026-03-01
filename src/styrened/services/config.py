@@ -110,11 +110,11 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
     config.profile = profile
     config.reticulum.mode = DeploymentMode.STANDALONE
 
-    # Default community hub — provides internet-accessible mesh connectivity
-    # for new installations. Can be removed or overridden in config.yaml.
-    config.reticulum.interfaces.peers = [
-        PeerConfig(host="rns.styrene.io", port=4242, name="Styrene Community Hub"),
-    ]
+    # Well-known public hubs — Styrene hub enabled by default, others
+    # available for operator to enable in Settings > Network > Peers.
+    from styrened.models.config import WELL_KNOWN_HUBS
+    import copy
+    config.reticulum.interfaces.peers = copy.deepcopy(WELL_KNOWN_HUBS)
 
     if profile == Profile.OPERATOR:
         config.rpc.enabled = True
@@ -295,6 +295,7 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                                 host=str(p["host"]),
                                 port=int(p.get("port", 4242)),
                                 name=p.get("name"),
+                                enabled=_parse_bool(p.get("enabled", True)),
                             )
                         )
                 config.reticulum.interfaces.peers = peers
@@ -634,7 +635,12 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     }
     if config.reticulum.interfaces.peers:
         interfaces_dict["peers"] = [
-            {"host": p.host, "port": p.port, **({"name": p.name} if p.name else {})}
+            {
+                "host": p.host,
+                "port": p.port,
+                **({"name": p.name} if p.name else {}),
+                "enabled": p.enabled,
+            }
             for p in config.reticulum.interfaces.peers
         ]
     reticulum_dict["interfaces"] = interfaces_dict
