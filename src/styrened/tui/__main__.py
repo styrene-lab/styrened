@@ -197,9 +197,9 @@ Examples:
             "venvs",
         )
         if pipx_bin_dir or pipx_venvs in exe:
-            cmd = ["pipx", "upgrade", "styrene"]
+            cmd = ["pipx", "upgrade", "styrene", "--pip-args", "--upgrade-strategy=eager"]
         else:
-            cmd = [exe, "-m", "pip", "install", "--upgrade", "styrene"]
+            cmd = [exe, "-m", "pip", "install", "--upgrade", "--upgrade-strategy=eager", "styrene"]
 
         result = subprocess.run(cmd)
         if result.returncode == 0:
