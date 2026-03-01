@@ -225,7 +225,8 @@ Rule {
 /* === Data Tables === */
 DataTable {
     background: transparent;
-    height: 8;
+    height: 1fr;
+    min-height: 5;
 }
 
 DataTable > .datatable--header {
@@ -398,55 +399,32 @@ Header {
 /* === Dashboard Layout === */
 #dashboard-container {
     height: 1fr;
+    overflow-y: auto;
 }
 
-#top-panels {
+/* Node info: compact, auto height with upper bound */
+#node-info-panel {
     height: auto;
-    max-height: 8;
+    max-height: 16;
 }
 
-#top-panels > .panel {
-    width: 1fr;
-    margin-right: 1;
-}
-
-#top-panels > .panel:last-child {
-    margin-right: 0;
-}
-
-#top-panels > HighlightedPanel {
-    width: 1fr;
-    margin-right: 1;
-}
-
-#top-panels > HighlightedPanel:last-child {
-    margin-right: 0;
-}
-
-#hardware-info-panel {
-    height: auto;
-    max-height: 6;
-}
-
-#devices-panel {
+/* Mesh devices table: fills remaining vertical space */
+#mesh-devices-panel {
     height: 1fr;
     min-height: 8;
 }
 
-#activity-panel {
-    height: auto;
-    max-height: 5;
-}
-
+/* Activity feed: compact at the bottom */
 #activity-feed-panel {
     height: auto;
-    max-height: 12;
+    max-height: 14;
 }
 
 /* === Local Dashboard Layout === */
 #dashboard-local-container {
     height: 1fr;
     padding: 0 1;
+    overflow-y: auto;
 }
 
 #dashboard-local-container > HighlightedPanel {
@@ -619,7 +597,7 @@ TabPane {
 
 #mesh-info-panel {
     height: auto;
-    max-height: 10;
+    max-height: 16;
 }
 
 #device-tabs {

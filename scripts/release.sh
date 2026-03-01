@@ -22,8 +22,8 @@ echo "$VERSION" > VERSION
 git add -A
 git commit -m "$MESSAGE"
 rm -rf dist/
-python -m build
-twine upload dist/*
+"$STYRENED_DIR/.venv/bin/python" -m build
+"$STYRENED_DIR/.venv/bin/twine" upload dist/*
 git tag "v${VERSION}"
 git push origin main --tags
 echo "✅ styrened ${VERSION} published"
@@ -36,8 +36,8 @@ sed -i '' "s/${OLD_VERSION}/${VERSION}/g" pyproject.toml
 git add -A
 git commit -m "chore: bump to ${VERSION}"
 rm -rf dist/
-python -m build
-twine upload dist/*
+"$STYRENED_DIR/.venv/bin/python" -m build
+"$STYRENED_DIR/.venv/bin/twine" upload dist/*
 git tag "v${VERSION}"
 git push origin main --tags
 echo "✅ styrene ${VERSION} published"
