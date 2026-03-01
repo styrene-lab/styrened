@@ -1,6 +1,7 @@
 """Styrene TUI Application."""
 
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
