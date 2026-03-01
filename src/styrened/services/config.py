@@ -112,7 +112,7 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
 
     # Well-known public hubs — Styrene hub enabled by default, others
     # available for operator to enable in Settings > Network > Peers.
-    from styrened.models.config import WELL_KNOWN_HUBS
+    from styrened.models.config import COMMUNITY_HUB_PROPAGATION_HASH, WELL_KNOWN_HUBS
     import copy
     config.reticulum.interfaces.peers = copy.deepcopy(WELL_KNOWN_HUBS)
 
@@ -127,6 +127,9 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
         config.terminal.enabled = False
         config.notifications.enabled = True
         config.reticulum.announce_interval = 300
+        # Use the Styrene Community Hub as the default LXMF propagation node.
+        # This enables store-and-forward delivery when recipients are offline.
+        config.lxmf.propagation_destination = COMMUNITY_HUB_PROPAGATION_HASH
 
     elif profile == Profile.ENDPOINT:
         config.rpc.enabled = True

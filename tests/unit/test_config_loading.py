@@ -476,7 +476,10 @@ reticulum:
         assert config.lxmf.delivery_limit == 1000
         assert config.lxmf.propagation_node.enabled is False
         assert config.lxmf.propagation_node.name is None
-        assert config.lxmf.propagation_destination is None
+        # OPERATOR default includes the community hub propagation destination.
+        # Configs without an explicit lxmf section inherit this from the profile.
+        from styrened.models.config import COMMUNITY_HUB_PROPAGATION_HASH
+        assert config.lxmf.propagation_destination == COMMUNITY_HUB_PROPAGATION_HASH
         assert config.lxmf.static_peers == []
         assert config.lxmf.from_static_only is False
 
@@ -510,7 +513,7 @@ lxmf:
         assert config.lxmf.propagation_destination == "abcdef0123456789abcdef0123456789"
 
     def test_lxmf_propagation_destination_invalid_length_ignored(self) -> None:
-        """Invalid length propagation destination is ignored."""
+        """Invalid length propagation destination is ignored; profile default applies."""
         yaml_content = """
 lxmf:
   propagation_destination: "tooshort"
@@ -520,7 +523,9 @@ lxmf:
             f.flush()
             config = load_core_config(Path(f.name))
 
-        assert config.lxmf.propagation_destination is None
+        # Invalid value ignored; OPERATOR profile default (community hub) applies.
+        from styrened.models.config import COMMUNITY_HUB_PROPAGATION_HASH
+        assert config.lxmf.propagation_destination == COMMUNITY_HUB_PROPAGATION_HASH
 
     def test_lxmf_sync_limits(self) -> None:
         """Sync limits are parsed correctly."""
