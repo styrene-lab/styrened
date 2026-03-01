@@ -117,17 +117,13 @@ def get_default_config() -> StyreneConfig:
     config.provisioning.ssh_key_paths = [k for k in common_keys if k.exists()]
 
     # Pre-configure Styrene Community Hub connection
-    # Hub details retrieved from brutus K3s cluster:
-    #   Host: 192.168.0.102:4242 (LoadBalancer)
-    #   Identity: 559c71c512c7376a5202e4c5b7043113
-    #   LXMF Propagation Destination: 6fc8bf22aa293588c9bf8d7488102e95
     config.reticulum.hub_enabled = True
     config.reticulum.hub_address = "6fc8bf22aa293588c9bf8d7488102e95"
     config.reticulum.hub_announce_interval = 60
 
     # Add TCP client interface to connect to hub
     hub_peer = PeerConfig(
-        host="192.168.0.102",
+        host="rns.styrene.io",
         port=4242,
         name="Styrene Community Hub"
     )
