@@ -138,11 +138,27 @@ class PeerConfig:
         host: Hostname or IP address of peer hub.
         port: TCP port for connection.
         name: Optional human-readable name for this peer.
+        enabled: Whether this peer interface is active. Disabled peers are
+            preserved in config but not written to ~/.reticulum/config.
     """
 
     host: str
     port: int = 4242
     name: str | None = None
+    enabled: bool = True
+
+
+# Well-known public Reticulum transport hubs maintained by the community.
+# Source: https://github.com/markqvist/Reticulum/wiki/Community-Node-List
+# These are offered as optional peers during first-run setup and in
+# Settings > Network > Peers alongside the Styrene Community Hub.
+WELL_KNOWN_HUBS: list[PeerConfig] = [
+    PeerConfig(host="rns.styrene.io", port=4242, name="Styrene Community Hub", enabled=True),
+    PeerConfig(host="dublin.connect.reticulum.network", port=4965, name="RNS Dublin", enabled=False),
+    PeerConfig(host="reticulum.betweentheborders.com", port=4242, name="BetweenTheBorders", enabled=False),
+    PeerConfig(host="istanbul.reserve.network", port=9034, name="Istanbul Reserve", enabled=False),
+    PeerConfig(host="sydney.reticulum.au", port=4242, name="RNS Sydney", enabled=False),
+]
 
 
 @dataclass

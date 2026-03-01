@@ -591,28 +591,18 @@ Header {
     max-width: 14;
 }
 
-.peer-status-col {
-    width: 3;
-    min-width: 3;
-    max-width: 3;
+.peer-enabled-col {
+    width: 4;
+    min-width: 4;
+    max-width: 4;
     content-align: center middle;
     padding: 0;
 }
 
-.peer-status-unknown {
-    color: $border;
-}
-
-.peer-status-new {
-    color: $panel;
-}
-
-.peer-status-up {
-    color: $success;
-}
-
-.peer-status-down {
-    color: $error;
+.peer-enabled-toggle {
+    width: 4;
+    min-width: 4;
+    max-width: 4;
 }
 
 .peer-remove-btn {
