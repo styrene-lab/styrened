@@ -188,5 +188,6 @@ def create_styrene_theme() -> Theme:
             "scrollbar": STYRENE_DARK["muted"],
             "scrollbar-hover": STYRENE_DARK["secondary"],
             "scrollbar-active": STYRENE_DARK["border"],
+            "text-muted": STYRENE_DARK["muted_foreground"],
         },
     )
