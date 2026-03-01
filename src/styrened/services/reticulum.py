@@ -1079,6 +1079,29 @@ class StyreneAnnounceHandler:
                 f"identity_hash={identity_hash_hex[:16]}... (same identity, different destination)"
             )
 
+        # Cross-reference: if this is an LXMF peer, check if same identity
+        # has a known Styrene operator announce.  Upgrade to STYRENE_NODE so
+        # nodes discovered only via LXMF relay still appear in the mesh table.
+        if device.device_type == DeviceType.LXMF_PEER and identity_hash_hex:
+            for existing in self.discovered_devices.values():
+                if (
+                    existing.identity_hash == identity_hash_hex
+                    and existing.device_type == DeviceType.STYRENE_NODE
+                ):
+                    device.device_type = DeviceType.STYRENE_NODE
+                    # Carry over Styrene metadata the LXMF announce lacks
+                    if existing.version:
+                        device.version = existing.version
+                    if existing.capabilities:
+                        device.capabilities = existing.capabilities
+                    if existing.short_name:
+                        device.short_name = existing.short_name
+                    logger.info(
+                        f"[UPGRADE] LXMF peer {device.name} upgraded to STYRENE_NODE "
+                        f"(matched identity {identity_hash_hex[:16]}...)"
+                    )
+                    break
+
         self.discovered_devices[dest_hash_hex] = device
 
         # Persist to store if available

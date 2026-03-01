@@ -291,10 +291,13 @@ class StyreneDaemon:
         """
         logger.info("[RECONNECT] Daemon handling RNS reconnection")
 
-        # Clear stale cached destination
+        # Clear stale cached destination from both daemon and RNS service
+        from styrened.services.rns_service import get_rns_service
+        rns_service = get_rns_service()
+        rns_service.clear_destinations()
         self._operator_destination = None
 
-        # Re-initialize operator destination (RNS caches will be empty)
+        # Re-initialize operator destination
         self._init_operator_destination()
 
         # Trigger a re-announce to make ourselves visible again
@@ -1514,7 +1517,7 @@ class StyreneDaemon:
                     # register_delivery_identity() only sets this once at init;
                     # without this, identity changes never propagate to LXMF peers.
                     lxmf_service.delivery_destination.display_name = (
-                        self.config.identity.display_name
+                        f"[styrene] {self.config.identity.display_name}"
                     )
                     lxmf_service.router.announce(lxmf_service.delivery_destination.hash)
                     logger.debug("Announced LXMF delivery destination")
