@@ -274,6 +274,14 @@ class RNSService:
                 return destination
 
             except Exception as e:
+                if "already registered" in str(e).lower():
+                    # RNS still has the destination from before reconnect.
+                    # Find it in RNS.Transport.destinations and cache it.
+                    for d in RNS.Transport.destinations:
+                        if d.hash == RNS.Destination.hash(identity, app_name, aspect):
+                            self._destinations[cache_key] = d
+                            logger.info(f"Recovered existing destination: {cache_key}")
+                            return d
                 logger.error(f"Failed to create destination: {e}")
                 return None
 

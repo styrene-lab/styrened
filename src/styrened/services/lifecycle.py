@@ -255,7 +255,11 @@ class CoreLifecycle:
             # the configured name instead of showing "Unknown"
             display_name = None
             if hasattr(self.config, "identity") and self.config.identity:
-                display_name = self.config.identity.display_name
+                # Tag display_name with [styrene] prefix so other nodes can
+                # identify us as a Styrene node from LXMF announces alone,
+                # without needing the operator announce to relay through
+                # transport nodes.
+                display_name = f"[styrene] {self.config.identity.display_name}"
             if lxmf_service.initialize(
                 identity, lxmf_config=lxmf_config, display_name=display_name
             ):

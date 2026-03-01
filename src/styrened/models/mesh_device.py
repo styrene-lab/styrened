@@ -196,6 +196,13 @@ def _try_lxmf_parse(
     try:
         display_name = LXMF.display_name_from_app_data(app_data)
         if display_name:
+            # Styrene nodes tag their LXMF display_name with a [styrene] prefix
+            # so they can be identified even when the operator announce doesn't
+            # relay through transport nodes.
+            if display_name.startswith("[styrene]"):
+                clean_name = display_name[len("[styrene]"):].strip()
+                name = clean_name[:32] if len(clean_name) > 32 else clean_name
+                return (name, DeviceType.STYRENE_NODE, None, None, None, None, None)
             name = display_name[:32] if len(display_name) > 32 else display_name
             dtype = aspect_hint or DeviceType.LXMF_PEER
             return (name, dtype, None, None, None, None, None)
