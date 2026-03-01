@@ -30,6 +30,23 @@ if TYPE_CHECKING:
 class MeshInfoWidget(Static):
     """Widget displaying mesh discovery information about device."""
 
+    CSS = """
+    MeshInfoWidget {
+        height: auto;
+    }
+
+    .info-actions {
+        height: auto;
+        margin-top: 1;
+        padding: 0;
+    }
+
+    .info-actions Button {
+        margin: 0 1 0 0;
+        min-width: 16;
+    }
+    """
+
     def __init__(self, device: MeshDevice, **kwargs) -> None:  # type: ignore[no-untyped-def]
         """Initialize mesh info widget.
 
@@ -84,6 +101,13 @@ class MeshInfoWidget(Static):
         # Version (if available)
         if self.device.version:
             yield Static(f"[bold]Version:[/] {self.device.version}", classes="info-field")
+
+        # Action buttons
+        with Horizontal(classes="info-actions"):
+            yield Button("💬 Message", id="btn-message", variant="primary")
+            yield Button("➕ Contact", id="btn-add-contact", variant="success")
+            yield Button("📋 Copy Hash", id="btn-copy-hash", variant="default")
+            yield Button("🚫 Block", id="btn-block", variant="error")
 
 
 class MeshDeviceDetailScreen(Screen[None]):
@@ -292,6 +316,14 @@ class MeshDeviceDetailScreen(Screen[None]):
         """
         if str(event.button.id) == "refresh-status-btn":
             await self.action_refresh_status()
+        elif str(event.button.id) == "btn-message":
+            self._switch_to_chat()
+        elif str(event.button.id) == "btn-add-contact":
+            self.action_add_contact()
+        elif str(event.button.id) == "btn-copy-hash":
+            self.action_copy_hash()
+        elif str(event.button.id) == "btn-block":
+            self._block_peer()
 
     async def action_refresh_status(self) -> None:
         """Refresh device status via RPC call."""
@@ -380,6 +412,25 @@ class MeshDeviceDetailScreen(Screen[None]):
             self.notify(f"Contact saved: {default_name}", severity="information")
         except Exception as e:
             self.notify(f"Failed to save contact: {e}", severity="error")
+
+    def _switch_to_chat(self) -> None:
+        """Switch to the Chat tab."""
+        try:
+            tabs = self.query_one("#device-tabs", TabbedContent)
+            tabs.active = "chat"
+        except Exception:
+            pass
+
+    def _block_peer(self) -> None:
+        """Block this peer (placeholder — not yet implemented)."""
+        if not self.device:
+            return
+        self.notify(
+            f"Blocking not yet implemented for {self.device.name}",
+            title="Coming Soon",
+            severity="warning",
+            timeout=3,
+        )
 
     def action_copy_hash(self) -> None:
         """Copy the device identity hash to the clipboard."""
