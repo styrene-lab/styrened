@@ -32,8 +32,18 @@ logger = logging.getLogger(__name__)
 class _LinkClicked(Message):
     """Posted when a micron link is clicked in the page body."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, link_fields: str = "") -> None:
         self.url = url
+        self.link_fields = link_fields
+        super().__init__()
+
+
+class _FieldClicked(Message):
+    """Posted when a form field is clicked for editing."""
+
+    def __init__(self, field_name: str, current_value: str) -> None:
+        self.field_name = field_name
+        self.current_value = current_value
         super().__init__()
 
 
@@ -48,6 +58,14 @@ class _PageBody(Static):
     def action_navigate_link(self, url: str) -> None:
         """Handle @click action from micron link markup."""
         self.post_message(_LinkClicked(url))
+
+    def action_submit_form(self, url: str, fields: str) -> None:
+        """Handle @click action from a form submit link."""
+        self.post_message(_LinkClicked(url, link_fields=fields))
+
+    def action_edit_field(self, field_name: str, current_value: str) -> None:
+        """Handle @click action on a form field."""
+        self.post_message(_FieldClicked(field_name, current_value))
 
 
 class PageBrowserWidget(Widget):
@@ -93,6 +111,7 @@ class PageBrowserWidget(Widget):
         self._initial_path = initial_path
         self._history: list[str] = []
         self._page_content: str = ""
+        self._form_fields: dict[str, str] = {}  # field_name -> current_value
 
     @property
     def _ipc_bridge(self) -> Any | None:
@@ -161,7 +180,9 @@ class PageBrowserWidget(Widget):
                 # Fall back to micron rendering
                 if rendered is None:
                     elements = parse_micron(content)
-                    rendered = render_to_rich(elements)
+                    # Reset form fields on new page load
+                    self._form_fields = {}
+                    rendered = render_to_rich(elements, form_state=self._form_fields)
 
                 self._page_content = content
                 self.current_path = path
@@ -252,6 +273,70 @@ class PageBrowserWidget(Widget):
         """Focus URL bar for manual navigation (placeholder)."""
         self.notify("Manual URL entry coming soon", severity="information")
 
+    def on__field_clicked(self, message: _FieldClicked) -> None:
+        """Handle form field click — open input dialog."""
+        from textual.screen import ModalScreen
+        from textual.widgets import Input
+
+        field_name = message.field_name
+        current_value = message.current_value
+
+        class _FieldInputScreen(ModalScreen[str | None]):
+            """Modal for editing a form field value."""
+
+            DEFAULT_CSS = """
+            _FieldInputScreen {
+                align: center middle;
+            }
+            #field-input-container {
+                width: 60;
+                height: auto;
+                max-height: 10;
+                border: thick $accent;
+                background: $surface;
+                padding: 1 2;
+            }
+            #field-label {
+                margin-bottom: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="field-input-container"):
+                    yield Static(f"  {field_name}:", id="field-label")
+                    yield Input(
+                        value=current_value,
+                        placeholder=f"Enter {field_name}...",
+                        id="field-input",
+                        password=(field_name.lower() == "password"),
+                    )
+
+            def on_input_submitted(self, event: Input.Submitted) -> None:
+                self.dismiss(event.value)
+
+            def key_escape(self) -> None:
+                self.dismiss(None)
+
+        async def _handle_result(result: str | None) -> None:
+            if result is not None:
+                self._form_fields[field_name] = result
+                # Re-render page with updated form state
+                self._rerender_page()
+
+        self.app.push_screen(_FieldInputScreen(), _handle_result)
+
+    def _rerender_page(self) -> None:
+        """Re-render the current page content with updated form state."""
+        if not self._page_content:
+            return
+        elements = parse_micron(self._page_content)
+        rendered = render_to_rich(elements, form_state=self._form_fields)
+        try:
+            body = self.query_one("#page-body", _PageBody)
+            body.update(rendered)
+        except Exception:
+            pass
+
     def on__link_clicked(self, message: _LinkClicked) -> None:
         """Handle link click from page body.
 
@@ -261,21 +346,93 @@ class PageBrowserWidget(Widget):
         - ``:/page/path``             — same-node absolute (colon = self)
         - ``:path.mu``                — same-node relative (colon = self)
         - ``dest_hash:/page/path``    — cross-node reference
+
+        If the link has form fields, collect values and submit as form_data.
         """
         url = message.url.strip()
         if not url:
             return
+
+        # If link has form fields, collect and submit as form data
+        form_data: dict[str, str] | None = None
+        if message.link_fields:
+            form_data = {}
+            for field_name in message.link_fields.split("|"):
+                field_name = field_name.strip()
+                if field_name:
+                    form_data[field_name] = self._form_fields.get(field_name, "")
+
         if url.startswith(":"):
-            # Same-node link (NomadNet convention: leading colon = self)
             path = url[1:]
             if path:
-                self.navigate(path)
+                self._navigate_with_form(path, form_data)
             return
         if ":" in url and not url.startswith("/"):
-            # Cross-node reference (dest_hash:/page/path) — not yet supported
             self.notify("Cross-node links not yet supported", severity="warning")
             return
-        self.navigate(url)
+        self._navigate_with_form(url, form_data)
+
+    def _navigate_with_form(self, path: str, form_data: dict[str, str] | None = None) -> None:
+        """Navigate to a path, optionally submitting form data."""
+        if form_data:
+            if self.current_path:
+                self._history.append(self.current_path)
+            self.run_worker(self._load_page_with_form(path, form_data), exclusive=True)
+        else:
+            self.navigate(path)
+
+    async def _load_page_with_form(self, path: str, form_data: dict[str, str]) -> None:
+        """Fetch a page with form data submission."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            self._set_error("Page browsing requires daemon mode")
+            return
+
+        self.loading = True
+        self._update_url_bar(path)
+        self._set_status("Submitting...")
+
+        try:
+            result = await bridge.fetch_page(
+                destination_hash=self.destination_hash,
+                path=path,
+                form_data=form_data,
+                timeout=30.0,
+            )
+
+            status = result.get("status", "error")
+            if status == "ok":
+                content = result.get("content", "")
+                transfer_time = result.get("transfer_time", 0.0)
+                content_length = result.get("content_length", 0)
+
+                elements = parse_micron(content)
+                self._form_fields = {}  # Reset form for new page
+                rendered = render_to_rich(elements, form_state=self._form_fields)
+
+                self._page_content = content
+                self.current_path = path
+
+                try:
+                    body = self.query_one("#page-body", _PageBody)
+                    body.update(rendered)
+                    body.remove_class("placeholder-text")
+                except Exception:
+                    pass
+
+                if content_length > 1024:
+                    size_str = f"{content_length / 1024:.1f}KB"
+                else:
+                    size_str = f"{content_length}B"
+                self._set_status(f"{size_str} in {transfer_time:.1f}s")
+            else:
+                error_detail = result.get("error_message", "")
+                self._set_error(error_detail or f"Form submission failed: {status}")
+        except Exception as e:
+            logger.error(f"Form submission failed: {e}")
+            self._set_error(f"Form submission failed: {e}")
+        finally:
+            self.loading = False
 
     def set_destination(self, destination_hash: str) -> None:
         """Change target node and reload index page.
