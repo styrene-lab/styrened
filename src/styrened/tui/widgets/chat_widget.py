@@ -111,6 +111,8 @@ class ChatWidget(Widget, can_focus=True):
     ChatWidget #chat-message-container {
         height: 1fr;
         overflow-y: scroll;
+        scrollbar-background: transparent;
+        scrollbar-color: $border;
     }
 
     ChatWidget #chat-input-container {

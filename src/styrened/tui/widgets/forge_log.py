@@ -37,6 +37,8 @@ class ForgeLog(Widget):
         height: 1fr;
         min-height: 6;
         padding: 0 1;
+        scrollbar-background: transparent;
+        scrollbar-color: $border;
     }
 
     #forge-log-output {

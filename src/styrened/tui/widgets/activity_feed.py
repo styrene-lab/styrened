@@ -138,6 +138,9 @@ class ActivityFeedWidget(Widget):
 
     ActivityFeedWidget RichLog {
         height: 1fr;
+        background: transparent;
+        scrollbar-background: transparent;
+        scrollbar-color: $border;
         scrollbar-size: 1 1;
     }
     """

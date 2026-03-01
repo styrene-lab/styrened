@@ -4,6 +4,15 @@
 /* === Base Screen === */
 Screen {
     background: $background;
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
+    scrollbar-color: $border;
+    scrollbar-color-hover: $panel;
+    scrollbar-color-active: $primary;
+    scrollbar-corner-color: $surface;
+    scrollbar-size-vertical: 1;
+    scrollbar-size-horizontal: 1;
 }
 
 /* === Panel Styling === */
@@ -44,6 +53,24 @@ Screen {
 }
 
 /* === Scrollable Content === */
+/* Global scrollbar inheritance for all scrollable containers */
+VerticalScroll, ScrollableContainer, RichLog, Log, TextArea {
+    scrollbar-background: transparent;
+    scrollbar-background-hover: transparent;
+    scrollbar-background-active: transparent;
+    scrollbar-color: $border;
+    scrollbar-color-hover: $panel;
+    scrollbar-color-active: $primary;
+    scrollbar-corner-color: transparent;
+    scrollbar-size-vertical: 1;
+    scrollbar-size-horizontal: 1;
+}
+
+/* RichLog/Log widgets — ensure background inherits from parent */
+RichLog, Log {
+    background: transparent;
+}
+
 #main-scroll {
     padding: 1 2;
 }
@@ -509,7 +536,7 @@ Header {
 .setting-description {
     width: 100%;
     padding: 1 2;
-    color: #7a9a9a;
+    color: $text-muted;
 }
 
 .peer-header-row {
@@ -518,7 +545,7 @@ Header {
 }
 
 .peer-header {
-    color: #7a9a9a;
+    color: $text-muted;
     padding: 0 1;
 }
 
@@ -550,19 +577,19 @@ Header {
 }
 
 .peer-status-unknown {
-    color: #4a5568;
+    color: $border;
 }
 
 .peer-status-new {
-    color: #7a9a9a;
+    color: $panel;
 }
 
 .peer-status-up {
-    color: #00f0d3;
+    color: $success;
 }
 
 .peer-status-down {
-    color: #e06060;
+    color: $error;
 }
 
 .peer-remove-btn {
