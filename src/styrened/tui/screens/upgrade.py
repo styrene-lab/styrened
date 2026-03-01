@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Log, Static
 
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 # Use a specific match pattern for pkill to avoid killing unrelated processes.
 # The anchored regex matches the actual daemon invocation, not grep/editor buffers.
@@ -49,16 +49,19 @@ class UpgradeScreen(ModalScreen[bool]):
 
     #upgrade-container {
         width: 72;
-        height: 24;
+        height: 28;
         max-height: 80%;
-    }
-
-    #upgrade-container > .hp-content {
-        height: 1fr;
-    }
-
-    #upgrade-content {
+        background: $surface;
+        border: solid $panel;
         padding: 1 2;
+    }
+
+    #upgrade-title {
+        width: 100%;
+        text-align: center;
+        text-style: bold;
+        color: $primary;
+        margin-bottom: 1;
     }
 
     #upgrade-info {
@@ -66,7 +69,7 @@ class UpgradeScreen(ModalScreen[bool]):
     }
 
     #upgrade-log {
-        height: 12;
+        height: 1fr;
         margin: 1 0;
         display: none;
         background: transparent;
@@ -100,25 +103,25 @@ class UpgradeScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         cascade = get_color_cascade()
 
-        with HighlightedPanel(title="UPGRADE AVAILABLE", id="upgrade-container"):
-            with Vertical(id="upgrade-content"):
-                yield Static(
-                    f"[{cascade.medium}]Current:[/] v{self._current}  →  "
-                    f"[{cascade.bright} bold]v{self._latest}[/]",
-                    id="upgrade-info",
+        with Vertical(id="upgrade-container"):
+            yield Static("UPGRADE AVAILABLE", id="upgrade-title")
+            yield Static(
+                f"[{cascade.medium}]Current:[/] v{self._current}  →  "
+                f"[{cascade.bright} bold]v{self._latest}[/]",
+                id="upgrade-info",
+            )
+            yield Log(id="upgrade-log")
+            with Horizontal(id="upgrade-actions"):
+                yield Button(
+                    "Upgrade Now",
+                    id="btn-upgrade",
+                    variant="success",
                 )
-                yield Log(id="upgrade-log")
-                with Horizontal(id="upgrade-actions"):
-                    yield Button(
-                        "Upgrade Now",
-                        id="btn-upgrade",
-                        variant="success",
-                    )
-                    yield Button(
-                        "Later",
-                        id="btn-cancel",
-                        variant="default",
-                    )
+                yield Button(
+                    "Later",
+                    id="btn-cancel",
+                    variant="default",
+                )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-upgrade":
