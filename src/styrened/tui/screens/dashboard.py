@@ -445,6 +445,12 @@ class DashboardScreen(Screen[None]):
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status())
 
+        # Check for updates (same as startup)
+        try:
+            self.app._check_for_updates()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
     async def _subscribe_activity(self) -> None:
         """Subscribe to unified activity events and wire device events."""
         bridge = self._ipc_bridge
