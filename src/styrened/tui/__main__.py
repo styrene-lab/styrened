@@ -108,6 +108,13 @@ Examples:
         help="Upgrade styrene to the latest version from PyPI",
     )
 
+    # Restart daemon
+    parser.add_argument(
+        "--restart-daemon",
+        action="store_true",
+        help="Restart the daemon (preserves identity and config)",
+    )
+
     # Remote mode
     parser.add_argument(
         "--remote",
@@ -152,6 +159,22 @@ Examples:
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+
+    # Restart daemon mode
+    if args.restart_daemon:
+        import subprocess
+        import time as _time
+
+        print("Stopping daemon...")
+        subprocess.run(["pkill", "-f", "styrened daemon"], capture_output=True)
+        _time.sleep(2)
+        check = subprocess.run(["pgrep", "-f", "styrened daemon"], capture_output=True)
+        if check.returncode == 0:
+            print("✅ Daemon restarted.")
+        else:
+            print("⚠️  Daemon stopped but did not auto-restart.")
+            print("   Start manually: styrened daemon")
+        sys.exit(0)
 
     # Self-upgrade mode
     if args.upgrade:
