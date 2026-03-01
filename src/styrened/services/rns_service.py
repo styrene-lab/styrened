@@ -106,6 +106,7 @@ class RNSService:
         self._interface_monitor_thread: threading.Thread | None = None
         self._monitor_stop_event = threading.Event()
         self._last_interface_states: dict[str, bool] = {}
+        self._last_interface_ids: dict[str, int] = {}  # Track object identity for reconnect detection
         # Track disconnect time per interface to avoid cross-interface confusion
         self._disconnect_times: dict[str, float] = {}
         self._reconnect_callbacks: list[Callable[[], None]] = []
@@ -495,6 +496,21 @@ class RNSService:
                         # Clear caches and invoke callbacks
                         self._handle_reconnection(iface_type, name)
                         del self._disconnect_times[name]
+
+                # Track TCP interface reconnection via object identity change.
+                # RNS TCPClientInterface recreates the socket on reconnect,
+                # so we also track the object id to detect silent reconnects
+                # that don't toggle the online flag (e.g., network switch).
+                if "TCPClientInterface" in iface_type:
+                    obj_id = id(iface)
+                    prev_id = self._last_interface_ids.get(name)
+                    if prev_id is not None and prev_id != obj_id:
+                        logger.info(
+                            f"[RECONNECT] TCP interface object changed: {name} "
+                            f"(id {prev_id} -> {obj_id}) — triggering re-announce"
+                        )
+                        self._handle_reconnection(iface_type, name)
+                    self._last_interface_ids[name] = obj_id
 
                 # Update tracked state
                 self._last_interface_states[name] = online
