@@ -615,11 +615,12 @@ class SettingsScreen(Screen[None]):
             classes="peer-row",
             id=f"peer-row-{idx}",
         )
-        # Mount before the Add Peer button
+        # Mount inside the peers panel content area, before the Add Peer button row
         try:
-            add_btn_row = self.query_one("#btn-add-peer").parent
-            if add_btn_row:
-                add_btn_row.mount(new_row, before=0)  # type: ignore[arg-type]
+            add_btn = self.query_one("#btn-add-peer")
+            add_btn_row = add_btn.parent
+            if add_btn_row and add_btn_row.parent:
+                add_btn_row.parent.mount(new_row, before=add_btn_row)
             else:
                 self.query_one("#peers-panel").mount(new_row)
         except Exception:
