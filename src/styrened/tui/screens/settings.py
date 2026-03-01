@@ -35,6 +35,8 @@ class SettingsScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+s", "save", "Save"),
+        Binding("left_square_bracket", "previous_tab", "Previous Tab", show=False),
+        Binding("right_square_bracket", "next_tab", "Next Tab", show=False),
     ]
 
     def __init__(self, config: StyreneConfig) -> None:
@@ -517,6 +519,14 @@ class SettingsScreen(Screen[None]):
     def action_cancel(self) -> None:
         """Cancel and return to previous screen."""
         self.dismiss()
+
+    def action_previous_tab(self) -> None:
+        """Switch to the previous settings tab."""
+        self.query_one("#settings-tabs", TabbedContent).action_previous_tab()
+
+    def action_next_tab(self) -> None:
+        """Switch to the next settings tab."""
+        self.query_one("#settings-tabs", TabbedContent).action_next_tab()
 
     @on(Button.Pressed, "#btn-restart-daemon")
     def on_restart_daemon(self) -> None:
