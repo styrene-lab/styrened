@@ -49,8 +49,12 @@ class UpgradeScreen(ModalScreen[bool]):
 
     #upgrade-container {
         width: 72;
-        height: auto;
+        height: 24;
         max-height: 80%;
+    }
+
+    #upgrade-container > .hp-content {
+        height: 1fr;
     }
 
     #upgrade-content {
