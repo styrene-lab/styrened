@@ -484,7 +484,7 @@ Header {
 .setting-description {
     width: 100%;
     padding: 1 2;
-    color: $secondary;
+    color: #7a9a9a;
 }
 
 .peer-row {
