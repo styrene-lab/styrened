@@ -92,6 +92,7 @@ class PageBrowserService:
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._cleanup_task: asyncio.Task | None = None
         self._started = False
+        self._force_path_rediscovery = False
 
     async def start(self) -> None:
         """Start the page browser service.
@@ -105,6 +106,23 @@ class PageBrowserService:
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         self._started = True
         logger.info("PageBrowserService started")
+
+    def handle_reconnection(self) -> None:
+        """Handle network reconnection by invalidating cached links and paths.
+
+        Called by the daemon's reconnection callback chain.  Tears down
+        all cached RNS.Links (they hold stale socket state) and flags
+        the next fetch to force path re-discovery instead of trusting
+        the stale RNS path table.
+        """
+        logger.info("[RECONNECT] PageBrowserService clearing cached links and forcing path re-discovery")
+        for dest_hash, entry in list(self._links.items()):
+            try:
+                entry.link.teardown()
+            except Exception:
+                pass
+        self._links.clear()
+        self._force_path_rediscovery = True
 
     async def stop(self) -> None:
         """Stop the service and tear down all links."""
@@ -164,9 +182,14 @@ class PageBrowserService:
                 error_message="Invalid destination hash format",
             )
 
-        # Step 1: Ensure path exists
-        if not RNS.Transport.has_path(dest_hash_bytes):
-            logger.debug(f"Requesting path to {destination_hash[:16]}...")
+        # Step 1: Ensure path exists (force re-request if flagged)
+        force_path = self._force_path_rediscovery
+        if force_path or not RNS.Transport.has_path(dest_hash_bytes):
+            if force_path:
+                logger.info(f"Forcing path re-discovery for {destination_hash[:16]}... (post-reconnect)")
+                self._force_path_rediscovery = False
+            else:
+                logger.debug(f"Requesting path to {destination_hash[:16]}...")
             RNS.Transport.request_path(dest_hash_bytes)
 
             # Wait for path
@@ -197,8 +220,21 @@ class PageBrowserService:
                 error_message="Cannot recall node identity — try refreshing",
             )
 
-        # Step 3: Get or create link
+        # Step 3: Get or create link (retry once with forced path re-discovery)
         link = await self._get_or_create_link(destination_hash, identity)
+        if link is None:
+            # First attempt failed — force path re-discovery and retry.
+            # This handles post-network-switch scenarios where the cached
+            # RNS path points through a now-dead interface.
+            logger.info(f"Link failed for {destination_hash[:16]}..., retrying with fresh path")
+            RNS.Transport.request_path(dest_hash_bytes)
+            path_wait_start = time.time()
+            while not RNS.Transport.has_path(dest_hash_bytes):
+                if time.time() - path_wait_start > PATH_DISCOVERY_TIMEOUT:
+                    break
+                await asyncio.sleep(0.2)
+            link = await self._get_or_create_link(destination_hash, identity)
+
         if link is None:
             return PageResponse(
                 content="",
