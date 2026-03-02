@@ -123,7 +123,8 @@ def get_default_config() -> StyreneConfig:
 
     # Well-known public hubs — Styrene enabled, others available to toggle
     import copy
-    from styrened.models.config import WELL_KNOWN_HUBS
+
+    from styrened.models.config import WELL_KNOWN_HUBS  # noqa: I001
     config.reticulum.interfaces.peers = copy.deepcopy(WELL_KNOWN_HUBS)
 
     return config
@@ -255,8 +256,9 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
                 config.reticulum.interfaces.peers = peers
 
             # Merge missing well-known hubs (disabled) for existing installs
-            from styrened.models.config import WELL_KNOWN_HUBS
             import copy
+
+            from styrened.models.config import WELL_KNOWN_HUBS
             existing_hosts = {(p.host, p.port) for p in config.reticulum.interfaces.peers}
             for hub in WELL_KNOWN_HUBS:
                 if (hub.host, hub.port) not in existing_hosts:
@@ -572,9 +574,9 @@ def _overlay_core_config(config: StyreneConfig) -> None:
         elif core_is_default:
             # Neither source has identity — preserve icon/provider from
             # legacy config if they differ from bare defaults.
-            from styrened.models.config import IdentityConfig as _IC
+            from styrened.models.config import IdentityConfig
 
-            defaults = _IC()
+            defaults = IdentityConfig()
             if old_identity.icon != defaults.icon:
                 config.core.identity.icon = old_identity.icon
             if old_identity.provider != defaults.provider:

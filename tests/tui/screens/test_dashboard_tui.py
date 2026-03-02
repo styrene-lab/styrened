@@ -257,8 +257,8 @@ class TestDashboardDeviceSelection:
                 await pilot.press("down")
                 await pilot.pause()
 
-                # Should return an identity or None
-                identity = device_tree.get_selected_identity()
+                # Should return an identity or None (exercise the method)
+                device_tree.get_selected_identity()
                 # May or may not be on a leaf node depending on tree structure
 
 

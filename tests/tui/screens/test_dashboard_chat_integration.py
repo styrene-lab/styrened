@@ -50,7 +50,7 @@ def message_db(tmp_path):
     """Create a test message database."""
     db_path = tmp_path / "messages.db"
     engine = create_engine(f"sqlite:///{db_path}")
-    init_db(engine)
+    init_db(str(db_path))
     return engine
 
 
@@ -62,15 +62,18 @@ def mock_local_identity():
 
 def add_messages_to_db(engine, messages):
     """Helper to add messages to the test database."""
+    import time
+
     from sqlalchemy.orm import Session
 
     with Session(engine) as session:
-        for msg_data in messages:
+        for i, msg_data in enumerate(messages):
             msg = Message(
-                lxmf_hash=f"test_{id(msg_data)}_{msg_data.get('source_hash', '')}",
+                lxmf_hash=f"test_{id(msg_data)}_{msg_data.get('source_hash', '')}_{i}",
                 source_hash=msg_data.get("source_hash", "unknown"),
                 destination_hash=msg_data.get("destination_hash", "unknown"),
                 content=msg_data.get("content", "test message"),
+                timestamp=msg_data.get("timestamp", time.time()),
                 protocol_id="chat",
                 status=msg_data.get("status", "pending"),
             )
@@ -174,7 +177,7 @@ class TestDashboardMessageIndicators:
                 labels = _get_leaf_labels(tree)
 
                 # Find node-01's label — should contain unread badge "✉3"
-                node01_labels = [l for l in labels if "node-01" in l]
+                node01_labels = [lbl for lbl in labels if "node-01" in lbl]
                 assert len(node01_labels) == 1
                 assert "✉3" in node01_labels[0], (
                     f"Expected unread badge ✉3 in label, got: {node01_labels[0]}"
@@ -233,7 +236,7 @@ class TestDashboardMessageIndicators:
                 tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 labels = _get_leaf_labels(tree)
 
-                node01_labels = [l for l in labels if "node-01" in l]
+                node01_labels = [lbl for lbl in labels if "node-01" in lbl]
                 assert len(node01_labels) == 1
                 # Unread badge should have Rich markup (bold)
                 assert "bold" in node01_labels[0] or "✉" in node01_labels[0]
