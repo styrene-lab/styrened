@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -65,7 +66,7 @@ class StyreneApp(App[None]):
     # App-level bindings work when not overridden by screen/widget
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority bindings (always work regardless of focus)
-        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+        Binding("ctrl+c", "interrupt", "Quit", show=False, priority=True),
         # Global navigation
         Binding("?", "toggle_help", "Help"),
         Binding("grave_accent", "push_screen_settings", "Settings", show=True),
@@ -82,6 +83,27 @@ class StyreneApp(App[None]):
         "dashboard": DashboardScreen,
         "provision": ProvisionScreen,
     }
+
+    # Double ctrl+c to quit (single ctrl+c pops back to dashboard)
+    _last_interrupt: float = 0.0
+    _INTERRUPT_WINDOW: float = 1.0  # seconds
+
+    def action_interrupt(self) -> None:
+        """Handle ctrl+c: pop to dashboard on first press, quit on double press."""
+        now = time.monotonic()
+        if now - self._last_interrupt < self._INTERRUPT_WINDOW:
+            # Double ctrl+c — exit
+            self.exit()
+            return
+        self._last_interrupt = now
+
+        # If we're on a non-default screen, pop back toward dashboard
+        if len(self.screen_stack) > 1:
+            self.pop_screen()
+            return
+
+        # Already on dashboard — notify about double-press to quit
+        self.notify("Press Ctrl+C again to quit", severity="warning", timeout=2)
 
     def action_push_screen_settings(self) -> None:
         """Push settings screen with current config."""
