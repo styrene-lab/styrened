@@ -120,21 +120,27 @@ class ChatWidget(Widget, can_focus=True):
         height: 3;
         dock: bottom;
         border-top: solid $border;
-        padding: 0 1;
     }
 
-    ChatWidget #chat-input-bar Input {
+    ChatWidget #chat-input-bar #chat-input {
         width: 1fr;
-        border: none;
+        border: none !important;
+        background: transparent;
+        padding: 0 1;
+        height: 1;
+    }
+
+    ChatWidget #chat-input-bar #chat-input:focus {
+        border: none !important;
         background: transparent;
     }
 
     ChatWidget #chat-input-bar #send-hint {
         width: auto;
-        min-width: 8;
+        min-width: 4;
         color: $panel;
-        content-align-vertical: middle;
         padding: 0 1;
+        height: 1;
     }
 
     ChatWidget #chat-status {

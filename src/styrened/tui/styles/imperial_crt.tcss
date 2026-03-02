@@ -777,6 +777,18 @@ ChatWidget #chat-input-bar {
     border-top: solid $border;
 }
 
+ChatWidget #chat-input-bar #chat-input {
+    border: none !important;
+    background: transparent;
+    height: 1;
+    padding: 0 1;
+}
+
+ChatWidget #chat-input-bar #chat-input:focus {
+    border: none !important;
+    background: transparent;
+}
+
 ChatWidget .chat-no-bridge {
     color: $warning;
     text-style: bold italic;
