@@ -60,6 +60,7 @@ tui = [
     "psutil>=5.9",
     "textual-image>=0.8.0",
     "Pillow>=10.0",
+    "rumps>=0.4.0; sys_platform == 'darwin'",
 ]
 dev = [
     "pytest>=8.0",
