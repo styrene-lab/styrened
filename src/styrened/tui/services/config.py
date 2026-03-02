@@ -505,23 +505,25 @@ def validate_config(config: StyreneConfig) -> list[ConfigFieldError]:
 # -----------------------------------------------------------------------------
 
 
-def _overlay_core_identity(config: StyreneConfig) -> None:
-    """Overlay identity fields from the daemon's core config.
+def _overlay_core_config(config: StyreneConfig) -> None:
+    """Overlay the full CoreConfig from the daemon's core config file.
 
-    Identity is persisted in core config.yaml (via ``_save_identity`` in
-    the settings screen or the daemon's IPC handler), not in tui.yaml.
-    After loading the TUI config we read core config.yaml and copy the
-    identity section so that the settings screen shows the real values.
+    Many settings (identity, lxmf, rpc, reticulum interfaces, etc.) are
+    persisted in core-config.yaml, not tui.yaml.  After loading the TUI
+    config we read core-config.yaml and replace the default CoreConfig so
+    the settings screen shows the real values.
+
+    The TUI-specific sections (tui, fleet, provisioning, mesh) remain
+    from the TUI config; only ``config.core`` is replaced.
     """
     try:
         from styrened.services.config import load_core_config
 
-        core = load_core_config()
-        config.core.identity = core.identity
+        config.core = load_core_config()
     except Exception as e:
         import logging
 
-        logging.getLogger(__name__).debug("Failed to overlay core identity: %s", e)
+        logging.getLogger(__name__).debug("Failed to overlay core config: %s", e)
 
 
 def load_config() -> StyreneConfig:
@@ -541,7 +543,7 @@ def load_config() -> StyreneConfig:
 
     if not config_path.exists():
         config = get_default_config()
-        _overlay_core_identity(config)
+        _overlay_core_config(config)
         return config
 
     try:
@@ -559,7 +561,7 @@ def load_config() -> StyreneConfig:
         config = _migrate_config(config)
 
     # Overlay identity from core config (persisted separately)
-    _overlay_core_identity(config)
+    _overlay_core_config(config)
 
     # Validate
     errors = validate_config(config)

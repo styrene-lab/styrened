@@ -223,8 +223,9 @@ class NodeInfoPanel(Static):
         lines.append("")
         try:
             from styrened import __version__
+            version = self.daemon_version if self.daemon_version else __version__
             lines.append(f"[{cascade.bright}]VERSION[/]")
-            lines.append(f"  [{cascade.medium}]styrened {__version__}[/]")
+            lines.append(f"  [{cascade.medium}]styrened {version}[/]")
         except ImportError:
             pass
 

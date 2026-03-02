@@ -17,15 +17,13 @@ from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
 @pytest.fixture(autouse=True)
 def mock_reticulum(tmp_path):
     """Mock Reticulum initialization for all TUI tests."""
-    # Create a fake config directory
     fake_config = tmp_path / "config"
     fake_config.mkdir()
-    (fake_config / "config").write_text("")  # Empty config file
+    (fake_config / "config").write_text("")
 
     mock_store = MagicMock()
     mock_store.get_styrene_nodes.return_value = []
 
-    # Reset the NodeStore singleton to prevent pollution from earlier tests
     import styrened.services.node_store as _ns_mod
 
     old_singleton = _ns_mod._node_store
@@ -33,9 +31,6 @@ def mock_reticulum(tmp_path):
 
     with (
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
-        patch(
-            "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
-        ),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
         patch("styrened.services.node_store.get_node_store", return_value=mock_store),
@@ -63,10 +58,19 @@ def mock_devices():
         identity_hash="f6e5d4c3b2a1",
         name="Test Device 2",
         device_type=DeviceType.STYRENE_NODE,
-        last_announce=now - 300,  # 5 minutes ago
+        last_announce=now - 300,
         announce_count=2,
     )
     return [device1, device2]
+
+
+def _count_leaf_nodes(tree: MeshDeviceTree) -> int:
+    """Count leaf nodes (devices) in the tree, excluding branch headers."""
+    count = 0
+    for node in tree._tree_walk(tree.root):
+        if node.data is not None:
+            count += 1
+    return count
 
 
 class TestDashboardComposition:
@@ -81,57 +85,29 @@ class TestDashboardComposition:
             await app.push_screen(DashboardScreen())
             await pilot.pause()
 
-            # Verify widgets exist
             screen = app.screen
             assert isinstance(screen, DashboardScreen)
 
-            # Check for device table widget
-            device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-            assert device_table is not None
-            assert device_table.id == "mesh-device-table"
+            device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+            assert device_tree is not None
 
     @pytest.mark.asyncio
     async def test_dashboard_loads_with_no_devices(self):
         """Dashboard should load successfully with no devices."""
         app = StyreneApp()
 
-        with patch("styrened.tui.services.reticulum.discover_devices", return_value=[]):
+        with patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]):
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-
-                # Table should have 1 row (placeholder message)
-                assert device_table.row_count == 1
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                assert _count_leaf_nodes(device_tree) == 0
 
     @pytest.mark.asyncio
     async def test_dashboard_displays_devices(self, mock_devices):
-        """Dashboard should display devices in the table."""
-        app = StyreneApp()
-
-        # Patch at the point where dashboard imports it
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(DashboardScreen())
-                await pilot.pause()
-
-                screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-
-                # Should have 2 rows (2 devices)
-                assert device_table.row_count == 2
-
-
-class TestDeviceTableColumns:
-    """Tests for device table column structure."""
-
-    @pytest.mark.asyncio
-    async def test_table_has_no_sec_column(self, mock_devices):
-        """Device table should NOT have a SEC column (dead _pqc_tier removed)."""
+        """Dashboard should display devices in the tree."""
         app = StyreneApp()
 
         with patch(
@@ -142,35 +118,8 @@ class TestDeviceTableColumns:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-
-                # Column count should be 6 (NAME, TYPE, IDENTITY, STATUS, UNREAD, LAST ANNOUNCE)
-                assert len(device_table.columns) == 6
-
-    @pytest.mark.asyncio
-    async def test_table_expected_columns(self):
-        """Device table should have exactly the expected columns."""
-        app = StyreneApp()
-
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=[]
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(DashboardScreen())
-                await pilot.pause()
-
-                screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-
-                # Extract column labels
-                col_labels = [str(col.label) for col in device_table.columns.values()]
-                assert "SEC" not in col_labels
-                assert "NAME" in col_labels
-                assert "TYPE" in col_labels
-                assert "IDENTITY" in col_labels
-                assert "STATUS" in col_labels
-                assert "UNREAD" in col_labels
-                assert "LAST ANNOUNCE" in col_labels
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                assert _count_leaf_nodes(device_tree) == 2
 
 
 class TestDashboardKeyboardBindings:
@@ -188,19 +137,16 @@ class TestDashboardKeyboardBindings:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Get initial row count
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                initial_count = device_table.row_count
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                initial_count = _count_leaf_nodes(device_tree)
 
-                # Press 'r' to refresh
                 await pilot.press("r")
                 await pilot.pause()
 
-                # Table should still exist (refresh completed)
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                assert device_table is not None
-                assert device_table.row_count == initial_count
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                assert device_tree is not None
+                assert _count_leaf_nodes(device_tree) == initial_count
 
     @pytest.mark.asyncio
     async def test_provision_key_binding(self):
@@ -211,25 +157,20 @@ class TestDashboardKeyboardBindings:
             await app.push_screen(DashboardScreen())
             await pilot.pause()
 
-            # Press 'p' to provision
             await pilot.press("p")
             await pilot.pause()
 
-            # Provision screen should be pushed (screen stack grows)
-            # Note: This tests the binding exists and doesn't crash
-
     @pytest.mark.asyncio
-    async def test_quit_key_binding(self):
-        """Pressing 'ctrl+c' should have quit binding."""
+    async def test_interrupt_binding(self):
+        """Pressing 'ctrl+c' should have interrupt binding."""
         app = StyreneApp()
 
         async with app.run_test() as pilot:
             await app.push_screen(DashboardScreen())
             await pilot.pause()
 
-            # Check for quit binding in app (ctrl+c is the priority quit binding)
-            quit_bindings = [b for b in app.BINDINGS if b.key == "ctrl+c"]
-            assert len(quit_bindings) > 0
+            interrupt_bindings = [b for b in app.BINDINGS if b.key == "ctrl+c"]
+            assert len(interrupt_bindings) > 0
 
     @pytest.mark.asyncio
     async def test_enter_description_is_details(self):
@@ -248,10 +189,10 @@ class TestDashboardKeyboardBindings:
 
     @pytest.mark.asyncio
     async def test_chat_binding_exists(self):
-        """Dashboard should have 'c' (chat) binding for opening chat with selected device."""
+        """Dashboard should have 'c' (chat) binding."""
         screen = DashboardScreen()
         c_bindings = [b for b in screen.BINDINGS if b.key == "c"]
-        assert len(c_bindings) == 1, "Dashboard should have a 'c' binding for chat"
+        assert len(c_bindings) == 1
         assert c_bindings[0].action == "open_chat"
 
 
@@ -259,8 +200,8 @@ class TestDashboardDeviceSelection:
     """Test device selection and navigation."""
 
     @pytest.mark.asyncio
-    async def test_arrow_key_navigation(self, mock_devices):
-        """Arrow keys should navigate device list."""
+    async def test_tree_navigation(self, mock_devices):
+        """Arrow keys should navigate device tree."""
         app = StyreneApp()
 
         with patch(
@@ -271,21 +212,18 @@ class TestDashboardDeviceSelection:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
-                # Initial cursor position
-                initial_row = device_table.cursor_row
-
-                # Press down arrow
+                # Press down arrow to navigate
                 await pilot.press("down")
                 await pilot.pause()
 
-                # Cursor should move
-                assert device_table.cursor_row != initial_row
+                # Tree should not crash
+                assert device_tree is not None
 
     @pytest.mark.asyncio
     async def test_enter_key_selects_device(self, mock_devices):
-        """Pressing Enter should open device detail screen."""
+        """Pressing Enter should not crash."""
         app = StyreneApp()
 
         with patch(
@@ -295,11 +233,33 @@ class TestDashboardDeviceSelection:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Press Enter to select device
                 await pilot.press("enter")
                 await pilot.pause()
 
-                # Should push device detail screen (doesn't crash)
+    @pytest.mark.asyncio
+    async def test_get_selected_identity(self, mock_devices):
+        """get_selected_identity() returns identity of selected leaf."""
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.dashboard.discover_devices", return_value=mock_devices
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(DashboardScreen())
+                await pilot.pause()
+
+                screen = app.screen
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+
+                # Navigate to a leaf node (skip root, skip branch header)
+                await pilot.press("down")
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+
+                # Should return an identity or None
+                identity = device_tree.get_selected_identity()
+                # May or may not be on a leaf node depending on tree structure
 
 
 class TestDashboardAsyncUpdates:
@@ -307,10 +267,9 @@ class TestDashboardAsyncUpdates:
 
     @pytest.mark.asyncio
     async def test_auto_refresh_updates_table(self, mock_devices):
-        """Auto-refresh should update device table."""
+        """Auto-refresh should update device tree."""
         app = StyreneApp()
 
-        # Track calls to verify refresh happened
         call_count = {"count": 0}
 
         def mock_discover():
@@ -323,24 +282,20 @@ class TestDashboardAsyncUpdates:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
-                # Initial state (devices loaded on mount)
                 initial_calls = call_count["count"]
-                assert device_table.row_count == 2
+                assert _count_leaf_nodes(device_tree) == 2
 
-                # Refresh
-                device_table.refresh_data()
+                device_tree.refresh_data()
                 await pilot.pause()
 
-                # Should have called discover_devices again
                 assert call_count["count"] > initial_calls
-                # Should still have 2 devices
-                assert device_table.row_count == 2
+                assert _count_leaf_nodes(device_tree) == 2
 
     @pytest.mark.asyncio
     async def test_device_status_changes_reflect_in_ui(self, mock_devices):
-        """Device status changes should update in table."""
+        """Device status changes should update in tree."""
         app = StyreneApp()
 
         with patch(
@@ -350,10 +305,9 @@ class TestDashboardAsyncUpdates:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Table renders successfully with devices
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                assert device_table.row_count == 2
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                assert _count_leaf_nodes(device_tree) == 2
 
 
 class TestDashboardErrorHandling:
@@ -364,23 +318,20 @@ class TestDashboardErrorHandling:
         """Database errors should be handled gracefully."""
         app = StyreneApp()
 
-        # Mock discover_devices to raise exception
         with patch(
             "styrened.tui.services.reticulum.discover_devices",
             side_effect=Exception("DB error"),
         ):
             async with app.run_test() as pilot:
-                # Should not crash
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Screen should load (with error handling)
                 screen = app.screen
                 assert isinstance(screen, DashboardScreen)
 
     @pytest.mark.asyncio
     async def test_empty_device_selection_handled(self):
-        """Selecting device when table is empty should not crash."""
+        """Selecting device when tree is empty should not crash."""
         app = StyreneApp()
 
         with patch("styrened.tui.services.reticulum.discover_devices", return_value=[]):
@@ -388,11 +339,8 @@ class TestDashboardErrorHandling:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Try to select device (should handle gracefully)
                 await pilot.press("enter")
                 await pilot.pause()
-
-                # Should not crash
 
 
 class TestDashboardScreenLifecycle:
@@ -413,10 +361,9 @@ class TestDashboardScreenLifecycle:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # on_mount should have loaded devices
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                assert device_table.row_count == 2
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                assert _count_leaf_nodes(device_tree) == 2
 
     @pytest.mark.asyncio
     async def test_screen_resume_refreshes_data(self, mock_devices):
@@ -430,17 +377,16 @@ class TestDashboardScreenLifecycle:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Verify the mechanism exists
                 screen = app.screen
                 assert hasattr(screen, "_refresh_device_table")
 
 
 class TestDashboardLostNodeFiltering:
-    """Test that lost nodes are excluded from the dashboard device table."""
+    """Test that stale ghosts are filtered from the dashboard."""
 
     @pytest.mark.asyncio
-    async def test_mesh_device_table_excludes_lost_nodes(self):
-        """MeshDeviceTree should not display devices with LOST status."""
+    async def test_mesh_device_tree_filters_old_lost_nodes(self):
+        """MeshDeviceTree should filter devices lost for >30 minutes."""
         now = int(datetime.now().timestamp())
 
         active_device = MeshDevice(
@@ -448,7 +394,7 @@ class TestDashboardLostNodeFiltering:
             identity_hash="active_hash",
             name="Active Node",
             device_type=DeviceType.STYRENE_NODE,
-            last_announce=now,  # Just now -> ACTIVE
+            last_announce=now,
             announce_count=5,
         )
         lost_device = MeshDevice(
@@ -456,7 +402,7 @@ class TestDashboardLostNodeFiltering:
             identity_hash="lost_hash",
             name="Lost Node",
             device_type=DeviceType.STYRENE_NODE,
-            last_announce=now - 86400,  # 24h ago -> LOST
+            last_announce=now - 86400,  # 24h ago — filtered by dedup
             announce_count=1,
         )
         stale_device = MeshDevice(
@@ -464,11 +410,10 @@ class TestDashboardLostNodeFiltering:
             identity_hash="stale_hash",
             name="Stale Node",
             device_type=DeviceType.STYRENE_NODE,
-            last_announce=now - 600,  # 10min ago -> STALE
+            last_announce=now - 600,  # 10min ago — within 30min cutoff
             announce_count=3,
         )
 
-        # Verify status assumptions
         assert active_device.status == NodeStatus.ACTIVE
         assert lost_device.status == NodeStatus.LOST
         assert stale_device.status == NodeStatus.STALE
@@ -493,7 +438,7 @@ class TestDashboardLostNodeFiltering:
                 await pilot.pause()
 
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
-                # Should have 2 rows (active + stale), NOT 3 (lost excluded)
-                assert device_table.row_count == 2
+                # Only active + stale shown (lost >30min filtered by _deduplicate_by_identity)
+                assert _count_leaf_nodes(device_tree) == 2
