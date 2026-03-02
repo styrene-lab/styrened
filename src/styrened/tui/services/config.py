@@ -309,6 +309,26 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
         if "config_version" in adv_data:
             config.advanced.config_version = int(adv_data["config_version"])
 
+    # Identity settings (may exist in legacy config.yaml)
+    if "identity" in data and isinstance(data["identity"], dict):
+        ident_data = data["identity"]
+        if "display_name" in ident_data and ident_data["display_name"]:
+            config.core.identity.display_name = str(ident_data["display_name"])
+        if "icon" in ident_data and ident_data["icon"]:
+            config.core.identity.icon = str(ident_data["icon"])
+        if "short_name" in ident_data and ident_data["short_name"]:
+            config.core.identity.short_name = str(ident_data["short_name"])
+        if "provider" in ident_data:
+            config.core.identity.provider = str(ident_data["provider"])
+
+    # LXMF settings (may exist in legacy config.yaml)
+    if "lxmf" in data and isinstance(data["lxmf"], dict):
+        lxmf_data = data["lxmf"]
+        if "propagation_destination" in lxmf_data and lxmf_data["propagation_destination"]:
+            config.core.lxmf.propagation_destination = str(
+                lxmf_data["propagation_destination"]
+            )
+
     return config
 
 
@@ -519,7 +539,46 @@ def _overlay_core_config(config: StyreneConfig) -> None:
     try:
         from styrened.services.config import load_core_config
 
+        # Preserve identity from TUI/legacy config in case core-config.yaml
+        # doesn't have an identity section (pre-migration installs).
+        old_identity = config.core.identity
         config.core = load_core_config()
+
+        # If core-config.yaml yielded default identity but legacy config
+        # had a real one, keep the legacy value and migrate it forward.
+        core_is_default = config.core.identity.display_name in (
+            "",
+            "Anonymous Styrene",
+        )
+        legacy_has_value = (
+            old_identity.display_name
+            and old_identity.display_name != "Anonymous Styrene"
+        )
+        if core_is_default and legacy_has_value:
+            config.core.identity = old_identity
+            # Persist to core-config.yaml so future loads find it directly
+            try:
+                from styrened.services.config import save_core_config
+
+                save_core_config(config.core)
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Migrated identity '%s' from legacy config to core-config.yaml",
+                    old_identity.display_name,
+                )
+            except Exception:
+                pass
+        elif core_is_default:
+            # Neither source has identity — preserve icon/provider from
+            # legacy config if they differ from bare defaults.
+            from styrened.models.config import IdentityConfig as _IC
+
+            defaults = _IC()
+            if old_identity.icon != defaults.icon:
+                config.core.identity.icon = old_identity.icon
+            if old_identity.provider != defaults.provider:
+                config.core.identity.provider = old_identity.provider
     except Exception as e:
         import logging
 
