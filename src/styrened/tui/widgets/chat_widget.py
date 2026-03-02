@@ -381,8 +381,13 @@ class ChatWidget(Widget, can_focus=True):
                         icon = f"[{cascade.bright}]{STATUS_ICONS['read']}[/]"
                     elif new_status == "delivered":
                         icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
+                    elif new_status == "failed":
+                        icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
                     ts_str = datetime.datetime.fromtimestamp(child.timestamp).strftime("%H:%M") if child.timestamp else ""
-                    msg_text = f"[{cascade.medium} bold]ME[/]: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
+                    if new_status == "failed":
+                        msg_text = f"[red italic]ME: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/][/]"
+                    else:
+                        msg_text = f"[{cascade.medium} bold]ME[/]: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
                     child.update_text(msg_text)
                 return
 
@@ -516,8 +521,13 @@ class ChatWidget(Widget, can_focus=True):
                 status_icon = f"[{cascade.bright}]{STATUS_ICONS['read']}[/]"
             elif status == "delivered":
                 status_icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
+            elif status == "failed":
+                status_icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
 
-            parts.append(f"[{cascade.medium} bold]ME[/]: {content} {status_icon} [{cascade.dim}]{ts_str}[/]")
+            if status == "failed":
+                parts.append(f"[red italic]ME: {content} {status_icon} [{cascade.dim}]{ts_str}[/][/]")
+            else:
+                parts.append(f"[{cascade.medium} bold]ME[/]: {content} {status_icon} [{cascade.dim}]{ts_str}[/]")
         else:
             sender = self.display_name or self.peer_hash[:8]
             parts.append(f"[{cascade.dim}]{sender}[/]: {content} [{cascade.dim}]{ts_str}[/]")
@@ -716,10 +726,15 @@ class ChatWidget(Widget, can_focus=True):
 
         cascade = get_color_cascade()
         icon = STATUS_ICONS.get(status, "")
+        if status == "failed":
+            icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
 
         for child in reversed(list(container.query(".--outgoing"))):
             if isinstance(child, MessageBubble):
-                msg_text = f"[{cascade.medium} bold]ME[/]: {content} {icon}"
+                if status == "failed":
+                    msg_text = f"[red italic]ME: {content} {icon}[/]"
+                else:
+                    msg_text = f"[{cascade.medium} bold]ME[/]: {content} {icon}"
                 child.update_text(msg_text)
                 child.update_status(status)
                 return
