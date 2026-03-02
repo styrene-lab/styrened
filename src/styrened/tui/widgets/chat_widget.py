@@ -107,6 +107,7 @@ class ChatWidget(Widget, can_focus=True):
         Binding("y", "copy_message", "Copy", show=True),
         Binding("o", "open_attachment", "Open", show=True),
         Binding("a", "attach_file", "Attach", show=True),
+        Binding("ctrl+o", "attach_clipboard", "📋 Attach", priority=True),
         Binding("ctrl+v", "paste_attachment", "Paste", show=False),
     ]
 
@@ -1362,6 +1363,72 @@ class ChatWidget(Widget, can_focus=True):
         the widget itself has focus (message browsing mode).
         """
         self.run_worker(self._stage_from_clipboard(), group="chat-paste")
+
+    def action_attach_clipboard(self) -> None:
+        """Attach clipboard content directly (Ctrl+A).
+
+        Works regardless of whether Input or ChatWidget has focus.
+        Checks clipboard for image data or file references first.
+        If nothing in clipboard, falls back to path prompt.
+        """
+        # If already staged, cancel
+        if self._pending_attachment is not None:
+            self._pending_attachment = None
+            self._set_status("")
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.placeholder = "Type a message…"
+            except Exception:
+                pass
+            return
+
+        self.run_worker(self._attach_from_clipboard_or_prompt(), group="chat-attach")
+
+    async def _attach_from_clipboard_or_prompt(self) -> None:
+        """Try clipboard first, fall back to path prompt."""
+        loop = asyncio.get_running_loop()
+        attachment = await loop.run_in_executor(None, read_clipboard_attachment)
+
+        if attachment is not None:
+            self._pending_attachment = {
+                "data_b64": attachment.data_b64,
+                "filename": attachment.filename,
+                "mime": attachment.mime,
+            }
+            icon = ATTACHMENT_ICONS.get(
+                "image" if attachment.mime.startswith("image/") else
+                "audio" if attachment.mime.startswith("audio/") else
+                "file",
+                ATTACHMENT_ICONS["file"],
+            )
+            size_str = _human_size(attachment.size)
+            source_label = {
+                "screenshot": "📋 screenshot",
+                "image_copy": "📋 copied image",
+                "file": "📎 file",
+                "path": "📎 file",
+            }.get(attachment.source, "📎")
+            self._set_status(
+                f"[dim]{icon} {source_label}: {attachment.filename} ({size_str}) "
+                f"| Enter to send, Esc to cancel[/]"
+            )
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.focus()
+            except Exception:
+                pass
+            return
+
+        # Nothing in clipboard — fall back to path prompt
+        self._set_status("[dim]No image in clipboard. Enter file path:[/]")
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.placeholder = "Enter file path to attach (Esc to cancel)…"
+            chat_input.value = ""
+            chat_input.focus()
+            self._pending_attachment = {"awaiting_path": True}
+        except Exception:
+            self._set_status("[red]Cannot access input[/]")
 
     async def _stage_from_clipboard(self) -> None:
         """Read clipboard and stage as attachment."""
