@@ -4,7 +4,9 @@ Provides a DataTable of contacts with add, edit, delete, and resolve actions.
 Uses IPCBridge for daemon communication and theme variables for styling.
 """
 
+import datetime
 import logging
+import time
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -144,16 +146,34 @@ class ContactsScreen(Screen[None]):
         """Load contacts on mount."""
         table = self.query_one("#contacts-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("ALIAS", "PEER HASH", "NOTES")
+        table.add_columns("ALIAS", "STATUS", "LAST MESSAGE", "PEER HASH")
 
         if self._ipc_bridge is None:
-            table.add_row("-", "[dim]Contacts require daemon mode[/]", "-")
+            table.add_row("-", "-", "-", "[dim]Contacts require daemon mode[/]")
             return
 
         self.run_worker(self._load_contacts())
 
+    @staticmethod
+    def _relative_time(ts: float) -> str:
+        """Format a unix timestamp as a human-readable relative time."""
+        if not ts:
+            return ""
+        elapsed = int(time.time() - ts)
+        if elapsed < 0:
+            return "just now"
+        if elapsed < 60:
+            return "just now"
+        if elapsed < 3600:
+            return f"{elapsed // 60}m ago"
+        if elapsed < 86400:
+            return f"{elapsed // 3600}h ago"
+        if elapsed < 604800:
+            return f"{elapsed // 86400}d ago"
+        return datetime.datetime.fromtimestamp(ts).strftime("%b %d")
+
     async def _load_contacts(self) -> None:
-        """Load contacts from IPCBridge."""
+        """Load contacts enriched with presence and last message data."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
@@ -164,23 +184,76 @@ class ContactsScreen(Screen[None]):
             logger.warning(f"Failed to load contacts: {e}")
             contacts = []
 
+        # Fetch devices and conversations for cross-referencing
+        device_map: dict[str, dict[str, Any]] = {}
+        conv_map: dict[str, dict[str, Any]] = {}
+
+        try:
+            devices = await bridge.get_devices()
+            for dev in devices:
+                d = dev if isinstance(dev, dict) else dev.to_dict()
+                for key in (d.get("lxmf_destination_hash"), d.get("destination_hash")):
+                    if key:
+                        device_map[key] = d
+        except Exception:
+            pass
+
+        try:
+            convs = await bridge.get_conversations()
+            for conv in convs:
+                ph = conv.get("peer_hash", "")
+                if ph:
+                    conv_map[ph] = conv
+        except Exception:
+            pass
+
         table = self.query_one("#contacts-table", DataTable)
         table.clear()
 
         if not contacts:
-            table.add_row("-", "[dim]No contacts saved[/]", "-")
+            table.add_row("-", "-", "-", "[dim]No contacts saved[/]")
             return
 
         for contact in contacts:
             peer_hash = contact.get("peer_hash", "")
             alias = contact.get("alias", "")
-            notes = contact.get("notes") or ""
             hash_display = peer_hash[:16] + "..." if len(peer_hash) > 16 else peer_hash
+
+            # Presence from device announces
+            dev = device_map.get(peer_hash)
+            if dev:
+                dev_status = dev.get("status", "")
+                last_announce = dev.get("last_announce", 0)
+                if dev_status == "active":
+                    status_str = "[green]● online[/]"
+                elif dev_status == "stale":
+                    status_str = f"[yellow]◐ {self._relative_time(last_announce)}[/]"
+                else:
+                    status_str = f"[dim]○ {self._relative_time(last_announce)}[/]"
+            else:
+                status_str = "[dim]○ unknown[/]"
+
+            # Last message from conversations
+            conv = conv_map.get(peer_hash)
+            if conv:
+                last_msg_time = conv.get("last_message_time", 0)
+                preview = conv.get("last_message_preview", "")
+                if preview and len(preview) > 25:
+                    preview = preview[:25] + "…"
+                if last_msg_time:
+                    last_msg_str = f"[dim]{self._relative_time(last_msg_time)}[/]"
+                    if preview:
+                        last_msg_str = f"{preview} [dim]{self._relative_time(last_msg_time)}[/]"
+                else:
+                    last_msg_str = ""
+            else:
+                last_msg_str = ""
 
             table.add_row(
                 alias,
+                status_str,
+                last_msg_str,
                 hash_display,
-                notes,
                 key=peer_hash,
             )
 
