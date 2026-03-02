@@ -730,13 +730,13 @@ MeshDeviceTree {
 }
 
 MeshDeviceTree > .tree--cursor {
-    background: $surface;
+    background: $background;
     color: $primary;
     text-style: bold;
 }
 
 MeshDeviceTree > .tree--highlight {
-    background: $background;
+    background: transparent;
 }
 
 MeshDeviceTree > .tree--guides {

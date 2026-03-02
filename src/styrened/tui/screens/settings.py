@@ -813,6 +813,13 @@ class SettingsScreen(Screen[None]):
             await self._save_identity(
                 identity_display_name, identity_icon, identity_short_name
             )
+            # Update in-memory config so the later save_core_config(self.config.core)
+            # at the end of this method doesn't overwrite with stale identity values.
+            self.config.core.identity.display_name = identity_display_name
+            self.config.core.identity.icon = identity_icon
+            self.config.core.identity.short_name = (
+                identity_short_name if identity_short_name else None
+            )
 
             # Read TUI settings
             log_level_select = self.query_one("#log_level", Select)
