@@ -1148,26 +1148,34 @@ class TestInlineTimestamps:
 
 
 class TestPasteHandler:
-    """Tests for paste handler not eating non-image paths (W15)."""
+    """Tests for paste handler — clipboard image detection and path-based staging."""
 
-    def test_paste_non_image_path_does_not_prevent_default(self):
-        """Pasting a non-image file path should not prevent the default paste."""
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_non_image_path_does_not_prevent_default(self, _rc, _hc):
+        """Pasting a non-supported file path should not prevent the default paste."""
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
-        event.text = "/tmp/document.txt"
+        event.text = "/tmp/document.xyz"
         widget.on_paste(event)
         event.prevent_default.assert_not_called()
 
-    def test_paste_image_path_prevents_default(self):
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_image_path_prevents_default(self, _rc, _hc, tmp_path):
         """Pasting an image file path should prevent the default paste."""
+        img = tmp_path / "photo.png"
+        img.write_bytes(b"\x89PNG")
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
-        event.text = "/tmp/photo.png"
-        widget.run_worker = MagicMock()  # Prevent actual worker
+        event.text = str(img)
+        widget.run_worker = MagicMock()
         widget.on_paste(event)
         event.prevent_default.assert_called_once()
 
-    def test_paste_non_path_text_does_not_prevent_default(self):
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_non_path_text_does_not_prevent_default(self, _rc, _hc):
         """Pasting ordinary text should not prevent the default paste."""
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
@@ -1175,7 +1183,9 @@ class TestPasteHandler:
         widget.on_paste(event)
         event.prevent_default.assert_not_called()
 
-    def test_paste_empty_text_does_nothing(self):
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_empty_text_does_nothing(self, _rc, _hc):
         """Pasting empty text should do nothing."""
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
@@ -1183,28 +1193,39 @@ class TestPasteHandler:
         widget.on_paste(event)
         event.prevent_default.assert_not_called()
 
-    def test_paste_jpeg_path_prevents_default(self):
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_jpeg_path_prevents_default(self, _rc, _hc, tmp_path):
         """Pasting a .jpeg path should prevent default."""
+        img = tmp_path / "photo.jpeg"
+        img.write_bytes(b"\xff\xd8\xff")
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
-        event.text = "~/images/photo.jpeg"
+        event.text = str(img)
         widget.run_worker = MagicMock()
         widget.on_paste(event)
         event.prevent_default.assert_called_once()
 
-    def test_paste_pdf_path_does_not_prevent_default(self):
-        """Pasting a .pdf path should not prevent default."""
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_pdf_path_prevents_default(self, _rc, _hc, tmp_path):
+        """Pasting a .pdf file path should prevent default (expanded file support)."""
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_bytes(b"%PDF-1.4")
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
-        event.text = "/home/user/doc.pdf"
+        event.text = str(pdf)
+        widget.run_worker = MagicMock()
         widget.on_paste(event)
-        event.prevent_default.assert_not_called()
+        event.prevent_default.assert_called_once()
 
-    def test_paste_windows_path_non_image_does_not_prevent(self):
-        """Pasting a Windows-style non-image path should not prevent default."""
+    @patch("styrened.tui.widgets.chat_widget.has_clipboard_image", return_value=False)
+    @patch("styrened.tui.widgets.chat_widget.read_clipboard_attachment", return_value=None)
+    def test_paste_windows_path_non_supported_does_not_prevent(self, _rc, _hc):
+        """Pasting a Windows-style non-supported path should not prevent default."""
         widget = ChatWidget(peer_hash="test_hash")
         event = MagicMock()
-        event.text = "C:\\Users\\me\\doc.txt"
+        event.text = "C:\\Users\\me\\doc.xyz"
         widget.on_paste(event)
         event.prevent_default.assert_not_called()
 
