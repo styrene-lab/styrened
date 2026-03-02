@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
-from textual.widgets import DataTable
+from styrened.tui.screens.dashboard import MeshDeviceTree
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
@@ -142,8 +142,10 @@ class TestBoundaryConditions:
                 await pilot.pause()
 
                 # Dashboard should render without crashing
-                table = app.screen.query_one("#mesh-device-tree", DataTable)
-                assert table.row_count == 1
+                tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                # Tree should have at least one leaf node (the device)
+                leaves = [n for n in tree._tree_walk(tree.root) if n.data is not None]
+                assert len(leaves) == 1
 
     @pytest.mark.asyncio
     async def test_very_long_message_content_handled_in_conversation(
@@ -400,7 +402,11 @@ class TestMultiDeviceScenarios:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Select first device and enter detail
+                # Navigate past branch header to a leaf node
+                await pilot.press("down")  # branch header
+                await pilot.pause()
+                await pilot.press("down")  # first device leaf
+                await pilot.pause()
                 await pilot.press("enter")
                 await pilot.pause()
 
