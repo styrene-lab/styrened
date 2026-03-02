@@ -37,6 +37,16 @@ from styrened.tui.widgets.message_bubble import (
     _human_size,
 )
 
+try:
+    from styrened.tui.menubar.clipboard import has_clipboard_image, read_clipboard_attachment
+except ImportError:
+    # Not on macOS or clipboard deps missing
+    def has_clipboard_image() -> bool:  # type: ignore[misc]
+        return False
+
+    def read_clipboard_attachment():  # type: ignore[misc]
+        return None
+
 logger = logging.getLogger(__name__)
 
 # Re-export for backward compatibility
@@ -97,6 +107,7 @@ class ChatWidget(Widget, can_focus=True):
         Binding("y", "copy_message", "Copy", show=True),
         Binding("o", "open_attachment", "Open", show=True),
         Binding("a", "attach_file", "Attach", show=True),
+        Binding("ctrl+v", "paste_attachment", "Paste", show=False),
     ]
 
     loading: reactive[bool] = reactive(False)
@@ -1172,24 +1183,54 @@ class ChatWidget(Widget, can_focus=True):
             self._set_status(f"[red]Failed to open: {e}[/]")
 
     def action_attach_file(self) -> None:
-        """Start attaching a file (a key).
+        """Attach a file or clipboard content (a key).
 
         If an attachment is already staged, cancel it.
-        Otherwise, prompt for a file path via the chat input.
+        Otherwise, try clipboard first, then fall back to path prompt.
         """
         if self._pending_attachment is not None:
             self._pending_attachment = None
             self._set_status("")
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.placeholder = "Type a message…"
+            except Exception:
+                pass
             return
 
-        # Switch input to accept a file path
+        # Try clipboard first
+        attachment = read_clipboard_attachment()
+        if attachment is not None:
+            self._pending_attachment = {
+                "data_b64": attachment.data_b64,
+                "filename": attachment.filename,
+                "mime": attachment.mime,
+            }
+            icon = ATTACHMENT_ICONS.get(
+                "image" if attachment.mime.startswith("image/") else
+                "audio" if attachment.mime.startswith("audio/") else
+                "file",
+                ATTACHMENT_ICONS["file"],
+            )
+            size_str = _human_size(attachment.size)
+            self._set_status(
+                f"[dim]{icon} 📋 {attachment.filename} ({size_str}) "
+                f"| Enter to send, Esc to cancel[/]"
+            )
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.focus()
+            except Exception:
+                pass
+            return
+
+        # Fall back to path prompt
         try:
             chat_input = self.query_one("#chat-input", Input)
-            chat_input.placeholder = "Enter file path to attach (Esc to cancel)..."
+            chat_input.placeholder = "Enter file path to attach (Esc to cancel)…"
             chat_input.value = ""
             chat_input.focus()
             self._set_status("[dim]Enter path to file, then press Enter[/]")
-            # Mark that we're in attach mode by setting a sentinel
             self._pending_attachment = {"awaiting_path": True}
         except Exception:
             self._set_status("[red]Cannot access input[/]")
@@ -1271,49 +1312,100 @@ class ChatWidget(Widget, can_focus=True):
             return False
 
     # -------------------------------------------------------------------------
-    # Paste support
+    # Paste & clipboard attachment support
     # -------------------------------------------------------------------------
 
     def on_paste(self, event: Any) -> None:
-        """Handle paste events — stage file if a path to an image is pasted.
+        """Handle paste events — check clipboard for image data or file paths.
 
-        Only prevents the default paste behavior when the path actually
-        resolves to an image file.  Non-image paths (or non-existent
-        paths) let the paste propagate so the text is inserted normally.
+        Priority order:
+        1. macOS clipboard image data (screenshots, copied images)
+        2. File path in clipboard text pointing to a supported file
+        3. Normal text paste (don't intercept)
         """
+        # First, try reading image/file data directly from macOS clipboard.
+        # This catches screenshots (Cmd+Shift+4 → clipboard) and Finder copies.
+        if has_clipboard_image():
+            event.prevent_default()
+            self.run_worker(
+                self._stage_from_clipboard(),
+                group="chat-paste",
+            )
+            return
+
+        # Fallback: check if pasted text is a file path
         text = getattr(event, "text", "")
         if not text:
             return
 
         stripped = text.strip()
-        # Quick heuristic: only try file staging if it looks like a path
         if stripped.startswith(("/", "~", ".")) or (len(stripped) > 2 and stripped[1] == ":"):
-            # Check synchronously whether the suffix is an image extension
-            # before preventing default.  This avoids eating non-image pastes.
             from pathlib import Path as _P
 
             path = _P(stripped).expanduser()
             if path.suffix.lower() in (
                 ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
-            ):
+                ".pdf", ".txt", ".md", ".zip", ".tar", ".gz",
+                ".mp3", ".wav", ".ogg", ".mp4", ".mov",
+            ) and path.is_file():
                 event.prevent_default()
                 self.run_worker(
-                    self._try_paste_as_file(stripped),
+                    self._stage_attachment_from_path(str(path)),
                     group="chat-paste",
                 )
 
-    async def _try_paste_as_file(self, path_str: str) -> None:
-        """Check if pasted text is a path to an image and stage it."""
-        from pathlib import Path as PPath
+    def action_paste_attachment(self) -> None:
+        """Explicitly paste clipboard content as attachment (Ctrl+V).
 
+        When the input is focused, Textual handles Ctrl+V as text paste
+        which triggers on_paste(). This action is a fallback for when
+        the widget itself has focus (message browsing mode).
+        """
+        self.run_worker(self._stage_from_clipboard(), group="chat-paste")
+
+    async def _stage_from_clipboard(self) -> None:
+        """Read clipboard and stage as attachment."""
         loop = asyncio.get_running_loop()
-        path = PPath(path_str).expanduser()
 
-        is_file = await loop.run_in_executor(None, path.is_file)
-        if is_file and path.suffix.lower() in (
-            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
-        ):
-            await self._stage_attachment_from_path(str(path))
+        self._set_status("[dim]Reading clipboard…[/]")
+
+        attachment = await loop.run_in_executor(None, read_clipboard_attachment)
+
+        if attachment is None:
+            self._set_status("[dim]No image or file in clipboard[/]")
+            return
+
+        self._pending_attachment = {
+            "data_b64": attachment.data_b64,
+            "filename": attachment.filename,
+            "mime": attachment.mime,
+        }
+
+        icon = ATTACHMENT_ICONS.get(
+            "image" if attachment.mime.startswith("image/") else
+            "audio" if attachment.mime.startswith("audio/") else
+            "file",
+            ATTACHMENT_ICONS["file"],
+        )
+        size_str = _human_size(attachment.size)
+        source_label = {
+            "screenshot": "📋 screenshot",
+            "image_copy": "📋 copied image",
+            "file": "📎 file",
+            "path": "📎 file",
+        }.get(attachment.source, "📎")
+
+        self._set_status(
+            f"[dim]{icon} {source_label}: {attachment.filename} ({size_str}) "
+            f"| Enter to send, Esc to cancel[/]"
+        )
+
+        # Focus input for message to accompany the attachment
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.focus()
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Worker error handling
