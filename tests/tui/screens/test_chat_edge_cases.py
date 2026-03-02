@@ -13,13 +13,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
-from styrened.tui.screens.dashboard import MeshDeviceTree
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.conversation import ConversationScreen
-from styrened.tui.screens.dashboard import DashboardScreen
+from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
 from styrened.tui.services.app_lifecycle import LifecycleMode
 
 
