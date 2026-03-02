@@ -771,9 +771,10 @@ ChatWidget #chat-message-container {
     overflow-y: scroll;
 }
 
-ChatWidget #chat-input-container {
+ChatWidget #chat-input-bar {
     height: 3;
     dock: bottom;
+    border-top: solid $border;
 }
 
 ChatWidget .chat-no-bridge {
