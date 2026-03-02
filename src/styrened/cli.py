@@ -2728,7 +2728,21 @@ def create_parser() -> argparse.ArgumentParser:
 
     api_auth_parser.set_defaults(func=cmd_api_auth)
 
+    # menubar (macOS menu bar agent)
+    menubar_parser = subparsers.add_parser(
+        "menubar", help="Launch macOS menu bar agent (shows unread count, notifications)"
+    )
+    menubar_parser.set_defaults(func=cmd_menubar)
+
     return parser
+
+
+def cmd_menubar(args: argparse.Namespace) -> int:
+    """Launch the macOS menu bar agent."""
+    from styrened.tui.menubar.agent import run
+
+    run()
+    return 0
 
 
 def main() -> NoReturn:
