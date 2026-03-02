@@ -107,7 +107,8 @@ class ChatWidget(Widget, can_focus=True):
         Binding("y", "copy_message", "Copy", show=True),
         Binding("o", "open_attachment", "Open", show=True),
         Binding("a", "attach_file", "Attach", show=True),
-        Binding("ctrl+o", "attach_clipboard", "📋 Attach", priority=True),
+        Binding("ctrl+p", "attach_clipboard", "📋 Attach", priority=True),
+        Binding("ctrl+o", "attach_clipboard", "📋 Attach", show=False, priority=True),
         Binding("ctrl+v", "paste_attachment", "Paste", show=False),
     ]
 
@@ -1365,12 +1366,13 @@ class ChatWidget(Widget, can_focus=True):
         self.run_worker(self._stage_from_clipboard(), group="chat-paste")
 
     def action_attach_clipboard(self) -> None:
-        """Attach clipboard content directly (Ctrl+A).
+        """Attach clipboard content (Ctrl+P / Ctrl+O).
 
         Works regardless of whether Input or ChatWidget has focus.
         Checks clipboard for image data or file references first.
         If nothing in clipboard, falls back to path prompt.
         """
+        logger.debug("action_attach_clipboard triggered")
         # If already staged, cancel
         if self._pending_attachment is not None:
             self._pending_attachment = None
