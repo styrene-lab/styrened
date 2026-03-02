@@ -113,16 +113,28 @@ class ChatWidget(Widget, can_focus=True):
         overflow-y: scroll;
         scrollbar-background: transparent;
         scrollbar-color: $border;
+        padding: 0 1;
     }
 
-    ChatWidget #chat-input-container {
-        height: auto;
+    ChatWidget #chat-input-bar {
+        height: 3;
         dock: bottom;
-        max-height: 5;
+        border-top: solid $border;
+        padding: 0 1;
     }
 
-    ChatWidget #chat-input-container Input {
+    ChatWidget #chat-input-bar Input {
         width: 1fr;
+        border: none;
+        background: transparent;
+    }
+
+    ChatWidget #chat-input-bar #send-hint {
+        width: auto;
+        min-width: 8;
+        color: $panel;
+        content-align-vertical: middle;
+        padding: 0 1;
     }
 
     ChatWidget #chat-status {
@@ -138,6 +150,7 @@ class ChatWidget(Widget, can_focus=True):
         color: $primary;
         padding: 0 1;
         background: $surface;
+        border-top: solid $border;
     }
 
     ChatWidget #chat-search-bar {
@@ -145,6 +158,7 @@ class ChatWidget(Widget, can_focus=True):
         dock: top;
         max-height: 3;
         padding: 0 1;
+        border-bottom: solid $border;
     }
 
     ChatWidget #search-input {
@@ -160,23 +174,23 @@ class ChatWidget(Widget, can_focus=True):
     ChatWidget .chat-no-bridge {
         color: $warning;
         text-style: bold italic;
-        padding: 1;
+        padding: 1 2;
     }
 
     ChatWidget .chat-no-messages {
         color: $panel;
-        padding: 1;
+        padding: 1 2;
     }
 
     ChatWidget .message-bubble.--outgoing {
         margin-left: 20;
         text-align: right;
-        padding: 0 2;
+        padding: 0 1;
     }
 
     ChatWidget .message-bubble.--incoming {
         margin-right: 20;
-        padding: 0 2;
+        padding: 0 1;
     }
 
     ChatWidget .message-bubble.--selected .bubble-text {
@@ -261,8 +275,9 @@ class ChatWidget(Widget, can_focus=True):
         yield Static("", id="chat-reply-bar", classes="hidden")
 
         yield Static("", id="chat-status")
-        with Horizontal(id="chat-input-container"):
-            yield Input(placeholder="Type message...", id="chat-input")
+        with Horizontal(id="chat-input-bar"):
+            yield Input(placeholder="Type a message…", id="chat-input")
+            yield Static("[dim]⏎[/]", id="send-hint")
 
     def on_mount(self) -> None:
         """Load message history on mount, subscribe to events, and mark as read."""
