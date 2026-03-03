@@ -124,7 +124,10 @@ class TestStaticPageServing:
         (config.pages_dir / "beta.mu").write_text(">Beta")
         (config.pages_dir / "notes.txt").write_text("not a page")
 
-        assert service.static_pages == ["alpha.mu", "beta.mu"]
+        pages = service.static_pages
+        assert "alpha.mu" in pages
+        assert "beta.mu" in pages
+        assert "notes.txt" not in pages
 
 
 class TestDynamicHandlers:

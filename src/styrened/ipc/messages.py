@@ -483,6 +483,16 @@ class CmdPageDisconnectRequest(IPCRequest):
 
 
 @dataclass
+class CmdPageRegenerateRequest(IPCRequest):
+    """Regenerate the default node info page."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_REGENERATE
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -1253,6 +1263,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdPageDisconnectRequest(
             destination_hash=payload.get("destination_hash", ""),
         )
+    elif msg_type == IPCMessageType.CMD_PAGE_REGENERATE:
+        return CmdPageRegenerateRequest()
     elif msg_type == IPCMessageType.CMD_REBOOT_DEVICE:
         return CmdRebootDeviceRequest(
             destination=payload.get("destination", ""),

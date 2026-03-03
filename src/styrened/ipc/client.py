@@ -26,6 +26,7 @@ from styrened.ipc.messages import (
     CmdExecRequest,
     CmdMarkReadRequest,
     CmdPageDisconnectRequest,
+    CmdPageRegenerateRequest,
     CmdRebootDeviceRequest,
     CmdRemoteInboxRequest,
     CmdRemoteMessagesRequest,
@@ -984,6 +985,15 @@ class ControlClient:
             CmdPageDisconnectRequest(destination_hash=destination_hash)
         )
         return cast(bool, data.get("disconnected", False))
+
+    async def page_regenerate_index(self) -> bool:
+        """Regenerate the default node info page.
+
+        Returns:
+            True if page was regenerated successfully.
+        """
+        data = await self._request(CmdPageRegenerateRequest())
+        return cast(bool, data.get("regenerated", False))
 
     async def query_page_server_status(self) -> dict[str, Any]:
         """Query page server status.
