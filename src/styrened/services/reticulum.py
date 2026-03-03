@@ -1136,19 +1136,29 @@ class StyreneAnnounceHandler:
                     )
                     break
 
-        # Look up receiving interface from RNS path table
+        # Look up receiving interface and next-hop from RNS path table
         # path_table[destination_hash] = [timestamp, received_from, hops, expires, blobs, interface, packet_hash]
         try:
             path_entry = RNS.Transport.path_table.get(destination_hash)
             if path_entry and len(path_entry) > 5:
-                # path_entry = [timestamp, received_from, hops, expires, blobs, interface, packet_hash]
                 if path_entry[5] is not None:
                     iface = path_entry[5]
-                    iface_name = getattr(iface, "name", None)
-                    if iface_name:
-                        device.discovered_via = iface_name
+                    iface_name = getattr(iface, "name", None) or ""
+
+                    # Include next-hop transport hash for multi-hub disambiguation
+                    next_hop = path_entry[1] if len(path_entry) > 1 else None
+                    if next_hop and isinstance(next_hop, bytes) and len(next_hop) > 0:
+                        next_hop_short = next_hop.hex()[:8]
+                        via_label = f"{iface_name} → {next_hop_short}" if iface_name else next_hop_short
+                    elif iface_name:
+                        via_label = iface_name
+                    else:
+                        via_label = None
+
+                    if via_label:
+                        device.discovered_via = via_label
                         logger.debug(
-                            f"[IFACE] {device.name} discovered via interface: {iface_name}"
+                            f"[IFACE] {device.name} discovered via: {via_label}"
                         )
                 if len(path_entry) > 2 and path_entry[2] is not None:
                     device.hops = int(path_entry[2])
