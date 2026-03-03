@@ -106,7 +106,9 @@ class StyreneApp(App[None]):
         self.notify("Press Ctrl+C again to quit", severity="warning", timeout=2)
 
     def action_push_screen_settings(self) -> None:
-        """Push settings screen with current config."""
+        """Push settings screen with current config (no-op if already on top)."""
+        if isinstance(self.screen, SettingsScreen):
+            return
         self.push_screen(SettingsScreen(self.config))
 
     def action_open_inbox(self) -> None:
