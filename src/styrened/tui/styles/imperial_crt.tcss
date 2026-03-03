@@ -800,6 +800,14 @@ ChatWidget .chat-no-messages {
     padding: 1;
 }
 
+ChatWidget .chat-date-separator {
+    text-align: center;
+    color: $panel;
+    padding: 0 2;
+    margin: 0 0;
+    height: 1;
+}
+
 /* === MessageBubble Styles === */
 .message-bubble {
     padding: 0 2;
