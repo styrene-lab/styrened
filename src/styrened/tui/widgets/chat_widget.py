@@ -631,21 +631,34 @@ class ChatWidget(Widget, can_focus=True):
 
         event.input.value = ""
 
-        self._pending_messages.append(message)
-        self._show_optimistic_message(message)
-
         kwargs: dict[str, Any] = {}
         if self._reply_to is not None:
             kwargs["reply_to_hash"] = self._reply_to.get("lxmf_hash")
             self._clear_reply()
 
         # Include pending attachment if staged
+        attachment_filename = None
         if self._pending_attachment and not self._pending_attachment.get("awaiting_path"):
             kwargs["attachment_data_b64"] = self._pending_attachment.get("data_b64")
             kwargs["attachment_filename"] = self._pending_attachment.get("filename")
             kwargs["attachment_mime"] = self._pending_attachment.get("mime")
+            attachment_filename = self._pending_attachment.get("filename")
             self._pending_attachment = None
             self._set_status("")
+            # Restore placeholder
+            try:
+                chat_input = self.query_one("#chat-input", Input)
+                chat_input.placeholder = "Type a message…"
+            except Exception:
+                pass
+
+        # Build display text for optimistic message
+        display = message
+        if not display and attachment_filename:
+            display = f"📎 {attachment_filename}"
+
+        self._pending_messages.append(display)
+        self._show_optimistic_message(display)
 
         self.run_worker(
             self._send_message(message, **kwargs),

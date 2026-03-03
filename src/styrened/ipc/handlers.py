@@ -1095,8 +1095,11 @@ class IPCHandlers:
         # Validate required fields (handle None, empty string, and wrong types)
         if not req.peer_hash or not isinstance(req.peer_hash, str):
             return ErrorResponse.invalid_request("peer_hash is required and must be a string")
-        if not req.content or not isinstance(req.content, str):
+        if req.content is None or not isinstance(req.content, str):
             return ErrorResponse.invalid_request("content is required and must be a string")
+        # Allow empty content when attachment is provided
+        if not req.content and not req.attachment_data_b64:
+            return ErrorResponse.invalid_request("content or attachment is required")
 
         # Validate peer_hash format (16-32 hex chars)
         if not HASH_PATTERN.match(req.peer_hash):
