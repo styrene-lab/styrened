@@ -443,14 +443,21 @@ class IPCHandlers:
                 "content": req.message,
             }
 
+            loop = asyncio.get_running_loop()
             if req.retry:
-                success = lxmf_service.send_with_retry(
-                    req.destination,
-                    payload,
-                    max_wait=req.timeout,
+                success = await loop.run_in_executor(
+                    None,
+                    lambda: lxmf_service.send_with_retry(
+                        req.destination,
+                        payload,
+                        max_wait=req.timeout,
+                    ),
                 )
             else:
-                result = lxmf_service.send_message(req.destination, payload)
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: lxmf_service.send_message(req.destination, payload),
+                )
                 success = result is not None
 
             return ResultResponse(data={"sent": success})
@@ -1391,13 +1398,19 @@ class IPCHandlers:
                             lxmf_fields[LXMF.FIELD_FILE_ATTACHMENTS] = [file_entry]
 
             # Step 4: Send via LXMF with race-safe callbacks
-            result = lxmf_service.send_message(
-                req.peer_hash,
-                payload,
-                on_delivery=register_and_callback_delivery,
-                on_failed=register_and_callback_failed,
-                delivery_method=delivery_method,
-                lxmf_fields=lxmf_fields if lxmf_fields else None,
+            # Run in executor because send_message may block up to 10s
+            # if identity resolution requires a path request + wait.
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: lxmf_service.send_message(
+                    req.peer_hash,
+                    payload,
+                    on_delivery=register_and_callback_delivery,
+                    on_failed=register_and_callback_failed,
+                    delivery_method=delivery_method,
+                    lxmf_fields=lxmf_fields if lxmf_fields else None,
+                ),
             )
 
             if result is None:
@@ -1664,12 +1677,16 @@ class IPCHandlers:
                 except Exception as e:
                     logger.warning(f"Error in failed callback: {e}")
 
-            # Send via LXMF
-            result = lxmf_service.send_message(
-                dest_hash,
-                payload,
-                on_delivery=on_delivery,
-                on_failed=on_failed,
+            # Send via LXMF (run in executor — may block on identity resolution)
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: lxmf_service.send_message(
+                    dest_hash,
+                    payload,
+                    on_delivery=on_delivery,
+                    on_failed=on_failed,
+                ),
             )
 
             if result is None:

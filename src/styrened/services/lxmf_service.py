@@ -627,8 +627,59 @@ class LXMFService:
             )
             return dest_identity
 
-        logger.debug(
-            f"[HASH] All strategies failed for {destination_hash[:16]}... - identity not found"
+        # Strategy 5: Request path and wait for identity to arrive via announce
+        # The node may be actively announcing but the identity cache was evicted.
+        # Requesting a path triggers the network to provide the identity.
+        # NOTE: This blocks the calling thread for up to 10s. The IPC handler
+        # runs send_message in a thread pool worker, so this is acceptable.
+        logger.info(
+            f"[HASH] All recall strategies failed for {destination_hash[:16]}... "
+            f"Requesting path to trigger identity resolution..."
+        )
+        try:
+            RNS.Transport.request_path(dest_bytes)
+
+            # Also try requesting with identity hash if we have it from NodeStore
+            if identity_hash:
+                try:
+                    RNS.Transport.request_path(bytes.fromhex(identity_hash))
+                except Exception:
+                    pass
+
+            # Wait up to 10 seconds for the identity to arrive, polling every 0.5s
+            import time
+            for i in range(20):
+                time.sleep(0.5)
+                # Re-try Strategy 1: direct recall
+                dest_identity = RNS.Identity.recall(dest_bytes)
+                if dest_identity:
+                    logger.info(
+                        f"[HASH] Strategy 5 success: path request resolved identity "
+                        f"after {(i + 1) * 0.5:.1f}s for {destination_hash[:16]}..."
+                    )
+                    return dest_identity
+                # Re-try with identity hash if known
+                if identity_hash:
+                    dest_identity = RNS.Identity.recall(
+                        bytes.fromhex(identity_hash), from_identity_hash=True
+                    )
+                    if dest_identity:
+                        logger.info(
+                            f"[HASH] Strategy 5 success: path request resolved identity "
+                            f"(via identity_hash) after {(i + 1) * 0.5:.1f}s "
+                            f"for {destination_hash[:16]}..."
+                        )
+                        return dest_identity
+            logger.warning(
+                f"[HASH] Strategy 5 failed: path request did not resolve identity "
+                f"within 10s for {destination_hash[:16]}..."
+            )
+        except Exception as e:
+            logger.warning(f"[HASH] Strategy 5 path request error: {e}")
+
+        logger.warning(
+            f"[HASH] All 5 strategies failed for {destination_hash[:16]}... - "
+            f"identity not found. Node must re-announce."
         )
         return None
 

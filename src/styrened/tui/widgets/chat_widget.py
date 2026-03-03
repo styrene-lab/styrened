@@ -71,7 +71,7 @@ def _cleanup_temp_files() -> None:
 atexit.register(_cleanup_temp_files)
 
 # Timeout for IPC send_chat call (seconds)
-_SEND_TIMEOUT = 15.0
+_SEND_TIMEOUT = 30.0
 
 # Polling fallback interval (seconds)
 _POLL_INTERVAL = 10.0
