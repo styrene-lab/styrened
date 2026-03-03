@@ -100,7 +100,7 @@ class ChatWidget(Widget, can_focus=True):
         Binding("escape", "escape_handler", "Back", show=False),
         Binding("tab", "toggle_focus", "Toggle Focus", show=False),
         Binding("R", "retry_message", "Retry", show=True),
-        Binding("ctrl+r", "retry_all_failed", "Retry All", show=False),
+        Binding("ctrl+r", "retry_all_failed", "Retry All", show=True, priority=True),
         Binding("d", "delete_message", "Delete", show=True),
         Binding("slash", "open_search", "Search", show=True),
         Binding("r", "reply_to_message", "Reply", show=True),
@@ -615,7 +615,8 @@ class ChatWidget(Widget, can_focus=True):
                 status_icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
 
             if status == "failed":
-                parts.append(f"[red italic]{content}[/] {status_icon} [{cascade.dim}]{ts_str}[/]")
+                parts.append(f"{content} {status_icon} [{cascade.dim}]{ts_str}[/]")
+                parts.append(f"[{cascade.dim}]↻ press R to retry[/]")
             else:
                 parts.append(f"{content} {status_icon} [{cascade.dim}]{ts_str}[/]")
         else:
@@ -812,12 +813,20 @@ class ChatWidget(Widget, can_focus=True):
                 title="Send Timeout",
                 severity="warning",
             )
+            # Refresh to replace optimistic bubble (id=0) with real DB record
+            if self.is_mounted:
+                await asyncio.sleep(0.3)
+                await self._refresh_messages()
             return
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
             self._set_status(f"[red]Send failed: {e}[/]")
             self._update_optimistic_status(content, "failed")
             self.notify(f"Send failed: {e}", title="Chat Error", severity="error")
+            # Refresh to replace optimistic bubble (id=0) with real DB record
+            if self.is_mounted:
+                await asyncio.sleep(0.3)
+                await self._refresh_messages()
             return
 
         await asyncio.sleep(0.5)
@@ -841,13 +850,20 @@ class ChatWidget(Widget, can_focus=True):
         for child in reversed(list(container.query(".--outgoing"))):
             if isinstance(child, MessageBubble):
                 # Match by content to avoid updating the wrong bubble
-                # when multiple sends are in flight
-                if child.raw_content and child.raw_content.rstrip() != content.rstrip():
+                # when multiple sends are in flight. For attachment-only
+                # messages (empty content), match the most recent pending bubble.
+                if content and child.raw_content and child.raw_content.rstrip() != content.rstrip():
                     continue
+                if not content and child.status != "pending":
+                    continue
+
+                display = content
                 if status == "failed":
-                    msg_text = f"[red italic]{content}[/] {icon}"
+                    cascade_ref = get_color_cascade()
+                    msg_text = f"{display} {icon}"
+                    # Retry hint added on next full refresh from DB
                 else:
-                    msg_text = f"{content} {icon}"
+                    msg_text = f"{display} {icon}"
                 child.update_text(msg_text)
                 child.update_status(status)
                 return
@@ -978,12 +994,44 @@ class ChatWidget(Widget, can_focus=True):
     # -------------------------------------------------------------------------
 
     def action_retry_message(self) -> None:
-        """Retry sending a failed message (R key)."""
-        bubble = self._get_selected_bubble()
-        if bubble is None or not bubble.is_failed:
-            return
+        """Retry sending a failed message (R key).
 
-        self.run_worker(self._retry_single(bubble.message_id), group="chat-retry")
+        If no message is selected, auto-selects the most recent failed message.
+        """
+        bubble = self._get_selected_bubble()
+
+        # If nothing selected or selected isn't failed, find the most recent failed
+        if bubble is None or not bubble.is_failed:
+            failed = [b for b in self._get_bubbles() if b.is_failed]
+            if not failed:
+                self._set_status("[dim]No failed messages to retry[/]")
+                return
+            bubble = failed[-1]  # Most recent
+            self._selected_message_id = bubble.message_id
+            bubble.select()
+
+        if bubble.message_id == 0:
+            # Optimistic bubble — refresh from DB first to get real ID
+            self.run_worker(self._retry_after_refresh(bubble.raw_content), group="chat-retry")
+        else:
+            self.run_worker(
+                self._retry_single(bubble.message_id),
+                group=f"chat-retry-{bubble.message_id}",
+            )
+
+    async def _retry_after_refresh(self, content: str | None) -> None:
+        """Refresh messages from DB, find the failed message by content, then retry."""
+        await self._refresh_messages()
+        await asyncio.sleep(0.2)
+
+        # Find the failed message in the refreshed bubbles
+        for bubble in reversed(self._get_bubbles()):
+            if bubble.is_failed and bubble.message_id > 0:
+                if content is None or (bubble.raw_content and bubble.raw_content.strip() == (content or "").strip()):
+                    await self._retry_single(bubble.message_id)
+                    return
+
+        self._set_status("[red]Could not find message to retry[/]")
 
     async def _retry_single(self, message_id: int) -> None:
         """Retry a single failed message via IPC."""
@@ -995,7 +1043,11 @@ class ChatWidget(Widget, can_focus=True):
 
         try:
             await bridge.retry_message(message_id)
-            self._set_status("[green]Retry sent[/]")
+            self._set_status("[green]Retry queued[/]")
+            # Refresh to show updated status
+            if self.is_mounted:
+                await asyncio.sleep(0.5)
+                await self._refresh_messages()
         except Exception as e:
             logger.error(f"Retry failed: {e}")
             self._update_bubble_status(message_id, "failed")
@@ -1007,8 +1059,12 @@ class ChatWidget(Widget, can_focus=True):
         if not failed:
             return
 
+        self._set_status(f"[dim]Retrying {len(failed)} failed message(s)...[/]")
         for bubble in failed:
-            self.run_worker(self._retry_single(bubble.message_id), group="chat-retry")
+            self.run_worker(
+                self._retry_single(bubble.message_id),
+                group=f"chat-retry-{bubble.message_id}",
+            )
 
     # -------------------------------------------------------------------------
     # Phase 4: Message delete (double-tap)
