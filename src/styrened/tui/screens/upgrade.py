@@ -37,9 +37,10 @@ def _kill_daemon() -> None:
 class UpgradeScreen(ModalScreen[bool]):
     """Modal screen for upgrading styrene to the latest version.
 
-    Shows current/latest version info, runs upgrade in background,
-    streams output to a log widget.  Returns True if the user wants
-    to restart the TUI after a successful upgrade.
+    Shows current/latest version info, changelog of what changed,
+    runs upgrade in background, streams output to a log widget.
+    Returns True if the user wants to restart the TUI after a
+    successful upgrade.
     """
 
     CSS = """
@@ -48,9 +49,9 @@ class UpgradeScreen(ModalScreen[bool]):
     }
 
     #upgrade-container {
-        width: 72;
-        height: 28;
-        max-height: 80%;
+        width: 80;
+        height: 36;
+        max-height: 85%;
         background: $surface;
         border: solid $panel;
         padding: 1 2;
@@ -66,6 +67,30 @@ class UpgradeScreen(ModalScreen[bool]):
 
     #upgrade-info {
         margin: 0 0 1 0;
+    }
+
+    #changelog-section {
+        height: 1fr;
+        min-height: 4;
+        margin: 0 0 1 0;
+        border: solid $border;
+        padding: 0 1;
+        overflow-y: scroll;
+    }
+
+    #changelog-title {
+        text-style: bold;
+        color: $panel;
+        margin-bottom: 0;
+    }
+
+    #changelog-content {
+        height: auto;
+    }
+
+    #changelog-loading {
+        color: $panel;
+        text-style: italic;
     }
 
     #upgrade-log {
@@ -110,6 +135,9 @@ class UpgradeScreen(ModalScreen[bool]):
                 f"[{cascade.bright} bold]v{self._latest}[/]",
                 id="upgrade-info",
             )
+            with Vertical(id="changelog-section"):
+                yield Static("WHAT'S NEW", id="changelog-title")
+                yield Static("[dim italic]Loading changelog...[/]", id="changelog-content")
             yield Log(id="upgrade-log")
             with Horizontal(id="upgrade-actions"):
                 yield Button(
@@ -122,6 +150,44 @@ class UpgradeScreen(ModalScreen[bool]):
                     id="btn-cancel",
                     variant="default",
                 )
+
+    def on_mount(self) -> None:
+        """Fetch changelog in background."""
+        self._fetch_changelog()
+
+    @work(thread=True, exclusive=True, group="changelog")
+    def _fetch_changelog(self) -> None:
+        """Fetch changelog between current and latest version."""
+        from styrened.tui.services.changelog import fetch_changelog
+
+        changelog = fetch_changelog(self._current, self._latest)
+        cascade = get_color_cascade()
+
+        lines = changelog.format_lines(max_lines=50)
+
+        # Build rich text
+        parts: list[str] = []
+        for line in lines:
+            # Highlight version prefixes
+            if line.strip().startswith("v0.") or line.strip().startswith("v1."):
+                parts.append(f"[{cascade.medium}]{line}[/]")
+            elif line.strip().startswith("fix:") or line.strip().startswith("feat:"):
+                parts.append(f"[{cascade.bright}]{line}[/]")
+            else:
+                parts.append(line)
+
+        content = "\n".join(parts) if parts else "[dim]No changelog available[/]"
+        self.app.call_from_thread(self._update_changelog, content)
+
+    def _update_changelog(self, content: str) -> None:
+        """Update the changelog display (main thread)."""
+        if not self.is_mounted:
+            return
+        try:
+            widget = self.query_one("#changelog-content", Static)
+            widget.update(content)
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-upgrade":
@@ -162,10 +228,15 @@ class UpgradeScreen(ModalScreen[bool]):
         return [exe, "-m", "pip", "install", "--upgrade", "--upgrade-strategy=eager", "styrene"]
 
     def _start_upgrade(self) -> None:
-        """Disable buttons, show log, kick off background worker."""
+        """Disable buttons, hide changelog, show log, kick off background worker."""
         self._upgrading = True
         self.query_one("#btn-upgrade", Button).disabled = True
         self.query_one("#btn-cancel", Button).disabled = True
+        # Swap changelog for upgrade log
+        try:
+            self.query_one("#changelog-section", Vertical).styles.display = "none"
+        except Exception:
+            pass
         log_widget = self.query_one("#upgrade-log", Log)
         log_widget.styles.display = "block"
         log_widget.write_line("Starting upgrade...")
