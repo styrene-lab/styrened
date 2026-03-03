@@ -604,7 +604,12 @@ class ChatWidget(Widget, can_focus=True):
             return
 
         message = event.value.strip()
-        if not message:
+
+        # Allow empty message if we have a staged attachment
+        if not message and not (
+            self._pending_attachment
+            and not self._pending_attachment.get("awaiting_path")
+        ):
             return
 
         # Handle attach mode: user entered a file path
@@ -1371,11 +1376,9 @@ class ChatWidget(Widget, can_focus=True):
         Checks clipboard for image data or file references first.
         If nothing in clipboard, falls back to path prompt.
         """
-        self.notify("[1] attach_clipboard ACTION FIRED")
         logger.debug("action_attach_clipboard triggered")
         # If already staged, cancel
         if self._pending_attachment is not None:
-            self.notify("[X] cancelling existing attachment")
             self._pending_attachment = None
             self._set_status("")
             try:
@@ -1388,18 +1391,16 @@ class ChatWidget(Widget, can_focus=True):
         # Read clipboard on main thread — PyObjC NSPasteboard requires it
         try:
             attachment = read_clipboard_attachment()
-            self.notify(f"[2] clipboard read: {attachment is not None}")
         except Exception as e:
-            self.notify(f"[ERR] clipboard read exception: {e}")
+            logger.error(f"Clipboard read exception: {e}")
             attachment = None
 
         if attachment is not None:
-            self.notify(f"[3] staging: {attachment.filename} ({attachment.size}B)")
             self._stage_clipboard_attachment(attachment)
             return
 
         # Nothing in clipboard — fall back to path prompt
-        self.notify("[4] no clipboard content, prompting for path")
+        logger.debug("No clipboard content, prompting for path")
         self._set_status("[dim]No image in clipboard. Enter file path:[/]")
         try:
             chat_input = self.query_one("#chat-input", Input)
@@ -1437,6 +1438,7 @@ class ChatWidget(Widget, can_focus=True):
             )
             try:
                 chat_input = self.query_one("#chat-input", Input)
+                chat_input.placeholder = f"📎 {attachment.filename} — Enter to send, Esc to cancel"
                 chat_input.focus()
             except Exception:
                 pass
