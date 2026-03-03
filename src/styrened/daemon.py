@@ -1465,8 +1465,6 @@ class StyreneDaemon:
         if self.config.chat.auto_reply_mode != AutoReplyMode.DISABLED:
             capabilities.append("autoreply")
 
-        caps_str = ",".join(capabilities) if capabilities else "node"
-
         # Use display_name from config, fall back to hostname
         display_name = self.config.identity.display_name or hostname
         # Include icon in display_name if configured
@@ -1487,38 +1485,46 @@ class StyreneDaemon:
         short_name = self.config.identity.short_name or ""
         fingerprint = get_system_fingerprint()
 
-        # Include NomadNet page destination hash if page server is active.
-        # This lets remote TUIs show a Pages tab even when NomadNet runs
-        # as a separate process with its own identity (hub mode).
+        # Include NomadNet page destination hash so remote TUIs can show
+        # a Pages tab. Two sources:
+        # 1. styrened's own page server is running (edge mode or bridge mode)
+        # 2. NomadNet is installed and has an identity file (hub co-location)
         nomadnet_dest = ""
-        if self._page_server_service and self._page_server_service.is_started:
-            try:
+        try:
+            # Check if styrened's page server owns the destination
+            if self._page_server_service and self._page_server_service.is_started:
                 if self._page_server_service.owns_destination:
-                    # Edge mode — styrened owns the NomadNet destination directly
                     dest = self._page_server_service._destination
                     if dest:
                         nomadnet_dest = dest.hash.hex()
-                else:
-                    # Bridge mode — NomadNet runs separately with its own identity.
-                    # Read NomadNet's identity file and compute its destination hash.
-                    import RNS
-                    from styrened.services.reticulum import KNOWN_LXMF_IDENTITY_PATHS
 
-                    for label, path in KNOWN_LXMF_IDENTITY_PATHS:
-                        if "NomadNet" in label and path.exists():
-                            try:
-                                nn_identity = RNS.Identity.from_file(str(path))
-                                if nn_identity:
-                                    nn_dest_hash = RNS.Destination.hash(
-                                        nn_identity, "nomadnetwork", "node"
-                                    )
-                                    nomadnet_dest = nn_dest_hash.hex()
-                                    break
-                            except Exception:
-                                pass
-            except Exception as e:
-                logger.debug(f"Could not resolve NomadNet destination: {e}")
+            # If no page server destination, probe for NomadNet's identity file
+            if not nomadnet_dest:
+                import RNS
+                from pathlib import Path
 
+                _NN_IDENTITY_PATHS = [
+                    Path.home() / ".nomadnetwork" / "storage" / "identity",
+                    Path.home() / ".config" / "nomadnetwork" / "storage" / "identity",
+                    Path("/etc/nomadnetwork/storage/identity"),
+                    # Container paths
+                    Path("/app/.nomadnetwork/storage/identity"),
+                ]
+                for path in _NN_IDENTITY_PATHS:
+                    if path.exists():
+                        nn_identity = RNS.Identity.from_file(str(path))
+                        if nn_identity:
+                            nn_dest_hash = RNS.Destination.hash(
+                                nn_identity, "nomadnetwork", "node"
+                            )
+                            nomadnet_dest = nn_dest_hash.hex()
+                            if "pages" not in capabilities:
+                                capabilities.append("pages")
+                            break
+        except Exception as e:
+            logger.debug(f"Could not resolve NomadNet destination: {e}")
+
+        caps_str = ",".join(capabilities) if capabilities else "node"
         return f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}:{fingerprint}:{nomadnet_dest}".encode()
 
     def _announce(self) -> None:
