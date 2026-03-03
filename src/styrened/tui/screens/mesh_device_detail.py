@@ -208,14 +208,6 @@ class MeshDeviceDetailScreen(Screen[None]):
                     initial=default_tab or "status",
                     id="device-tabs",
                 ):
-                    # Pages tab (NomadNet nodes only)
-                    if self.device.is_nomadnet_node:
-                        with TabPane("Pages", id="pages"):
-                            yield PageBrowserWidget(
-                                destination_hash=self.device.destination_hash,
-                                id="page-browser-widget",
-                            )
-
                     # Status tab
                     with TabPane("Status", id="status"):
                         status_widget = DeviceStatusWidget(id="status-widget")
@@ -250,6 +242,13 @@ class MeshDeviceDetailScreen(Screen[None]):
                             device_identity=self.device_identity,
                             initial_available_commands=initial_cmds,
                             id="command-widget",
+                        )
+
+                    # Pages tab (NomadNet page browser)
+                    with TabPane("Pages", id="pages"):
+                        yield PageBrowserWidget(
+                            destination_hash=self.device.destination_hash,
+                            id="page-browser-widget",
                         )
 
                     # Terminal tab
