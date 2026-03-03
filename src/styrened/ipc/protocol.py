@@ -89,6 +89,7 @@ class IPCMessageType(IntEnum):
     CMD_SELF_UPDATE = 0x41
     CMD_SET_IDENTITY = 0x42
     CMD_PQC_STATUS = 0x43
+    CMD_PAGE_REGENERATE = 0x44
 
     # Terminal session (0x50-0x5F)
     CMD_TERMINAL_OPEN = 0x50

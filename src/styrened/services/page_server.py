@@ -15,6 +15,8 @@ directly and serves pages itself.
 """
 
 import logging
+import platform
+import sys
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,80 @@ DynamicHandler = Callable[
     [str, dict | None, str],  # path, form_data, remote_identity_hash
     Coroutine[Any, Any, str],  # Returns micron string
 ]
+
+
+def _detect_hardware() -> str:
+    """Detect hardware model string (best-effort)."""
+    system = platform.system()
+
+    if system == "Darwin":
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                ["sysctl", "-n", "hw.model"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+
+    elif system == "Linux":
+        # Try device-tree model (RPi, SBCs)
+        for model_path in ("/proc/device-tree/model", "/sys/firmware/devicetree/base/model"):
+            try:
+                model = Path(model_path).read_text().strip().rstrip("\x00")
+                if model:
+                    return model
+            except Exception:
+                pass
+
+        # Try DMI product name (x86 servers/desktops)
+        try:
+            model = Path("/sys/class/dmi/id/product_name").read_text().strip()
+            if model and model != "System Product Name":
+                return model
+        except Exception:
+            pass
+
+    return ""
+
+
+def _detect_capabilities() -> list[str]:
+    """Detect active styrened capabilities."""
+    caps: list[str] = []
+
+    try:
+        from styrened.services.lxmf_service import get_lxmf_service
+
+        svc = get_lxmf_service()
+        if svc and svc.is_initialized:
+            caps.append("📨 LXMF Messaging")
+    except Exception:
+        pass
+
+    try:
+        from styrened.services.rns_service import get_rns_service
+
+        svc = get_rns_service()
+        if svc and svc.is_initialized:
+            caps.append("🔀 Reticulum Transport")
+    except Exception:
+        pass
+
+    try:
+        from styrened.rpc.server import get_rpc_server
+
+        rpc = get_rpc_server()
+        if rpc:
+            caps.append("⚡ RPC Server")
+    except Exception:
+        pass
+
+    return caps
 
 
 class PageServerService:
@@ -109,6 +185,9 @@ class PageServerService:
             )
             self._owns_destination = False
 
+        # Generate default index page if none exists
+        self._ensure_default_index()
+
         self._started = True
         logger.info(
             "PageServerService started (pages_dir=%s, owns_destination=%s, static_pages=%d)",
@@ -116,6 +195,130 @@ class PageServerService:
             self._owns_destination,
             len(self.static_pages),
         )
+
+    def _ensure_default_index(self) -> None:
+        """Generate a default index.mu if no index page exists.
+
+        Creates a node info page showing version, platform, hardware,
+        and capabilities. Skips if an index.mu already exists (operator
+        may have customized it).
+        """
+        if self._pages_dir is None:
+            return
+
+        index_path = self._pages_dir / "index.mu"
+        if index_path.exists():
+            return
+
+        try:
+            micron = self._generate_node_info_page()
+            index_path.write_text(micron, encoding="utf-8")
+            logger.info("Generated default index page: %s", index_path)
+        except Exception as e:
+            logger.warning("Failed to generate default index page: %s", e)
+
+    def regenerate_index(self) -> bool:
+        """Regenerate the default index page with current node info.
+
+        Overwrites any existing index.mu. Call from TUI settings or CLI.
+
+        Returns:
+            True if page was written successfully.
+        """
+        if self._pages_dir is None:
+            return False
+
+        try:
+            self._pages_dir.mkdir(parents=True, exist_ok=True)
+            index_path = self._pages_dir / "index.mu"
+            micron = self._generate_node_info_page()
+            index_path.write_text(micron, encoding="utf-8")
+            logger.info("Regenerated index page: %s", index_path)
+            return True
+        except Exception as e:
+            logger.warning("Failed to regenerate index page: %s", e)
+            return False
+
+    def _generate_node_info_page(self) -> str:
+        """Generate micron markup for a node information page."""
+        from styrened import __version__
+
+        # Node name
+        node_name = self._config.node_name or "Styrene Node"
+
+        # Platform info
+        arch = platform.machine() or "unknown"
+        os_name = platform.system() or "unknown"
+        os_version = platform.release() or ""
+        py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+        # Hardware detection
+        hw_model = _detect_hardware()
+
+        # Identity hash
+        identity_hex = ""
+        if self._identity is not None:
+            try:
+                identity_hex = self._identity.hexhash
+            except Exception:
+                pass
+
+        # Capabilities
+        caps = _detect_capabilities()
+
+        # Build the micron page
+        lines = [
+            f">{node_name}",
+            "",
+            f"A node on the Styrene mesh network running styrened v{__version__}.",
+            "",
+            "-",
+            "",
+            ">>System",
+            f"  Platform: `!{os_name} {os_version}`! ({arch})",
+            f"  Python:   `!{py_version}`!",
+            f"  Styrened: `!v{__version__}`!",
+        ]
+
+        if hw_model:
+            lines.append(f"  Hardware: `!{hw_model}`!")
+
+        if identity_hex:
+            lines.append(f"  Identity: `!{identity_hex}`!")
+
+        lines.append("")
+        lines.append("-")
+        lines.append("")
+
+        if caps:
+            lines.append(">>Capabilities")
+            for cap in caps:
+                lines.append(f"  {cap}")
+            lines.append("")
+            lines.append("-")
+            lines.append("")
+
+        # About / links
+        lines.extend([
+            ">>About Styrene",
+            "",
+            "This page is automatically generated by `!styrened`!,",
+            "a daemon for operating on Reticulum mesh networks.",
+            "",
+            "  Docs:          `!https://github.com/styrene-lab/styrened`!",
+            "  Community Hub:  `[Styrene Community Hub`:/page/index.mu]",
+            "  PyPI:          `!pip install styrene`!",
+            "",
+            "Connect to the Styrene Community Hub at `!rns.styrene.io:4242`!",
+            "for public transport, LXMF propagation, and a NomadNet BBS.",
+            "",
+            "-",
+            "",
+            f"`Fg50Powered by styrened v{__version__}`f",
+            "",
+        ])
+
+        return "\n".join(lines)
 
     def stop(self) -> None:
         """Stop the page server and teardown destination."""

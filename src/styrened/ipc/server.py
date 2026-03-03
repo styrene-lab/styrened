@@ -259,6 +259,7 @@ class ControlServer:
             IPCMessageType.QUERY_PAGE_SERVER_STATUS: self._handlers.handle_query_page_server_status,
             IPCMessageType.QUERY_ATTACHMENT: self._handlers.handle_query_attachment,
             IPCMessageType.CMD_PAGE_DISCONNECT: self._handlers.handle_cmd_page_disconnect,
+            IPCMessageType.CMD_PAGE_REGENERATE: self._handlers.handle_cmd_page_regenerate,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
             IPCMessageType.CMD_SELF_UPDATE: self._handlers.handle_cmd_self_update,
             IPCMessageType.CMD_SET_IDENTITY: self._handlers.handle_cmd_set_identity,

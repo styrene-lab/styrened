@@ -2244,6 +2244,31 @@ class IPCHandlers:
             logger.exception(f"Error querying page server status: {e}")
             return ErrorResponse.internal_error(f"Failed to query page server status: {e}")
 
+    async def handle_cmd_page_regenerate(self, request: IPCRequest) -> IPCResponse:
+        """Handle CMD_PAGE_REGENERATE request.
+
+        Regenerates the default node info index page with current
+        system and capability information.
+
+        Returns:
+            ResultResponse with regeneration status.
+        """
+        err = self._check_page_server()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        try:
+            svc = self.daemon._page_server_service
+            success = svc.regenerate_index()
+            return ResultResponse(data={
+                "regenerated": success,
+                "pages_dir": str(svc.pages_dir) if svc.pages_dir else None,
+            })
+        except Exception as e:
+            logger.exception(f"Error regenerating index page: {e}")
+            return ErrorResponse.internal_error(f"Failed to regenerate index page: {e}")
+
     async def handle_cmd_page_disconnect(self, request: IPCRequest) -> IPCResponse:
         """Handle CMD_PAGE_DISCONNECT request.
 

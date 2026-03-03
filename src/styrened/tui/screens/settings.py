@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, ClassVar
 
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -511,6 +511,42 @@ class SettingsScreen(Screen[None]):
                             ),
                             title="DATA",
                         )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Serve Pages:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.page_server.enabled,
+                                    id="page_server_enabled",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Node Name:", classes="setting-label"),
+                                Input(
+                                    value=self.config.core.page_server.node_name or "",
+                                    placeholder="Styrene Node",
+                                    id="page_server_node_name",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Button(
+                                    "Generate Node Page",
+                                    id="btn-generate-page",
+                                    classes="setting-btn",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "Enable to serve a NomadNet-compatible info page for this node. "
+                                "Generate Node Page creates or refreshes an index page with "
+                                "version, platform, hardware, and capability info.",
+                                classes="setting-description",
+                            ),
+                            title="PAGES",
+                        )
 
             # Action bar — outside tabs, always visible
             with Horizontal(id="settings-actions"):
@@ -780,6 +816,30 @@ class SettingsScreen(Screen[None]):
             self._show_error(f"Failed to clear node history: {e}")
             self.app.log.error(f"Error clearing node history: {e}")
 
+    @on(Button.Pressed, "#btn-generate-page")
+    def on_generate_page_button(self) -> None:
+        """Generate or regenerate the default node info page via IPC."""
+        self._do_generate_page()
+
+    @work(exclusive=True, group="generate-page")
+    async def _do_generate_page(self) -> None:
+        """Send page regenerate command to daemon."""
+        try:
+            from styrened.tui.services.lifecycle import get_lifecycle
+
+            lifecycle = get_lifecycle()
+            if not lifecycle or not lifecycle.ipc:
+                self._show_error("Not connected to daemon")
+                return
+
+            result = await lifecycle.ipc.page_regenerate_index()
+            if result:
+                self._show_success("Node page generated ✓")
+            else:
+                self._show_error("Page generation failed — is the page server enabled?")
+        except Exception as e:
+            self._show_error(f"Failed to generate page: {e}")
+
     async def _save_settings(self) -> None:
         """Read form values, validate, and save configuration."""
         try:
@@ -974,6 +1034,13 @@ class SettingsScreen(Screen[None]):
             self.config.core.reticulum.interfaces.server = ServerInterfaceConfig(
                 enabled=server_enabled, listen_ip=server_ip, port=server_port,
             )
+
+            # Page server settings
+            self.config.core.page_server.enabled = self.query_one(
+                "#page_server_enabled", Switch
+            ).value
+            page_node_name = self.query_one("#page_server_node_name", Input).value.strip()
+            self.config.core.page_server.node_name = page_node_name or None
 
             # Validate configuration
             errors = validate_config(self.config)
