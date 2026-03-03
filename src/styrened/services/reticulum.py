@@ -1140,16 +1140,20 @@ class StyreneAnnounceHandler:
         # path_table[destination_hash] = [timestamp, received_from, hops, expires, blobs, interface, packet_hash]
         try:
             path_entry = RNS.Transport.path_table.get(destination_hash)
-            if path_entry and len(path_entry) > 5 and path_entry[5] is not None:
-                iface = path_entry[5]
-                iface_name = getattr(iface, "name", None)
-                if iface_name:
-                    device.discovered_via = iface_name
-                    logger.debug(
-                        f"[IFACE] {device.name} discovered via interface: {iface_name}"
-                    )
+            if path_entry and len(path_entry) > 5:
+                # path_entry = [timestamp, received_from, hops, expires, blobs, interface, packet_hash]
+                if path_entry[5] is not None:
+                    iface = path_entry[5]
+                    iface_name = getattr(iface, "name", None)
+                    if iface_name:
+                        device.discovered_via = iface_name
+                        logger.debug(
+                            f"[IFACE] {device.name} discovered via interface: {iface_name}"
+                        )
+                if len(path_entry) > 2 and path_entry[2] is not None:
+                    device.hops = int(path_entry[2])
         except Exception as e:
-            logger.debug(f"Could not determine receiving interface: {e}")
+            logger.debug(f"Could not determine path info: {e}")
 
         self.discovered_devices[dest_hash_hex] = device
 

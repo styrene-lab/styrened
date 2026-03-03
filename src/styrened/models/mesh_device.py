@@ -74,6 +74,7 @@ class MeshDevice:
     short_name: str | None = None
     system_fingerprint: str | None = None
     discovered_via: str | None = None  # Interface name that received this announce
+    hops: int | None = None  # Number of hops from path table
 
     # Legacy alias for backwards compatibility
     @property

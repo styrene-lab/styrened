@@ -71,6 +71,8 @@ class ReticumAnnounceTable(DataTable[str]):
             ("name", "NAME"),
             ("type", "TYPE"),
             ("identity", "IDENTITY"),
+            ("hops", "HOPS"),
+            ("via", "VIA"),
             ("status", "STATUS"),
             ("last_announce", "LAST ANNOUNCE"),
         )
@@ -171,7 +173,7 @@ class ReticumAnnounceTable(DataTable[str]):
             else:
                 msg = "No announces discovered"
             self.add_row(
-                "-", "-", "-", f"[{cascade.dim}]{msg}[/]", "-"
+                "-", "-", "-", "-", "-", f"[{cascade.dim}]{msg}[/]", "-"
             )
             self._post_count_update(0, len(self._all_devices))
             return
@@ -215,10 +217,24 @@ class ReticumAnnounceTable(DataTable[str]):
             if device.announce_count > 1:
                 last_seen_text += f" ({device.announce_count})"
 
+            # Hops display
+            if device.hops is not None:
+                if device.hops == 0:
+                    hops_text = f"[{cascade.medium}]direct[/]"
+                else:
+                    hops_text = f"[{cascade.dim}]{device.hops}[/]"
+            else:
+                hops_text = f"[{cascade.dim}]—[/]"
+
+            # Interface/via display
+            via_text = f"[{cascade.dim}]{device.discovered_via}[/]" if device.discovered_via else f"[{cascade.dim}]—[/]"
+
             self.add_row(
                 name_text,
                 type_text,
                 identity_text,
+                hops_text,
+                via_text,
                 status_text,
                 last_seen_text,
                 key=device.identity,
@@ -256,6 +272,8 @@ class ReticumAnnounceTable(DataTable[str]):
             "name": lambda d: d.name.lower(),
             "type": lambda d: d.device_type.value,
             "identity": lambda d: d.destination_hash,
+            "hops": lambda d: d.hops if d.hops is not None else 999,
+            "via": lambda d: (d.discovered_via or "").lower(),
             "status": lambda d: d.status.value,
             "last_announce": lambda d: d.last_announce,
         }
