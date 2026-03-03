@@ -769,12 +769,14 @@ ChatWidget {
 ChatWidget #chat-message-container {
     height: 1fr;
     overflow-y: scroll;
+    /* Gravity-bottom: empty space appears at top, messages at bottom */
+    align-vertical: bottom;
 }
 
 ChatWidget #chat-input-bar {
-    height: 3;
+    height: 2;
     dock: bottom;
-    border-top: solid $border;
+    border-top: heavy $border;
 }
 
 ChatWidget #chat-input-bar #chat-input {
@@ -810,28 +812,27 @@ ChatWidget .chat-date-separator {
 
 /* === MessageBubble Styles === */
 .message-bubble {
-    padding: 0 2;
-    margin: 0 0 0 0;
+    padding: 0 1 0 2;
+    margin: 0;
+    height: auto;
     width: 100%;
 }
 
 .message-bubble.--outgoing {
-    margin-left: 20;
-    text-align: right;
-    padding: 0 2;
+    padding: 0 2 0 8;
+    color: $primary;
 }
 
 .message-bubble.--incoming {
-    margin-right: 20;
-    padding: 0 2;
+    padding: 0 8 0 2;
 }
 
 .message-bubble.--selected {
     background: $surface;
-    text-style: bold;
 }
 
 .message-bubble.--failed {
+    color: $error;
     text-style: italic;
 }
 

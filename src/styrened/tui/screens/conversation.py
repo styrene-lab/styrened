@@ -42,19 +42,23 @@ class ConversationScreen(Screen[None]):
         background: $background;
     }
 
-    ConversationScreen Static {
-        color: $primary;
-        background: $background;
-    }
-
     ConversationScreen #conv-content {
         height: 1fr;
+    }
+
+    ConversationScreen #conv-title {
+        height: 1;
+        padding: 0 1;
+        color: $primary;
+        text-style: bold;
+        background: $surface;
     }
 
     ConversationScreen #conv-path-info {
         height: 1;
         padding: 0 1;
         color: $panel;
+        background: $surface;
     }
     """
 
@@ -85,10 +89,10 @@ class ConversationScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         """Compose conversation UI."""
-        title = self.display_name or f"{self.peer_hash[:16]}..."
+        title = self.display_name or self.peer_hash[:12]
         yield Header()
         with Container(id="conv-content"):
-            yield Static(f"CONVERSATION - {title}", id="conv-title")
+            yield Static(f"[bold]{title}[/]", id="conv-title")
             yield Static("", id="conv-path-info")
             yield ChatWidget(
                 peer_hash=self.peer_hash,
