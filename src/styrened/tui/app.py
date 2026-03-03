@@ -71,9 +71,9 @@ class StyreneApp(App[None]):
         Binding("?", "toggle_help", "Help"),
         Binding("grave_accent", "push_screen_settings", "Settings", show=True),
         Binding("i", "open_inbox", "Inbox", show=True),
-        Binding("b", "push_screen('contacts')", "Contacts", show=True),
+        Binding("b", "open_contacts", "Contacts", show=True),
         # Screen shortcuts (can be overridden by screens)
-        Binding("p", "push_screen('provision')", "Provision", show=True),
+        Binding("p", "open_provision", "Provision", show=True),
         Binding("ctrl+r", "restart_daemon", "Restart Daemon", show=False),
         Binding("a", "announce", "Announce", show=True),
     ]
@@ -112,14 +112,28 @@ class StyreneApp(App[None]):
         self.push_screen(SettingsScreen(self.config))
 
     def action_open_inbox(self) -> None:
-        """Open inbox screen showing all conversations."""
+        """Open inbox screen showing all conversations (no-op if already on top)."""
         if self._lifecycle.ipc_bridge is None:
             self.notify("Chat requires daemon mode", severity="warning")
             return
 
         from styrened.tui.screens.inbox import InboxScreen
 
+        if isinstance(self.screen, InboxScreen):
+            return
         self.push_screen(InboxScreen())
+
+    def action_open_contacts(self) -> None:
+        """Push contacts screen (no-op if already on top)."""
+        if isinstance(self.screen, ContactsScreen):
+            return
+        self.push_screen("contacts")
+
+    def action_open_provision(self) -> None:
+        """Push provision screen (no-op if already on top)."""
+        if isinstance(self.screen, ProvisionScreen):
+            return
+        self.push_screen("provision")
 
     def get_unread_count(self) -> int:
         """Get total unread message count.
