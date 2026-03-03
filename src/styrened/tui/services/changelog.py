@@ -99,9 +99,10 @@ def fetch_changelog(from_version: str, to_version: str) -> Changelog:
     """Fetch changelog between two versions.
 
     Strategy order:
-    1. Local git log (fastest, works offline, has commit messages)
-    2. GitHub compare API (needs auth for private repos)
-    3. PyPI version listing (always works, no commit messages)
+    1. Bundled changelog (baked into package at build time — always works)
+    2. Local git log (dev installs from git checkout)
+    3. GitHub compare API (needs auth for private repos)
+    4. PyPI version listing (always works, no commit messages)
 
     Args:
         from_version: Current version (e.g., "0.12.5").
@@ -110,17 +111,22 @@ def fetch_changelog(from_version: str, to_version: str) -> Changelog:
     Returns:
         Changelog with entries, or error message.
     """
-    # Strategy 1: Local git log
+    # Strategy 1: Bundled changelog (always available, has commit messages)
+    changelog = _fetch_from_bundled(from_version, to_version)
+    if changelog is not None and changelog.entries:
+        return changelog
+
+    # Strategy 2: Local git log
     changelog = _fetch_from_git_log(from_version, to_version)
     if changelog is not None and changelog.entries:
         return changelog
 
-    # Strategy 2: GitHub compare API
+    # Strategy 3: GitHub compare API
     changelog = _fetch_from_github_compare(from_version, to_version)
     if changelog is not None and changelog.entries:
         return changelog
 
-    # Strategy 3: PyPI version listing (no commit messages)
+    # Strategy 4: PyPI version listing (no commit messages)
     changelog = _fetch_from_pypi_versions(from_version, to_version)
     if changelog is not None:
         return changelog
@@ -130,6 +136,40 @@ def fetch_changelog(from_version: str, to_version: str) -> Changelog:
         to_version=to_version,
         error="Could not reach GitHub or PyPI",
     )
+
+
+def _fetch_from_bundled(from_version: str, to_version: str) -> Changelog | None:
+    """Read changelog from bundled data baked in at build time."""
+    try:
+        from packaging.version import Version
+
+        from styrened._changelog import ENTRIES
+
+        if not ENTRIES:
+            return None
+
+        from_v = Version(from_version)
+        to_v = Version(to_version)
+
+        entries = [
+            ChangelogEntry(version=ver, summary=summary)
+            for ver, summary in ENTRIES
+            if from_v < Version(ver) <= to_v
+        ]
+
+        if not entries:
+            return None
+
+        return Changelog(
+            from_version=from_version,
+            to_version=to_version,
+            entries=entries,
+            version_count=len(entries),
+        )
+
+    except Exception as e:
+        logger.debug(f"Bundled changelog failed: {e}")
+        return None
 
 
 def _fetch_from_git_log(from_version: str, to_version: str) -> Changelog | None:
