@@ -149,6 +149,7 @@ build-wheel:
         echo "Wheel exists: $expected"
     else
         echo "Building wheel..."
+        python scripts/generate_changelog.py
         rm -f dist/styrened-*.whl
         python -m build --wheel
     fi
@@ -486,6 +487,8 @@ publish:
     #!/usr/bin/env bash
     set -euo pipefail
     VERSION=$(cat VERSION)
+    # Bake changelog into package from git tags
+    .venv/bin/python scripts/generate_changelog.py
     rm -rf dist/
     .venv/bin/python -m build
     .venv/bin/python -m twine upload --skip-existing dist/*
