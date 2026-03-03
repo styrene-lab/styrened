@@ -400,9 +400,9 @@ class ChatWidget(Widget, can_focus=True):
                         icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
                     ts_str = datetime.datetime.fromtimestamp(child.timestamp).strftime("%H:%M") if child.timestamp else ""
                     if new_status == "failed":
-                        msg_text = f"[red italic]ME: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/][/]"
+                        msg_text = f"[red italic]{child.raw_content}[/] {icon} [{cascade.dim}]{ts_str}[/]"
                     else:
-                        msg_text = f"[{cascade.medium} bold]ME[/]: {child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
+                        msg_text = f"{child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
                     child.update_text(msg_text)
                 return
 
@@ -604,12 +604,13 @@ class ChatWidget(Widget, can_focus=True):
                 status_icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
 
             if status == "failed":
-                parts.append(f"[red italic]ME: {content} {status_icon} [{cascade.dim}]{ts_str}[/][/]")
+                parts.append(f"[red italic]{content}[/] {status_icon} [{cascade.dim}]{ts_str}[/]")
             else:
-                parts.append(f"[{cascade.medium} bold]ME[/]: {content} {status_icon} [{cascade.dim}]{ts_str}[/]")
+                parts.append(f"{content} {status_icon} [{cascade.dim}]{ts_str}[/]")
         else:
             sender = self.display_name or self.peer_hash[:8]
-            parts.append(f"[{cascade.dim}]{sender}[/]: {content} [{cascade.dim}]{ts_str}[/]")
+            parts.append(f"[{cascade.dim} bold]{sender}[/]")
+            parts.append(f"{content} [{cascade.dim}]{ts_str}[/]")
 
         # Attachment indicator (images rendered inline by MessageBubble)
         if has_attachment and not (attachment_type and attachment_type.startswith("image")):
@@ -762,7 +763,7 @@ class ChatWidget(Widget, can_focus=True):
         for child in list(container.query(".chat-no-messages")):
             child.remove()
 
-        msg_text = f"[{cascade.medium} bold]ME[/]: {content} \u23f3"
+        msg_text = f"{content} \u23f3"
         bubble = MessageBubble(
             msg_text,
             message_id=0,
@@ -829,9 +830,9 @@ class ChatWidget(Widget, can_focus=True):
         for child in reversed(list(container.query(".--outgoing"))):
             if isinstance(child, MessageBubble):
                 if status == "failed":
-                    msg_text = f"[red italic]ME: {content} {icon}[/]"
+                    msg_text = f"[red italic]{content}[/] {icon}"
                 else:
-                    msg_text = f"[{cascade.medium} bold]ME[/]: {content} {icon}"
+                    msg_text = f"{content} {icon}"
                 child.update_text(msg_text)
                 child.update_status(status)
                 return
