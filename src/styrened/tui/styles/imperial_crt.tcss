@@ -447,7 +447,7 @@ Header {
 /* Node info: compact two-column layout */
 #node-info-panel {
     height: auto;
-    max-height: 20;
+    max-height: 28;
 }
 
 /* Mesh devices tree: takes majority of remaining space */
