@@ -177,6 +177,13 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass
 
+    # Schema migration: Add hops column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE nodes ADD COLUMN hops INTEGER")
+        logger.debug("Added hops column to nodes table")
+    except sqlite3.OperationalError:
+        pass
+
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
@@ -318,8 +325,8 @@ class NodeStore:
                         destination_hash, identity_hash, name, device_type,
                         last_announce, announce_count, capabilities, version,
                         lxmf_destination_hash, short_name, system_fingerprint,
-                        discovered_via, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                        discovered_via, hops, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
                     ON CONFLICT(destination_hash) DO UPDATE SET
                         identity_hash = excluded.identity_hash,
                         name = excluded.name,
@@ -332,6 +339,7 @@ class NodeStore:
                         short_name = excluded.short_name,
                         system_fingerprint = excluded.system_fingerprint,
                         discovered_via = COALESCE(excluded.discovered_via, nodes.discovered_via),
+                        hops = excluded.hops,
                         updated_at = strftime('%s', 'now')
                     """,
                     (
@@ -347,6 +355,7 @@ class NodeStore:
                         device.short_name,
                         device.system_fingerprint,
                         device.discovered_via,
+                        device.hops,
                     ),
                 )
                 conn.commit()
@@ -833,6 +842,12 @@ class NodeStore:
         except (KeyError, IndexError):
             pass
 
+        hops = None
+        try:
+            hops = row["hops"]
+        except (KeyError, IndexError):
+            pass
+
         try:
             raw_type = row["device_type"]
             # Handle legacy "styrene_node" values from pre-0.10 databases
@@ -855,6 +870,7 @@ class NodeStore:
             short_name=short_name,
             system_fingerprint=system_fingerprint,
             discovered_via=discovered_via,
+            hops=hops,
         )
 
     def get_connection_count(self) -> int:

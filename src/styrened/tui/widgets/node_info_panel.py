@@ -473,53 +473,79 @@ class NodeInfoPanel(Static):
             self.interface_status = ""
 
     def _load_comms_data(self) -> None:
-        """Load local comms data from the message database (non-IPC mode)."""
+        """Load local comms data from the message database (non-IPC mode).
+
+        Uses SQL aggregates instead of loading all rows to avoid blocking
+        the main thread on large message databases.
+        """
         try:
             app = self.app
             if not hasattr(app, "db_engine") or app.db_engine is None:
                 return
 
+            from sqlalchemy import func, case, literal_column
             from sqlalchemy.orm import Session as SASession
             from styrened.models.messages import Message
 
+            local_hash = getattr(app, "local_identity_hash", None)
+
             with SASession(app.db_engine) as session:
-                local_hash = getattr(app, "local_identity_hash", None)
+                base = session.query(Message).filter(Message.protocol_id == "chat")
 
-                # Count conversations (distinct peer hashes)
-                all_msgs = session.query(Message).filter(
-                    Message.protocol_id == "chat"
-                ).all()
+                # Aggregate counts in one query
+                if local_hash is not None:
+                    row = base.with_entities(
+                        func.count().label("total"),
+                        func.count(case(
+                            (Message.source_hash == local_hash, literal_column("1")),
+                        )).label("sent"),
+                        func.count(case(
+                            (Message.source_hash != local_hash, literal_column("1")),
+                        )).label("received"),
+                        func.count(case(
+                            ((Message.status == "pending") & (Message.destination_hash == local_hash), literal_column("1")),
+                        )).label("unread"),
+                        func.count(case(
+                            (Message.status.in_(["queued", "sending"]), literal_column("1")),
+                        )).label("pending_count"),
+                    ).one()
 
-                peer_hashes = set()
-                sent = 0
-                received = 0
-                unread = 0
-                pending = 0
+                    self.messages_sent = row.sent
+                    self.messages_received = row.received
+                    self.unread_count = row.unread
+                    self.pending_deliveries = row.pending_count
 
-                for msg in all_msgs:
-                    peer_hashes.add(msg.source_hash if msg.source_hash != local_hash else msg.destination_hash)
-                    if msg.source_hash == local_hash:
-                        sent += 1
-                    else:
-                        received += 1
-                    if msg.status == "pending" and msg.destination_hash == local_hash:
-                        unread += 1
-                    if msg.status in ("queued", "sending"):
-                        pending += 1
+                    # Distinct peer hashes (conversation count)
+                    peer_hash_expr = case(
+                        (Message.source_hash != local_hash, Message.source_hash),
+                        else_=Message.destination_hash,
+                    )
+                    conv_count = base.with_entities(
+                        func.count(func.distinct(peer_hash_expr))
+                    ).scalar() or 0
+                    self.conversation_count = conv_count
+                else:
+                    # No local_hash — count distinct hashes from both columns
+                    row = base.with_entities(func.count()).one()
+                    self.messages_received = row[0]
+                    self.messages_sent = 0
 
-                self.conversation_count = len(peer_hashes)
-                self.messages_sent = sent
-                self.messages_received = received
-                self.unread_count = unread
-                self.pending_deliveries = pending
+                    # Approximate conversation count
+                    src_count = base.with_entities(
+                        func.count(func.distinct(Message.source_hash))
+                    ).scalar() or 0
+                    dst_count = base.with_entities(
+                        func.count(func.distinct(Message.destination_hash))
+                    ).scalar() or 0
+                    self.conversation_count = max(src_count, dst_count)
         except Exception:
             pass
 
         # Contact count from node store
         try:
             from styrened.services.node_store import get_node_store
-            contacts = get_node_store().get_contacts()
-            self.contact_count = len(contacts) if contacts else 0
+            nodes = get_node_store().get_all_nodes()
+            self.contact_count = len(nodes) if nodes else 0
         except Exception:
             pass
 
