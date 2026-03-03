@@ -262,6 +262,9 @@ class ChatWidget(Widget, can_focus=True):
         # Tracks whether the status bar is showing the idle tier label
         self._status_is_tier: bool = False
 
+        # Tracks the last displayed date for date separator continuity
+        self._last_displayed_date: str | None = None
+
     @property
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
@@ -468,25 +471,57 @@ class ChatWidget(Widget, can_focus=True):
         new_ids = [msg.get("id", 0) for msg in messages]
 
         if new_ids != self._message_ids:
-            await container.remove_children()
-            self._message_ids = new_ids
-            self._pending_messages.clear()
-
+            old_ids_set = set(self._message_ids)
             cascade = get_color_cascade()
 
-            if not messages:
-                await container.mount(Static("[dim]No messages yet[/]", classes="chat-no-messages"))
-                return
+            if not self._message_ids:
+                # First load or empty → full rebuild
+                await container.remove_children()
+                self._message_ids = new_ids
+                self._pending_messages.clear()
 
-            for msg in messages:
-                bubble = self._create_bubble(msg, cascade)
-                await container.mount(bubble)
+                if not messages:
+                    await container.mount(Static("[dim]No messages yet[/]", classes="chat-no-messages"))
+                    return
 
-                if msg.get("id") == self._selected_message_id:
-                    bubble.select()
+                last_date: str | None = None
+                for msg in messages:
+                    sep, last_date = self._date_separator_if_needed(
+                        msg.get("timestamp", 0.0), last_date, cascade
+                    )
+                    if sep:
+                        await container.mount(sep)
+                    bubble = self._create_bubble(msg, cascade)
+                    await container.mount(bubble)
 
-            container.scroll_end(animate=False)
+                    if msg.get("id") == self._selected_message_id:
+                        bubble.select()
+
+                container.scroll_end(animate=False)
+            else:
+                # Incremental — only append new messages
+                appended = False
+                # Determine last date from existing messages for date separator continuity
+                last_date = self._last_displayed_date
+                for msg in messages:
+                    msg_id = msg.get("id", 0)
+                    if msg_id not in old_ids_set:
+                        sep, last_date = self._date_separator_if_needed(
+                            msg.get("timestamp", 0.0), last_date, cascade
+                        )
+                        if sep:
+                            await container.mount(sep)
+                        bubble = self._create_bubble(msg, cascade)
+                        await container.mount(bubble)
+                        appended = True
+
+                self._message_ids = new_ids
+                self._pending_messages.clear()
+
+                if appended:
+                    container.scroll_end(animate=False)
         else:
+            # Same IDs — just update statuses in-place
             cascade = get_color_cascade()
             for msg in messages:
                 msg_id = msg.get("id", 0)
@@ -495,6 +530,38 @@ class ChatWidget(Widget, can_focus=True):
                     if child.message_id == msg_id and child.status != new_status:
                         self._update_bubble_status(msg_id, new_status)
                         break
+
+    def _date_separator_if_needed(
+        self,
+        timestamp: float,
+        last_date: str | None,
+        cascade: Any,
+    ) -> tuple[Static | None, str | None]:
+        """Create a date separator widget if the message date differs from last_date.
+
+        Returns (separator_widget_or_None, date_string).
+        """
+        if not timestamp:
+            return None, last_date
+        msg_date = datetime.datetime.fromtimestamp(timestamp)
+        today = datetime.datetime.now().date()
+        yesterday = today - datetime.timedelta(days=1)
+
+        if msg_date.date() == today:
+            date_str = "Today"
+        elif msg_date.date() == yesterday:
+            date_str = "Yesterday"
+        else:
+            date_str = msg_date.strftime("%a, %b %d")
+
+        if date_str != last_date:
+            self._last_displayed_date = date_str
+            separator = Static(
+                f"[{cascade.dim}]── {date_str} ──[/]",
+                classes="chat-date-separator",
+            )
+            return separator, date_str
+        return None, last_date
 
     def _create_bubble(
         self,
