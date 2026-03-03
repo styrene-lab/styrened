@@ -1458,6 +1458,8 @@ class StyreneDaemon:
             capabilities.append("hub")
         if self.config.api.enabled:
             capabilities.append("api")
+        if self.config.page_server.enabled:
+            capabilities.append("pages")
         from styrened.models.config import AutoReplyMode
 
         if self.config.chat.auto_reply_mode != AutoReplyMode.DISABLED:
@@ -1484,7 +1486,40 @@ class StyreneDaemon:
 
         short_name = self.config.identity.short_name or ""
         fingerprint = get_system_fingerprint()
-        return f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}:{fingerprint}".encode()
+
+        # Include NomadNet page destination hash if page server is active.
+        # This lets remote TUIs show a Pages tab even when NomadNet runs
+        # as a separate process with its own identity (hub mode).
+        nomadnet_dest = ""
+        if self._page_server_service and self._page_server_service.is_started:
+            try:
+                if self._page_server_service.owns_destination:
+                    # Edge mode — styrened owns the NomadNet destination directly
+                    dest = self._page_server_service._destination
+                    if dest:
+                        nomadnet_dest = dest.hash.hex()
+                else:
+                    # Bridge mode — NomadNet runs separately with its own identity.
+                    # Read NomadNet's identity file and compute its destination hash.
+                    import RNS
+                    from styrened.services.reticulum import KNOWN_LXMF_IDENTITY_PATHS
+
+                    for label, path in KNOWN_LXMF_IDENTITY_PATHS:
+                        if "NomadNet" in label and path.exists():
+                            try:
+                                nn_identity = RNS.Identity.from_file(str(path))
+                                if nn_identity:
+                                    nn_dest_hash = RNS.Destination.hash(
+                                        nn_identity, "nomadnetwork", "node"
+                                    )
+                                    nomadnet_dest = nn_dest_hash.hex()
+                                    break
+                            except Exception:
+                                pass
+            except Exception as e:
+                logger.debug(f"Could not resolve NomadNet destination: {e}")
+
+        return f"styrene:{display_name}:{version}:{caps_str}:{lxmf_dest}:{short_name}:{fingerprint}:{nomadnet_dest}".encode()
 
     def _announce(self) -> None:
         """Trigger an announce of the local operator destination.

@@ -184,6 +184,13 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass
 
+    # Schema migration: Add nomadnet_destination_hash column
+    try:
+        conn.execute("ALTER TABLE nodes ADD COLUMN nomadnet_destination_hash TEXT")
+        logger.debug("Added nomadnet_destination_hash column to nodes table")
+    except sqlite3.OperationalError:
+        pass
+
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
@@ -325,8 +332,8 @@ class NodeStore:
                         destination_hash, identity_hash, name, device_type,
                         last_announce, announce_count, capabilities, version,
                         lxmf_destination_hash, short_name, system_fingerprint,
-                        discovered_via, hops, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                        discovered_via, hops, nomadnet_destination_hash, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
                     ON CONFLICT(destination_hash) DO UPDATE SET
                         identity_hash = excluded.identity_hash,
                         name = excluded.name,
@@ -340,6 +347,7 @@ class NodeStore:
                         system_fingerprint = excluded.system_fingerprint,
                         discovered_via = COALESCE(excluded.discovered_via, nodes.discovered_via),
                         hops = excluded.hops,
+                        nomadnet_destination_hash = COALESCE(excluded.nomadnet_destination_hash, nodes.nomadnet_destination_hash),
                         updated_at = strftime('%s', 'now')
                     """,
                     (
@@ -356,6 +364,7 @@ class NodeStore:
                         device.system_fingerprint,
                         device.discovered_via,
                         device.hops,
+                        device.nomadnet_destination_hash,
                     ),
                 )
                 conn.commit()
@@ -848,6 +857,12 @@ class NodeStore:
         except (KeyError, IndexError):
             pass
 
+        nomadnet_dest = None
+        try:
+            nomadnet_dest = row["nomadnet_destination_hash"]
+        except (KeyError, IndexError):
+            pass
+
         try:
             raw_type = row["device_type"]
             # Handle legacy "styrene_node" values from pre-0.10 databases
@@ -869,6 +884,7 @@ class NodeStore:
             lxmf_destination_hash=lxmf_dest,
             short_name=short_name,
             system_fingerprint=system_fingerprint,
+            nomadnet_destination_hash=nomadnet_dest,
             discovered_via=discovered_via,
             hops=hops,
         )

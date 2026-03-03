@@ -35,7 +35,7 @@ class TestBuildAnnounceData:
         assert version == __version__
         assert version != "0.1.0"
 
-    def test_announce_has_seven_fields(self, daemon):
+    def test_announce_has_eight_fields(self, daemon):
         """Announce must have 7 colon-delimited fields (prefix + 6 values)."""
         with patch(
             "styrened.services.system_info.get_system_fingerprint",
@@ -44,7 +44,7 @@ class TestBuildAnnounceData:
             data = daemon._build_announce_data()
         decoded = data.decode("utf-8")
         parts = decoded.split(":")
-        assert len(parts) == 7, f"Expected 7 fields, got {len(parts)}: {parts}"
+        assert len(parts) == 8, f"Expected 8 fields, got {len(parts)}: {parts}"
 
     def test_fingerprint_is_7th_field(self, daemon):
         """System fingerprint is the 7th colon-delimited field."""

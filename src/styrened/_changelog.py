@@ -119,4 +119,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.10", "fix: Pages tab only for NomadNet-capable devices"),
     ("0.13.11", "feat: auto-generated NomadNet node page + settings UI"),
     ("0.13.12", "fix: node page links — docs.styrene.io, recommend pipx"),
+    ("0.13.13", "fix: upgrade changelog shows actual commit messages"),
 ]
