@@ -264,11 +264,18 @@ class MeshDeviceDetailScreen(Screen[None]):
         yield Footer()
 
     def _resolve_nomadnet_destination(self) -> str | None:
-        """Find a NomadNet destination hash for this device's identity.
+        """Find a NomadNet destination hash for page browsing.
 
-        Checks if this device is a NomadNet node directly, or if any other
-        device sharing the same identity_hash is a NomadNet node (e.g., a
-        Styrene hub that also runs NomadNet).
+        Resolution order:
+        1. Device is a NOMADNET_NODE directly → use its destination hash
+        2. Device advertises 'pages' capability → compute the NomadNet
+           destination hash from its identity (same identity, different aspect)
+        3. Another device in the store/live list shares the same identity_hash
+           and is a NOMADNET_NODE → use that destination hash
+
+        Strategy 2 covers Styrene hubs that run both styrened (with page_server
+        enabled) and NomadNet — they share an RNS identity but the NomadNet
+        announce may arrive on a different destination hash.
         """
         if self.device is None:
             return None
@@ -276,14 +283,37 @@ class MeshDeviceDetailScreen(Screen[None]):
         if self.device.is_nomadnet_node:
             return self.device.destination_hash
 
+        # Check if the announce includes a NomadNet destination hash directly
+        # (set when page_server is active, including bridge mode with NomadNet)
+        if self.device.nomadnet_destination_hash:
+            return self.device.nomadnet_destination_hash
+
+        target_identity = self.device.identity_hash
+        if not target_identity:
+            return None
+
+        from styrened.models.mesh_device import DeviceType
+
+        # Check persisted nodes
         try:
-            from styrened.models.mesh_device import DeviceType
             from styrened.services.node_store import get_node_store
 
             store = get_node_store()
             for node in store.get_all_nodes():
                 if (
-                    node.identity_hash == self.device.identity_hash
+                    node.identity_hash == target_identity
+                    and node.device_type == DeviceType.NOMADNET_NODE
+                ):
+                    return node.destination_hash
+        except Exception:
+            pass
+
+        # Check live discovered devices (in-memory, not yet persisted)
+        try:
+            live_nodes = discover_devices()
+            for node in live_nodes:
+                if (
+                    node.identity_hash == target_identity
                     and node.device_type == DeviceType.NOMADNET_NODE
                 ):
                     return node.destination_hash

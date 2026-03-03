@@ -61,7 +61,7 @@ class TestParseAnnounceDataExistingFormats:
     def test_styrene_node_format(self):
         """Styrene node announce format is unchanged."""
         data = b"styrene:myhost:0.10.0:hub,api:deadbeef:mynode:fp1"
-        name, dtype, caps, version, lxmf_dest, short, fp = parse_announce_data(data)
+        name, dtype, caps, version, lxmf_dest, short, fp, _nn = parse_announce_data(data)
         assert dtype == DeviceType.STYRENE_NODE
         assert name == "myhost"
         assert version == "0.10.0"

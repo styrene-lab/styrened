@@ -73,6 +73,7 @@ class MeshDevice:
     lxmf_destination_hash: str | None = None
     short_name: str | None = None
     system_fingerprint: str | None = None
+    nomadnet_destination_hash: str | None = None  # NomadNet page destination (from announce)
     discovered_via: str | None = None  # Interface name that received this announce
     hops: int | None = None  # Number of hops from path table
 
@@ -190,7 +191,7 @@ def _try_lxmf_parse(
             pn_name = LXMF.pn_name_from_app_data(app_data)
             name = pn_name[:32] if pn_name and len(pn_name) > 32 else (pn_name or "propagation-node")
             dtype = aspect_hint or DeviceType.PROPAGATION_NODE
-            return (name, dtype, None, None, None, None, None)
+            return (name, dtype, None, None, None, None, None, None)
     except Exception:
         pass
 
@@ -204,10 +205,10 @@ def _try_lxmf_parse(
             if display_name.startswith("[styrene]"):
                 clean_name = display_name[len("[styrene]"):].strip()
                 name = clean_name[:32] if len(clean_name) > 32 else clean_name
-                return (name, DeviceType.STYRENE_NODE, None, None, None, None, None)
+                return (name, DeviceType.STYRENE_NODE, None, None, None, None, None, None)
             name = display_name[:32] if len(display_name) > 32 else display_name
             dtype = aspect_hint or DeviceType.LXMF_PEER
-            return (name, dtype, None, None, None, None, None)
+            return (name, dtype, None, None, None, None, None, None)
     except Exception:
         pass
 
@@ -217,7 +218,7 @@ def _try_lxmf_parse(
 def parse_announce_data(
     app_data: bytes | None,
     aspect_hint: DeviceType | None = None,
-) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None]:
+) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None, str | None]:
     """Parse announce app_data to extract device information.
 
     Styrene nodes announce with format:
@@ -238,7 +239,7 @@ def parse_announce_data(
     """
     if not app_data:
         dtype = aspect_hint or DeviceType.UNKNOWN
-        return ("unknown", dtype, None, None, None, None, None)
+        return ("unknown", dtype, None, None, None, None, None, None)
 
     # Try LXMF library parsers for msgpack-encoded announces.
     # LXMF 0.5.0+ peers and propagation nodes use msgpack (first byte 0x90-0x9f or 0xDC).
@@ -253,7 +254,7 @@ def parse_announce_data(
     except UnicodeDecodeError:
         # Binary app_data that wasn't LXMF msgpack
         dtype = aspect_hint or DeviceType.UNKNOWN
-        return ("binary-data", dtype, None, None, None, None, None)
+        return ("binary-data", dtype, None, None, None, None, None, None)
 
     # Check for Styrene node (wire format: "styrene" or "styrene:host:ver:caps:...")
     if decoded.lower() == "styrene" or decoded.lower().startswith("styrene:"):
@@ -262,6 +263,7 @@ def parse_announce_data(
         # - "styrene:hostname:version:caps" (legacy 4-field)
         # - "styrene:hostname:version:caps:lxmf_dest:short_name" (6-field)
         # - "styrene:hostname:version:caps:lxmf_dest:short_name:fingerprint" (7-field)
+        # - "styrene:hostname:version:caps:lxmf_dest:short_name:fingerprint:nomadnet_dest" (8-field)
         if ":" in decoded:
             parts = decoded.split(":")
             name = parts[1] if len(parts) > 1 else "styrene-node"
@@ -271,6 +273,7 @@ def parse_announce_data(
             short_name = parts[5] if len(parts) > 5 and parts[5] else None
             raw_fp = parts[6] if len(parts) > 6 and parts[6] else None
             fingerprint = _sanitize_fingerprint(raw_fp)
+            nomadnet_dest = parts[7] if len(parts) > 7 and parts[7] else None
         else:
             name = "styrene-node"
             version = None
@@ -278,13 +281,14 @@ def parse_announce_data(
             lxmf_dest = None
             short_name = None
             fingerprint = None
-        return (name, DeviceType.STYRENE_NODE, capabilities, version, lxmf_dest, short_name, fingerprint)
+            nomadnet_dest = None
+        return (name, DeviceType.STYRENE_NODE, capabilities, version, lxmf_dest, short_name, fingerprint, nomadnet_dest)
 
     # Check for RNode
     if decoded.lower().startswith("rnode:"):
         parts = decoded.split(":")
         name = parts[1] if len(parts) > 1 else "rnode"
-        return (name, DeviceType.RNODE, None, None, None, None, None)
+        return (name, DeviceType.RNODE, None, None, None, None, None, None)
 
     # Check for JSON app_data (common in LXMF clients like Sideband/NomadNet)
     # These typically have {"display_name": "...", ...} format
@@ -300,12 +304,12 @@ def parse_announce_data(
                     # Truncate long names
                     name = display_name[:32] if len(display_name) > 32 else display_name
                     dtype = aspect_hint or DeviceType.GENERIC
-                    return (name, dtype, None, None, None, None, None)
+                    return (name, dtype, None, None, None, None, None, None)
         except (json.JSONDecodeError, TypeError):
             pass
         # JSON but no usable name - treat as unknown
         dtype = aspect_hint or DeviceType.UNKNOWN
-        return ("unknown", dtype, None, None, None, None, None)
+        return ("unknown", dtype, None, None, None, None, None, None)
 
     # Generic announce with custom name (simple string, not JSON/hex)
     # Sanitize: only allow reasonable name characters, reject serialized data
@@ -317,11 +321,11 @@ def parse_announce_data(
     ):
         # NomadNet nodes announce plain UTF-8 node name
         dtype = aspect_hint or DeviceType.GENERIC
-        return (decoded, dtype, None, None, None, None, None)
+        return (decoded, dtype, None, None, None, None, None, None)
 
     # Unknown or unparseable
     dtype = aspect_hint or DeviceType.UNKNOWN
-    return ("unknown", dtype, None, None, None, None, None)
+    return ("unknown", dtype, None, None, None, None, None, None)
 
 
 def create_mesh_device(
@@ -343,7 +347,7 @@ def create_mesh_device(
     Returns:
         MeshDevice instance.
     """
-    name, device_type, capabilities, version, lxmf_dest, short_name, fingerprint = (
+    name, device_type, capabilities, version, lxmf_dest, short_name, fingerprint, nomadnet_dest = (
         parse_announce_data(app_data, aspect_hint=aspect_hint)
     )
 
@@ -364,4 +368,5 @@ def create_mesh_device(
         lxmf_destination_hash=lxmf_dest,
         short_name=short_name,
         system_fingerprint=fingerprint,
+        nomadnet_destination_hash=nomadnet_dest,
     )
