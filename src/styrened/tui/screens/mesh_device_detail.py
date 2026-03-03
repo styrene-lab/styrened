@@ -244,12 +244,15 @@ class MeshDeviceDetailScreen(Screen[None]):
                             id="command-widget",
                         )
 
-                    # Pages tab (NomadNet page browser)
-                    with TabPane("Pages", id="pages"):
-                        yield PageBrowserWidget(
-                            destination_hash=self.device.destination_hash,
-                            id="page-browser-widget",
-                        )
+                    # Pages tab — shown for NomadNet nodes, or any node whose
+                    # identity also has a NomadNet announce (e.g., Styrene hubs)
+                    pages_dest = self._resolve_nomadnet_destination()
+                    if pages_dest:
+                        with TabPane("Pages", id="pages"):
+                            yield PageBrowserWidget(
+                                destination_hash=pages_dest,
+                                id="page-browser-widget",
+                            )
 
                     # Terminal tab
                     with TabPane("Terminal", id="terminal"):
@@ -259,6 +262,35 @@ class MeshDeviceDetailScreen(Screen[None]):
                         )
 
         yield Footer()
+
+    def _resolve_nomadnet_destination(self) -> str | None:
+        """Find a NomadNet destination hash for this device's identity.
+
+        Checks if this device is a NomadNet node directly, or if any other
+        device sharing the same identity_hash is a NomadNet node (e.g., a
+        Styrene hub that also runs NomadNet).
+        """
+        if self.device is None:
+            return None
+
+        if self.device.is_nomadnet_node:
+            return self.device.destination_hash
+
+        try:
+            from styrened.models.mesh_device import DeviceType
+            from styrened.services.node_store import get_node_store
+
+            store = get_node_store()
+            for node in store.get_all_nodes():
+                if (
+                    node.identity_hash == self.device.identity_hash
+                    and node.device_type == DeviceType.NOMADNET_NODE
+                ):
+                    return node.destination_hash
+        except Exception:
+            pass
+
+        return None
 
     def on_mount(self) -> None:
         """Auto-fetch status when the screen mounts if no initial data."""
