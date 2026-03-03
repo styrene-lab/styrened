@@ -1383,13 +1383,25 @@ class ChatWidget(Widget, can_focus=True):
                 pass
             return
 
-        self.run_worker(self._attach_from_clipboard_or_prompt(), group="chat-attach")
+        # Read clipboard on main thread — PyObjC NSPasteboard requires it
+        attachment = read_clipboard_attachment()
+        if attachment is not None:
+            self._stage_clipboard_attachment(attachment)
+            return
 
-    async def _attach_from_clipboard_or_prompt(self) -> None:
-        """Try clipboard first, fall back to path prompt."""
-        loop = asyncio.get_running_loop()
-        attachment = await loop.run_in_executor(None, read_clipboard_attachment)
+        # Nothing in clipboard — fall back to path prompt
+        self._set_status("[dim]No image in clipboard. Enter file path:[/]")
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.placeholder = "Enter file path to attach (Esc to cancel)…"
+            chat_input.value = ""
+            chat_input.focus()
+            self._pending_attachment = {"awaiting_path": True}
+        except Exception:
+            self._set_status("[red]Cannot access input[/]")
 
+    def _stage_clipboard_attachment(self, attachment: "ClipboardAttachment") -> None:
+        """Stage a clipboard attachment for sending."""
         if attachment is not None:
             self._pending_attachment = {
                 "data_b64": attachment.data_b64,
@@ -1418,57 +1430,21 @@ class ChatWidget(Widget, can_focus=True):
                 chat_input.focus()
             except Exception:
                 pass
-            return
-
-        # Nothing in clipboard — fall back to path prompt
-        self._set_status("[dim]No image in clipboard. Enter file path:[/]")
-        try:
-            chat_input = self.query_one("#chat-input", Input)
-            chat_input.placeholder = "Enter file path to attach (Esc to cancel)…"
-            chat_input.value = ""
-            chat_input.focus()
-            self._pending_attachment = {"awaiting_path": True}
-        except Exception:
-            self._set_status("[red]Cannot access input[/]")
 
     async def _stage_from_clipboard(self) -> None:
-        """Read clipboard and stage as attachment."""
-        loop = asyncio.get_running_loop()
+        """Read clipboard and stage as attachment.
 
-        self._set_status("[dim]Reading clipboard…[/]")
-
-        attachment = await loop.run_in_executor(None, read_clipboard_attachment)
+        NOTE: clipboard read happens via call_from_thread/call_later to
+        ensure NSPasteboard is accessed on the main thread.
+        """
+        # Read clipboard on main thread — PyObjC NSPasteboard requires it
+        attachment = read_clipboard_attachment()
 
         if attachment is None:
             self._set_status("[dim]No image or file in clipboard[/]")
             return
 
-        self._pending_attachment = {
-            "data_b64": attachment.data_b64,
-            "filename": attachment.filename,
-            "mime": attachment.mime,
-        }
-
-        icon = ATTACHMENT_ICONS.get(
-            "image" if attachment.mime.startswith("image/") else
-            "audio" if attachment.mime.startswith("audio/") else
-            "file",
-            ATTACHMENT_ICONS["file"],
-        )
-        size_str = _human_size(attachment.size)
-        source_label = {
-            "screenshot": "📋 screenshot",
-            "image_copy": "📋 copied image",
-            "file": "📎 file",
-            "path": "📎 file",
-        }.get(attachment.source, "📎")
-
-        self._set_status(
-            f"[dim]{icon} {source_label}: {attachment.filename} ({size_str}) "
-            f"| Enter to send, Esc to cancel[/]"
-        )
-
-        # Focus input for message to accompany the attachment
+        self._stage_clipboard_attachment(attachment)
         try:
             chat_input = self.query_one("#chat-input", Input)
             chat_input.focus()
