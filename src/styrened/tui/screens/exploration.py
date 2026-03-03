@@ -1,6 +1,7 @@
 """Exploration Screen - Reticulum network discovery.
 
-Categorized tabbed interface for non-Styrene announces on the Reticulum network:
+Categorized tabbed interface for Reticulum announces:
+- Styrene tab: Styrene fleet nodes with version, capabilities, hops
 - LXMF tab: messaging peers (Sideband, MeshChat, NomadNet users)
 - Pages tab: NomadNet page services with inline page browser
 - Infrastructure tab: propagation nodes, RNodes
@@ -41,6 +42,7 @@ _EXPLORATION_TYPES = frozenset({
 })
 
 # Category groupings for tabs
+_STYRENE_TYPES = frozenset({DeviceType.STYRENE_NODE})
 _LXMF_TYPES = frozenset({DeviceType.LXMF_PEER})
 _PAGES_TYPES = frozenset({DeviceType.NOMADNET_NODE})
 _INFRA_TYPES = frozenset({DeviceType.PROPAGATION_NODE, DeviceType.RNODE})
@@ -300,10 +302,221 @@ class ReticumAnnounceTable(DataTable[str]):
         self._load_data()
 
 
+class StyreneFleetTable(DataTable[str]):
+    """Styrene fleet node listing with version, capabilities, and hop info.
+
+    Shows only STYRENE_NODE devices, deduplicated by identity hash
+    (prefers the entry with the most recent announce).
+    """
+
+    COLUMN_KEYS = ("name", "version", "caps", "hops", "via", "status", "last_announce")
+
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        super().__init__(*args, **kwargs)
+        self._all_devices: list[MeshDevice] = []
+        self._filter_text: str = ""
+        self._sort_column: str = "last_announce"
+        self._sort_reverse: bool = True
+
+    @property
+    def device_count(self) -> int:
+        return len(self._all_devices)
+
+    def on_mount(self) -> None:
+        self.add_columns(
+            ("name", "NAME"),
+            ("version", "VERSION"),
+            ("caps", "CAPABILITIES"),
+            ("hops", "HOPS"),
+            ("via", "VIA"),
+            ("status", "STATUS"),
+            ("last_announce", "LAST ANNOUNCE"),
+        )
+        self.cursor_type = "row"
+
+    def load_from_devices(self, devices: list[MeshDevice]) -> None:
+        """Accept full device list, filter to Styrene nodes, deduplicate, rebuild."""
+        from styrened.services.reticulum import _deduplicate_by_identity
+
+        styrene = [d for d in devices if d.device_type == DeviceType.STYRENE_NODE]
+        self._all_devices = _deduplicate_by_identity(styrene)
+        self._rebuild_table()
+
+    def _rebuild_table(self) -> None:
+        devices = self._all_devices
+
+        if self._filter_text:
+            query = self._filter_text.lower()
+            devices = [
+                d for d in devices
+                if query in d.name.lower()
+                or query in (d.version or "").lower()
+                or query in d.destination_hash.lower()
+                or query in " ".join(d.capabilities or []).lower()
+            ]
+
+        devices = self._sort_devices(devices)
+
+        # Track selection
+        selected_key: str | None = None
+        if self.cursor_row is not None and self.row_count > 0:
+            try:
+                cell_key = self.coordinate_to_cell_key(Coordinate(self.cursor_row, 0))
+                if cell_key and cell_key.row_key:
+                    selected_key = str(cell_key.row_key.value)
+            except Exception:
+                pass
+
+        self.clear()
+
+        if not devices:
+            cascade = get_color_cascade()
+            msg = f"No matches for '{self._filter_text}'" if self._filter_text else "No Styrene nodes discovered"
+            self.add_row(f"[{cascade.dim}]{msg}[/]", "", "", "", "", "", "")
+            self._post_count_update(0, len(self._all_devices))
+            return
+
+        cascade = get_color_cascade()
+
+        for device in devices:
+            # Status
+            status_colors = {
+                NodeStatus.ACTIVE: cascade.medium,
+                NodeStatus.STALE: cascade.dim,
+                NodeStatus.LOST: cascade.dim,
+            }
+            status_color = status_colors.get(device.status, cascade.medium)
+            status_icon = {
+                NodeStatus.ACTIVE: "●",
+                NodeStatus.STALE: "◐",
+                NodeStatus.LOST: "○",
+            }.get(device.status, "?")
+            status_text = f"[{status_color}]{status_icon} {device.status.value.upper()}[/]"
+
+            # Name — bright for active
+            if device.status == NodeStatus.ACTIVE:
+                name_text = f"[{cascade.bright} bold]{device.name}[/]"
+            else:
+                name_text = f"[{cascade.medium}]{device.name}[/]"
+
+            # Version
+            ver = device.version or "—"
+            version_text = f"[{cascade.medium}]{ver}[/]"
+
+            # Capabilities — icons for key caps
+            caps = device.capabilities or []
+            cap_parts = []
+            if "autoreply" in caps:
+                cap_parts.append("📨")
+            if "exec" in caps:
+                cap_parts.append("⚡")
+            if "rpc" in caps:
+                cap_parts.append("🔌")
+            if "transport" in caps:
+                cap_parts.append("🔀")
+            # Show any remaining caps as text
+            known = {"autoreply", "exec", "rpc", "transport"}
+            extras = [c for c in caps if c not in known]
+            if extras:
+                cap_parts.append(f"[{cascade.dim}]{','.join(extras)}[/]")
+            caps_text = " ".join(cap_parts) if cap_parts else f"[{cascade.dim}]—[/]"
+
+            # Hops
+            if device.hops is not None:
+                if device.hops == 0:
+                    hops_text = f"[{cascade.medium}]direct[/]"
+                else:
+                    hops_text = f"[{cascade.dim}]{device.hops}[/]"
+            else:
+                hops_text = f"[{cascade.dim}]—[/]"
+
+            # Via
+            via_text = f"[{cascade.dim}]{device.discovered_via}[/]" if device.discovered_via else f"[{cascade.dim}]—[/]"
+
+            # Last seen
+            last_seen_text = device.last_seen_display
+            if device.announce_count > 1:
+                last_seen_text += f" ({device.announce_count})"
+
+            self.add_row(
+                name_text,
+                version_text,
+                caps_text,
+                hops_text,
+                via_text,
+                status_text,
+                last_seen_text,
+                key=device.identity,
+            )
+
+        # Restore selection
+        if selected_key and self.row_count > 0:
+            for row_idx in range(self.row_count):
+                try:
+                    cell_key = self.coordinate_to_cell_key(Coordinate(row_idx, 0))
+                    if cell_key and cell_key.row_key and str(cell_key.row_key.value) == selected_key:
+                        self.cursor_coordinate = Coordinate(row_idx, 0)
+                        break
+                except Exception:
+                    pass
+
+        self._post_count_update(len(devices), len(self._all_devices))
+
+    def _post_count_update(self, visible: int, total: int) -> None:
+        try:
+            screen = self.screen
+            if isinstance(screen, ExplorationScreen):
+                screen.update_count(visible, total)
+        except Exception:
+            pass
+
+    def _sort_devices(self, devices: list[MeshDevice]) -> list[MeshDevice]:
+        key_funcs = {
+            "name": lambda d: d.name.lower(),
+            "version": lambda d: (d.version or "").lower(),
+            "caps": lambda d: len(d.capabilities or []),
+            "hops": lambda d: d.hops if d.hops is not None else 999,
+            "via": lambda d: (d.discovered_via or "").lower(),
+            "status": lambda d: d.status.value,
+            "last_announce": lambda d: d.last_announce,
+        }
+        key_fn = key_funcs.get(self._sort_column, key_funcs["last_announce"])
+        return sorted(devices, key=key_fn, reverse=self._sort_reverse)
+
+    def set_filter(self, text: str) -> None:
+        self._filter_text = text
+        self._rebuild_table()
+
+    def sort_by(self, column_key: str) -> None:
+        if self._sort_column == column_key:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = column_key
+            self._sort_reverse = column_key in ("last_announce", "status", "caps")
+        self._rebuild_table()
+
+    def refresh_data(self) -> None:
+        """Standalone fallback refresh."""
+        try:
+            from styrened.services.node_store import get_node_store
+            from styrened.services.reticulum import _deduplicate_by_identity
+
+            stored = get_node_store().get_styrene_nodes()
+            live = discover_devices()
+            merged = {n.destination_hash: n for n in stored}
+            merged.update({n.destination_hash: n for n in live})
+            styrene = [d for d in merged.values() if d.device_type == DeviceType.STYRENE_NODE]
+            self._all_devices = _deduplicate_by_identity(styrene)
+            self._rebuild_table()
+        except Exception:
+            pass
+
+
 class ExplorationScreen(Screen[None]):
     """Reticulum network exploration screen.
 
-    Categorized tabs for non-Styrene announces:
+    Categorized tabs:
+    - Styrene: fleet nodes with version, capabilities, hops
     - LXMF: messaging destinations
     - Pages: NomadNet page services with inline browser
     - Infrastructure: propagation nodes, RNodes
@@ -439,6 +652,11 @@ class ExplorationScreen(Screen[None]):
                 classes="hidden",
             )
             with TabbedContent(id="explore-tabs"):
+                with TabPane("Styrene", id="tab-styrene"):
+                    yield StyreneFleetTable(
+                        id="table-styrene",
+                        classes="explore-tab-table",
+                    )
                 with TabPane("LXMF", id="tab-lxmf"):
                     yield ReticumAnnounceTable(
                         id="table-lxmf",
@@ -474,24 +692,24 @@ class ExplorationScreen(Screen[None]):
             yield Static("", id="explore-count")
         yield Footer()
 
-    def _get_all_tables(self) -> list[ReticumAnnounceTable]:
-        """Get all announce tables across tabs."""
-        table_ids = ["#table-lxmf", "#table-pages", "#table-infra", "#table-other"]
+    def _get_all_tables(self) -> list[DataTable]:
+        """Get all announce tables across tabs (both ReticumAnnounceTable and StyreneFleetTable)."""
+        table_ids = ["#table-styrene", "#table-lxmf", "#table-pages", "#table-infra", "#table-other"]
         tables = []
         for tid in table_ids:
             try:
-                tables.append(self.query_one(tid, ReticumAnnounceTable))
+                tables.append(self.query_one(tid, DataTable))
             except Exception:
                 pass
         return tables
 
-    def _get_active_table(self) -> ReticumAnnounceTable | None:
+    def _get_active_table(self) -> DataTable | None:
         """Get the announce table in the currently active tab."""
         try:
             tabs = self.query_one("#explore-tabs", TabbedContent)
             active_id = tabs.active
-            # Map tab pane ID to table ID
             table_map = {
+                "tab-styrene": "#table-styrene",
                 "tab-lxmf": "#table-lxmf",
                 "tab-pages": "#table-pages",
                 "tab-infra": "#table-infra",
@@ -499,13 +717,17 @@ class ExplorationScreen(Screen[None]):
             }
             table_id = table_map.get(active_id)
             if table_id:
-                return self.query_one(table_id, ReticumAnnounceTable)
+                return self.query_one(table_id, DataTable)
         except Exception:
             pass
         return None
 
-    def _load_all_devices(self) -> list[MeshDevice]:
-        """Load and deduplicate all exploration devices, filtering LXMF shadows."""
+    def _load_all_devices(self) -> tuple[list[MeshDevice], list[MeshDevice]]:
+        """Load and deduplicate all devices, returning (exploration, all_merged).
+
+        Returns:
+            Tuple of (exploration devices with LXMF shadows filtered, all merged devices).
+        """
         try:
             from styrened.services.node_store import get_node_store
             stored_nodes = get_node_store().get_all_nodes()
@@ -517,28 +739,44 @@ class ExplorationScreen(Screen[None]):
         all_devices_dict = {n.destination_hash: n for n in stored_nodes}
         all_devices_dict.update({n.destination_hash: n for n in live_nodes})
 
+        all_merged = list(all_devices_dict.values())
+
         styrene_identities = {
             d.identity_hash
-            for d in all_devices_dict.values()
+            for d in all_merged
             if d.device_type == DeviceType.STYRENE_NODE
         }
 
-        return [
-            d for d in all_devices_dict.values()
+        exploration = [
+            d for d in all_merged
             if d.device_type in _EXPLORATION_TYPES
             and d.identity_hash not in styrene_identities
         ]
 
+        return exploration, all_merged
+
     def _refresh_announce_tables(self) -> None:
         """Load all devices once and distribute to category tables."""
-        devices = self._load_all_devices()
+        exploration_devices, all_devices = self._load_all_devices()
+
+        # Feed Styrene table from all devices (it filters internally)
+        try:
+            styrene_table = self.query_one("#table-styrene", StyreneFleetTable)
+            styrene_table.load_from_devices(all_devices)
+        except Exception:
+            pass
+
+        # Feed exploration tables from filtered list
         for table in self._get_all_tables():
-            table.load_from_devices(devices)
+            if isinstance(table, ReticumAnnounceTable):
+                table.load_from_devices(exploration_devices)
+
         self._update_tab_labels()
 
     def _update_tab_labels(self) -> None:
         """Update tab labels with device counts."""
         label_map = {
+            "#table-styrene": ("tab-styrene", "Styrene"),
             "#table-lxmf": ("tab-lxmf", "LXMF"),
             "#table-pages": ("tab-pages", "Pages"),
             "#table-infra": ("tab-infra", "Infra"),
@@ -548,8 +786,8 @@ class ExplorationScreen(Screen[None]):
             tabs_widget = self.query_one("#explore-tabs", TabbedContent)
             for table_id, (pane_id, base_label) in label_map.items():
                 try:
-                    table = self.query_one(table_id, ReticumAnnounceTable)
-                    count = table.device_count
+                    table = self.query_one(table_id, DataTable)
+                    count = getattr(table, "device_count", 0)
                     tab = tabs_widget.get_tab(pane_id)
                     if count > 0:
                         tab.label = f"{base_label} ({count})"
@@ -589,11 +827,11 @@ class ExplorationScreen(Screen[None]):
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         """Handle column header click — sort by that column."""
         column_key = str(event.column_key.value) if event.column_key else None
-        if column_key and column_key in ReticumAnnounceTable.COLUMN_KEYS:
-            # Use the specific table that emitted the event
+        if column_key:
             table = event.data_table
-            if isinstance(table, ReticumAnnounceTable):
-                table.sort_by(column_key)
+            if isinstance(table, (ReticumAnnounceTable, StyreneFleetTable)):
+                if column_key in table.COLUMN_KEYS:
+                    table.sort_by(column_key)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle search input changes — filter the active tab's table."""
