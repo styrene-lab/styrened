@@ -99,10 +99,12 @@ def fetch_changelog(from_version: str, to_version: str) -> Changelog:
     """Fetch changelog between two versions.
 
     Strategy order:
-    1. Bundled changelog (baked into package at build time — always works)
-    2. Local git log (dev installs from git checkout)
-    3. GitHub compare API (needs auth for private repos)
-    4. PyPI version listing (always works, no commit messages)
+    1. Bundled changelog (baked into package at build time)
+    2. Target version's bundled changelog from PyPI wheel (covers the gap
+       where the installed version doesn't know about newer releases)
+    3. Local git log (dev installs from git checkout)
+    4. GitHub compare API (needs auth for private repos)
+    5. PyPI version listing (always works, no commit messages)
 
     Args:
         from_version: Current version (e.g., "0.12.5").
@@ -116,17 +118,22 @@ def fetch_changelog(from_version: str, to_version: str) -> Changelog:
     if changelog is not None and changelog.entries:
         return changelog
 
-    # Strategy 2: Local git log
+    # Strategy 2: Fetch target version's bundled changelog from PyPI wheel
+    changelog = _fetch_from_pypi_wheel(from_version, to_version)
+    if changelog is not None and changelog.entries:
+        return changelog
+
+    # Strategy 3: Local git log
     changelog = _fetch_from_git_log(from_version, to_version)
     if changelog is not None and changelog.entries:
         return changelog
 
-    # Strategy 3: GitHub compare API
+    # Strategy 4: GitHub compare API
     changelog = _fetch_from_github_compare(from_version, to_version)
     if changelog is not None and changelog.entries:
         return changelog
 
-    # Strategy 4: PyPI version listing (no commit messages)
+    # Strategy 5: PyPI version listing (no commit messages)
     changelog = _fetch_from_pypi_versions(from_version, to_version)
     if changelog is not None:
         return changelog
@@ -169,6 +176,85 @@ def _fetch_from_bundled(from_version: str, to_version: str) -> Changelog | None:
 
     except Exception as e:
         logger.debug(f"Bundled changelog failed: {e}")
+        return None
+
+
+def _fetch_from_pypi_wheel(from_version: str, to_version: str) -> Changelog | None:
+    """Download the target version's wheel from PyPI and extract its bundled changelog.
+
+    The installed version's _changelog.py can't know about newer releases,
+    but the TARGET version's wheel contains a _changelog.py with entries
+    up to and including itself. We download just enough of the wheel (it's
+    a zip) to extract that single file.
+    """
+    import io
+    import zipfile
+
+    try:
+        from packaging.version import Version
+
+        # Get wheel URL from PyPI JSON API
+        url = f"https://pypi.org/pypi/styrened/{to_version}/json"
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "styrened-changelog"},
+        )
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            data = json.loads(resp.read())
+
+        wheel_url = None
+        for file_info in data.get("urls", []):
+            if file_info["filename"].endswith(".whl"):
+                wheel_url = file_info["url"]
+                break
+
+        if not wheel_url:
+            return None
+
+        # Download wheel (typically ~200KB for styrened)
+        wheel_req = urllib.request.Request(
+            wheel_url,
+            headers={"User-Agent": "styrened-changelog"},
+        )
+        with urllib.request.urlopen(wheel_req, timeout=15) as resp:
+            wheel_data = resp.read()
+
+        # Extract _changelog.py from the zip
+        zf = zipfile.ZipFile(io.BytesIO(wheel_data))
+        try:
+            changelog_src = zf.read("styrened/_changelog.py").decode("utf-8")
+        except KeyError:
+            return None
+
+        # Parse ENTRIES from the source
+        local_ns: dict = {}
+        exec(changelog_src, {"__builtins__": {}}, local_ns)
+        entries_raw = local_ns.get("ENTRIES", [])
+
+        if not entries_raw:
+            return None
+
+        from_v = Version(from_version)
+        to_v = Version(to_version)
+
+        entries = [
+            ChangelogEntry(version=ver, summary=summary)
+            for ver, summary in entries_raw
+            if from_v < Version(ver) <= to_v
+        ]
+
+        if not entries:
+            return None
+
+        return Changelog(
+            from_version=from_version,
+            to_version=to_version,
+            entries=entries,
+            version_count=len(entries),
+        )
+
+    except Exception as e:
+        logger.debug(f"PyPI wheel changelog failed: {e}")
         return None
 
 
