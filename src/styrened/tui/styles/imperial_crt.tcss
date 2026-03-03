@@ -769,14 +769,12 @@ ChatWidget {
 ChatWidget #chat-message-container {
     height: 1fr;
     overflow-y: scroll;
-    /* Gravity-bottom: empty space appears at top, messages at bottom */
-    align-vertical: bottom;
 }
 
 ChatWidget #chat-input-bar {
     height: 2;
     dock: bottom;
-    border-top: heavy $border;
+    border-top: wide $border;
 }
 
 ChatWidget #chat-input-bar #chat-input {

@@ -239,7 +239,7 @@ class DashboardScreen(Screen[None]):
                 panel.daemon_connected = False
             except Exception:
                 pass
-            self.run_worker(self._fetch_daemon_status())
+            self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
             self.run_worker(self._subscribe_activity())
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
@@ -254,7 +254,7 @@ class DashboardScreen(Screen[None]):
             tree.refresh_data()
 
         if self._ipc_bridge is not None:
-            self.run_worker(self._fetch_daemon_status())
+            self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
 
     def _retry_hub_connection(self) -> None:
         """Periodically retry hub connection if not connected."""
@@ -290,7 +290,7 @@ class DashboardScreen(Screen[None]):
             logging.getLogger(__name__).error(f"Tree refresh failed: {e}", exc_info=True)
 
         if self._ipc_bridge is not None:
-            self.run_worker(self._fetch_daemon_status())
+            self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -364,7 +364,7 @@ class DashboardScreen(Screen[None]):
             pass
 
         if self._ipc_bridge is not None:
-            self.run_worker(self._fetch_daemon_status())
+            self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
 
     async def _fetch_daemon_status(self) -> None:
         """Fetch daemon status and comms data via IPC bridge."""
@@ -400,28 +400,31 @@ class DashboardScreen(Screen[None]):
             panel.daemon_connected = False
             return
 
-        # Fetch conversations for unread/chat counts
+        # Fetch conversations, contacts, and auto-reply in parallel
+        import asyncio
+        convs_task = asyncio.create_task(bridge.get_conversations())
+        contacts_task = asyncio.create_task(bridge.get_contacts())
+        auto_reply_task = asyncio.create_task(bridge.get_auto_reply())
+
         try:
-            convs = await bridge.get_conversations()
+            convs = await convs_task
             panel.conversation_count = len(convs)
             panel.unread_count = sum(c.get("unread_count", 0) for c in convs)
-            # Count sent/received from conversation metadata
-            panel.messages_sent = sum(c.get("sent_count", 0) for c in convs)
-            panel.messages_received = sum(c.get("received_count", 0) for c in convs)
-            panel.pending_deliveries = sum(c.get("pending_count", 0) for c in convs)
+            total_messages = sum(c.get("message_count", 0) for c in convs)
+            panel.messages_sent = 0  # not tracked per-conversation yet
+            panel.messages_received = total_messages
+            panel.pending_deliveries = 0  # not tracked per-conversation yet
         except Exception:
             pass
 
-        # Fetch contacts count
         try:
-            contacts = await bridge.get_contacts()
+            contacts = await contacts_task
             panel.contact_count = len(contacts)
         except Exception:
             pass
 
-        # Fetch auto-reply status
         try:
-            auto_reply = await bridge.get_auto_reply()
+            auto_reply = await auto_reply_task
             panel.auto_reply_enabled = bool(auto_reply.get("enabled", False))
         except Exception:
             pass

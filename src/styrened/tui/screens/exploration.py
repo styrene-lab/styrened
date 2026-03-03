@@ -173,7 +173,7 @@ class ReticumAnnounceTable(DataTable[str]):
             else:
                 msg = "No announces discovered"
             self.add_row(
-                "-", "-", "-", "-", "-", f"[{cascade.dim}]{msg}[/]", "-"
+                f"[{cascade.dim}]{msg}[/]", "", "", "", "", "", ""
             )
             self._post_count_update(0, len(self._all_devices))
             return

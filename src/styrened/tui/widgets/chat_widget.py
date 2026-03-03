@@ -478,6 +478,7 @@ class ChatWidget(Widget, can_focus=True):
                 # First load or empty → full rebuild
                 await container.remove_children()
                 self._message_ids = new_ids
+                self._last_displayed_date = None
                 self._pending_messages.clear()
 
                 if not messages:
@@ -499,6 +500,16 @@ class ChatWidget(Widget, can_focus=True):
 
                 container.scroll_end(animate=False)
             else:
+                new_ids_set = set(new_ids)
+                deleted_ids = old_ids_set - new_ids_set
+
+                if deleted_ids:
+                    # Messages were deleted — full rebuild needed
+                    self._message_ids = []
+                    self._last_displayed_date = None
+                    await self._refresh_messages()
+                    return
+
                 # Incremental — only append new messages
                 appended = False
                 # Determine last date from existing messages for date separator continuity
@@ -829,6 +840,10 @@ class ChatWidget(Widget, can_focus=True):
 
         for child in reversed(list(container.query(".--outgoing"))):
             if isinstance(child, MessageBubble):
+                # Match by content to avoid updating the wrong bubble
+                # when multiple sends are in flight
+                if child.raw_content and child.raw_content.rstrip() != content.rstrip():
+                    continue
                 if status == "failed":
                     msg_text = f"[red italic]{content}[/] {icon}"
                 else:
@@ -1414,10 +1429,7 @@ class ChatWidget(Widget, can_focus=True):
         # This catches screenshots (Cmd+Shift+4 → clipboard) and Finder copies.
         if has_clipboard_image():
             event.prevent_default()
-            self.run_worker(
-                self._stage_from_clipboard(),
-                group="chat-paste",
-            )
+            self._do_stage_from_clipboard()
             return
 
         # Fallback: check if pasted text is a file path
@@ -1448,7 +1460,7 @@ class ChatWidget(Widget, can_focus=True):
         which triggers on_paste(). This action is a fallback for when
         the widget itself has focus (message browsing mode).
         """
-        self.run_worker(self._stage_from_clipboard(), group="chat-paste")
+        self._do_stage_from_clipboard()
 
     def action_attach_clipboard(self) -> None:
         """Attach clipboard content (Ctrl+Y).
@@ -1494,44 +1506,47 @@ class ChatWidget(Widget, can_focus=True):
 
     def _stage_clipboard_attachment(self, attachment: "ClipboardAttachment") -> None:
         """Stage a clipboard attachment for sending."""
-        if attachment is not None:
-            self._pending_attachment = {
-                "data_b64": attachment.data_b64,
-                "filename": attachment.filename,
-                "mime": attachment.mime,
-            }
-            icon = ATTACHMENT_ICONS.get(
-                "image" if attachment.mime.startswith("image/") else
-                "audio" if attachment.mime.startswith("audio/") else
-                "file",
-                ATTACHMENT_ICONS["file"],
-            )
-            size_str = _human_size(attachment.size)
-            source_label = {
-                "screenshot": "📋 screenshot",
-                "image_copy": "📋 copied image",
-                "file": "📎 file",
-                "path": "📎 file",
-            }.get(attachment.source, "📎")
-            self._set_status(
-                f"[dim]{icon} {source_label}: {attachment.filename} ({size_str}) "
-                f"| Enter to send, Esc to cancel[/]"
-            )
-            try:
-                chat_input = self.query_one("#chat-input", Input)
-                chat_input.placeholder = f"📎 {attachment.filename} — Enter to send, Esc to cancel"
-                chat_input.focus()
-            except Exception:
-                pass
+        self._pending_attachment = {
+            "data_b64": attachment.data_b64,
+            "filename": attachment.filename,
+            "mime": attachment.mime,
+        }
+        icon = ATTACHMENT_ICONS.get(
+            "image" if attachment.mime.startswith("image/") else
+            "audio" if attachment.mime.startswith("audio/") else
+            "file",
+            ATTACHMENT_ICONS["file"],
+        )
+        size_str = _human_size(attachment.size)
+        source_label = {
+            "screenshot": "📋 screenshot",
+            "image_copy": "📋 copied image",
+            "file": "📎 file",
+            "path": "📎 file",
+        }.get(attachment.source, "📎")
+        self._set_status(
+            f"[dim]{icon} {source_label}: {attachment.filename} ({size_str}) "
+            f"| Enter to send, Esc to cancel[/]"
+        )
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.placeholder = f"📎 {attachment.filename} — Enter to send, Esc to cancel"
+            chat_input.focus()
+        except Exception:
+            pass
 
-    async def _stage_from_clipboard(self) -> None:
+    def _do_stage_from_clipboard(self) -> None:
         """Read clipboard and stage as attachment.
 
-        NOTE: clipboard read happens via call_from_thread/call_later to
-        ensure NSPasteboard is accessed on the main thread.
+        Called directly (not via run_worker) to ensure NSPasteboard
+        is accessed on the main thread, as required by macOS/PyObjC.
         """
-        # Read clipboard on main thread — PyObjC NSPasteboard requires it
-        attachment = read_clipboard_attachment()
+        try:
+            attachment = read_clipboard_attachment()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Clipboard read exception: {e}")
+            attachment = None
 
         if attachment is None:
             self._set_status("[dim]No image or file in clipboard[/]")
