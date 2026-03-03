@@ -376,8 +376,8 @@ class TestIPCHandlersChatValidation:
         assert "peer_hash is required" in response.message
 
     @pytest.mark.asyncio
-    async def test_handle_cmd_send_chat_requires_content(self):
-        """CMD_SEND_CHAT should require content."""
+    async def test_handle_cmd_send_chat_requires_content_or_attachment(self):
+        """CMD_SEND_CHAT should require content or attachment."""
         daemon = MockDaemon()
         handlers = IPCHandlers(daemon=daemon)
 
@@ -388,7 +388,7 @@ class TestIPCHandlersChatValidation:
         response = await handlers.handle_cmd_send_chat(request)
 
         assert isinstance(response, ErrorResponse)
-        assert "content is required" in response.message
+        assert "content or attachment is required" in response.message
 
     @pytest.mark.asyncio
     async def test_handle_cmd_send_chat_rejects_none_peer_hash(self):

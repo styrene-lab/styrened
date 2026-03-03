@@ -74,6 +74,18 @@ class NodeInfoPanel(Static):
     # Security tier (PQC session status)
     security_tier: reactive[str] = reactive("")
 
+    # Comms reactive vars (populated from IPC or local DB)
+    unread_count: reactive[int] = reactive(0)
+    conversation_count: reactive[int] = reactive(0)
+    contact_count: reactive[int] = reactive(0)
+    messages_sent: reactive[int] = reactive(0)
+    messages_received: reactive[int] = reactive(0)
+    pending_deliveries: reactive[int] = reactive(0)
+    auto_reply_enabled: reactive[bool] = reactive(False)
+    propagation_enabled: reactive[bool] = reactive(False)
+    transport_enabled: reactive[bool] = reactive(False)
+    active_links: reactive[int] = reactive(0)
+
     # When True, skip local RNS/discovery queries (screen pushes daemon data)
     ipc_managed: reactive[bool] = reactive(False)
 
@@ -160,6 +172,24 @@ class NodeInfoPanel(Static):
                 tier_color = cascade.bright if "PQC" in self.security_tier.upper() else cascade.medium
                 lines.append(f"  SEC: [{tier_color}]{self.security_tier}[/]")
 
+        # === COMMS ===
+        lines.append("")
+        lines.append(f"[{cascade.bright}]COMMS[/]")
+        if self.unread_count > 0:
+            lines.append(f"  INBOX: [{cascade.bright} bold]✉ {self.unread_count} unread[/]")
+        else:
+            lines.append(f"  INBOX: [{cascade.dim}]no unread[/]")
+        if self.conversation_count > 0:
+            lines.append(f"  CHATS: [{cascade.medium}]{self.conversation_count}[/]")
+        else:
+            lines.append(f"  CHATS: [{cascade.dim}]none[/]")
+        if self.contact_count > 0:
+            lines.append(f"  CONTACTS: [{cascade.medium}]{self.contact_count}[/]")
+        else:
+            lines.append(f"  CONTACTS: [{cascade.dim}]none[/]")
+        if self.auto_reply_enabled:
+            lines.append(f"  AUTO-REPLY: {SemanticSymbols.ONLINE} [{cascade.medium}]on[/]")
+
         return lines
 
     def _render_right_column(self, cascade: object) -> list[str]:
@@ -219,6 +249,30 @@ class NodeInfoPanel(Static):
         else:
             lines.append(f"  MESH: {SemanticSymbols.OFFLINE} [{cascade.dim}]no peers[/]")
 
+        # === TRAFFIC ===
+        lines.append("")
+        lines.append(f"[{cascade.bright}]TRAFFIC[/]")
+        traffic_parts = []
+        if self.messages_sent > 0:
+            traffic_parts.append(f"↑{self.messages_sent}")
+        if self.messages_received > 0:
+            traffic_parts.append(f"↓{self.messages_received}")
+        if traffic_parts:
+            lines.append(f"  MSG: [{cascade.medium}]{' '.join(traffic_parts)}[/]")
+        else:
+            lines.append(f"  MSG: [{cascade.dim}]no traffic[/]")
+        if self.pending_deliveries > 0:
+            lines.append(f"  PENDING: [{cascade.bright}]{self.pending_deliveries}[/]")
+        if self.active_links > 0:
+            lines.append(f"  LINKS: [{cascade.medium}]{self.active_links} active[/]")
+        role_parts = []
+        if self.transport_enabled:
+            role_parts.append("transport")
+        if self.propagation_enabled:
+            role_parts.append("propagation")
+        if role_parts:
+            lines.append(f"  ROLE: [{cascade.medium}]{', '.join(role_parts)}[/]")
+
         # === VERSION ===
         lines.append("")
         try:
@@ -271,10 +325,12 @@ class NodeInfoPanel(Static):
         self._load_all_data()
 
     def _load_all_data(self) -> None:
-        """Load hardware, Styrene, and Reticulum data."""
+        """Load hardware, Styrene, Reticulum, and comms data."""
         self._load_hardware_data()
         self._load_styrene_data()
         self._load_reticulum_data()
+        if not self.ipc_managed:
+            self._load_comms_data()
 
     def _load_hardware_data(self) -> None:
         """Load system hardware information."""
@@ -415,6 +471,65 @@ class NodeInfoPanel(Static):
         else:
             self.interface_count = 0
             self.interface_status = ""
+
+    def _load_comms_data(self) -> None:
+        """Load local comms data from the message database (non-IPC mode)."""
+        try:
+            app = self.app
+            if not hasattr(app, "db_engine") or app.db_engine is None:
+                return
+
+            from sqlalchemy.orm import Session as SASession
+            from styrened.models.messages import Message
+
+            with SASession(app.db_engine) as session:
+                local_hash = getattr(app, "local_identity_hash", None)
+
+                # Count conversations (distinct peer hashes)
+                all_msgs = session.query(Message).filter(
+                    Message.protocol_id == "chat"
+                ).all()
+
+                peer_hashes = set()
+                sent = 0
+                received = 0
+                unread = 0
+                pending = 0
+
+                for msg in all_msgs:
+                    peer_hashes.add(msg.source_hash if msg.source_hash != local_hash else msg.destination_hash)
+                    if msg.source_hash == local_hash:
+                        sent += 1
+                    else:
+                        received += 1
+                    if msg.status == "pending" and msg.destination_hash == local_hash:
+                        unread += 1
+                    if msg.status in ("queued", "sending"):
+                        pending += 1
+
+                self.conversation_count = len(peer_hashes)
+                self.messages_sent = sent
+                self.messages_received = received
+                self.unread_count = unread
+                self.pending_deliveries = pending
+        except Exception:
+            pass
+
+        # Contact count from node store
+        try:
+            from styrened.services.node_store import get_node_store
+            contacts = get_node_store().get_contacts()
+            self.contact_count = len(contacts) if contacts else 0
+        except Exception:
+            pass
+
+        # Auto-reply status from config
+        try:
+            config = load_config()
+            if hasattr(config, "auto_reply"):
+                self.auto_reply_enabled = getattr(config.auto_reply, "enabled", False)
+        except Exception:
+            pass
 
     def _get_error_state(self) -> RNSErrorState | None:
         """Get the RNS error state from the app's lifecycle.

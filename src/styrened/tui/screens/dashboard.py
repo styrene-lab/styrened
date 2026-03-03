@@ -367,25 +367,64 @@ class DashboardScreen(Screen[None]):
             self.run_worker(self._fetch_daemon_status())
 
     async def _fetch_daemon_status(self) -> None:
-        """Fetch daemon status via IPC bridge."""
+        """Fetch daemon status and comms data via IPC bridge."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
+
+        try:
+            panel = self.query_one(NodeInfoPanel)
+        except Exception:
+            return
+
         try:
             status = await bridge.get_status()
-            try:
-                panel = self.query_one(NodeInfoPanel)
-                panel.daemon_connected = True
-                if hasattr(status, "uptime"):
-                    panel.daemon_uptime = status.uptime
-            except Exception:
-                pass
+            panel.daemon_connected = True
+            if hasattr(status, "uptime"):
+                panel.daemon_uptime = status.uptime
+            if hasattr(status, "daemon_version") and status.daemon_version:
+                panel.daemon_version = status.daemon_version
+            if hasattr(status, "propagation_enabled"):
+                panel.propagation_enabled = status.propagation_enabled
+            if hasattr(status, "transport_enabled"):
+                panel.transport_enabled = status.transport_enabled
+            if hasattr(status, "active_links"):
+                panel.active_links = status.active_links
+            if hasattr(status, "styrene_node_count"):
+                panel.styrene_mesh_count = status.styrene_node_count
+            if hasattr(status, "interface_count"):
+                panel.interface_count = status.interface_count
+            if hasattr(status, "rns_initialized"):
+                panel.rns_online = status.rns_initialized
         except Exception:
-            try:
-                panel = self.query_one(NodeInfoPanel)
-                panel.daemon_connected = False
-            except Exception:
-                pass
+            panel.daemon_connected = False
+            return
+
+        # Fetch conversations for unread/chat counts
+        try:
+            convs = await bridge.get_conversations()
+            panel.conversation_count = len(convs)
+            panel.unread_count = sum(c.get("unread_count", 0) for c in convs)
+            # Count sent/received from conversation metadata
+            panel.messages_sent = sum(c.get("sent_count", 0) for c in convs)
+            panel.messages_received = sum(c.get("received_count", 0) for c in convs)
+            panel.pending_deliveries = sum(c.get("pending_count", 0) for c in convs)
+        except Exception:
+            pass
+
+        # Fetch contacts count
+        try:
+            contacts = await bridge.get_contacts()
+            panel.contact_count = len(contacts)
+        except Exception:
+            pass
+
+        # Fetch auto-reply status
+        try:
+            auto_reply = await bridge.get_auto_reply()
+            panel.auto_reply_enabled = bool(auto_reply.get("enabled", False))
+        except Exception:
+            pass
 
     async def _subscribe_activity(self) -> None:
         """Subscribe to activity events via IPC."""
