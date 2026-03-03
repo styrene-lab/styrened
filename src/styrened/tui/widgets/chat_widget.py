@@ -107,8 +107,7 @@ class ChatWidget(Widget, can_focus=True):
         Binding("y", "copy_message", "Copy", show=True),
         Binding("o", "open_attachment", "Open", show=True),
         Binding("a", "attach_file", "Attach", show=True),
-        Binding("ctrl+p", "attach_clipboard", "📋 Attach", priority=True),
-        Binding("ctrl+o", "attach_clipboard", "📋 Attach", show=False, priority=True),
+        Binding("ctrl+y", "attach_clipboard", "📋 Attach", priority=True),
         Binding("ctrl+v", "paste_attachment", "Paste", show=False),
     ]
 
