@@ -694,18 +694,20 @@ def render_to_rich(
 
         if elem.element_type == ElementType.HEADING:
             level = min(elem.level, 3)
-            base_tag = "bold italic" if level >= 3 else "bold"
+            # Visual hierarchy: h1 = bright cyan bold, h2 = cyan bold, h3 = dim cyan italic
+            _HEADING_STYLES = {
+                1: "bold #5af0ce",
+                2: "bold #3fbfa0",
+                3: "bold italic #6a9a8e",
+            }
+            base_tag = _HEADING_STYLES.get(level, "bold #5af0ce")
 
             if elem.children:
-                # Children-aware: render each child with heading base
-                # style merged with its own inline style
                 parts: list[str] = []
                 for child in elem.children:
                     child_tags = [base_tag]
                     if child.style.fg_color:
                         child_tags.append(child.style.fg_color)
-                    if child.style.italic and base_tag == "bold":
-                        child_tags.append("italic")
                     if child.style.underline:
                         child_tags.append("underline")
                     tag_str = " ".join(child_tags)
@@ -714,7 +716,6 @@ def render_to_rich(
                     )
                 lines.append("".join(parts))
             else:
-                # Backward compat: plain content rendering
                 lines.append(f"[{base_tag}]{_escape(elem.content)}[/{base_tag}]")
 
         elif elem.element_type == ElementType.TEXT:
@@ -725,28 +726,28 @@ def render_to_rich(
                 lines.append(markup)
 
         elif elem.element_type == ElementType.DIVIDER:
-            lines.append(f"[dim]{elem.divider_char * 40}[/dim]")
+            lines.append(f"[dim #3a6a5e]{elem.divider_char * 48}[/dim #3a6a5e]")
 
         elif elem.element_type == ElementType.LITERAL:
-            # Render verbatim content with dim italic for visual distinction
+            # Render verbatim content in a visually distinct monospace block
             for lit_line in elem.content.split("\n"):
-                lines.append(f"[dim italic]{_escape(lit_line)}[/dim italic]")
+                lines.append(f"[dim #8a9a8e]  │ {_escape(lit_line)}[/dim #8a9a8e]")
 
         elif elem.element_type == ElementType.LINK:
             label = _escape(elem.content) or _escape(elem.url)
             url_safe = elem.url.replace("\\", "\\\\").replace("'", "\\'")
+            link_style = "underline #5ac8fa"
             if elem.link_fields:
-                # Form submit link — collect named fields and submit
                 fields_safe = elem.link_fields.replace("\\", "\\\\").replace("'", "\\'")
                 lines.append(
                     f"[@click=\"submit_form('{url_safe}', '{fields_safe}')\"]"
-                    f"[underline]{label}[/underline]"
+                    f"[{link_style}]▸ {label}[/{link_style}]"
                     f"[/]"
                 )
             else:
                 lines.append(
                     f"[@click=\"navigate_link('{url_safe}')\"]"
-                    f"[underline]{label}[/underline]"
+                    f"[{link_style}]▸ {label}[/{link_style}]"
                     f"[/]"
                 )
 
