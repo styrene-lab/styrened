@@ -291,16 +291,11 @@ class UpgradeScreen(ModalScreen[bool]):
             self.app.call_from_thread(self._finish_failure)
 
     def _finish_success(self) -> None:
-        """Replace action buttons with a restart prompt (guarded)."""
+        """Auto-restart after successful upgrade — no user action needed."""
         self._upgrading = False
         if not self.is_mounted:
             return
-        try:
-            actions = self.query_one("#upgrade-actions", Horizontal)
-            actions.remove_children()
-            actions.mount(Button("Restart TUI", id="btn-restart", variant="success"))
-        except Exception:
-            pass
+        self.dismiss(True)
 
     def _finish_failure(self) -> None:
         """Replace action buttons with a close button (guarded)."""
