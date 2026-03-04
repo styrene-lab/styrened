@@ -1,16 +1,17 @@
-"""Mesh VPN service — WireGuard tunnels bootstrapped over RNS.Link.
+"""Mesh VPN service — WireGuard tunnels bootstrapped over LXMF.
 
 Three-tier connectivity model:
   1. Internet available → WireGuard to mesh gateway → bat0 IP access
   2. Local WiFi         → BATMAN-ADV (802.11s)     → bat0 IP access
   3. LoRa only          → RNS.Link L2 tunnel       → bat0 IP access (future)
 
-This service handles tier 1: using the existing RNS.Link (DirectLinkService)
+This service handles tier 1: using Styrene protocol messages over LXMF
 to exchange WireGuard public keys and endpoints, then establishing a WireGuard
 tunnel that a gateway node can bridge into bat0.
 
-Key exchange happens over the already-encrypted, identity-verified RNS.Link —
-no manual key management or config files needed.
+Key exchange happens as end-to-end encrypted LXMF messages routed through
+any available hub — no direct RNS.Link connection needed per peer. The hub
+acts as a signaling server; WireGuard data flows directly peer-to-peer.
 """
 
 import base64
@@ -21,7 +22,7 @@ import logging
 import os
 import platform
 import stat
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -163,7 +164,7 @@ def derive_mesh_ip(identity_hash: str, subnet_prefix: str = DEFAULT_SUBNET_PREFI
 
 
 # =============================================================================
-# Handshake protocol (JSON over RNS.Link /vpn/handshake)
+# Handshake protocol (JSON over LXMF StyreneProtocol)
 # =============================================================================
 
 
@@ -182,7 +183,7 @@ def build_handshake_request(
     mesh_ip: str,
     endpoint: str | None = None,
 ) -> bytes:
-    """Build a VPN handshake request to send over RNS.Link.
+    """Build a VPN handshake request to send over LXMF.
 
     Args:
         public_key: Our WireGuard public key.
@@ -234,7 +235,7 @@ def parse_handshake_request(data: bytes) -> PeerInfo:
     """Parse a VPN handshake request.
 
     Args:
-        data: JSON-encoded bytes from RNS.Link.
+        data: JSON-encoded bytes from LXMF message.
 
     Returns:
         PeerInfo with the peer's WireGuard details.
@@ -262,7 +263,7 @@ def parse_handshake_response(data: bytes) -> PeerInfo:
     """Parse a VPN handshake response.
 
     Args:
-        data: JSON-encoded bytes from RNS.Link.
+        data: JSON-encoded bytes from LXMF message.
 
     Returns:
         PeerInfo with the responder's WireGuard details.
@@ -299,21 +300,21 @@ from styrened.models.config import MeshVPNConfig  # noqa: E402, F401
 
 
 class MeshVPNService:
-    """Manages WireGuard mesh VPN tunnels bootstrapped over RNS.Link.
+    """Manages WireGuard mesh VPN tunnels bootstrapped over LXMF.
 
     Lifecycle:
         1. On start, generate or load WireGuard keypair
         2. Derive mesh IP from RNS identity hash
-        3. Register /vpn/handshake handler on datalink destination
-        4. When a peer initiates handshake over RNS.Link:
+        3. Register VPN_HANDSHAKE_REQUEST handler on StyreneProtocol
+        4. When a peer sends VPN handshake via LXMF:
            a. Exchange WG public keys + endpoints
            b. Configure WireGuard peer
            c. If gateway: bridge into bat0
         5. On stop, tear down WireGuard interface
 
-    The RNS.Link provides the trust anchor — if a peer can establish
-    an authenticated Link to our datalink destination, we trust their
-    WireGuard key.
+    LXMF messages are end-to-end encrypted by RNS identity keys.
+    The hub routes them but cannot read the payload. Trust comes from
+    RNS identity authentication — same as before, no direct link needed.
     """
 
     def __init__(
@@ -332,6 +333,8 @@ class MeshVPNService:
         self._platform = detect_platform()
         self._interface_name = "wg-styrene"
         self._started = False
+        self._styrene_protocol: Any = None  # Set by daemon after start
+        self._pending_handshakes: dict[str, Any] = {}  # identity_hash → asyncio.Future
 
     @property
     def enabled(self) -> bool:
@@ -415,6 +418,9 @@ class MeshVPNService:
         """Stop the service and tear down the WireGuard interface."""
         if not self._started:
             return
+        # Tear down VXLAN overlays before destroying the WG interface
+        if self.config.gateway and self._platform == VPNPlatform.LINUX:
+            await self._destroy_all_vxlans()
         await self._destroy_interface()
         self._peers.clear()
         self._started = False
@@ -433,75 +439,110 @@ class MeshVPNService:
         if exc:
             logger.error(f"Peer configuration failed: {exc}")
 
-    def handle_handshake(
-        self,
-        path: str,
-        data: Any,
-        request_id: Any,
-        link_id: Any,
-        remote_identity: Any,
-    ) -> bytes:
-        """Handle incoming /vpn/handshake request over RNS.Link.
+    async def handle_handshake_request(self, message: Any, envelope: Any) -> None:
+        """Handle incoming VPN_HANDSHAKE_REQUEST via Styrene protocol over LXMF.
 
-        This is a synchronous RNS request handler (called from RNS thread).
+        Decodes the peer's WG info, configures WG peer, and sends back
+        a VPN_HANDSHAKE_RESPONSE via LXMF.
 
         Args:
-            data: JSON-encoded handshake request bytes.
-            remote_identity: The RNS identity of the requesting peer.
-
-        Returns:
-            JSON-encoded handshake response bytes.
+            message: LXMF message (has .source_hash)
+            envelope: StyreneEnvelope (payload is JSON handshake request)
         """
         try:
+            from styrened.models.styrene_wire import decode_payload
+            payload_data = decode_payload(envelope.payload)
+            data = payload_data if isinstance(payload_data, bytes) else json.dumps(payload_data).encode()
+
             peer_info = parse_handshake_request(data)
-            remote_hash = remote_identity.hash.hex() if remote_identity else "unknown"
+            remote_hash = message.source_hash  # hex string from LXMFMessage
             peer_info.identity_hash = remote_hash
 
             logger.info(
-                f"VPN handshake from {remote_hash[:16]}: "
+                f"VPN handshake request from {remote_hash[:16]}: "
                 f"ip={peer_info.mesh_ip} key={peer_info.public_key[:8]}..."
             )
 
             # Verify subnet prefix agreement
             peer_prefix = extract_prefix(peer_info.mesh_ip)
-            our_prefix = self.config.subnet_prefix
+            our_prefix = extract_prefix(
+                f"{self.config.subnet_prefix}::1"
+            ) or self.config.subnet_prefix
             if peer_prefix and our_prefix and peer_prefix != our_prefix:
                 logger.warning(
                     f"Subnet prefix mismatch with {remote_hash[:16]}: "
                     f"ours={our_prefix} theirs={peer_prefix}"
                 )
-                return json.dumps({
-                    "error": "subnet_prefix_mismatch",
-                    "our_prefix": our_prefix,
-                }).encode("utf-8")
+                return
 
-            # Store peer
+            # Store and configure peer
             self._peers[remote_hash] = peer_info
+            await self._configure_peer(remote_hash, peer_info)
 
-            # Build response with our info — auto-detect endpoint if not configured
+            # Send response via LXMF
             endpoint = self.config.endpoint or self._detect_local_endpoint(
                 self.config.listen_port
             )
-            response = build_handshake_response(
+            response_data = build_handshake_response(
                 public_key=self.public_key,
                 mesh_ip=self.mesh_ip,
                 endpoint=endpoint,
                 gateway=self.config.gateway,
             )
+            await self._send_vpn_message(
+                remote_hash,
+                "VPN_HANDSHAKE_RESPONSE",
+                response_data,
+                request_id=envelope.request_id,
+            )
 
-            # Schedule async WireGuard peer configuration
-            # (can't await in sync handler — fire and forget via event loop)
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                task = loop.create_task(self._configure_peer(remote_hash, peer_info))
-                task.add_done_callback(self._on_peer_config_done)
-
-            return response
+            logger.info(f"VPN handshake response sent to {remote_hash[:16]}")
 
         except Exception as e:
-            logger.error(f"VPN handshake failed: {e}")
-            return json.dumps({"error": str(e)}).encode("utf-8")
+            logger.error(f"VPN handshake request handling failed: {e}")
+
+    async def handle_handshake_response(self, message: Any, envelope: Any) -> None:
+        """Handle incoming VPN_HANDSHAKE_RESPONSE via Styrene protocol.
+
+        The peer has accepted our handshake — configure them as WG peer.
+
+        Args:
+            message: LXMF message (has .source_hash)
+            envelope: StyreneEnvelope (payload is JSON handshake response)
+        """
+        try:
+            from styrened.models.styrene_wire import decode_payload
+            payload_data = decode_payload(envelope.payload)
+            data = payload_data if isinstance(payload_data, bytes) else json.dumps(payload_data).encode()
+
+            peer_info = parse_handshake_response(data)
+            remote_hash = message.source_hash  # hex string from LXMFMessage
+            peer_info.identity_hash = remote_hash
+
+            logger.info(
+                f"VPN handshake response from {remote_hash[:16]}: "
+                f"ip={peer_info.mesh_ip} gateway={peer_info.gateway}"
+            )
+
+            # Store and configure peer
+            self._peers[remote_hash] = peer_info
+            await self._configure_peer(remote_hash, peer_info)
+
+            # Resolve pending handshake future if any
+            future = self._pending_handshakes.pop(remote_hash, None)
+            if future and not future.done():
+                future.set_result(peer_info)
+
+            logger.info(
+                f"VPN handshake complete with {remote_hash[:16]}: "
+                f"ip={peer_info.mesh_ip} gateway={peer_info.gateway}"
+            )
+
+        except Exception as e:
+            logger.error(f"VPN handshake response handling failed: {e}")
+            future = self._pending_handshakes.pop(message.source_hash, None)
+            if future and not future.done():
+                future.set_exception(e)
 
     # -------------------------------------------------------------------------
     # WireGuard interface management (platform-specific)
@@ -553,10 +594,12 @@ class MeshVPNService:
 
         # Write private key to temp file with restricted permissions
         fd, key_path = tempfile.mkstemp(prefix="wg_", suffix=".key")
+        fd_closed = False
         try:
             os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
             os.write(fd, self.private_key.encode())
             os.close(fd)
+            fd_closed = True
 
             proc = await asyncio.create_subprocess_exec(
                 "wg", "set", self._interface_name,
@@ -570,6 +613,8 @@ class MeshVPNService:
                 logger.error(f"wg set failed: {stderr.decode()}")
                 return False
         finally:
+            if not fd_closed:
+                os.close(fd)
             os.unlink(key_path)
 
         # Assign mesh IPv6 and bring up
@@ -592,19 +637,12 @@ class MeshVPNService:
             logger.error(f"Failed to bring up {self._interface_name}: {stderr.decode()}")
             return False
 
-        # If gateway, add WG interface to bat0
-        if self.config.gateway:
-            await self._add_to_batman()
-
         logger.info(f"WireGuard interface {self._interface_name} up: {self.mesh_ip}/64")
         return True
 
     async def _destroy_interface_linux(self) -> None:
         """Remove WireGuard interface on Linux."""
         import asyncio
-
-        if self.config.gateway:
-            await self._remove_from_batman()
 
         proc = await asyncio.create_subprocess_exec(
             "ip", "link", "del", "dev", self._interface_name,
@@ -615,16 +653,22 @@ class MeshVPNService:
         logger.info(f"WireGuard interface {self._interface_name} removed")
 
     async def _create_interface_macos(self) -> bool:
-        """Create WireGuard tunnel on macOS using wg-quick. Returns True on success."""
+        """Create WireGuard tunnel on macOS via wg-quick.
+
+        macOS requires root for utun interface creation and all wg
+        commands (the UAPI socket is root-owned). If not running as
+        root, writes the config file and returns False with instructions.
+
+        Returns:
+            True if tunnel is up, False if config-only (not root).
+        """
         import asyncio
         import shutil
 
         if not shutil.which("wg-quick"):
-            logger.error("wg-quick not found — install WireGuard: brew install wireguard-tools")
+            logger.error("wg-quick not found — install: brew install wireguard-tools")
             return False
 
-        # macOS uses userspace wireguard-go, managed via wg-quick.
-        # Write config and bring up the tunnel.
         conf_path = self._styrene_dir / f"{self._interface_name}.conf"
         conf_content = (
             f"[Interface]\n"
@@ -635,21 +679,24 @@ class MeshVPNService:
         conf_path.write_text(conf_content)
         conf_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
-        # wg-quick on macOS requires sudo for utun creation
+        if os.geteuid() != 0:
+            logger.warning(
+                f"Not running as root — WireGuard config written to {conf_path} "
+                f"but tunnel NOT activated. Restart with: sudo styrened daemon"
+            )
+            return False
+
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "wg-quick", "up", str(conf_path),
+            "wg-quick", "up", str(conf_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             logger.error(f"wg-quick up failed: {stderr.decode()}")
-            logger.error(
-                "WireGuard requires root on macOS. Either run with sudo, "
-                "or use the WireGuard.app GUI to manage tunnels."
-            )
             return False
 
+        self._macos_tunnel_active = True
         logger.info(f"WireGuard tunnel up on macOS: {self.mesh_ip}/64")
         return True
 
@@ -658,62 +705,196 @@ class MeshVPNService:
         import asyncio
 
         conf_path = self._styrene_dir / f"{self._interface_name}.conf"
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "wg-quick", "down", str(conf_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate()
-        # Clean up config
+
+        if getattr(self, "_macos_tunnel_active", False):
+            proc = await asyncio.create_subprocess_exec(
+                "wg-quick", "down", str(conf_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            self._macos_tunnel_active = False
+            logger.info("WireGuard tunnel down on macOS")
+
         if conf_path.exists():
             conf_path.unlink()
-        logger.info("WireGuard tunnel down on macOS")
+
+    def _append_peer_to_macos_conf(self, peer: PeerInfo, allowed_ips: str) -> None:
+        """Append a [Peer] section to the macOS wg-quick config."""
+        conf_path = self._styrene_dir / f"{self._interface_name}.conf"
+        if not conf_path.exists():
+            return
+        peer_block = (
+            f"\n[Peer]\n"
+            f"PublicKey = {peer.public_key}\n"
+            f"AllowedIPs = {allowed_ips}\n"
+            f"PersistentKeepalive = 25\n"
+        )
+        if peer.endpoint:
+            peer_block += f"Endpoint = {peer.endpoint}\n"
+        with open(conf_path, "a") as f:
+            f.write(peer_block)
+        logger.info(
+            f"Peer added to {conf_path} — re-import or restart tunnel to apply"
+        )
 
     # -------------------------------------------------------------------------
-    # BATMAN-ADV gateway integration (Linux only)
+    # BATMAN-ADV gateway integration via VXLAN (Linux only)
     # -------------------------------------------------------------------------
+    #
+    # WireGuard is L3 — it carries IP packets, not Ethernet frames.
+    # BATMAN-ADV hard interfaces need L2 (Ethernet) to carry OGMs.
+    # Solution: layer a VXLAN tunnel over the WG mesh IPs.
+    #
+    #   bat0 (L2 mesh, BATMAN-ADV)
+    #     └── vxlan-<peer_prefix>  (L2-over-UDP, per-peer)
+    #           └── wg-styrene     (L3 encrypted tunnel)
+    #                 └── physical NIC
+    #
+    # Each peer gets a point-to-point VXLAN interface using their WG mesh
+    # IP as the remote endpoint. The VXLAN interface is added to bat0.
+    # BATMAN handles L2 forwarding across all VXLAN tunnels.
 
-    async def _add_to_batman(self) -> None:
-        """Add WireGuard interface to bat0 as a BATMAN-ADV hard interface."""
+    # Fixed VXLAN Network Identifier for Styrene mesh
+    VXLAN_VNI = 7379  # "sy" as decimal
+
+    def _vxlan_name(self, identity_hash: str) -> str:
+        """Generate VXLAN interface name for a peer (max 15 chars for Linux)."""
+        return f"vx-{identity_hash[:10]}"
+
+    async def _create_vxlan_for_peer(self, identity_hash: str, peer: PeerInfo) -> bool:
+        """Create a VXLAN tunnel over WG to a peer and add it to bat0.
+
+        Args:
+            identity_hash: Peer's RNS identity hash.
+            peer: Peer info with mesh_ip.
+
+        Returns:
+            True if VXLAN was created and added to bat0.
+        """
         import asyncio
 
-        # batman-adv treats the WG interface as a neighbor link
+        vxlan_name = self._vxlan_name(identity_hash)
+
+        # Create VXLAN interface:
+        #   - local = our WG mesh IP
+        #   - remote = peer's WG mesh IP
+        #   - dstport 4789 (IANA standard VXLAN port)
+        #   - dev wg-styrene (route VXLAN UDP through the WG tunnel)
         proc = await asyncio.create_subprocess_exec(
-            "batctl", "meshif", "bat0", "if", "add", self._interface_name,
+            "ip", "link", "add", vxlan_name,
+            "type", "vxlan",
+            "id", str(self.VXLAN_VNI),
+            "local", self.mesh_ip,
+            "remote", peer.mesh_ip,
+            "dstport", "4789",
+            "dev", self._interface_name,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            logger.error(f"batctl if add failed: {stderr.decode()}")
-            return
+            if b"File exists" not in stderr:
+                logger.error(f"Failed to create VXLAN {vxlan_name}: {stderr.decode()}")
+                return False
 
-        # Set throughput override for BATMAN V — WG over internet is fast
-        # but batman-adv can't auto-detect throughput on a WG interface.
-        # Default to 100 Mbit, peers can update via speedtest results.
+        # Bring up VXLAN interface
         proc = await asyncio.create_subprocess_exec(
-            "batctl", "hardif", self._interface_name, "throughput_override", "100Mbit",
+            "ip", "link", "set", "up", "dev", vxlan_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error(f"Failed to bring up {vxlan_name}: {stderr.decode()}")
+            return False
+
+        # Verify bat0 exists before adding
+        proc = await asyncio.create_subprocess_exec(
+            "ip", "link", "show", "bat0",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning(
+                f"bat0 interface not found — VXLAN {vxlan_name} is up but "
+                f"not bridged to BATMAN. Load batman-adv and create bat0 first."
+            )
+            return True  # VXLAN is up, just not bridged — not a failure
+
+        # Add VXLAN to bat0 as a BATMAN-ADV hard interface
+        proc = await asyncio.create_subprocess_exec(
+            "batctl", "meshif", "bat0", "if", "add", vxlan_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            if b"is already" not in stderr:
+                logger.error(f"batctl if add {vxlan_name} failed: {stderr.decode()}")
+                return False
+
+        # Set throughput override — WG over internet is fast but batman-adv
+        # can't auto-detect throughput on a VXLAN interface.
+        proc = await asyncio.create_subprocess_exec(
+            "batctl", "hardif", vxlan_name, "throughput_override", "100Mbit",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         await proc.communicate()
 
-        logger.info(f"Added {self._interface_name} to bat0 (gateway mode)")
+        logger.info(
+            f"VXLAN {vxlan_name} up: {self.mesh_ip} → {peer.mesh_ip} → bat0"
+        )
+        return True
 
-    async def _remove_from_batman(self) -> None:
-        """Remove WireGuard interface from bat0."""
+    async def _destroy_vxlan_for_peer(self, identity_hash: str) -> None:
+        """Remove a peer's VXLAN interface."""
         import asyncio
 
+        vxlan_name = self._vxlan_name(identity_hash)
+
+        # Remove from bat0 first
         proc = await asyncio.create_subprocess_exec(
-            "batctl", "meshif", "bat0", "if", "del", self._interface_name,
+            "batctl", "meshif", "bat0", "if", "del", vxlan_name,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         await proc.communicate()
+
+        # Delete the interface
+        proc = await asyncio.create_subprocess_exec(
+            "ip", "link", "del", "dev", vxlan_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        logger.info(f"VXLAN {vxlan_name} removed")
+
+    async def _destroy_all_vxlans(self) -> None:
+        """Remove all VXLAN interfaces for current peers."""
+        for identity_hash in list(self._peers):
+            await self._destroy_vxlan_for_peer(identity_hash)
 
     # -------------------------------------------------------------------------
     # Peer configuration
     # -------------------------------------------------------------------------
+
+    async def _update_peer_allowed_ips(self, peer: PeerInfo, allowed_ips: str) -> None:
+        """Update a peer's allowed-ips in WireGuard."""
+        import asyncio
+
+        proc = await asyncio.create_subprocess_exec(
+            "wg", "set", self._interface_name,
+            "peer", peer.public_key,
+            "allowed-ips", allowed_ips,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error(f"Failed to update allowed-ips for peer: {stderr.decode()}")
 
     async def _configure_peer(self, identity_hash: str, peer: PeerInfo) -> None:
         """Configure a WireGuard peer after handshake.
@@ -731,39 +912,73 @@ class MeshVPNService:
         import asyncio
 
         # Gateway peers route the entire mesh subnet.
-        # Direct peers only route their own /32.
+        # Direct peers only route their own /128.
         # This means: if a gateway exists, traffic to unknown mesh IPs
-        # goes through it. If the gateway dies, direct /32 routes to
+        # goes through it. If the gateway dies, direct /128 routes to
         # peers we've handshaked with still work — graceful degradation.
+        #
+        # Only one gateway can hold the /64 route at a time (WireGuard
+        # rejects overlapping allowed-ips). If a new gateway appears,
+        # remove the old one's /64 route first.
         if peer.gateway:
+            # Evict existing gateway's /64 claim
+            for existing_hash, existing_peer in list(self._peers.items()):
+                if existing_peer.gateway and existing_hash != identity_hash:
+                    logger.info(
+                        f"Replacing gateway {existing_hash[:16]} with {identity_hash[:16]}"
+                    )
+                    # Downgrade old gateway to /128 peer route
+                    await self._update_peer_allowed_ips(
+                        existing_peer, f"{existing_peer.mesh_ip}/128"
+                    )
+                    existing_peer.gateway = False
             allowed_ips = f"{self.config.subnet_prefix}::/64"
         else:
             allowed_ips = f"{peer.mesh_ip}/128"
 
-        cmd = [
-            "wg", "set", self._interface_name,
-            "peer", peer.public_key,
-            "allowed-ips", allowed_ips,
-            "persistent-keepalive", "25",
-        ]
-
-        if peer.endpoint:
-            cmd.extend(["endpoint", peer.endpoint])
-        else:
-            logger.info(
-                f"Peer {identity_hash[:16]} has no endpoint — "
-                f"configuring as endpoint-less peer (will learn on first packet)"
-            )
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # On macOS without root, the tunnel isn't active — we can only
+        # append to the config file for when the user brings it up.
+        macos_config_only = (
+            self._platform == VPNPlatform.MACOS
+            and not getattr(self, "_macos_tunnel_active", False)
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            logger.error(f"wg set peer failed: {stderr.decode()}")
-            return
+
+        if macos_config_only:
+            self._append_peer_to_macos_conf(peer, allowed_ips)
+        else:
+            cmd = [
+                "wg", "set", self._interface_name,
+                "peer", peer.public_key,
+                "allowed-ips", allowed_ips,
+                "persistent-keepalive", "25",
+            ]
+
+            if peer.endpoint:
+                cmd.extend(["endpoint", peer.endpoint])
+            else:
+                logger.info(
+                    f"Peer {identity_hash[:16]} has no endpoint — "
+                    f"configuring as endpoint-less peer (will learn on first packet)"
+                )
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logger.error(f"wg set peer failed: {stderr.decode()}")
+                return
+
+            # On macOS with root, also update the conf for persistence
+            if self._platform == VPNPlatform.MACOS:
+                self._append_peer_to_macos_conf(peer, allowed_ips)
+
+        # If we're a gateway, create VXLAN overlay for L2 bridging into bat0.
+        # Non-gateway nodes don't need VXLAN — they use WG for IP-level access.
+        if self.config.gateway and self._platform == VPNPlatform.LINUX:
+            await self._create_vxlan_for_peer(identity_hash, peer)
 
         logger.info(
             f"Configured VPN peer {identity_hash[:16]}: "
@@ -774,21 +989,59 @@ class MeshVPNService:
     # Client-side: initiate handshake
     # -------------------------------------------------------------------------
 
-    async def initiate_handshake(self, direct_link_service: Any, target_hash: str) -> PeerInfo | None:
-        """Initiate VPN handshake with a remote peer over RNS.Link.
+    async def _send_vpn_message(
+        self,
+        target_hash: str,
+        message_type_name: str,
+        payload_data: bytes,
+        request_id: bytes | None = None,
+    ) -> None:
+        """Send a VPN message via Styrene protocol over LXMF.
 
         Args:
-            direct_link_service: DirectLinkService instance for RNS.Link comms.
-            target_hash: LXMF destination hash of the target peer.
+            target_hash: Destination identity hash.
+            message_type_name: "VPN_HANDSHAKE_REQUEST" or "VPN_HANDSHAKE_RESPONSE"
+            payload_data: JSON-encoded handshake bytes.
+            request_id: Optional correlation ID.
+        """
+        if not self._styrene_protocol:
+            raise RuntimeError("StyreneProtocol not set on MeshVPNService")
+
+        from styrened.models.styrene_wire import StyreneMessageType, encode_payload
+        msg_type = StyreneMessageType[message_type_name]
+        encoded = encode_payload(payload_data)
+
+        await self._styrene_protocol.send_typed_message(
+            target_hash,
+            msg_type,
+            encoded,
+            request_id=request_id,
+        )
+
+    async def initiate_handshake(self, target_hash: str, timeout: float = 30.0) -> PeerInfo | None:
+        """Initiate VPN handshake with a remote peer via LXMF.
+
+        Sends a VPN_HANDSHAKE_REQUEST and waits for VPN_HANDSHAKE_RESPONSE.
+        The response arrives asynchronously via handle_handshake_response().
+
+        Args:
+            target_hash: Identity hash of the target peer.
+            timeout: Seconds to wait for response (default 30s).
 
         Returns:
-            PeerInfo of the remote peer, or None on failure.
+            PeerInfo of the remote peer, or None on failure/timeout.
         """
+        import asyncio
+
         if not self._started:
             logger.error("MeshVPN not started")
             return None
 
-        # Build our handshake request — auto-detect endpoint if not configured
+        if not self._styrene_protocol:
+            logger.error("StyreneProtocol not set — cannot initiate handshake")
+            return None
+
+        # Build handshake request
         endpoint = self.config.endpoint or self._detect_local_endpoint(
             self.config.listen_port
         )
@@ -798,32 +1051,29 @@ class MeshVPNService:
             endpoint=endpoint,
         )
 
-        # Send over RNS.Link via DirectLinkService
+        # Create future to wait for response
+        future: asyncio.Future[PeerInfo] = asyncio.get_event_loop().create_future()
+        self._pending_handshakes[target_hash] = future
+
         try:
-            response_data = await direct_link_service.request(
+            await self._send_vpn_message(
                 target_hash,
-                "/vpn/handshake",
+                "VPN_HANDSHAKE_REQUEST",
                 request_data,
             )
-            if not response_data:
-                logger.error(f"No response from {target_hash[:16]} for VPN handshake")
-                return None
+            logger.info(f"VPN handshake request sent to {target_hash[:16]}")
 
-            peer_info = parse_handshake_response(response_data)
-            peer_info.identity_hash = target_hash
-
-            # Store and configure peer
-            self._peers[target_hash] = peer_info
-            await self._configure_peer(target_hash, peer_info)
-
-            logger.info(
-                f"VPN handshake complete with {target_hash[:16]}: "
-                f"ip={peer_info.mesh_ip} gateway={peer_info.gateway}"
-            )
+            # Wait for response (arrives via handle_handshake_response)
+            peer_info = await asyncio.wait_for(future, timeout=timeout)
             return peer_info
 
+        except asyncio.TimeoutError:
+            logger.warning(f"VPN handshake with {target_hash[:16]} timed out after {timeout}s")
+            self._pending_handshakes.pop(target_hash, None)
+            return None
         except Exception as e:
             logger.error(f"VPN handshake with {target_hash[:16]} failed: {e}")
+            self._pending_handshakes.pop(target_hash, None)
             return None
 
     # -------------------------------------------------------------------------
@@ -848,7 +1098,7 @@ class MeshVPNService:
     async def handle_peer_lost(self, identity_hash: str) -> None:
         """Handle a peer going offline.
 
-        If the lost peer was a gateway, direct /32 routes to other
+        If the lost peer was a gateway, direct /128 routes to other
         peers still work — graceful degradation to point-to-point.
 
         Args:
@@ -857,6 +1107,10 @@ class MeshVPNService:
         peer = self._peers.pop(identity_hash, None)
         if not peer:
             return
+
+        # Remove VXLAN overlay if gateway mode
+        if self.config.gateway and self._platform == VPNPlatform.LINUX:
+            await self._destroy_vxlan_for_peer(identity_hash)
 
         # Remove WireGuard peer
         import asyncio

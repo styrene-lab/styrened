@@ -111,6 +111,8 @@ class StyreneMessageType(IntEnum):
     ANNOUNCE_ACK = 0x31
     PEER_REQUEST = 0x32
     PEER_RESPONSE = 0x33
+    VPN_HANDSHAKE_REQUEST = 0x34
+    VPN_HANDSHAKE_RESPONSE = 0x35
 
     # RPC Commands (0x40-0x5F)
     EXEC = 0x40
