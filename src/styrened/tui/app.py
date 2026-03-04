@@ -440,9 +440,33 @@ class StyreneApp(App[None]):
     async def _check_daemon(self) -> bool:
         """Quick IPC socket check — does the socket exist and respond to ping?
 
+        If no daemon is found, attempts to start one automatically before
+        falling back to the setup screen.  This handles post-upgrade restarts
+        where the old daemon was killed but the new one hasn't started yet.
+
         Returns:
             True if daemon is reachable, False otherwise.
         """
+        if await self._ping_daemon():
+            return True
+
+        # Daemon not running — try starting it automatically
+        self.log.info("Daemon not reachable, attempting auto-start...")
+        await self._auto_start_daemon()
+
+        # Poll for daemon readiness (up to 8 seconds)
+        import asyncio
+
+        for _ in range(16):
+            await asyncio.sleep(0.5)
+            if await self._ping_daemon():
+                self.log.info("Daemon auto-started successfully")
+                return True
+
+        return False
+
+    async def _ping_daemon(self) -> bool:
+        """Single IPC ping attempt."""
         try:
             from styrened.ipc import ControlClient, get_default_socket_path
 
@@ -453,12 +477,31 @@ class StyreneApp(App[None]):
             client = ControlClient(socket_path=socket_path, timeout=3.0)
             try:
                 await client.connect()
-                result = await client.ping(timeout=2.0)
-                return result
+                return await client.ping(timeout=2.0)
             finally:
                 await client.disconnect()
         except Exception:
             return False
+
+    async def _auto_start_daemon(self) -> None:
+        """Try to start the daemon in the background."""
+        import shutil
+        import subprocess
+
+        exe = shutil.which("styrened")
+        if not exe:
+            self.log.warning("styrened binary not found in PATH")
+            return
+        try:
+            subprocess.Popen(
+                [exe, "daemon"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.log.info(f"Started daemon: {exe} daemon")
+        except Exception as e:
+            self.log.warning(f"Failed to auto-start daemon: {e}")
 
     @work(thread=True, exclusive=True, group="update_check")
     def _check_for_updates(self) -> None:
