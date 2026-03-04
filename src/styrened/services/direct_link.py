@@ -21,12 +21,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Timeouts
-PATH_DISCOVERY_TIMEOUT = 15.0
-LINK_ESTABLISHMENT_TIMEOUT = 15.0
-REQUEST_TIMEOUT = 10.0
-CLEANUP_INTERVAL = 60.0
-IDLE_LINK_TIMEOUT = 300.0  # 5 min idle before teardown
+# Timeouts — sized for LoRa multi-hop (3+ hops, SF10-SF12).
+# TCP links complete in <1s; these generous defaults keep LoRa working.
+PATH_DISCOVERY_TIMEOUT = 45.0
+LINK_ESTABLISHMENT_TIMEOUT = 45.0
+REQUEST_TIMEOUT = 30.0
+CLEANUP_INTERVAL = 120.0
+IDLE_LINK_TIMEOUT = 900.0  # 15 min — link establishment is expensive on LoRa
+
+# Speedtest payload sets — selected by link RTT
+PAYLOAD_SET_FAST = [256, 1024, 4096, 16384, 65536, 262144]  # TCP/UDP, RTT <200ms
+PAYLOAD_SET_MEDIUM = [64, 256, 1024, 4096, 16384]  # WiFi mesh / fast LoRa, RTT 200ms-2s
+PAYLOAD_SET_SLOW = [64, 256, 1024, 4096]  # LoRa SF7-SF9, RTT 2s-5s
+PAYLOAD_SET_MINIMAL = [64, 256, 1024]  # LoRa SF10-SF12 / very slow, RTT >5s
+
+# Inter-test delay — longer for slow links to respect airtime
+SPEEDTEST_DELAY_FAST = 0.2
+SPEEDTEST_DELAY_SLOW = 2.0
 
 # Destination aspect for Styrene direct data links
 DATALINK_APP = "styrene"
@@ -251,6 +262,190 @@ class DirectLinkService:
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Datalink /status decode error: {e}")
         return None
+
+    async def run_speedtest(
+        self,
+        lxmf_destination_hash: str,
+        payload_sizes: list[int] | None = None,
+        timeout_per_transfer: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run bandwidth test over direct link with RTT-adaptive payload sizes.
+
+        Probes link RTT first, then selects an appropriate payload set:
+        - RTT <200ms (TCP/UDP): up to 256KB
+        - RTT 200ms-2s (WiFi mesh): up to 16KB
+        - RTT 2s-5s (fast LoRa): up to 4KB
+        - RTT >5s (slow LoRa): up to 1KB
+
+        Per-transfer timeout scales with payload size and estimated link
+        throughput to avoid killing slow LoRa transfers.
+
+        Args:
+            lxmf_destination_hash: Peer LXMF destination hash.
+            payload_sizes: Override automatic payload selection.
+            timeout_per_transfer: Override per-transfer timeout (auto-scales if None).
+
+        Returns:
+            List of result dicts with link_rtt and per-payload metrics.
+        """
+        import RNS
+
+        entry = self._links.get(lxmf_destination_hash)
+        if not entry or entry.link.status != RNS.Link.ACTIVE:
+            return [{"size": 0, "status": "no_link"}]
+
+        entry.last_used = time.time()
+
+        # Probe RTT from the link (RNS maintains this from keepalives)
+        link_rtt = None
+        try:
+            link_rtt = entry.link.rtt
+        except Exception:
+            pass
+
+        # Select payload set based on RTT
+        if payload_sizes is None:
+            payload_sizes = self._select_payloads(link_rtt)
+
+        # Select inter-test delay
+        delay = SPEEDTEST_DELAY_SLOW if (link_rtt and link_rtt > 0.5) else SPEEDTEST_DELAY_FAST
+
+        results: list[dict[str, Any]] = []
+        estimated_bps: float | None = None
+
+        for size in payload_sizes:
+            # Auto-scale timeout: at least 30s, or 4x estimated transfer time
+            if timeout_per_transfer is not None:
+                t = timeout_per_transfer
+            elif estimated_bps and estimated_bps > 0:
+                t = max(30.0, (size * 8 / estimated_bps) * 4)
+            elif link_rtt and link_rtt > 1.0:
+                # LoRa: very generous — assume ~1kbps minimum
+                t = max(60.0, (size * 8 / 1000) * 3)
+            else:
+                t = max(30.0, size / 1000)  # ~1KB/s baseline for unknowns
+
+            result = await self._speedtest_single(entry, size, t)
+            result["link_rtt"] = link_rtt
+            results.append(result)
+
+            # Update throughput estimate from successful transfer
+            if result.get("status") == "ok" and result.get("throughput_bps", 0) > 0:
+                estimated_bps = result["throughput_bps"]
+
+            # Bail early if transfer failed (link probably dead)
+            if result.get("status") in ("timeout", "failed", "send_failed", "send_error"):
+                # Mark remaining sizes as skipped
+                idx = payload_sizes.index(size)
+                for remaining in payload_sizes[idx + 1 :]:
+                    results.append({
+                        "size": remaining,
+                        "status": "skipped",
+                        "reason": f"previous {size}B transfer {result['status']}",
+                    })
+                break
+
+            await asyncio.sleep(delay)
+
+        return results
+
+    @staticmethod
+    def _select_payloads(rtt: float | None) -> list[int]:
+        """Select payload sizes based on link RTT."""
+        if rtt is None:
+            return list(PAYLOAD_SET_MEDIUM)  # conservative default
+        elif rtt < 0.2:
+            return list(PAYLOAD_SET_FAST)
+        elif rtt < 2.0:
+            return list(PAYLOAD_SET_MEDIUM)
+        elif rtt < 5.0:
+            return list(PAYLOAD_SET_SLOW)
+        else:
+            return list(PAYLOAD_SET_MINIMAL)
+
+    async def _speedtest_single(
+        self,
+        entry: _LinkEntry,
+        size: int,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """Run a single speedtest transfer."""
+        import os
+
+        payload = os.urandom(size)
+        response_future: asyncio.Future[tuple[bytes | None, float]] = asyncio.Future()
+        send_time = time.time()
+
+        def on_response(receipt: Any) -> None:
+            recv_time = time.time()
+            if self._event_loop:
+                asyncio.run_coroutine_threadsafe(
+                    _resolve(response_future, (receipt.response, recv_time)),
+                    self._event_loop,
+                )
+
+        def on_failed(receipt: Any) -> None:
+            if self._event_loop:
+                asyncio.run_coroutine_threadsafe(
+                    _resolve(response_future, (None, time.time())),
+                    self._event_loop,
+                )
+
+        progress_pct = 0.0
+
+        def on_progress(receipt: Any) -> None:
+            nonlocal progress_pct
+            progress_pct = getattr(receipt, "progress", 0.0)
+
+        try:
+            receipt = entry.link.request(
+                "/speedtest",
+                data=payload,
+                response_callback=on_response,
+                failed_callback=on_failed,
+                progress_callback=on_progress,
+            )
+            if receipt is False:
+                return {"size": size, "status": "send_failed"}
+        except Exception as e:
+            logger.error(f"Speedtest send failed ({size}B): {e}")
+            return {"size": size, "status": "send_error", "error": str(e)}
+
+        try:
+            resp_data, recv_time = await asyncio.wait_for(
+                response_future, timeout=timeout
+            )
+        except TimeoutError:
+            return {"size": size, "status": "timeout", "timeout": timeout}
+
+        if resp_data is None:
+            return {"size": size, "status": "failed"}
+
+        rtt = recv_time - send_time
+
+        # Parse peer's acknowledgement
+        try:
+            ack = json.loads(resp_data)
+            peer_received = ack.get("bytes_received", 0)
+            peer_process_ms = ack.get("process_ms", 0)
+        except (json.JSONDecodeError, Exception):
+            peer_received = 0
+            peer_process_ms = 0
+
+        # Calculate throughput: total bytes transferred = upload + download ack
+        # But the meaningful metric is the payload size over RTT
+        throughput_bps = (size * 8) / rtt if rtt > 0 else 0
+        throughput_kbps = throughput_bps / 1000
+
+        return {
+            "size": size,
+            "rtt": round(rtt, 4),
+            "throughput_bps": round(throughput_bps),
+            "throughput_kbps": round(throughput_kbps, 1),
+            "peer_received": peer_received,
+            "peer_process_ms": round(peer_process_ms, 2),
+            "status": "ok",
+        }
 
     def get_link_info(self, lxmf_destination_hash: str) -> LinkInfo | None:
         """Get link info for a peer, or None if no link."""

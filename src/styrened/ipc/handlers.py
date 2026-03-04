@@ -2803,3 +2803,32 @@ class IPCHandlers:
             return ResultResponse(data={"status_data": status})
         except Exception as e:
             return ErrorResponse.internal_error(f"Datalink query failed: {e}")
+
+    async def handle_cmd_datalink_speedtest(self, request: IPCRequest) -> IPCResponse:
+        """Run bandwidth test over direct link — fire-and-forget style.
+
+        Returns results directly since the test is self-timed and the
+        IPC timeout (30s default) should be sufficient for the default
+        payload set.  For very large payloads or slow links, increase
+        the client timeout.
+        """
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkSpeedtestRequest
+
+        req = request if isinstance(request, CmdDatalinkSpeedtestRequest) else CmdDatalinkSpeedtestRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            # run_speedtest auto-scales timeouts per-transfer based on link RTT.
+            # No total timeout here — the individual transfers handle their own.
+            results = await self.daemon._direct_link_service.run_speedtest(
+                req.destination_hash,
+            )
+            return ResultResponse(data={"results": results})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Speedtest failed: {e}")

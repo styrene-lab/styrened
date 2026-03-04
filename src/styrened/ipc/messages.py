@@ -607,6 +607,17 @@ class CmdDatalinkQueryRequest(IPCRequest):
 
 
 @dataclass
+class CmdDatalinkSpeedtestRequest(IPCRequest):
+    """Run bandwidth test over a direct data link."""
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_SPEEDTEST
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -1474,6 +1485,10 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         )
     elif msg_type == IPCMessageType.CMD_DATALINK_QUERY:
         return CmdDatalinkQueryRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_SPEEDTEST:
+        return CmdDatalinkSpeedtestRequest(
             destination_hash=payload.get("destination_hash", ""),
         )
     elif msg_type == IPCMessageType.SUB_MESSAGES:

@@ -101,6 +101,7 @@ class IPCMessageType(IntEnum):
     CMD_DATALINK_TEARDOWN = 0x51
     CMD_DATALINK_STATUS = 0x52
     CMD_DATALINK_QUERY = 0x53  # Query peer status over direct link
+    CMD_DATALINK_SPEEDTEST = 0x54  # Run bandwidth test over direct link
 
     # Terminal session (0x50-0x5F)
     CMD_TERMINAL_OPEN = 0x50

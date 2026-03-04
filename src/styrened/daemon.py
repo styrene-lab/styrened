@@ -1322,6 +1322,11 @@ class StyreneDaemon:
                 response_generator=self._serve_datalink_ping,
                 allow=RNS.Destination.ALLOW_ALL,
             )
+            self._datalink_destination.register_request_handler(
+                "/speedtest",
+                response_generator=self._serve_datalink_speedtest,
+                allow=RNS.Destination.ALLOW_ALL,
+            )
 
             # Set link established callback for logging
             self._datalink_destination.set_link_established_callback(
@@ -1360,6 +1365,27 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Datalink /status handler error: {e}")
             return json.dumps({"error": str(e)}).encode("utf-8")
+
+    def _serve_datalink_speedtest(
+        self,
+        path: str,
+        data: Any,
+        request_id: Any,
+        link_id: Any,
+        remote_identity: Any,
+        requested_at: Any,
+    ) -> bytes:
+        """Serve /speedtest — receive payload, return ack with byte count."""
+        import json
+
+        t0 = time.time()
+        received = len(data) if data else 0
+        process_ms = (time.time() - t0) * 1000
+        return json.dumps({
+            "bytes_received": received,
+            "process_ms": process_ms,
+            "timestamp": time.time(),
+        }).encode("utf-8")
 
     def _serve_datalink_ping(
         self,

@@ -26,6 +26,15 @@ if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
 
 
+def _format_bytes(n: int) -> str:
+    """Format byte count as human-readable label."""
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.0f}MB"
+    elif n >= 1024:
+        return f"{n / 1024:.0f}KB"
+    return f"{n}B"
+
+
 class MeshInfoWidget(Static):
     """Widget displaying mesh discovery information about device."""
 
@@ -122,6 +131,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         Binding("escape", "app.pop_screen", "Back"),
         Binding("r", "refresh_status", "Refresh"),
         Binding("l", "establish_link", "Link"),
+        Binding("t", "run_speedtest", "Speedtest"),
         Binding("a", "add_contact", "Add Contact"),
         Binding("y", "copy_hash", "Copy Hash"),
     ]
@@ -460,6 +470,95 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         except Exception as e:
             self.notify(f"Link failed: {e}", severity="error")
+
+    async def action_run_speedtest(self) -> None:
+        """Run bandwidth test over the direct link."""
+        if not self.device:
+            return
+
+        try:
+            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+        except Exception:
+            self.notify("Speedtest requires daemon mode", severity="warning")
+            return
+        if not bridge:
+            self.notify("Speedtest requires daemon mode", severity="warning")
+            return
+
+        # Check if link is active
+        try:
+            link_info = await bridge.datalink_status(
+                destination_hash=self.device_identity,
+            )
+            if not link_info.get("connected"):
+                self.notify("No active link — press L to establish first", severity="warning")
+                return
+        except Exception:
+            self.notify("No active link — press L to establish first", severity="warning")
+            return
+
+        self.notify("Running speedtest... (adaptive payload sizes)", severity="information")
+        self.run_worker(self._do_speedtest(bridge), name="speedtest")
+
+    async def _do_speedtest(self, bridge: Any) -> None:
+        """Background worker: run speedtest and display results."""
+        try:
+            result = await bridge.datalink_speedtest(
+                destination_hash=self.device_identity,
+            )
+            results = result.get("results", [])
+
+            if not results:
+                self.notify("Speedtest returned no results", severity="warning")
+                return
+
+            # Format results for notification and status widget
+            lines = ["[bold]─── SPEEDTEST RESULTS ───[/]"]
+            link_rtt = None
+            for r in results:
+                size = r.get("size", 0)
+                status = r.get("status", "?")
+                if not link_rtt and r.get("link_rtt"):
+                    link_rtt = r["link_rtt"]
+
+                if status == "ok":
+                    rtt = r.get("rtt", 0)
+                    kbps = r.get("throughput_kbps", 0)
+                    peer_rx = r.get("peer_received", 0)
+                    size_label = _format_bytes(size)
+                    lines.append(
+                        f"  {size_label:>6}  →  "
+                        f"RTT {rtt:.2f}s  "
+                        f"{kbps:.1f} kbps  "
+                        f"(peer rx: {peer_rx}B)"
+                    )
+                elif status == "skipped":
+                    lines.append(f"  {_format_bytes(size):>6}  →  [dim]skipped[/]")
+                elif status == "timeout":
+                    lines.append(f"  {_format_bytes(size):>6}  →  [yellow]timeout[/]")
+                else:
+                    lines.append(f"  {_format_bytes(size):>6}  →  [red]{status}[/]")
+
+            if link_rtt:
+                lines.insert(1, f"  Link RTT: {link_rtt:.3f}s")
+
+            # Find the best throughput
+            ok_results = [r for r in results if r.get("status") == "ok"]
+            if ok_results:
+                best = max(ok_results, key=lambda r: r.get("throughput_kbps", 0))
+                lines.append(f"  [bold]Peak: {best['throughput_kbps']:.1f} kbps[/]")
+
+            # Push results into status widget
+            try:
+                sw = self.query_one("#status-widget", DeviceStatusWidget)
+                sw.speedtest_results = results
+            except Exception:
+                pass
+
+            self.notify("\n".join(lines), severity="information", timeout=15)
+
+        except Exception as e:
+            self.notify(f"Speedtest failed: {e}", severity="error")
 
     def action_add_contact(self) -> None:
         """Add this device as a contact."""

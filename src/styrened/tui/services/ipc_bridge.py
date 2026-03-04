@@ -586,6 +586,10 @@ class IPCBridge:
         """Query peer status over an established direct link."""
         return await self._call("datalink_query", destination_hash=destination_hash)
 
+    async def datalink_speedtest(self, destination_hash: str) -> dict:
+        """Run bandwidth test over an established direct link."""
+        return await self._call("datalink_speedtest", destination_hash=destination_hash)
+
     # ── Subscriptions ──────────────────────────────────────────────
 
     async def subscribe_devices(self) -> bool:

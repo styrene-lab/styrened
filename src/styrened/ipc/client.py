@@ -1110,6 +1110,15 @@ class ControlClient:
             CmdDatalinkQueryRequest(destination_hash=destination_hash)
         )
 
+    async def datalink_speedtest(self, destination_hash: str) -> dict[str, Any]:
+        """Run bandwidth test over an established direct link."""
+        from styrened.ipc.messages import CmdDatalinkSpeedtestRequest
+
+        return await self._request(
+            CmdDatalinkSpeedtestRequest(destination_hash=destination_hash),
+            timeout=120.0,  # speedtest can take a while over slow links
+        )
+
     # -------------------------------------------------------------------------
     # Remote inbox methods (RPC over LXMF)
     # -------------------------------------------------------------------------
