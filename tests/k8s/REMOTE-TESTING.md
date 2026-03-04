@@ -96,7 +96,7 @@ This creates a secret named `ghcr-secret` using your GitHub credentials from:
 **Environment variables** (optional):
 ```bash
 export GITHUB_TOKEN=ghp_xxxxx      # Override gh CLI token
-export GITHUB_ACTOR=cwilson613     # Override username
+export GITHUB_ACTOR=your-github-user     # Override username
 export GITHUB_EMAIL=you@email.com  # Override email
 ```
 
@@ -359,7 +359,7 @@ For production clusters, create dedicated secrets:
 # Create secret in production namespace
 kubectl create secret docker-registry ghcr-prod-secret \
   --docker-server=ghcr.io \
-  --docker-username=cwilson613 \
+  --docker-username=your-github-user \
   --docker-password=$PROD_GITHUB_TOKEN \
   -n production
 ```

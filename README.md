@@ -1,325 +1,147 @@
 # styrened
 
-Headless Styrene daemon for edge deployments on Reticulum mesh networks.
+Daemon, library, and TUI for [Reticulum](https://reticulum.network) mesh networks.
 
 ## Overview
 
-`styrened` is the Styrene daemon and library for Reticulum mesh networks. It provides both headless daemon functionality for edge devices and the core library used by styrene-tui. Optimized for resource-constrained edge devices and designed for easy deployment via Nix flakes on NixOS.
+`styrened` is the core of the [Styrene](https://github.com/styrene-lab) mesh networking stack. It provides a headless daemon for edge devices, a terminal UI for interactive fleet management, and a Python library for building mesh applications on RNS/LXMF.
 
 **Key Features**:
-- **Zero UI dependencies** - No textual, minimal footprint
-- **RPC server** - Remote device management over LXMF
-- **Auto-reply handler** - Respond to mesh messages automatically
-- **Device discovery** - Track mesh network topology
-- **HTTP API** (optional) - REST endpoints for status/control
-- **Nix flake** - Declarative NixOS deployment
-
-## Architecture
-
-```
-┌──────────────────┐
-│  styrene-tui     │  ← Terminal UI (optional)
-├──────────────────┤
-│  styrened        │  ← This package: daemon + library
-│  (RNS, LXMF,     │
-│   protocols,     │
-│   services)      │
-├──────────────────┤
-│  Reticulum Stack │
-└──────────────────┘
-```
-
-`styrened` serves two purposes:
-1. **As a library** - Provides RNS/LXMF services, protocols, and models used by styrene-tui
-2. **As a daemon** - Runs headless on edge devices for fleet management
+- **Mesh daemon** — headless operation on edge devices (Raspberry Pi, NixOS, containers)
+- **Terminal UI** — full-featured TUI for fleet management, chat, device provisioning
+- **RPC over LXMF** — remote device management (status, exec, reboot, config)
+- **Device discovery** — automatic mesh topology tracking
+- **Auto-reply** — automated message responses with cooldown
+- **Direct links** — point-to-point RNS links for status queries and speedtests
+- **Mesh VPN** — WireGuard tunnels bootstrapped over LXMF (IPv6 ULA addressing)
+- **HTTP API** (optional) — REST/WebSocket endpoints for external integration
+- **Nix flake** — declarative NixOS deployment with OCI container builds
 
 ## Installation
 
-### PyPI
-
 ```bash
-pip install styrene             # Full stack: daemon + TUI (meta-package)
-pip install styrened            # Daemon only (no UI dependencies)
-pip install styrened[tui]       # Daemon + Terminal UI
+# Full stack: daemon + TUI (via meta-package)
+pip install styrene
+
+# Daemon only (minimal dependencies)
+pip install styrened
+
+# Daemon + TUI
+pip install styrened[tui]
+
+# All extras
+pip install styrened[tui,web,metrics,yubikey]
 ```
 
 ### Nix Flake
 
 ```bash
-# Run directly
 nix run github:styrene-lab/styrened
-
-# Or add to your flake.nix
-{
-  inputs.styrened.url = "github:styrene-lab/styrened";
-
-  outputs = { self, nixpkgs, styrened }: {
-    # ...
-  };
-}
 ```
 
-### NixOS Module
-
-```nix
-# configuration.nix
-{
-  inputs.styrened.url = "github:styrene-lab/styrened";
-
-  # ...
-
-  services.styrened = {
-    enable = true;
-    # user = "styrened";  # Optional: custom user
-  };
-}
-```
-
-### Containers / Kubernetes
-
-OCI container images are published to GitHub Container Registry (built via nix2container):
+### Container
 
 ```bash
-# Production image
 docker pull ghcr.io/styrene-lab/styrened:latest
-docker pull ghcr.io/styrene-lab/styrened:0.4.0
-
-# Edge builds (main branch)
-docker pull ghcr.io/styrene-lab/styrened:edge
-
-# Test images (includes test dependencies)
-docker pull ghcr.io/styrene-lab/styrened-test:latest
 ```
-
-**Supported platforms**: `linux/amd64`
-
-**Run container:**
-```bash
-docker run -d \
-  --name styrened \
-  -v ~/.styrene:/config \
-  -v styrene-data:/data \
-  ghcr.io/styrene-lab/styrened:latest
-```
-
-**Available tags:**
-- `latest` - Latest stable release (production image)
-- `edge` - Latest main branch build (production image)
-- `v0.2.1` - Specific release version
-- `<commit-sha>` - Build from specific commit
-
-See [tests/k8s/helm/styrened-test](tests/k8s/helm/styrened-test) for Kubernetes deployment examples.
-
-### Building from Source
-
-For local builds and development:
-
-```bash
-# Build production OCI image (via Nix)
-just build
-
-# Build test OCI image
-just build-test
-
-# Show version information
-just version
-```
-
-See [CONTAINERS.md](CONTAINERS.md) for complete build pipeline documentation, including:
-- Nix OCI build pipeline (nix2container)
-- Pushing to GitHub Container Registry
-- CI/CD integration
-- Troubleshooting
 
 ## Usage
 
-### Command Line
-
 ```bash
-# Run daemon with default config
-styrened
+# Run daemon
+styrened daemon
 
-# Or via Python module
-python -m styrened
-
-# Run TUI (requires styrened[tui])
+# Run TUI
 styrene
 
-# TUI with options
-styrene --dashboard           # Compact dashboard mode
-styrene --headless            # Headless mode with daemon
-styrene --peer host:port      # Connect to specific peer
+# CLI tools
+styrened devices              # List discovered mesh devices
+styrened devices -w 10        # Wait 10s for announces
+styrened status               # Local daemon health
+styrened status <dest>        # Query remote node
+styrened send <dest> "hello"  # Send message
+styrened exec <dest> uptime   # Remote command execution
+styrened doctor               # Installation diagnostics
+styrened doctor --setup       # Interactive setup wizard
+styrened identity             # Show local identity
 ```
 
-### Configuration
+## Architecture
 
-Config file: `~/.styrene/config.yaml` (or `/etc/styrene/config.yaml` for system-wide)
+```
+┌──────────────────────────────────────┐
+│  styrened                            │
+│  ├── tui/          Terminal UI       │  pip install styrened[tui]
+│  ├── services/     Business logic    │
+│  ├── protocols/    LXMF routing      │
+│  ├── rpc/          Remote mgmt       │
+│  ├── models/       Data models       │
+│  └── web/          HTTP API          │  pip install styrened[web]
+├──────────────────────────────────────┤
+│  RNS + LXMF (Reticulum Stack)       │
+└──────────────────────────────────────┘
+```
+
+**Async-first** — all network operations use asyncio. The daemon runs an event loop with periodic tasks for announces, discovery, and mesh maintenance.
+
+**Protocol discrimination** — LXMF messages are routed to handlers based on `fields["protocol"]`, supporting chat (NomadNet/MeshChat), Styrene wire protocol, and VPN handshake messages.
+
+## Configuration
+
+Config file: `~/.styrene/config.yaml`
 
 ```yaml
+identity:
+  display_name: "My Node"
+
 reticulum:
-  mode: client
-  transport_enabled: false
+  mode: standalone
+  interfaces:
+    peers:
+      - host: rns.styrene.io
+        port: 4242
 
 rpc:
   enabled: true
-  authorized_operators:
-    - identity_hash: "abc123..."
-      role: operator
-
-discovery:
-  announce_interval: 300
 
 chat:
   auto_reply_mode: template
-  auto_reply_message: "This is an automated system"
+  auto_reply_message: "Automated node"
 
-api:
+mesh_vpn:
   enabled: false
-  host: "0.0.0.0"
-  port: 8000
-```
-
-### Programmatic Usage
-
-```python
-import asyncio
-from styrened import StyreneDaemon
-from styrened.services.config import get_default_config
-
-config = get_default_config()
-daemon = StyreneDaemon(config)
-
-asyncio.run(daemon.start())
-```
-
-## Features
-
-### RPC Server
-
-Handles incoming LXMF messages for remote device management:
-
-- **status_request** - CPU, memory, disk, network stats
-- **exec** - Execute whitelisted commands
-- **reboot** - Schedule system reboot
-- **update_config** - Update configuration remotely
-
-### Auto-Reply
-
-Automatically responds to LXMF messages from NomadNet/MeshChat users.
-
-### Device Discovery
-
-Listens for RNS announces and tracks discovered devices.
-
-### HTTP API (Optional)
-
-REST endpoints for status and control (when `api.enabled: true`).
-
-## Deployment Scenarios
-
-### Edge Device (NixOS)
-
-```nix
-# Minimal edge node configuration
-services.styrened = {
-  enable = true;
-};
-```
-
-### Mesh Gateway
-
-```yaml
-# Gateway config
-reticulum:
-  mode: gateway
-  transport_enabled: true
-
-rpc:
-  enabled: true
-```
-
-### Monitoring Node
-
-```yaml
-# Discovery-focused config
-discovery:
-  announce_interval: 60
-
-api:
-  enabled: true
-  port: 8000
+  gateway: false
 ```
 
 ## Installation Extras
 
-| Extra | Install | Adds |
-|-------|---------|------|
-| (none) | `pip install styrened` | Headless daemon only (minimal deps) |
-| `[tui]` | `pip install styrened[tui]` | Terminal UI (+textual, +psutil) |
-| `[web]` | `pip install styrened[web]` | HTTP API (+fastapi, +uvicorn) |
-| `[metrics]` | `pip install styrened[metrics]` | Prometheus metrics |
-| `[yubikey]` | `pip install styrened[yubikey]` | YubiKey authentication |
+| Extra | Adds |
+|-------|------|
+| `[tui]` | Terminal UI (textual, psutil) |
+| `[web]` | HTTP API (fastapi, uvicorn) |
+| `[metrics]` | Prometheus metrics |
+| `[yubikey]` | YubiKey authentication |
 
 ## Development
 
 ```bash
-# Clone repository
 git clone https://github.com/styrene-lab/styrened
 cd styrened
+pip install -e ".[tui,dev]"
 
-# Install in development mode
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Type checking
-mypy src/
-
-# Linting
-ruff check src/
+just test-unit    # ~5s, 2200+ tests
+just test         # Full suite
+make lint         # ruff
+make typecheck    # mypy
+make validate     # lint + typecheck + test
 ```
-
-## Requirements
-
-- Python 3.11+
-- RNS (Reticulum Network Stack)
-- LXMF
-- msgpack
 
 ## Related Projects
 
-- **[styrene-tui](https://github.com/styrene-lab/styrene-tui)** - Terminal UI for interactive operation
-- **[styrene](https://github.com/styrene-lab/styrene)** - Organization docs and research
+- **[styrene-rs](https://github.com/styrene-lab/styrene-rs)** — Rust RNS/LXMF implementation (interoperable wire protocol)
+- **[styrene-pypi](https://github.com/styrene-lab/styrene-pypi)** — PyPI meta-package (`pip install styrene`)
+- **[Reticulum](https://reticulum.network)** — The underlying mesh networking stack
 
 ## License
 
-MIT License
-
-## Documentation
-
-### API Reference
-
-Auto-generated API documentation is available at:
-
-**[styrene-lab.github.io/styrened](https://styrene-lab.github.io/styrened/)**
-
-The API reference is built from source using [pdoc](https://pdoc.dev) and updated automatically on each release.
-
-#### Generate Locally
-
-```bash
-# Install docs dependencies
-pip install -e ".[docs]"
-
-# Generate static docs to docs/api/
-just docs
-
-# Serve with live reload for development
-just docs-serve
-```
-
-### Related Documentation
-
-- [Reticulum docs](https://reticulum.network)
-- [LXMF docs](https://github.com/markqvist/LXMF)
+[MIT](LICENSE)

@@ -13,7 +13,7 @@ def parse_peer(peer_str: str) -> PeerConfig:
     """Parse peer string in format host:port or host.
 
     Args:
-        peer_str: Peer string (e.g., "home.vanderlyn.house:4242")
+        peer_str: Peer string (e.g., "rns.styrene.io:4242")
 
     Returns:
         PeerConfig object
@@ -41,7 +41,7 @@ def main() -> None:
 Examples:
   styrene                                # Run in standalone mode (default)
   styrene --mode hub                     # Run as transport hub
-  styrene --peer home.vanderlyn.house    # Connect to specific peer
+  styrene --peer rns.styrene.io           # Connect to specific peer
   styrene --headless                     # Run without TUI
   styrene --headless --api-port 8000     # Headless with HTTP API
         """,
@@ -121,7 +121,7 @@ Examples:
         "--remote",
         type=str,
         metavar="URL",
-        help="Connect to remote Styrene API (e.g., https://styrene.vanderlyn.house)",
+        help="Connect to remote Styrene API (e.g., https://api.styrene.io)",
     )
 
     # Dashboard mode

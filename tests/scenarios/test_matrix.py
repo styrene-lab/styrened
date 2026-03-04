@@ -189,7 +189,7 @@ CONNECTIVITY_SCENARIOS = [
         name="ssh_reachable_nonexistent",
         description="Verify SSH fails for nonexistent host",
         category="connectivity",
-        params={"node": "nonexistent.vanderlyn.local", "timeout": 5.0},
+        params={"node": "nonexistent.example.local", "timeout": 5.0},
         expected=ExpectedOutcome.FAIL,
         expected_duration_max=10.0,
     ),

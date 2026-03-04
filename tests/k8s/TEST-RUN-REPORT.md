@@ -1,7 +1,7 @@
 # Styrened Containerized Test Suite - First Run Report
 
 **Date:** 2026-01-26
-**Cluster:** brutus.vanderlyn.local (k3s v1.33.6)
+**Cluster:** your-cluster.local (k3s v1.33.6)
 **Test Image:** styrened-test:latest (AMD64)
 
 ## Executive Summary

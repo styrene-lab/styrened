@@ -1,6 +1,6 @@
 # Production Values Override for Styrened
 #
-# This file would live at: vanderlyn/apps/styrened/values.yaml
+# This file would live at: infrastructure/apps/styrened/values.yaml
 # Referenced by the ArgoCD Application multi-source configuration
 #
 # Purpose: Override test chart defaults with production-specific settings
@@ -180,7 +180,7 @@ ingress:
     # traefik.ingress.kubernetes.io/router.middlewares: styrened-ratelimit@kubernetescrd
 
   hosts:
-    - host: styrened.vanderlyn.house
+    - host: styrened.example.com
       paths:
         - path: /
           pathType: Prefix
@@ -188,7 +188,7 @@ ingress:
   tls:
     - secretName: styrened-tls
       hosts:
-        - styrened.vanderlyn.house
+        - styrened.example.com
 
 # Persistent storage (optional - for message/identity persistence)
 # Uncomment if you need data to persist across pod restarts

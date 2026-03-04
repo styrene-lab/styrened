@@ -4,10 +4,10 @@
 # DO NOT apply this yet - styrened is not stable enough for production.
 #
 # When ready for production deployment on brutus:
-# 1. Copy this file to vanderlyn/apps/argocd/applications/styrened.yaml
-# 2. Create vanderlyn/apps/styrened/values.yaml with production overrides
+# 1. Copy this file to infrastructure/apps/argocd/applications/styrened.yaml
+# 2. Create infrastructure/apps/styrened/values.yaml with production overrides
 # 3. Create ImagePullSecret in styrened namespace
-# 4. Commit and push to vanderlyn repo
+# 4. Commit and push to infrastructure repo
 # 5. ArgoCD will auto-sync within 3 minutes
 
 apiVersion: argoproj.io/v1alpha1
@@ -30,25 +30,25 @@ spec:
   # Project scope (default = cluster-wide access)
   project: default
 
-  # Multi-source: Helm chart from styrened repo + values from vanderlyn repo
+  # Multi-source: Helm chart from styrened repo + values from infrastructure repo
   sources:
     # Source 1: Helm chart from styrened repository
     - repoURL: https://github.com/styrene-lab/styrened.git
       targetRevision: main  # Can be: main, develop, v0.2.1, etc.
       path: tests/k8s/helm/styrened-test
       helm:
-        # Load values from second source (vanderlyn repo)
+        # Load values from second source (infrastructure repo)
         valueFiles:
           - $values/apps/styrened/values.yaml
 
-    # Source 2: Values override from vanderlyn repository
-    - repoURL: https://github.com/cwilson613/vanderlyn.git
+    # Source 2: Values override from infrastructure repository
+    - repoURL: https://github.com/your-org/infrastructure.git
       targetRevision: main
       ref: values  # Referenced as $values in source 1
 
     # Source 3 (optional): Additional manifests (Ingress, NetworkPolicy, etc.)
     # Uncomment if you need extra manifests not in the Helm chart
-    # - repoURL: https://github.com/cwilson613/vanderlyn.git
+    # - repoURL: https://github.com/your-org/infrastructure.git
     #   targetRevision: main
     #   path: apps/styrened/manifests
     #   directory:

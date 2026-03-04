@@ -35,16 +35,9 @@ logger = logging.getLogger(__name__)
 PATH_CHECK_INTERVAL: int = 30
 
 # Known hub addresses
-# Styrene Community Hub (brutus cluster)
+# Styrene Community Hub
 #
-# Retrieved via scripts/get-hub-address.sh
-#
-# Hub details:
-#   Host: 192.168.0.102:4242 (RNS transport via LoadBalancer)
-#   Name: Styrene Propagation Node
-#   Identity Hash: 559c71c512c7376a5202e4c5b7043113
-#   LXMF Propagation Destination: 6fc8bf22aa293588c9bf8d7488102e95 (what lxmd announces)
-#   LXMF Delivery Destination: 1c527ad47a10dc62406bb5d780d289ba (not announced)
+# LXMF Propagation Destination (announced by lxmd)
 STYRENE_HUB_ADDRESS: str = "6fc8bf22aa293588c9bf8d7488102e95"
 
 
