@@ -8,6 +8,7 @@ Covers:
 
 
 
+import pytest
 from textual.widgets import Static
 
 from styrened.tui.widgets.image_preview import (

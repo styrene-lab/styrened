@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.request
 import urllib.error
+import urllib.request
 from typing import NamedTuple
 
 logger = logging.getLogger(__name__)

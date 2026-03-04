@@ -131,7 +131,7 @@ class TestAESGCM:
         tampered[15] ^= 0xFF
         tampered = bytes(tampered)
 
-        with pytest.raises(Exception):  # InvalidTag
+        with pytest.raises(Exception):  # noqa: B017  # InvalidTag
             aes_gcm_decrypt(key, tampered)
 
     def test_aes_gcm_aad_mismatch(self):
@@ -141,7 +141,7 @@ class TestAESGCM:
 
         encrypted = aes_gcm_encrypt(key, plaintext, aad=b"correct")
 
-        with pytest.raises(Exception):  # InvalidTag
+        with pytest.raises(Exception):  # noqa: B017  # InvalidTag
             aes_gcm_decrypt(key, encrypted, aad=b"wrong")
 
     def test_aes_gcm_wrong_key(self):
@@ -152,7 +152,7 @@ class TestAESGCM:
 
         encrypted = aes_gcm_encrypt(key1, plaintext)
 
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017
             aes_gcm_decrypt(key2, encrypted)
 
     def test_aes_gcm_nonce_uniqueness(self):

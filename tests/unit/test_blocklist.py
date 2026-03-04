@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from styrened.models.contacts import Contact
-from styrened.models.messages import Base
 
 
 @pytest.fixture

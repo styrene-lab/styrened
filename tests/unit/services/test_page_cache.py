@@ -1,12 +1,11 @@
 """Tests for PageCacheService."""
 
-import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import create_engine
 
-from styrened.models.messages import Base, PageCache, SavedSite
+from styrened.models.messages import Base
 from styrened.services.page_cache import PageCacheService, extract_page_links
 
 

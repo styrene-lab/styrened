@@ -5,10 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-import pytest
-
-from styrened.tui.themes.styrene_brand import STYRENE_THEME_KEY
-
 
 class TestColorSystemInit:
     """Tests for truecolor environment variable forcing."""
@@ -19,7 +15,7 @@ class TestColorSystemInit:
             from styrened.tui.app import StyreneApp
 
             with patch.object(StyreneApp, "run"):
-                app = StyreneApp.__new__(StyreneApp)
+                StyreneApp.__new__(StyreneApp)
                 # Simulate the init block's env setup
                 term = os.environ.get("TERM", "")
                 if term not in ("linux", "dumb"):
@@ -56,11 +52,11 @@ class TestDarkModeInit:
         """StyreneApp.dark must be True after init regardless of system setting."""
         # We can't easily construct a full StyreneApp in unit tests,
         # but we can verify the _dark attribute pre-injection pattern works.
-        from styrened.tui.app import StyreneApp
-
         # Verify the class has the dark mode forcing code by checking
         # that the init sets _dark before super().__init__
         import inspect
+
+        from styrened.tui.app import StyreneApp
         source = inspect.getsource(StyreneApp.__init__)
         assert "self._dark = True" in source, (
             "StyreneApp.__init__ must set self._dark = True before super().__init__()"
@@ -69,6 +65,7 @@ class TestDarkModeInit:
     def test_theme_is_styrene_in_init(self):
         """StyreneApp must pre-populate _registered_themes before super().__init__."""
         import inspect
+
         from styrened.tui.app import StyreneApp
 
         source = inspect.getsource(StyreneApp.__init__)

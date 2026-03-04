@@ -1,6 +1,5 @@
 """Tests for DirectLinkService — payload selection, cache, and status helpers."""
 
-import asyncio
 import time
 from unittest.mock import MagicMock
 
@@ -88,7 +87,6 @@ class TestStatusCache:
         from styrened.tui.screens.mesh_device_detail import (
             _STATUS_CACHE,
             _STATUS_CACHE_TTL,
-            _cache_status,
             _get_cached_status,
         )
 
@@ -187,7 +185,7 @@ class TestEstablishIdentityRecall:
     async def test_recall_by_dest_hash_succeeds(self):
         """When RNS.Identity.recall(dest_hash) succeeds, skip path discovery."""
         import sys
-        from unittest.mock import AsyncMock, patch, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         mock_identity = MagicMock()
         mock_identity.hash = bytes.fromhex("aa" * 16)
@@ -210,7 +208,7 @@ class TestEstablishIdentityRecall:
             RNS.Link.ACTIVE = 1
 
             with patch.object(svc, "_create_link", new_callable=AsyncMock, return_value=None):
-                result = await svc.establish("aa" * 16)
+                await svc.establish("aa" * 16)
                 # Should have called recall with dest_hash
                 assert RNS.Identity.recall.call_count >= 1
                 first_call = RNS.Identity.recall.call_args_list[0]
@@ -222,7 +220,7 @@ class TestEstablishIdentityRecall:
     async def test_recall_falls_back_to_identity_hash(self):
         """When dest hash recall fails, try from_identity_hash=True."""
         import sys
-        from unittest.mock import AsyncMock, patch, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         mock_identity = MagicMock()
         mock_identity.hash = bytes.fromhex("aa" * 16)
@@ -253,7 +251,7 @@ class TestEstablishIdentityRecall:
             RNS.Link.ACTIVE = 1
 
             with patch.object(svc, "_create_link", new_callable=AsyncMock, return_value=None):
-                result = await svc.establish("aa" * 16)
+                await svc.establish("aa" * 16)
                 # Should have tried both recall methods
                 assert call_count == 2
 
@@ -263,7 +261,7 @@ class TestEstablishIdentityRecall:
     async def test_identity_unknown_when_both_recalls_fail(self):
         """Returns identity_unknown when neither recall method works and no path."""
         import sys
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         svc = DirectLinkService()
         await svc.start()
@@ -282,7 +280,8 @@ class TestEstablishIdentityRecall:
     async def test_path_not_found_timeout(self):
         """Returns path_not_found when path discovery times out."""
         import sys
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         import styrened.services.direct_link as dl_mod
 
         svc = DirectLinkService()
@@ -311,7 +310,7 @@ class TestDestHashProperty:
 
     def test_dest_hash_prefers_device_destination_hash(self):
         """_dest_hash should return device.destination_hash when available."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
 
         device = MeshDevice(
             destination_hash="fe75a225eeff636a" + "0" * 16,
@@ -330,7 +329,7 @@ class TestDestHashProperty:
 
     def test_dest_hash_falls_back_to_identity(self):
         """When device has no destination_hash, fall back to identity."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
 
         device = MeshDevice(
             destination_hash="",
@@ -344,7 +343,7 @@ class TestDestHashProperty:
 
     def test_dest_hash_same_as_identity_is_common_bug(self):
         """Document: NodeStore often stores identity_hash as destination_hash."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
 
         # This is the broken state we see in practice
         identity = "e012da2530c3eb27" + "0" * 16

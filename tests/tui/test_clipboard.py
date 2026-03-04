@@ -1,10 +1,7 @@
 """Tests for macOS clipboard integration."""
 
 import base64
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from styrened.tui.menubar.clipboard import (
     ClipboardAttachment,

@@ -6,10 +6,8 @@ into a single unified view of "this node" - the daemon behind the TUI.
 Uses cascade colors for theme-aware rendering.
 """
 
-import re
 
 import RNS  # type: ignore
-from rich.cells import cell_len as rich_cell_len
 from rich.table import Table
 from rich.text import Text
 from textual.reactive import reactive
@@ -316,7 +314,7 @@ class NodeInfoPanel(Static):
         table.add_column(min_width=42, no_wrap=False)
         table.add_column(no_wrap=False)
 
-        for l_line, r_line in zip(left, right):
+        for l_line, r_line in zip(left, right, strict=False):
             table.add_row(Text.from_markup(l_line), Text.from_markup(r_line))
 
         return table
@@ -492,8 +490,9 @@ class NodeInfoPanel(Static):
             if not hasattr(app, "db_engine") or app.db_engine is None:
                 return
 
-            from sqlalchemy import func, case, literal_column
+            from sqlalchemy import case, func, literal_column
             from sqlalchemy.orm import Session as SASession
+
             from styrened.models.messages import Message
 
             local_hash = getattr(app, "local_identity_hash", None)
