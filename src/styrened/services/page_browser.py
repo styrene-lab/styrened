@@ -115,13 +115,10 @@ class PageBrowserService:
         the next fetch to force path re-discovery instead of trusting
         the stale RNS path table.
         """
-        logger.info("[RECONNECT] PageBrowserService clearing cached links and forcing path re-discovery")
-        for dest_hash, entry in list(self._links.items()):
-            try:
-                entry.link.teardown()
-            except Exception:
-                pass
-        self._links.clear()
+        logger.info("[RECONNECT] PageBrowserService forcing path re-discovery (keeping active links)")
+        # Don't tear down active links — they may still be healthy.
+        # Only flag path re-discovery for the next fetch.
+        # Stale links will fail naturally and get cleaned up on next use.
         self._force_path_rediscovery = True
 
     async def stop(self) -> None:
