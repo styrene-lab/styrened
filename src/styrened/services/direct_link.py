@@ -81,12 +81,14 @@ class DirectLinkService:
         self._cleanup_task: asyncio.Task | None = None
         self._started = False
         self._force_path_rediscovery = False
+        self._speedtest_lock: asyncio.Lock | None = None  # Created on start()
 
     async def start(self) -> None:
         """Start the service and background cleanup task."""
         if self._started:
             return
         self._event_loop = asyncio.get_running_loop()
+        self._speedtest_lock = asyncio.Lock()
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         self._started = True
         logger.info("DirectLinkService started")
@@ -294,6 +296,20 @@ class DirectLinkService:
         if not entry or entry.link.status != RNS.Link.ACTIVE:
             return [{"size": 0, "status": "no_link"}]
 
+        # One speedtest at a time per service (link can't handle concurrent bulk transfers)
+        if self._speedtest_lock and self._speedtest_lock.locked():
+            return [{"size": 0, "status": "busy", "reason": "speedtest already running"}]
+
+        async with self._speedtest_lock or asyncio.Lock():
+            return await self._run_speedtest_inner(entry, payload_sizes, timeout_per_transfer)
+
+    async def _run_speedtest_inner(
+        self,
+        entry: _LinkEntry,
+        payload_sizes: list[int] | None,
+        timeout_per_transfer: float | None,
+    ) -> list[dict[str, Any]]:
+        """Inner speedtest logic, called under lock."""
         entry.last_used = time.time()
 
         # Probe RTT from the link (RNS maintains this from keepalives)
@@ -391,19 +407,12 @@ class DirectLinkService:
                     self._event_loop,
                 )
 
-        progress_pct = 0.0
-
-        def on_progress(receipt: Any) -> None:
-            nonlocal progress_pct
-            progress_pct = getattr(receipt, "progress", 0.0)
-
         try:
             receipt = entry.link.request(
                 "/speedtest",
                 data=payload,
                 response_callback=on_response,
                 failed_callback=on_failed,
-                progress_callback=on_progress,
             )
             if receipt is False:
                 return {"size": size, "status": "send_failed"}
@@ -569,5 +578,7 @@ class DirectLinkService:
 
 async def _resolve(future: asyncio.Future, value: object) -> None:
     """Safely resolve a future if not already done."""
-    if not future.done():
+    try:
         future.set_result(value)
+    except asyncio.InvalidStateError:
+        pass  # Already resolved by another callback
