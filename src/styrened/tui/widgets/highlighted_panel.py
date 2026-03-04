@@ -113,11 +113,16 @@ class HighlightedPanel(Vertical):
         yield Static("", classes="hp-bottom-border", id="hp-bottom")
 
     def on_mount(self) -> None:
-        self._update_borders()
+        # call_after_refresh ensures layout is settled before we read size.width.
+        # Calling _update_borders() directly here hits width=0 (widget not yet
+        # laid out) and returns early, leaving borders unrendered.
+        self.call_after_refresh(self._update_borders)
 
     def on_resize(self) -> None:
         new_width = self.size.width
-        if new_width != self._last_width:
+        # Re-render when width changes. Also re-render when width is newly
+        # non-zero (first valid layout after mount-time zero-size).
+        if new_width != self._last_width or (new_width > 0 and self._last_width == 0):
             self._last_width = new_width
             self._update_borders()
 

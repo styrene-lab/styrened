@@ -339,6 +339,8 @@ class DashboardScreen(Screen[None]):
             self.app.push_screen(
                 MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
             )
+        else:
+            self.app.notify("Select a device in the mesh tree first.", severity="warning")
 
     def action_open_exploration(self) -> None:
         """Open exploration screen for all Reticulum announces."""
