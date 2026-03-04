@@ -2778,7 +2778,7 @@ class IPCHandlers:
                 "rtt": info.rtt,
                 "established_at": info.established_at,
             })
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ErrorResponse.internal_error("Link establishment timed out (60s)")
         except Exception as e:
             return ErrorResponse.internal_error(f"Failed to establish link: {e}")

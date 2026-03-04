@@ -12,7 +12,6 @@ These tests verify the terminal service handles edge cases properly:
 from __future__ import annotations
 
 import asyncio
-import os
 import signal
 import time
 from typing import TYPE_CHECKING, Any
@@ -30,7 +29,6 @@ from styrened.terminal.messages import (
     StreamData,
     VersionInfo,
     WindowSize,
-    register_message_types,
 )
 from styrened.terminal.service import (
     TerminalService,
@@ -676,7 +674,6 @@ class TestBackpressureInPtyReadLoop:
             # Run the loop (which should read, wait for backpressure, send, then EOF)
             # We need to patch run_in_executor to return synchronously
             loop = asyncio.get_running_loop()
-            original_executor = loop.run_in_executor
 
             async def mock_executor(executor, func):
                 return func()

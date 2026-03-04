@@ -22,7 +22,6 @@ import pytest_asyncio
 from tests.harness.ipc_client import (
     MeshControlClient,
     poll_for_message,
-    poll_for_status,
 )
 from tests.harness.ipc_client import (
     wait_for_ping as _wait_for_ping,

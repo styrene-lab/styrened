@@ -9,17 +9,16 @@ from styrened.services.mesh_vpn import (
     MeshVPNConfig,
     MeshVPNService,
     PeerInfo,
+    VPNPlatform,
+    build_handshake_request,
+    build_handshake_response,
     derive_mesh_ip,
+    detect_platform,
     extract_prefix,
     generate_keypair,
     parse_handshake_request,
     parse_handshake_response,
-    build_handshake_request,
-    build_handshake_response,
-    VPNPlatform,
-    detect_platform,
 )
-
 
 # =============================================================================
 # Key generation
@@ -460,6 +459,7 @@ class TestGatewayTopology:
     def test_handshake_response_handler_configures_peer(self, tmp_path):
         """handle_handshake_response should store peer and resolve pending future."""
         import asyncio
+
         from styrened.models.styrene_wire import StyreneEnvelope, StyreneMessageType, encode_payload
 
         svc = self._make_service(tmp_path)
@@ -498,6 +498,7 @@ class TestGatewayTopology:
     def test_handshake_request_handler_stores_peer(self, tmp_path):
         """handle_handshake_request should store peer on matching prefix."""
         import asyncio
+
         from styrened.models.styrene_wire import StyreneEnvelope, StyreneMessageType, encode_payload
 
         svc = self._make_service(tmp_path)

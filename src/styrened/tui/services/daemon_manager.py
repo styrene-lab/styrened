@@ -16,7 +16,6 @@ import signal
 import sys
 from enum import Enum
 from pathlib import Path
-from pathlib import Path
 
 from styrened.ipc import get_default_socket_path
 

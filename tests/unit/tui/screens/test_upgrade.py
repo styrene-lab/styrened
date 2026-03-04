@@ -6,9 +6,7 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from styrened.tui.screens.upgrade import UpgradeScreen, _DAEMON_PKILL_PATTERN, _kill_daemon
+from styrened.tui.screens.upgrade import _DAEMON_PKILL_PATTERN, UpgradeScreen, _kill_daemon
 
 
 class TestBuildUpgradeCmd:

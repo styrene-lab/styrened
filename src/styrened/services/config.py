@@ -112,8 +112,9 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
 
     # Well-known public hubs — Styrene hub enabled by default, others
     # available for operator to enable in Settings > Network > Peers.
-    from styrened.models.config import COMMUNITY_HUB_PROPAGATION_HASH, WELL_KNOWN_HUBS
     import copy
+
+    from styrened.models.config import COMMUNITY_HUB_PROPAGATION_HASH, WELL_KNOWN_HUBS
     config.reticulum.interfaces.peers = copy.deepcopy(WELL_KNOWN_HUBS)
 
     if profile == Profile.OPERATOR:
@@ -194,7 +195,6 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         ConfigLoadError: If config file exists but cannot be parsed.
     """
     from styrened.models.config import (
-        PeerConfig,
         ServerInterfaceConfig,
     )
 

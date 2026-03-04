@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.request
 import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -389,7 +389,6 @@ def _fetch_from_github_compare(from_version: str, to_version: str) -> Changelog 
             seen_summaries.add(summary)
 
             # Try to extract version from "chore: bump version to X.Y.Z" patterns
-            version = ""
             if "bump version" in summary.lower():
                 continue  # Skip version bump commits entirely
 

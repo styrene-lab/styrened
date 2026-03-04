@@ -120,18 +120,19 @@ class StyreneDaemon:
             logger.error("Failed to initialize services")
             sys.exit(1)
 
-        # Seed blocklist from config (for hub operators)
-        if self.config.banned_peers:
-            self._seed_config_bans()
-
         # Create and cache the operator destination once
         self._init_operator_destination()
 
         # Start RPC server for incoming requests
         self._start_rpc_server()
 
-        # Initialize conversation service for chat backend
+        # Initialize conversation service for chat backend (creates DB tables)
         self._init_conversation_service()
+
+        # Seed blocklist from config (for hub operators)
+        # Must run AFTER _init_conversation_service() which calls init_db()
+        if self.config.banned_peers:
+            self._seed_config_bans()
 
         # Wire conversation service into RPC server for remote inbox queries
         if self._rpc_server and self._conversation_service:
@@ -1730,17 +1731,18 @@ class StyreneDaemon:
 
             # If no page server destination, probe for NomadNet's identity file
             if not nomadnet_dest:
-                import RNS
                 from pathlib import Path
 
-                _NN_IDENTITY_PATHS = [
+                import RNS
+
+                nn_identity_paths = [  # noqa: N806
                     Path.home() / ".nomadnetwork" / "storage" / "identity",
                     Path.home() / ".config" / "nomadnetwork" / "storage" / "identity",
                     Path("/etc/nomadnetwork/storage/identity"),
                     # Container paths
                     Path("/app/.nomadnetwork/storage/identity"),
                 ]
-                for path in _NN_IDENTITY_PATHS:
+                for path in nn_identity_paths:
                     if path.exists():
                         nn_identity = RNS.Identity.from_file(str(path))
                         if nn_identity:

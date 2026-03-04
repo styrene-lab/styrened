@@ -230,7 +230,7 @@ class TestFileTransferResourceMatching:
             service._active_transfers["ccdd" * 4] = 1
 
         # Simulate resource with rid_b prefix
-        import RNS as rns_mod  # noqa: N811
+        import RNS as rns_mod  # noqa: N811  # noqa: N811
 
         rns_mod.Resource = MagicMock()
         rns_mod.Resource.COMPLETE = 1
@@ -326,7 +326,7 @@ class TestInboundResourceSizeValidation:
     @pytest.mark.asyncio
     async def test_oversized_resource_data_rejected(self, service):
         """Resource data exceeding max_size + prefix is rejected (C4)."""
-        import RNS as rns_mod
+        import RNS as rns_mod  # noqa: N811
 
         rns_mod.Resource = MagicMock()
         rns_mod.Resource.COMPLETE = 1
@@ -349,7 +349,7 @@ class TestFileAcceptPeerVerification:
     @pytest.mark.asyncio
     async def test_file_accept_from_wrong_peer_rejected(self, service, mock_deps):
         """FILE_ACCEPT from a peer different than the offer target is rejected (W6)."""
-        import RNS as rns_mod
+        import RNS as rns_mod  # noqa: N811
 
         rns_mod.Identity = MagicMock()
 
@@ -383,7 +383,7 @@ class TestFileAcceptPeerVerification:
     @pytest.mark.asyncio
     async def test_file_accept_from_correct_peer_proceeds(self, service, mock_deps):
         """FILE_ACCEPT from the correct peer is processed (W6)."""
-        import RNS as rns_mod
+        import RNS as rns_mod  # noqa: N811
 
         rns_mod.Identity = MagicMock()
         rns_mod.Identity.recall.return_value = None  # Will fail at identity resolution

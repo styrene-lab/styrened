@@ -2765,7 +2765,7 @@ def cmd_block(args: argparse.Namespace) -> int:
         client = ControlClient()
         await client.connect()
         try:
-            result = await client.block_peer(args.peer_hash)
+            await client.block_peer(args.peer_hash)
             print(f"Blocked {args.peer_hash[:16]}...")
             return 0
         except Exception as e:
@@ -2787,7 +2787,7 @@ def cmd_unblock(args: argparse.Namespace) -> int:
         client = ControlClient()
         await client.connect()
         try:
-            result = await client.unblock_peer(args.peer_hash)
+            await client.unblock_peer(args.peer_hash)
             print(f"Unblocked {args.peer_hash[:16]}...")
             return 0
         except Exception as e:

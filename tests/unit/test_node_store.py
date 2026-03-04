@@ -465,7 +465,7 @@ class TestDiscoveredVia:
 
     def test_mesh_device_discovered_via_default_none(self):
         """MeshDevice.discovered_via defaults to None."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
         d = MeshDevice(
             destination_hash="a" * 32,
             identity_hash="b" * 32,
@@ -477,7 +477,7 @@ class TestDiscoveredVia:
 
     def test_mesh_device_discovered_via_set(self):
         """MeshDevice.discovered_via can be set."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
         d = MeshDevice(
             destination_hash="a" * 32,
             identity_hash="b" * 32,
@@ -490,7 +490,7 @@ class TestDiscoveredVia:
 
     def test_node_store_persists_discovered_via(self, tmp_path):
         """NodeStore round-trips discovered_via through SQLite."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
         from styrened.services.node_store import NodeStore
         store = NodeStore(db_path=tmp_path / "test.db")
         d = MeshDevice(
@@ -508,7 +508,7 @@ class TestDiscoveredVia:
 
     def test_node_store_discovered_via_not_overwritten_with_none(self, tmp_path):
         """COALESCE keeps existing discovered_via when update has None."""
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
         from styrened.services.node_store import NodeStore
         store = NodeStore(db_path=tmp_path / "test.db")
         d1 = MeshDevice(

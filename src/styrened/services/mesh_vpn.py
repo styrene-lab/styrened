@@ -293,7 +293,6 @@ def parse_handshake_response(data: bytes) -> PeerInfo:
 # Re-export from models for backward compatibility
 from styrened.models.config import MeshVPNConfig  # noqa: E402, F401
 
-
 # =============================================================================
 # Service
 # =============================================================================
@@ -1067,7 +1066,7 @@ class MeshVPNService:
             peer_info = await asyncio.wait_for(future, timeout=timeout)
             return peer_info
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"VPN handshake with {target_hash[:16]} timed out after {timeout}s")
             self._pending_handshakes.pop(target_hash, None)
             return None

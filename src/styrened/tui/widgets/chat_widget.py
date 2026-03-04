@@ -17,8 +17,12 @@ import atexit
 import datetime
 import logging
 import time
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
+if TYPE_CHECKING:
+    from styrened.tui.menubar.clipboard import ClipboardAttachment
+
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
@@ -26,7 +30,6 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Input, Static
-from textual import work
 from textual.worker import Worker, WorkerState
 
 from styrened.ipc import IPCMessageType
@@ -777,7 +780,7 @@ class ChatWidget(Widget, can_focus=True):
         except Exception:
             return
 
-        cascade = get_color_cascade()
+        get_color_cascade()
 
         for child in list(container.query(".chat-no-messages")):
             child.remove()
@@ -849,7 +852,7 @@ class ChatWidget(Widget, can_focus=True):
         except Exception:
             return
 
-        cascade = get_color_cascade()
+        get_color_cascade()
         icon = STATUS_ICONS.get(status, "")
         if status == "failed":
             icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
@@ -866,7 +869,7 @@ class ChatWidget(Widget, can_focus=True):
 
                 display = content
                 if status == "failed":
-                    cascade_ref = get_color_cascade()
+                    get_color_cascade()
                     msg_text = f"{display} {icon}"
                     # Retry hint added on next full refresh from DB
                 else:
@@ -1309,7 +1312,7 @@ class ChatWidget(Widget, can_focus=True):
         if not bridge:
             return
         try:
-            result = await bridge.block_peer(self.peer_hash)
+            await bridge.block_peer(self.peer_hash)
             self.notify(
                 f"Blocked {self.peer_hash[:8]}... — messages will be dropped",
                 title="Peer Blocked",
@@ -1552,7 +1555,7 @@ class ChatWidget(Widget, can_focus=True):
 
         stripped = text.strip()
         if stripped.startswith(("/", "~", ".")) or (len(stripped) > 2 and stripped[1] == ":"):
-            from pathlib import Path as _P
+            from pathlib import Path as _P  # noqa: N814
 
             path = _P(stripped).expanduser()
             if path.suffix.lower() in (

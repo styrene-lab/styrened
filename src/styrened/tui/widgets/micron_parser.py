@@ -695,12 +695,12 @@ def render_to_rich(
         if elem.element_type == ElementType.HEADING:
             level = min(elem.level, 3)
             # Visual hierarchy: h1 = bright cyan bold, h2 = cyan bold, h3 = dim cyan italic
-            _HEADING_STYLES = {
+            heading_styles = {
                 1: "bold #5af0ce",
                 2: "bold #3fbfa0",
                 3: "bold italic #6a9a8e",
             }
-            base_tag = _HEADING_STYLES.get(level, "bold #5af0ce")
+            base_tag = heading_styles.get(level, "bold #5af0ce")
 
             if elem.children:
                 parts: list[str] = []

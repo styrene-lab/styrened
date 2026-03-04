@@ -86,7 +86,7 @@ def app():
     DaemonSetupScreen.  Tests that need to exercise the setup screen
     should create their own un-patched StyreneApp.
     """
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock
 
     from styrened.tui.app import StyreneApp
 

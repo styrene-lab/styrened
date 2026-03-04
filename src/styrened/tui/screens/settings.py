@@ -42,7 +42,7 @@ ANNOUNCE_INTERVALS: list[tuple[str, int]] = [
     ("8h", 28800),
     ("1d", 86400),
 ]
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel  # noqa: E402
 
 
 class SettingsScreen(Screen[None]):

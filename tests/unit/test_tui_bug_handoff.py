@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, PropertyMock
 from rich.cells import cell_len as rich_cell_len
 
 from styrened.models.mesh_device import DeviceType, NodeStatus
+from styrened.tui.widgets.highlighted_panel import ColorCascade
 
 
 def _make_device(

@@ -10,9 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
-from styrened.models.config import CoreConfig, IdentityConfig
+from styrened.models.config import CoreConfig
 from styrened.tui.models.config import StyreneConfig
 from styrened.tui.services.config import _parse_config_dict
 

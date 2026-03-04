@@ -34,6 +34,9 @@ Usage (client/TUI):
     await session.run_interactive()
 """
 
+# Legacy alias — TerminalMessage was the old base class, now MessageBase
+from RNS.Channel import MessageBase as TerminalMessage
+
 from styrened.terminal.client import TerminalClient, TerminalClientSession
 from styrened.terminal.messages import (
     CommandExited,
@@ -47,9 +50,6 @@ from styrened.terminal.messages import (
     register_message_types,
     serialize_message,
 )
-
-# Legacy alias — TerminalMessage was the old base class, now MessageBase
-from RNS.Channel import MessageBase as TerminalMessage
 from styrened.terminal.service import TerminalService, TerminalSession
 
 __all__ = [
