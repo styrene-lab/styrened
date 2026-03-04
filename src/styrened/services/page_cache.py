@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import time
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
@@ -24,7 +25,7 @@ from styrened.models.messages import PageCache, SavedSite
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
-    from styrened.services.page_browser import PageBrowserService, PageResponse
+    from styrened.services.page_browser import PageBrowserService
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class PageCacheService:
         self._engine = engine
         self._crawl_task: asyncio.Task | None = None
         self._started = False
-        self._page_browser: "PageBrowserService | None" = None
+        self._page_browser: PageBrowserService | None = None
 
     def set_page_browser(self, browser: "PageBrowserService") -> None:
         """Set reference to PageBrowserService for crawling."""
@@ -336,11 +337,11 @@ class PageCacheService:
             return 0
 
         visited: set[str] = set()
-        queue: list[tuple[str, int]] = [("/page/index.mu", 0)]
+        queue: deque[tuple[str, int]] = deque([("/page/index.mu", 0)])
         pages_cached = 0
 
         while queue:
-            path, depth = queue.pop(0)
+            path, depth = queue.popleft()
             if path in visited:
                 continue
             visited.add(path)

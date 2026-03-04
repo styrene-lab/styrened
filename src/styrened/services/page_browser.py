@@ -108,12 +108,11 @@ class PageBrowserService:
         logger.info("PageBrowserService started")
 
     def handle_reconnection(self) -> None:
-        """Handle network reconnection by invalidating cached links and paths.
+        """Handle network reconnection by flagging path re-discovery.
 
-        Called by the daemon's reconnection callback chain.  Tears down
-        all cached RNS.Links (they hold stale socket state) and flags
-        the next fetch to force path re-discovery instead of trusting
-        the stale RNS path table.
+        Called by the daemon's reconnection callback chain.  Does NOT
+        tear down active links (they may still be healthy).  Stale links
+        fail naturally on next use and get cleaned up then.
         """
         logger.info("[RECONNECT] PageBrowserService forcing path re-discovery (keeping active links)")
         # Don't tear down active links — they may still be healthy.

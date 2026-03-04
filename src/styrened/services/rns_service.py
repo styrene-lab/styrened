@@ -111,6 +111,7 @@ class RNSService:
         # Track disconnect time per interface to avoid cross-interface confusion
         self._disconnect_times: dict[str, float] = {}
         self._reconnect_callbacks: list[Callable[[], None]] = []
+        self._last_reconnect_time: float = 0.0
 
         # Thread safety lock for shared state (_destinations, _reconnect_callbacks)
         self._lock = threading.Lock()
@@ -510,7 +511,7 @@ class RNSService:
                     prev_id = self._last_interface_ids.get(name)
                     if prev_id is not None and prev_id != obj_id:
                         now = time.monotonic()
-                        last_reconnect = getattr(self, "_last_reconnect_time", 0.0)
+                        last_reconnect = self._last_reconnect_time
                         if now - last_reconnect > self._RECONNECT_DEBOUNCE:
                             logger.info(
                                 f"[RECONNECT] TCP interface object changed: {name} "
