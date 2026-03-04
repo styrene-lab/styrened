@@ -986,6 +986,76 @@ class ControlClient:
         )
         return cast(bool, data.get("disconnected", False))
 
+    async def page_save_site(
+        self,
+        destination_hash: str,
+        display_name: str = "",
+        refresh_interval: int = 3600,
+        max_depth: int = 3,
+    ) -> bool:
+        """Save a NomadNet node for periodic background crawling."""
+        from styrened.ipc.messages import CmdPageSaveSiteRequest
+
+        data = await self._request(
+            CmdPageSaveSiteRequest(
+                destination_hash=destination_hash,
+                display_name=display_name,
+                refresh_interval=refresh_interval,
+                max_depth=max_depth,
+            )
+        )
+        return cast(bool, data.get("saved", False))
+
+    async def page_remove_site(self, destination_hash: str) -> bool:
+        """Remove a saved NomadNet site."""
+        from styrened.ipc.messages import CmdPageRemoveSiteRequest
+
+        data = await self._request(
+            CmdPageRemoveSiteRequest(destination_hash=destination_hash)
+        )
+        return cast(bool, data.get("removed", False))
+
+    async def page_list_sites(self) -> list[dict[str, Any]]:
+        """List all saved NomadNet sites."""
+        from styrened.ipc.messages import CmdPageListSitesRequest
+
+        data = await self._request(CmdPageListSitesRequest())
+        return cast(list, data.get("sites", []))
+
+    async def page_crawl_site(
+        self, destination_hash: str, max_depth: int = 3
+    ) -> int:
+        """Manually trigger a full site crawl."""
+        from styrened.ipc.messages import CmdPageCrawlSiteRequest
+
+        data = await self._request(
+            CmdPageCrawlSiteRequest(
+                destination_hash=destination_hash,
+                max_depth=max_depth,
+            )
+        )
+        return cast(int, data.get("pages_cached", 0))
+
+    async def page_get_cached(
+        self, destination_hash: str, path: str = "/page/index.mu"
+    ) -> dict[str, Any] | None:
+        """Get a cached page."""
+        from styrened.ipc.messages import CmdPageGetCachedRequest
+
+        data = await self._request(
+            CmdPageGetCachedRequest(
+                destination_hash=destination_hash,
+                path=path,
+            )
+        )
+        if data.get("found"):
+            return {
+                "content": data.get("content", ""),
+                "content_length": data.get("content_length", 0),
+                "fetched_at": data.get("fetched_at", 0.0),
+            }
+        return None
+
     async def page_regenerate_index(self) -> bool:
         """Regenerate the default node info page.
 

@@ -2195,10 +2195,42 @@ class IPCHandlers:
                     "refresh": meta.refresh,
                 }
 
+            # Write-through cache on success
+            cache_svc = getattr(self.daemon, "_page_cache_service", None)
+            if cache_svc and response.status.value == "ok" and response.content:
+                cache_svc.cache_page(
+                    req.destination_hash, req.path, response.content
+                )
+
+            # On failure, try cache fallback
+            if response.status.value != "ok" and cache_svc:
+                cached = cache_svc.get_cached_page(req.destination_hash, req.path)
+                if cached:
+                    data["cached_content"] = cached["content"]
+                    data["cached_at"] = cached["fetched_at"]
+                    data["cached_content_length"] = cached["content_length"]
+
             return ResultResponse(data=data)
 
         except Exception as e:
             logger.exception(f"Error fetching page: {e}")
+            # Try cache fallback even on exception
+            cache_svc = getattr(self.daemon, "_page_cache_service", None)
+            if cache_svc:
+                cached = cache_svc.get_cached_page(req.destination_hash, req.path)
+                if cached:
+                    return ResultResponse(data={
+                        "content": "",
+                        "status": "error",
+                        "destination_hash": req.destination_hash,
+                        "path": req.path,
+                        "transfer_time": 0.0,
+                        "content_length": 0,
+                        "error_message": str(e),
+                        "cached_content": cached["content"],
+                        "cached_at": cached["fetched_at"],
+                        "cached_content_length": cached["content_length"],
+                    })
             return ErrorResponse.internal_error(f"Failed to fetch page: {e}")
 
     def _check_page_server(self) -> ErrorResponse | None:
@@ -2304,6 +2336,122 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error disconnecting page link: {e}")
             return ErrorResponse.internal_error(f"Failed to disconnect page link: {e}")
+
+    def _check_page_cache(self) -> ErrorResponse | None:
+        """Check if page cache service is available."""
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not getattr(self.daemon, "_page_cache_service", None):
+            return ErrorResponse.internal_error("Page cache service not initialized")
+        return None
+
+    async def handle_cmd_page_save_site(self, request: IPCRequest) -> IPCResponse:
+        """Save a NomadNet node for periodic background crawling."""
+        err = self._check_page_cache()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdPageSaveSiteRequest
+
+        req = request if isinstance(request, CmdPageSaveSiteRequest) else CmdPageSaveSiteRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            self.daemon._page_cache_service.save_site(
+                destination_hash=req.destination_hash,
+                display_name=req.display_name,
+                refresh_interval=req.refresh_interval,
+                max_depth=req.max_depth,
+            )
+            return ResultResponse(data={"saved": True})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to save site: {e}")
+
+    async def handle_cmd_page_remove_site(self, request: IPCRequest) -> IPCResponse:
+        """Remove a saved NomadNet site."""
+        err = self._check_page_cache()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdPageRemoveSiteRequest
+
+        req = request if isinstance(request, CmdPageRemoveSiteRequest) else CmdPageRemoveSiteRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            removed = self.daemon._page_cache_service.remove_site(req.destination_hash)
+            return ResultResponse(data={"removed": removed})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to remove site: {e}")
+
+    async def handle_cmd_page_list_sites(self, request: IPCRequest) -> IPCResponse:
+        """List all saved NomadNet sites."""
+        err = self._check_page_cache()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        try:
+            sites = self.daemon._page_cache_service.list_saved_sites()
+            return ResultResponse(data={"sites": sites})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to list saved sites: {e}")
+
+    async def handle_cmd_page_crawl_site(self, request: IPCRequest) -> IPCResponse:
+        """Manually trigger a full site crawl."""
+        err = self._check_page_cache()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdPageCrawlSiteRequest
+
+        req = request if isinstance(request, CmdPageCrawlSiteRequest) else CmdPageCrawlSiteRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            pages_cached = await self.daemon._page_cache_service.crawl_site(
+                destination_hash=req.destination_hash,
+                max_depth=req.max_depth,
+            )
+            return ResultResponse(data={"pages_cached": pages_cached})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to crawl site: {e}")
+
+    async def handle_cmd_page_get_cached(self, request: IPCRequest) -> IPCResponse:
+        """Get a cached page by destination and path."""
+        err = self._check_page_cache()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdPageGetCachedRequest
+
+        req = request if isinstance(request, CmdPageGetCachedRequest) else CmdPageGetCachedRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            cached = self.daemon._page_cache_service.get_cached_page(
+                req.destination_hash, req.path
+            )
+            if cached:
+                return ResultResponse(data={
+                    "found": True,
+                    "content": cached["content"],
+                    "content_length": cached["content_length"],
+                    "fetched_at": cached["fetched_at"],
+                })
+            return ResultResponse(data={"found": False})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to get cached page: {e}")
 
     # -------------------------------------------------------------------------
     # Terminal handlers

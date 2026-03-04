@@ -14,7 +14,7 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import Index, String, create_engine
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -38,6 +38,46 @@ class Base(DeclarativeBase):
     """SQLAlchemy declarative base."""
 
     pass
+
+
+class PageCache(Base):
+    """Cached NomadNet page content.
+
+    Write-through cache: every successful page fetch writes here.
+    On fetch failure, the TUI can display the last cached version
+    with a "cached @ <timestamp>" indicator.
+    """
+
+    __tablename__ = "page_cache"
+    __table_args__ = (
+        UniqueConstraint("destination_hash", "path", name="uq_page_cache_dest_path"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    destination_hash: Mapped[str] = mapped_column(String(64), index=True)
+    path: Mapped[str] = mapped_column(String(512))
+    content: Mapped[str] = mapped_column(Text, default="")
+    content_length: Mapped[int] = mapped_column(Integer, default=0)
+    fetched_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class SavedSite(Base):
+    """A NomadNet node saved for periodic background crawling.
+
+    Saved sites are crawled on a configurable interval to keep
+    cached pages fresh.  The crawler follows links from the index
+    page up to a configurable depth limit.
+    """
+
+    __tablename__ = "saved_sites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    destination_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    refresh_interval: Mapped[int] = mapped_column(Integer, default=3600)
+    last_crawl_at: Mapped[float] = mapped_column(Float, default=0.0)
+    pages_cached: Mapped[int] = mapped_column(Integer, default=0)
+    max_depth: Mapped[int] = mapped_column(Integer, default=3)
 
 
 class Message(Base):
