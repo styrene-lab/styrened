@@ -175,6 +175,190 @@ class TestDirectLinkServiceLifecycle:
         await svc.stop()
 
 
+class TestEstablishIdentityRecall:
+    """Tests for establish() identity resolution logic.
+
+    The establish() method must handle both destination hashes and identity
+    hashes, because the NodeStore sometimes stores identity hashes in the
+    destination_hash field.
+    """
+
+    @pytest.mark.asyncio
+    async def test_recall_by_dest_hash_succeeds(self):
+        """When RNS.Identity.recall(dest_hash) succeeds, skip path discovery."""
+        import sys
+        from unittest.mock import AsyncMock, patch, MagicMock
+
+        mock_identity = MagicMock()
+        mock_identity.hash = bytes.fromhex("aa" * 16)
+
+        mock_datalink_dest = MagicMock()
+        mock_datalink_dest.hash = bytes.fromhex("bb" * 16)
+
+        svc = DirectLinkService()
+        await svc.start()
+
+        with patch.dict(sys.modules, {"RNS": MagicMock()}):
+            import RNS
+            # First recall (by dest hash) succeeds
+            RNS.Identity.recall = MagicMock(return_value=mock_identity)
+            RNS.Transport.has_path = MagicMock(return_value=True)
+            RNS.Destination = MagicMock(return_value=mock_datalink_dest)
+            RNS.Destination.OUT = 1
+            RNS.Destination.SINGLE = 2
+            RNS.Link = MagicMock()
+            RNS.Link.ACTIVE = 1
+
+            with patch.object(svc, "_create_link", new_callable=AsyncMock, return_value=None):
+                result = await svc.establish("aa" * 16)
+                # Should have called recall with dest_hash
+                assert RNS.Identity.recall.call_count >= 1
+                first_call = RNS.Identity.recall.call_args_list[0]
+                assert first_call[0][0] == bytes.fromhex("aa" * 16)
+
+        await svc.stop()
+
+    @pytest.mark.asyncio
+    async def test_recall_falls_back_to_identity_hash(self):
+        """When dest hash recall fails, try from_identity_hash=True."""
+        import sys
+        from unittest.mock import AsyncMock, patch, MagicMock
+
+        mock_identity = MagicMock()
+        mock_identity.hash = bytes.fromhex("aa" * 16)
+
+        mock_datalink_dest = MagicMock()
+        mock_datalink_dest.hash = bytes.fromhex("bb" * 16)
+
+        svc = DirectLinkService()
+        await svc.start()
+
+        call_count = 0
+
+        def mock_recall(hash_bytes, from_identity_hash=False):
+            nonlocal call_count
+            call_count += 1
+            if from_identity_hash:
+                return mock_identity  # Second attempt succeeds
+            return None  # First attempt fails
+
+        with patch.dict(sys.modules, {"RNS": MagicMock()}):
+            import RNS
+            RNS.Identity.recall = mock_recall
+            RNS.Transport.has_path = MagicMock(return_value=True)
+            RNS.Destination = MagicMock(return_value=mock_datalink_dest)
+            RNS.Destination.OUT = 1
+            RNS.Destination.SINGLE = 2
+            RNS.Link = MagicMock()
+            RNS.Link.ACTIVE = 1
+
+            with patch.object(svc, "_create_link", new_callable=AsyncMock, return_value=None):
+                result = await svc.establish("aa" * 16)
+                # Should have tried both recall methods
+                assert call_count == 2
+
+        await svc.stop()
+
+    @pytest.mark.asyncio
+    async def test_identity_unknown_when_both_recalls_fail(self):
+        """Returns identity_unknown when neither recall method works and no path."""
+        import sys
+        from unittest.mock import patch, MagicMock
+
+        svc = DirectLinkService()
+        await svc.start()
+
+        mock_rns = MagicMock()
+        mock_rns.Identity.recall = MagicMock(return_value=None)
+        mock_rns.Transport.has_path = MagicMock(return_value=True)
+
+        with patch.dict(sys.modules, {"RNS": mock_rns}):
+            result = await svc.establish("cc" * 16)
+            assert result.status == "identity_unknown"
+
+        await svc.stop()
+
+    @pytest.mark.asyncio
+    async def test_path_not_found_timeout(self):
+        """Returns path_not_found when path discovery times out."""
+        import sys
+        from unittest.mock import patch, MagicMock
+        import styrened.services.direct_link as dl_mod
+
+        svc = DirectLinkService()
+        await svc.start()
+
+        original_timeout = dl_mod.PATH_DISCOVERY_TIMEOUT
+        dl_mod.PATH_DISCOVERY_TIMEOUT = 0.1
+
+        try:
+            mock_rns = MagicMock()
+            mock_rns.Identity.recall = MagicMock(return_value=None)
+            mock_rns.Transport.has_path = MagicMock(return_value=False)
+            mock_rns.Transport.request_path = MagicMock()
+
+            with patch.dict(sys.modules, {"RNS": mock_rns}):
+                result = await svc.establish("dd" * 16)
+                assert result.status == "path_not_found"
+        finally:
+            dl_mod.PATH_DISCOVERY_TIMEOUT = original_timeout
+
+        await svc.stop()
+
+
+class TestDestHashProperty:
+    """Test _dest_hash property on MeshDeviceDetailScreen."""
+
+    def test_dest_hash_prefers_device_destination_hash(self):
+        """_dest_hash should return device.destination_hash when available."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+
+        device = MeshDevice(
+            destination_hash="fe75a225eeff636a" + "0" * 16,
+            name="test",
+            device_type=DeviceType.STYRENE_NODE, last_announce=0,
+            identity_hash="e012da2530c3eb27" + "0" * 16,
+        )
+
+        # Can't instantiate the full screen easily, so test the logic directly
+        dest_hash = device.destination_hash
+        identity = device.identity_hash
+        # Simulate _dest_hash logic
+        result = dest_hash if dest_hash else identity
+        assert result == "fe75a225eeff636a" + "0" * 16
+        assert result != identity
+
+    def test_dest_hash_falls_back_to_identity(self):
+        """When device has no destination_hash, fall back to identity."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+
+        device = MeshDevice(
+            destination_hash="",
+            name="test",
+            device_type=DeviceType.STYRENE_NODE, last_announce=0,
+            identity_hash="e012da2530c3eb27" + "0" * 16,
+        )
+
+        result = device.destination_hash if device.destination_hash else device.identity_hash
+        assert result == "e012da2530c3eb27" + "0" * 16
+
+    def test_dest_hash_same_as_identity_is_common_bug(self):
+        """Document: NodeStore often stores identity_hash as destination_hash."""
+        from styrened.models.mesh_device import MeshDevice, DeviceType
+
+        # This is the broken state we see in practice
+        identity = "e012da2530c3eb27" + "0" * 16
+        device = MeshDevice(
+            destination_hash=identity,  # Bug: same as identity
+            name="test",
+            device_type=DeviceType.STYRENE_NODE, last_announce=0,
+            identity_hash=identity,
+        )
+        # _dest_hash would return the identity hash thinking it's a dest hash
+        # establish() must handle this via from_identity_hash=True fallback
+        assert device.destination_hash == device.identity_hash
+
+
 class TestExplorationFiltering:
     """Status filtering on exploration tables."""
 

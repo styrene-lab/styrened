@@ -1340,8 +1340,12 @@ class StyreneDaemon:
                 self._on_datalink_established
             )
 
+            # Announce the datalink destination so remote peers can discover
+            # a path to it and establish RNS Links for status/speedtest/etc.
+            self._datalink_destination.announce()
+
             logger.info(
-                f"Datalink destination registered: {self._datalink_destination.hash.hex()[:16]}..."
+                f"Datalink destination registered and announced: {self._datalink_destination.hash.hex()[:16]}..."
             )
         except Exception as e:
             logger.error(f"Failed to setup datalink destination: {e}")
@@ -1783,6 +1787,13 @@ class StyreneDaemon:
                     logger.debug("Announced LXMF delivery destination")
             except Exception as e:
                 logger.warning(f"LXMF announce failed: {e}")
+
+            # Re-announce datalink destination so paths stay fresh
+            if self._datalink_destination:
+                try:
+                    self._datalink_destination.announce()
+                except Exception as e:
+                    logger.debug(f"Datalink announce failed: {e}")
 
         except Exception as e:
             logger.warning(f"Announce failed: {e}")
