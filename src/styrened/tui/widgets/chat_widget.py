@@ -510,6 +510,11 @@ class ChatWidget(Widget, can_focus=True):
                     await self._refresh_messages()
                     return
 
+                # Remove optimistic bubbles (id=0) before appending real ones
+                for child in list(container.query(MessageBubble)):
+                    if child.message_id == 0:
+                        child.remove()
+
                 # Incremental — only append new messages
                 appended = False
                 # Determine last date from existing messages for date separator continuity
