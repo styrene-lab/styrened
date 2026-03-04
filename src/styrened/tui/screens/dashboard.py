@@ -173,7 +173,7 @@ class MeshDeviceTree(Tree[str]):
         # Last seen (compact)
         seen = device.last_seen_display
         if device.announce_count > 1:
-            seen += f"×{device.announce_count}"
+            seen += f" ×{device.announce_count}"
         last_seen = f"[{cascade.dim}]{seen}[/]"
 
         return f"{status} {name}  {last_seen}{unread_text}"

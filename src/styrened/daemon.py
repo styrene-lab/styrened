@@ -101,6 +101,7 @@ class StyreneDaemon:
         self._pqc_service: Any = None  # PQC session layer service
         self._direct_link_service: Any = None  # Direct data link service
         self._datalink_destination: Any = None  # Incoming datalink RNS.Destination
+        self._mesh_vpn_service: Any = None  # WireGuard mesh VPN service
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -1275,7 +1276,8 @@ class StyreneDaemon:
         Sets up:
         1. DirectLinkService for outgoing links to peers
         2. ("styrene", "datalink") IN destination for accepting incoming links
-        3. Request handlers for /status and /ping on the destination
+        3. Request handlers for /status, /ping, /vpn/handshake on the destination
+        4. MeshVPNService for WireGuard tunnel management (if enabled)
         """
         try:
             from styrened.services.direct_link import DirectLinkService
@@ -1285,6 +1287,9 @@ class StyreneDaemon:
 
             # Register incoming datalink destination
             self._setup_datalink_destination()
+
+            # Start mesh VPN service if enabled
+            await self._start_mesh_vpn()
 
             logger.info("Direct link service started")
         except Exception as e:
@@ -1328,6 +1333,14 @@ class StyreneDaemon:
                 allow=RNS.Destination.ALLOW_ALL,
             )
 
+            # Register VPN handshake handler if mesh VPN is enabled
+            if self._mesh_vpn_service and self._mesh_vpn_service.enabled:
+                self._datalink_destination.register_request_handler(
+                    "/vpn/handshake",
+                    response_generator=self._mesh_vpn_service.handle_handshake,
+                    allow=RNS.Destination.ALLOW_ALL,
+                )
+
             # Set link established callback for logging
             self._datalink_destination.set_link_established_callback(
                 self._on_datalink_established
@@ -1338,6 +1351,28 @@ class StyreneDaemon:
             )
         except Exception as e:
             logger.error(f"Failed to setup datalink destination: {e}")
+
+    async def _start_mesh_vpn(self) -> None:
+        """Start the mesh VPN service if enabled in config."""
+        try:
+            from styrened.services.mesh_vpn import MeshVPNService
+
+            vpn_config = getattr(self._config, "mesh_vpn", None)
+            if vpn_config is None:
+                return
+
+            self._mesh_vpn_service = MeshVPNService(
+                config=vpn_config,
+                identity_hash=self._identity_hash or "",
+            )
+
+            if vpn_config.enable:
+                await self._mesh_vpn_service.start(
+                    identity_hash=self._identity_hash or "",
+                )
+                logger.info("Mesh VPN service started")
+        except Exception as e:
+            logger.error(f"Failed to start mesh VPN: {e}")
 
     def _on_datalink_established(self, link: Any) -> None:
         """Log when a peer establishes a direct data link to us."""
@@ -1832,6 +1867,14 @@ class StyreneDaemon:
 
         # Stop terminal service (closes all sessions)
         self._stop_terminal_service()
+
+        # Stop mesh VPN service
+        if self._mesh_vpn_service:
+            try:
+                await self._mesh_vpn_service.stop()
+            except Exception as e:
+                logger.error(f"Error stopping mesh VPN service: {e}")
+            self._mesh_vpn_service = None
 
         # Stop direct link service
         if self._direct_link_service:

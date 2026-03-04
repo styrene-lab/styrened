@@ -6,7 +6,10 @@ into a single unified view of "this node" - the daemon behind the TUI.
 Uses cascade colors for theme-aware rendering.
 """
 
+import re
+
 import RNS  # type: ignore
+from rich.cells import cell_len as rich_cell_len
 from textual.reactive import reactive
 from textual.widgets import Static
 
@@ -202,7 +205,7 @@ class NodeInfoPanel(Static):
             if self.interface_count > 0:
                 lines.append(f"  RNS: {SemanticSymbols.ONLINE} [{cascade.medium}]online ({self.interface_count} if)[/]")
             else:
-                lines.append(f"  RNS: {SemanticSymbols.PENDING} [{cascade.medium}]no peers[/]")
+                lines.append(f"  RNS: {SemanticSymbols.PENDING} [{cascade.medium}]no interfaces[/]")
         else:
             if self.error_state and self.error_state.is_error:
                 lines.append(f"  RNS: {SemanticSymbols.REJECTED} [{cascade.bright}]{self.error_state.title}[/]")
@@ -243,11 +246,12 @@ class NodeInfoPanel(Static):
             lines.append(f"  HUB: {SemanticSymbols.OFFLINE} [{cascade.dim}]disabled[/]")
 
         if self.styrene_mesh_count > 0:
-            lines.append(f"  MESH: {SemanticSymbols.ONLINE} [{cascade.medium}]{self.styrene_mesh_count} peers[/]")
+            noun = "node" if self.styrene_mesh_count == 1 else "nodes"
+            lines.append(f"  MESH: {SemanticSymbols.ONLINE} [{cascade.medium}]{self.styrene_mesh_count} {noun}[/]")
         elif not self.rns_online and self.error_state and self.error_state.is_error:
             pass
         else:
-            lines.append(f"  MESH: {SemanticSymbols.OFFLINE} [{cascade.dim}]no peers[/]")
+            lines.append(f"  MESH: {SemanticSymbols.OFFLINE} [{cascade.dim}]no nodes[/]")
 
         # === TRAFFIC ===
         lines.append("")
@@ -311,10 +315,10 @@ class NodeInfoPanel(Static):
         col_width = 44
         output_lines = []
         for l_line, r_line in zip(left, right):
-            # Pad left line to fixed width (plain-text approximation)
-            # Rich tags don't count toward visible width, so we strip them for padding
-            import re
-            visible_len = len(re.sub(r"\[.*?\]", "", l_line))
+            # Pad left line to fixed width — strip Rich tags, then measure
+            # using Rich's own cell_len which matches Textual's rendering
+            stripped = re.sub(r"\[.*?\]", "", l_line)
+            visible_len = rich_cell_len(stripped)
             pad = max(0, col_width - visible_len)
             output_lines.append(f"{l_line}{' ' * pad}{r_line}")
 
@@ -411,13 +415,21 @@ class NodeInfoPanel(Static):
 
         self.hub_status = hub_connection.status
 
-        # Get Styrene mesh device count from discovery
-        devices = discover_devices()
+        # Get Styrene mesh device count from discovery + persistent store
+        live_nodes = discover_devices()
+        try:
+            from styrened.services.node_store import get_node_store
+            stored_nodes = get_node_store().get_styrene_nodes()
+        except Exception:
+            stored_nodes = []
+        all_devices = {n.destination_hash: n for n in stored_nodes}
+        all_devices.update({n.destination_hash: n for n in live_nodes})
 
-        # Count only Styrene nodes (other device types shown in Exploration screen)
-        self.styrene_mesh_count = len(
-            [d for d in devices if d.device_type == DeviceType.STYRENE_NODE]
+        from styrened.services.reticulum import _deduplicate_by_identity
+        styrene_nodes = _deduplicate_by_identity(
+            [d for d in all_devices.values() if d.device_type == DeviceType.STYRENE_NODE]
         )
+        self.styrene_mesh_count = len(styrene_nodes)
 
     def _load_reticulum_data(self) -> None:
         """Load Reticulum stack status."""
