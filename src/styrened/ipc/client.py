@@ -1075,6 +1075,42 @@ class ControlClient:
         return await self._request(QueryPageServerStatusRequest())
 
     # -------------------------------------------------------------------------
+    # Direct data link methods
+    # -------------------------------------------------------------------------
+
+    async def datalink_establish(self, destination_hash: str) -> dict[str, Any]:
+        """Establish a direct data link to a Styrene peer."""
+        from styrened.ipc.messages import CmdDatalinkEstablishRequest
+
+        return await self._request(
+            CmdDatalinkEstablishRequest(destination_hash=destination_hash)
+        )
+
+    async def datalink_teardown(self, destination_hash: str) -> dict[str, Any]:
+        """Tear down a direct data link."""
+        from styrened.ipc.messages import CmdDatalinkTeardownRequest
+
+        return await self._request(
+            CmdDatalinkTeardownRequest(destination_hash=destination_hash)
+        )
+
+    async def datalink_status(self, destination_hash: str) -> dict[str, Any]:
+        """Get direct link status for a peer."""
+        from styrened.ipc.messages import CmdDatalinkStatusRequest
+
+        return await self._request(
+            CmdDatalinkStatusRequest(destination_hash=destination_hash)
+        )
+
+    async def datalink_query(self, destination_hash: str) -> dict[str, Any]:
+        """Query peer status over an established direct link."""
+        from styrened.ipc.messages import CmdDatalinkQueryRequest
+
+        return await self._request(
+            CmdDatalinkQueryRequest(destination_hash=destination_hash)
+        )
+
+    # -------------------------------------------------------------------------
     # Remote inbox methods (RPC over LXMF)
     # -------------------------------------------------------------------------
 

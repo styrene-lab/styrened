@@ -8,13 +8,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static, TabbedContent, TabPane
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
-from styrened.rpc import RPCTimeoutError, RPCTransportError
-from styrened.rpc.messages import StatusResponse
 from styrened.tui.services.reticulum import discover_devices
 from styrened.tui.widgets.chat_widget import ChatWidget
 from styrened.tui.widgets.command_widget import CommandWidget
@@ -24,6 +22,7 @@ from styrened.tui.widgets.page_browser import PageBrowserWidget
 from styrened.tui.widgets.terminal_widget import TerminalWidget
 
 if TYPE_CHECKING:
+    from styrened.rpc.messages import StatusResponse
     from styrened.tui.app import StyreneApp
 
 
@@ -122,6 +121,7 @@ class MeshDeviceDetailScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back"),
         Binding("r", "refresh_status", "Refresh"),
+        Binding("l", "establish_link", "Link"),
         Binding("a", "add_contact", "Add Contact"),
         Binding("y", "copy_hash", "Copy Hash"),
     ]
@@ -129,7 +129,7 @@ class MeshDeviceDetailScreen(Screen[None]):
     def __init__(
         self,
         device_identity: str,
-        initial_status: StatusResponse | None = None,
+        initial_status: "StatusResponse | None" = None,
         initial_tab: str | None = None,
     ) -> None:
         """Initialize mesh device detail screen.
@@ -208,19 +208,14 @@ class MeshDeviceDetailScreen(Screen[None]):
                     initial=default_tab or "status",
                     id="device-tabs",
                 ):
-                    # Status tab
+                    # Status tab — two-column dashboard with announce + link data
                     with TabPane("Status", id="status"):
-                        status_widget = DeviceStatusWidget(id="status-widget")
+                        status_widget = DeviceStatusWidget(
+                            device=self.device, id="status-widget"
+                        )
                         if self.initial_status:
                             status_widget.status = self.initial_status
-
-                        yield Vertical(
-                            Horizontal(
-                                Button("Refresh", id="refresh-status-btn", variant="default"),
-                                classes="panel-header",
-                            ),
-                            status_widget,
-                        )
+                        yield status_widget
 
                     # Chat tab
                     with TabPane("Chat", id="chat"):
@@ -328,9 +323,10 @@ class MeshDeviceDetailScreen(Screen[None]):
             self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
 
     async def _auto_fetch_status(self) -> None:
-        """Silently fetch status on mount (no toast on success).
+        """Silently fetch status on mount — tries datalink first, then RPC.
 
-        Falls back to announce-derived info if RPC is unavailable.
+        Falls back gracefully: datalink query → RPC over LXMF → no data.
+        Also queries datalink status to populate the LINK panel.
         """
         try:
             status_widget = self.query_one("#status-widget", DeviceStatusWidget)
@@ -340,33 +336,60 @@ class MeshDeviceDetailScreen(Screen[None]):
         status_widget.loading = True
         status_widget.error = None
 
+        # Check datalink status (non-blocking, just reads cached state)
         try:
-            app: StyreneApp = self.app  # type: ignore[assignment]
-            response = await app.rpc_client.call_status(
-                self.device_identity,
-                timeout=30.0,
-            )
-            status_widget.status = response
-            status_widget.error = None
-        except Exception:
-            # RPC unavailable — populate from announce data instead
-            if self.device:
-                from styrened.rpc.messages import StatusResponse
-
-                fallback = StatusResponse(
-                    hostname=self.device.name,
-                    styrened_version=self.device.version or "",
-                    services=self.device.capabilities or [],
-                    uptime=-1,  # sentinel: unknown
-                    ip="unknown (no RPC link)",
-                    disk_total=0,
-                    disk_used=0,
+            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            if bridge:
+                link_info = await bridge.datalink_status(
+                    destination_hash=self.device_identity,
                 )
-                status_widget.status = fallback
-                status_widget.error = None
-            # else leave as loading placeholder
-        finally:
-            status_widget.loading = False
+                status_widget.link_info = link_info
+        except Exception:
+            pass
+
+        # Try datalink query first (low latency if link exists)
+        got_status = False
+        try:
+            if bridge and status_widget.link_info and status_widget.link_info.get("connected"):
+                result = await bridge.datalink_query(
+                    destination_hash=self.device_identity,
+                )
+                if result and "status_data" in result:
+                    sd = result["status_data"]
+                    from styrened.rpc.messages import StatusResponse
+
+                    status_widget.status = StatusResponse(
+                        uptime=sd.get("uptime", 0),
+                        ip=sd.get("ip", ""),
+                        services=sd.get("services", []),
+                        disk_used=sd.get("disk_used", 0),
+                        disk_total=sd.get("disk_total", 0),
+                        styrened_version=sd.get("styrened_version"),
+                        hostname=sd.get("hostname"),
+                        arch=sd.get("arch"),
+                        os_id=sd.get("os_id"),
+                        os_version=sd.get("os_version"),
+                        nixos_generation=sd.get("nixos_generation"),
+                        available_commands=sd.get("available_commands"),
+                    )
+                    got_status = True
+        except Exception:
+            pass
+
+        # Fall back to RPC over LXMF
+        if not got_status:
+            try:
+                app: StyreneApp = self.app  # type: ignore[assignment]
+                response = await app.rpc_client.call_status(
+                    self.device_identity,
+                    timeout=30.0,
+                )
+                status_widget.status = response
+            except Exception:
+                # No RPC data — status widget shows announce data only
+                pass
+
+        status_widget.loading = False
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press events.
@@ -374,9 +397,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         Args:
             event: Button pressed event.
         """
-        if str(event.button.id) == "refresh-status-btn":
-            await self.action_refresh_status()
-        elif str(event.button.id) == "btn-message":
+        if str(event.button.id) == "btn-message":
             self._switch_to_chat()
         elif str(event.button.id) == "btn-add-contact":
             self.action_add_contact()
@@ -385,63 +406,60 @@ class MeshDeviceDetailScreen(Screen[None]):
 
 
     async def action_refresh_status(self) -> None:
-        """Refresh device status via RPC call."""
+        """Refresh device status — tries datalink, falls back to RPC."""
+        if not self.device:
+            return
+        self.run_worker(self._auto_fetch_status(), name="refresh-status")
+        self.notify("Refreshing...", severity="information")
+
+    async def action_establish_link(self) -> None:
+        """Establish a direct data link to this peer."""
         if not self.device:
             return
 
-        # Get status widget
         try:
-            status_widget = self.query_one("#status-widget", DeviceStatusWidget)
+            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
         except Exception:
-            self.notify("Status widget not found", severity="error")
+            self.notify("Direct links require daemon mode", severity="warning")
+            return
+        if not bridge:
+            self.notify("Direct links require daemon mode", severity="warning")
             return
 
-        # Set loading state
-        status_widget.loading = True
-        status_widget.error = None
+        # Only for Styrene-enabled nodes
+        if not self.device.is_styrene_node:
+            self.notify("Direct links require a Styrene-enabled peer", severity="warning")
+            return
 
+        self.notify("Establishing direct link...", severity="information")
+        self.run_worker(self._do_establish_link(bridge), name="establish-link")
+
+    async def _do_establish_link(self, bridge: Any) -> None:
+        """Background worker: establish datalink and refresh status."""
         try:
-            # Make RPC call
-            app: StyreneApp = self.app  # type: ignore[assignment]
-            response = await app.rpc_client.call_status(
-                self.device_identity,
-                timeout=30.0,
+            result = await bridge.datalink_establish(
+                destination_hash=self.device_identity,
             )
+            status = result.get("status", "failed")
 
-            # Update widget
-            status_widget.status = response
-            status_widget.error = None
-            self.notify("Status updated", severity="information")
+            try:
+                sw = self.query_one("#status-widget", DeviceStatusWidget)
+                link_info = await bridge.datalink_status(
+                    destination_hash=self.device_identity,
+                )
+                sw.link_info = link_info
+            except Exception:
+                pass
 
-        except RPCTimeoutError:
-            status_widget.error = "Device did not respond in time"
-            self.notify(
-                "Device did not respond - it may be offline or unreachable",
-                title="Timeout",
-                severity="warning",
-                timeout=5,
-            )
-
-        except RPCTransportError as e:
-            status_widget.error = f"Transport error: {e}"
-            self.notify(
-                f"Failed to send message: {e}",
-                title="Transport Error",
-                severity="error",
-                timeout=5,
-            )
+            if status == "active":
+                self.notify("Direct link established ●", severity="information")
+                # Auto-query status over the new link
+                self.run_worker(self._auto_fetch_status(), name="post-link-status")
+            else:
+                self.notify(f"Link status: {status}", severity="warning")
 
         except Exception as e:
-            status_widget.error = f"Error: {e}"
-            self.notify(
-                f"Unexpected error: {e}",
-                title="Error",
-                severity="error",
-                timeout=5,
-            )
-
-        finally:
-            status_widget.loading = False
+            self.notify(f"Link failed: {e}", severity="error")
 
     def action_add_contact(self) -> None:
         """Add this device as a contact."""

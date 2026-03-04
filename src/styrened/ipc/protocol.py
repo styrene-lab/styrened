@@ -96,6 +96,12 @@ class IPCMessageType(IntEnum):
     CMD_PAGE_CRAWL_SITE = 0x48
     CMD_PAGE_GET_CACHED = 0x49
 
+    # Direct data link commands
+    CMD_DATALINK_ESTABLISH = 0x50
+    CMD_DATALINK_TEARDOWN = 0x51
+    CMD_DATALINK_STATUS = 0x52
+    CMD_DATALINK_QUERY = 0x53  # Query peer status over direct link
+
     # Terminal session (0x50-0x5F)
     CMD_TERMINAL_OPEN = 0x50
     CMD_TERMINAL_INPUT = 0x51

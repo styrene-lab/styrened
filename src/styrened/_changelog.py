@@ -130,4 +130,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.21", "fix: restart daemon after upgrade before re-execing TUI"),
     ("0.13.22", "fix: TUI auto-starts daemon on mount before showing setup screen"),
     ("0.13.23", "feat: NomadNet page caching system"),
+    ("0.13.24", "fix: page cache assessment fixes"),
 ]

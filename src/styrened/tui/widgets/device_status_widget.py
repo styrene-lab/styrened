@@ -1,144 +1,224 @@
-"""Device status widget for displaying RPC status responses."""
+"""Device status widget — two-column dashboard for mesh device detail.
 
+Displays announce data (always available) enriched with RPC/datalink data
+when available.  Uses the Imperial CRT cascade color system.
+
+Layout:
+    Left column:  NODE, MESH
+    Right column: LINK, SYSTEM, NETWORK
+"""
+
+import re
+import time
 from datetime import datetime
+from typing import Any
 
-from textual.app import ComposeResult
 from textual.reactive import reactive
 from textual.widgets import Static
 
+from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.rpc.messages import StatusResponse
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 
 class DeviceStatusWidget(Static):
-    """Widget for displaying device status from RPC response.
-
-    Uses reactive properties to update display when status changes.
-    Shows comprehensive system, network, and storage info organized
-    in sections.
+    """Two-column device status dashboard.
 
     Attributes:
-        status: Current status response (or None if no data).
-        loading: Whether status request is in progress.
-        error: Error message to display (or None if no error).
+        device: MeshDevice from announce data (always set).
+        status: Optional RPC StatusResponse (enrichment).
+        link_info: Optional direct link info dict.
+        loading: Whether a request is in progress.
+        error: Error message to display.
+    """
+
+    DEFAULT_CSS = """
+    DeviceStatusWidget {
+        height: auto;
+        padding: 0 1;
+    }
     """
 
     status: reactive[StatusResponse | None] = reactive(None)
+    link_info: reactive[dict | None] = reactive(None)
     loading: reactive[bool] = reactive(False)
     error: reactive[str | None] = reactive(None)
     last_updated: reactive[str | None] = reactive(None)
 
-    def compose(self) -> ComposeResult:
-        """Compose widget content based on current state."""
-        # Priority: loading > error > status > no data
+    def __init__(self, device: MeshDevice | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.device = device
+
+    def _render_left(self, cascade: Any) -> list[str]:
+        """Left column: NODE + MESH from announce data."""
+        lines: list[str] = []
+        d = self.device
+
+        # ── NODE ──
+        lines.append(f"[{cascade.bright}]NODE[/]")
+        if d:
+            type_display = {
+                DeviceType.STYRENE_NODE: f"[{cascade.bright} bold]STYRENE NODE[/]",
+                DeviceType.HUB: f"[{cascade.bright} bold]HUB[/]",
+                DeviceType.RNODE: f"[{cascade.medium} bold]RNODE[/]",
+                DeviceType.LXMF_PEER: f"[{cascade.medium}]LXMF PEER[/]",
+                DeviceType.PROPAGATION_NODE: f"[{cascade.medium}]PROPAGATION[/]",
+                DeviceType.NOMADNET_NODE: f"[{cascade.medium}]NOMADNET[/]",
+                DeviceType.GENERIC: f"[{cascade.dim}]GENERIC[/]",
+                DeviceType.UNKNOWN: f"[{cascade.dim}]UNKNOWN[/]",
+            }
+            lines.append(f"  Type: {type_display.get(d.device_type, f'[{cascade.dim}]?[/]')}")
+            if d.version:
+                lines.append(f"  Version: [{cascade.medium}]{d.version}[/]")
+            if d.capabilities:
+                lines.append(f"  Caps: [{cascade.medium}]{', '.join(d.capabilities)}[/]")
+            if d.short_name:
+                lines.append(f"  Alias: [{cascade.medium}]{d.short_name}[/]")
+        else:
+            lines.append(f"  [{cascade.dim}]no device data[/]")
+
+        # ── MESH ──
+        lines.append("")
+        lines.append(f"[{cascade.bright}]MESH[/]")
+        if d:
+            lines.append(f"  Identity: [{cascade.dim}]{d.identity_hash[:16]}[/]")
+            lines.append(f"  Dest: [{cascade.dim}]{d.destination_hash[:16]}[/]")
+            lines.append(f"  Seen: [{cascade.medium}]{d.last_seen_display}[/]")
+            if d.announce_count > 0:
+                lines.append(f"  Announces: [{cascade.medium}]{d.announce_count}[/]")
+            if d.hops is not None:
+                lines.append(f"  Hops: [{cascade.medium}]{d.hops}[/]")
+            if d.discovered_via:
+                via = d.discovered_via
+                if len(via) > 30:
+                    via = via[:27] + "..."
+                lines.append(f"  Via: [{cascade.medium}]{via}[/]")
+            if d.nomadnet_destination_hash:
+                lines.append(f"  Pages: [{cascade.dim}]{d.nomadnet_destination_hash[:16]}[/]")
+
+        return lines
+
+    def _render_right(self, cascade: Any) -> list[str]:
+        """Right column: LINK + SYSTEM + NETWORK."""
+        lines: list[str] = []
+        s = self.status
+        li = self.link_info
+
+        # ── LINK ──
+        lines.append(f"[{cascade.bright}]LINK[/]")
+        if li:
+            link_status = li.get("status", "none")
+            if link_status == "active":
+                rtt = li.get("rtt")
+                rtt_str = f" (RTT: {rtt:.3f}s)" if rtt else ""
+                lines.append(f"  Status: ● [{cascade.bright}]active{rtt_str}[/]")
+                est = li.get("established_at")
+                if est:
+                    ago = time.time() - est
+                    if ago < 60:
+                        lines.append(f"  Since: [{cascade.medium}]{int(ago)}s ago[/]")
+                    elif ago < 3600:
+                        lines.append(f"  Since: [{cascade.medium}]{int(ago / 60)}m ago[/]")
+                    else:
+                        lines.append(f"  Since: [{cascade.medium}]{int(ago / 3600)}h ago[/]")
+            elif link_status == "establishing":
+                lines.append(f"  Status: ◐ [{cascade.medium}]establishing...[/]")
+            else:
+                lines.append(f"  Status: ○ [{cascade.dim}]not connected[/]")
+                lines.append(f"  [{cascade.dim}]Press L to establish[/]")
+        else:
+            lines.append(f"  Status: ○ [{cascade.dim}]not connected[/]")
+            lines.append(f"  [{cascade.dim}]Press L to establish[/]")
+
+        # ── SYSTEM ── (from RPC or datalink query)
+        lines.append("")
+        lines.append(f"[{cascade.bright}]SYSTEM[/]")
         if self.loading:
-            yield Static("[dim]Fetching status...[/]", classes="status-loading")
+            lines.append(f"  [{cascade.dim}]⏳ Querying...[/]")
         elif self.error:
-            if self.last_updated:
-                yield Static(
-                    f"[dim]Updated: {self.last_updated}[/]",
-                    classes="status-updated-ts",
-                )
-            yield Static(f"[red]{self.error}[/]", classes="status-error")
-        elif self.status:
-            yield from self._compose_status(self.status)
+            lines.append(f"  [{cascade.dim}]⚠ {self.error}[/]")
+        elif s:
+            if s.hostname:
+                lines.append(f"  Host: [{cascade.medium}]{s.hostname}[/]")
+            if s.uptime == -1:
+                lines.append(f"  Uptime: [{cascade.dim}]unknown[/]")
+            elif s.uptime > 0:
+                lines.append(f"  Uptime: [{cascade.medium}]{s.format_uptime()}[/]")
+            os_parts: list[str] = []
+            if s.os_id:
+                os_parts.append(str(s.os_id))
+            if s.os_version:
+                os_parts.append(str(s.os_version))
+            if s.arch:
+                os_parts.append(f"({s.arch})")
+            if os_parts:
+                lines.append(f"  OS: [{cascade.medium}]{' '.join(os_parts)}[/]")
+            if s.nixos_generation:
+                lines.append(f"  NixOS: [{cascade.medium}]{s.nixos_generation}[/]")
+            if s.styrened_version:
+                lines.append(f"  Daemon: [{cascade.medium}]v{s.styrened_version}[/]")
         else:
-            yield Static(
-                "[dim]Fetching status...[/]", classes="status-placeholder"
-            )
+            lines.append(f"  [{cascade.dim}]No RPC data — press R to query[/]")
 
-    def _compose_status(self, s: StatusResponse) -> ComposeResult:
-        """Compose the full status display from a StatusResponse."""
-        # Updated timestamp
+        # ── NETWORK ── (from RPC)
+        if s and (s.ip or s.services):
+            lines.append("")
+            lines.append(f"[{cascade.bright}]NETWORK[/]")
+            if s.ip and s.ip not in ("", "127.0.0.1", "offline"):
+                lines.append(f"  IP: [{cascade.medium}]{s.ip}[/]")
+            elif s.ip:
+                lines.append(f"  IP: [{cascade.dim}]{s.ip}[/]")
+            if s.services:
+                lines.append(f"  Services: [{cascade.medium}]{', '.join(s.services)}[/]")
+            if s.disk_total > 0:
+                lines.append(f"  Disk: [{cascade.medium}]{s.format_disk_usage()}[/]")
+            if s.available_commands:
+                lines.append(f"  Commands: [{cascade.dim}]{len(s.available_commands)} available[/]")
+
+        # ── UPDATED ──
         if self.last_updated:
-            yield Static(
-                f"[dim]Updated: {self.last_updated}[/]",
-                classes="status-updated-ts",
-            )
+            lines.append("")
+            lines.append(f"  [{cascade.dim}]Updated: {self.last_updated}[/]")
 
-        # -- System section --
-        yield Static(
-            "[bold]-- System ---------------------------------------------------------[/]",
-            classes="status-section-header",
-        )
-        if s.hostname:
-            yield Static(f"  [bold]Hostname:[/]  {s.hostname}", classes="status-field")
+        return lines
 
-        # OS line: combine os_id + os_version + arch
-        os_parts: list[str] = []
-        if s.os_id:
-            os_parts.append(str(s.os_id))
-        if s.os_version:
-            os_parts.append(str(s.os_version))
-        if s.arch:
-            os_parts.append(f"({s.arch!s})")
-        if os_parts:
-            yield Static(f"  [bold]OS:[/]        {' '.join(os_parts)}", classes="status-field")
+    def render(self) -> str:
+        """Render two-column status display."""
+        cascade = get_color_cascade()
+        left = self._render_left(cascade)
+        right = self._render_right(cascade)
 
-        if s.uptime == -1:
-            yield Static("  [bold]Uptime:[/]    [dim]unknown (no RPC link)[/]", classes="status-field")
-        else:
-            yield Static(f"  [bold]Uptime:[/]    {s.format_uptime()}", classes="status-field")
+        # Pad to equal length
+        max_lines = max(len(left), len(right))
+        while len(left) < max_lines:
+            left.append("")
+        while len(right) < max_lines:
+            right.append("")
 
-        if s.styrened_version:
-            yield Static(
-                f"  [bold]Styrened:[/]  {s.styrened_version}",
-                classes="status-field",
-            )
+        # Side-by-side with fixed left column width
+        col_width = 40
+        output_lines = []
+        for l_line, r_line in zip(left, right, strict=True):
+            visible_len = len(re.sub(r"\[.*?\]", "", l_line))
+            pad = max(0, col_width - visible_len)
+            output_lines.append(f"{l_line}{' ' * pad}{r_line}")
 
-        if s.nixos_generation:
-            yield Static(
-                f"  [bold]NixOS Gen:[/] {s.nixos_generation}",
-                classes="status-field",
-            )
-
-        # -- Network section --
-        yield Static(
-            "[bold]-- Network --------------------------------------------------------[/]",
-            classes="status-section-header",
-        )
-        yield Static(f"  [bold]IP Address:[/] {s.ip}", classes="status-field")
-
-        if s.services:
-            yield Static(
-                f"  [bold]Services:[/]   {', '.join(s.services)}",
-                classes="status-field",
-            )
-        else:
-            yield Static("  [bold]Services:[/]   [dim]none[/]", classes="status-field")
-
-        # -- Storage section -- (only if data available)
-        if s.disk_total > 0:
-            yield Static(
-                "[bold]-- Storage --------------------------------------------------------[/]",
-                classes="status-section-header",
-            )
-            yield Static(
-                f"  [bold]Disk:[/]  {s.format_disk_usage()}",
-                classes="status-field",
-            )
+        return "\n".join(output_lines)
 
     def watch_status(self, status: StatusResponse | None) -> None:
-        """React to status changes by re-composing widget."""
         if status is not None:
             self.last_updated = datetime.now().strftime("%H:%M:%S")
         if self.is_mounted:
-            self._recompose()
+            self.refresh()
+
+    def watch_link_info(self, link_info: dict | None) -> None:
+        if self.is_mounted:
+            self.refresh()
 
     def watch_loading(self, loading: bool) -> None:
-        """React to loading state changes."""
         if self.is_mounted:
-            self._recompose()
+            self.refresh()
 
     def watch_error(self, error: str | None) -> None:
-        """React to error changes."""
         if self.is_mounted:
-            self._recompose()
-
-    def _recompose(self) -> None:
-        """Remove children and re-compose with current state."""
-        for child in list(self.children):
-            child.remove()
-
-        new_children = list(self.compose())
-        if new_children:
-            self.mount(*new_children)
+            self.refresh()

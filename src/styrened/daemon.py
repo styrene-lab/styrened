@@ -99,6 +99,8 @@ class StyreneDaemon:
         self._page_cache_service: Any = None  # NomadNet page caching service
         self._page_server_service: Any = None  # NomadNet page server service
         self._pqc_service: Any = None  # PQC session layer service
+        self._direct_link_service: Any = None  # Direct data link service
+        self._datalink_destination: Any = None  # Incoming datalink RNS.Destination
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -166,6 +168,9 @@ class StyreneDaemon:
 
         # Start page server service if enabled
         self._start_page_server()
+
+        # Start direct data link service + listener
+        await self._start_direct_link()
 
         self._running = True
         logger.info("Styrene daemon running")
@@ -305,6 +310,10 @@ class StyreneDaemon:
         # Clear stale page browser links and force path re-discovery
         if self._page_browser_service is not None:
             self._page_browser_service.handle_reconnection()
+
+        # Flag direct link service for path re-discovery
+        if self._direct_link_service is not None:
+            self._direct_link_service.handle_reconnection()
 
         # Re-enter eager discovery phase (15s intervals for 2 minutes)
         # so peers rediscover us quickly after network change
@@ -1259,6 +1268,112 @@ class StyreneDaemon:
                 logger.error(f"Error stopping page server: {e}")
             finally:
                 self._page_server_service = None
+
+    async def _start_direct_link(self) -> None:
+        """Start the direct data link service and register incoming listener.
+
+        Sets up:
+        1. DirectLinkService for outgoing links to peers
+        2. ("styrene", "datalink") IN destination for accepting incoming links
+        3. Request handlers for /status and /ping on the destination
+        """
+        try:
+            from styrened.services.direct_link import DirectLinkService
+
+            self._direct_link_service = DirectLinkService()
+            await self._direct_link_service.start()
+
+            # Register incoming datalink destination
+            self._setup_datalink_destination()
+
+            logger.info("Direct link service started")
+        except Exception as e:
+            logger.error(f"Failed to start direct link service: {e}")
+
+    def _setup_datalink_destination(self) -> None:
+        """Register ("styrene", "datalink") destination for incoming links."""
+        try:
+            import RNS
+
+            from styrened.services.direct_link import DATALINK_APP, DATALINK_ASPECT
+            from styrened.services.reticulum import get_operator_identity_object
+
+            identity = get_operator_identity_object()
+            if not identity:
+                logger.warning("No identity for datalink destination")
+                return
+
+            self._datalink_destination = RNS.Destination(
+                identity,
+                RNS.Destination.IN,
+                RNS.Destination.SINGLE,
+                DATALINK_APP,
+                DATALINK_ASPECT,
+            )
+
+            # Register request handlers
+            self._datalink_destination.register_request_handler(
+                "/status",
+                response_generator=self._serve_datalink_status,
+                allow=RNS.Destination.ALLOW_ALL,
+            )
+            self._datalink_destination.register_request_handler(
+                "/ping",
+                response_generator=self._serve_datalink_ping,
+                allow=RNS.Destination.ALLOW_ALL,
+            )
+
+            # Set link established callback for logging
+            self._datalink_destination.set_link_established_callback(
+                self._on_datalink_established
+            )
+
+            logger.info(
+                f"Datalink destination registered: {self._datalink_destination.hash.hex()[:16]}..."
+            )
+        except Exception as e:
+            logger.error(f"Failed to setup datalink destination: {e}")
+
+    def _on_datalink_established(self, link: Any) -> None:
+        """Log when a peer establishes a direct data link to us."""
+        logger.info(f"Incoming datalink established (link_id={link.link_id.hex()[:16]}...)")
+
+    def _serve_datalink_status(
+        self,
+        path: str,
+        data: Any,
+        request_id: Any,
+        link_id: Any,
+        remote_identity: Any,
+        requested_at: Any,
+    ) -> bytes:
+        """Serve /status request over direct link.
+
+        Returns the same status data as RPC STATUS_RESPONSE but serialized
+        as JSON over the direct link for lower latency.
+        """
+        import json
+
+        try:
+            status_data = self._rpc_server._gather_status() if self._rpc_server else {}
+            return json.dumps(status_data).encode("utf-8")
+        except Exception as e:
+            logger.error(f"Datalink /status handler error: {e}")
+            return json.dumps({"error": str(e)}).encode("utf-8")
+
+    def _serve_datalink_ping(
+        self,
+        path: str,
+        data: Any,
+        request_id: Any,
+        link_id: Any,
+        remote_identity: Any,
+        requested_at: Any,
+    ) -> bytes:
+        """Serve /ping request over direct link."""
+        import json
+
+        return json.dumps({"pong": True, "timestamp": time.time()}).encode("utf-8")
 
     def _start_terminal_service(self) -> None:
         """Start the terminal session service.
