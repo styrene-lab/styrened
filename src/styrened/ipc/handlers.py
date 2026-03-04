@@ -2728,12 +2728,18 @@ class IPCHandlers:
             return ErrorResponse.invalid_request("destination_hash is required")
 
         try:
-            info = await self.daemon._direct_link_service.establish(req.destination_hash)
+            import asyncio
+            info = await asyncio.wait_for(
+                self.daemon._direct_link_service.establish(req.destination_hash),
+                timeout=60.0,
+            )
             return ResultResponse(data={
                 "status": info.status,
                 "rtt": info.rtt,
                 "established_at": info.established_at,
             })
+        except asyncio.TimeoutError:
+            return ErrorResponse.internal_error("Link establishment timed out (60s)")
         except Exception as e:
             return ErrorResponse.internal_error(f"Failed to establish link: {e}")
 

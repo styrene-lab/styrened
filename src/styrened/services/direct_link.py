@@ -141,23 +141,35 @@ class DirectLinkService:
                 pass
             self._links.pop(lxmf_destination_hash, None)
 
-        # Recall identity from the LXMF destination hash
+        # Resolve identity from the provided hash.
+        # Callers may pass a destination hash OR an identity hash (the
+        # NodeStore sometimes stores identity hashes in both fields).
+        # Try identity recall both ways before falling back to path discovery.
         dest_hash_bytes = bytes.fromhex(lxmf_destination_hash)
 
-        # Ensure path exists for identity recall
-        if self._force_path_rediscovery or not RNS.Transport.has_path(dest_hash_bytes):
-            self._force_path_rediscovery = False
-            RNS.Transport.request_path(dest_hash_bytes)
-            start = time.time()
-            while not RNS.Transport.has_path(dest_hash_bytes):
-                if time.time() - start > PATH_DISCOVERY_TIMEOUT:
-                    return LinkInfo(
-                        destination_hash=lxmf_destination_hash,
-                        status="path_not_found",
-                    )
-                await asyncio.sleep(0.2)
-
         identity = RNS.Identity.recall(dest_hash_bytes)
+        if identity is None:
+            identity = RNS.Identity.recall(dest_hash_bytes, from_identity_hash=True)
+
+        if identity is None:
+            # Identity not cached — try path discovery to trigger announce recall
+            if self._force_path_rediscovery or not RNS.Transport.has_path(dest_hash_bytes):
+                self._force_path_rediscovery = False
+                RNS.Transport.request_path(dest_hash_bytes)
+                start = time.time()
+                while not RNS.Transport.has_path(dest_hash_bytes):
+                    if time.time() - start > PATH_DISCOVERY_TIMEOUT:
+                        return LinkInfo(
+                            destination_hash=lxmf_destination_hash,
+                            status="path_not_found",
+                        )
+                    await asyncio.sleep(0.2)
+
+            # Retry recall after path discovery
+            identity = RNS.Identity.recall(dest_hash_bytes)
+            if identity is None:
+                identity = RNS.Identity.recall(dest_hash_bytes, from_identity_hash=True)
+
         if identity is None:
             return LinkInfo(
                 destination_hash=lxmf_destination_hash,
