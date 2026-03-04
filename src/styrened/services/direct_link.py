@@ -147,11 +147,18 @@ class DirectLinkService:
         # Try identity recall both ways before falling back to path discovery.
         dest_hash_bytes = bytes.fromhex(lxmf_destination_hash)
 
+        logger.info(f"Establishing link to {lxmf_destination_hash[:16]}...")
+
         identity = RNS.Identity.recall(dest_hash_bytes)
         if identity is None:
+            logger.debug(f"recall(dest_hash) failed for {lxmf_destination_hash[:16]}")
             identity = RNS.Identity.recall(dest_hash_bytes, from_identity_hash=True)
 
         if identity is None:
+            logger.info(
+                f"Identity not in RNS cache for {lxmf_destination_hash[:16]} — "
+                f"requesting path (timeout={PATH_DISCOVERY_TIMEOUT}s)"
+            )
             # Identity not cached — try path discovery to trigger announce recall
             if self._force_path_rediscovery or not RNS.Transport.has_path(dest_hash_bytes):
                 self._force_path_rediscovery = False
@@ -159,11 +166,15 @@ class DirectLinkService:
                 start = time.time()
                 while not RNS.Transport.has_path(dest_hash_bytes):
                     if time.time() - start > PATH_DISCOVERY_TIMEOUT:
+                        logger.warning(f"Path discovery timed out for {lxmf_destination_hash[:16]}")
                         return LinkInfo(
                             destination_hash=lxmf_destination_hash,
                             status="path_not_found",
                         )
                     await asyncio.sleep(0.2)
+                logger.info(f"Path found for {lxmf_destination_hash[:16]}")
+            else:
+                logger.info(f"Path already known for {lxmf_destination_hash[:16]}")
 
             # Retry recall after path discovery
             identity = RNS.Identity.recall(dest_hash_bytes)
@@ -171,10 +182,13 @@ class DirectLinkService:
                 identity = RNS.Identity.recall(dest_hash_bytes, from_identity_hash=True)
 
         if identity is None:
+            logger.warning(f"Identity unknown for {lxmf_destination_hash[:16]} after path discovery")
             return LinkInfo(
                 destination_hash=lxmf_destination_hash,
                 status="identity_unknown",
             )
+
+        logger.info(f"Identity resolved for {lxmf_destination_hash[:16]}: {identity.hash.hex()[:16]}")
 
         # Compute the datalink destination (different hash from LXMF dest)
         datalink_dest = RNS.Destination(
@@ -185,9 +199,11 @@ class DirectLinkService:
             DATALINK_ASPECT,
         )
         datalink_hash = datalink_dest.hash.hex()
+        logger.info(f"Datalink dest for {lxmf_destination_hash[:16]}: {datalink_hash[:16]}")
 
         # Request path to datalink destination (may differ from LXMF path)
         if not RNS.Transport.has_path(datalink_dest.hash):
+            logger.info(f"No path to datalink {datalink_hash[:16]} — requesting...")
             RNS.Transport.request_path(datalink_dest.hash)
             start = time.time()
             while not RNS.Transport.has_path(datalink_dest.hash):
