@@ -234,7 +234,24 @@ class PageBrowserWidget(Widget):
 
         except Exception as e:
             logger.error(f"Failed to load page: {e}")
-            self._set_error(f"Failed to load page: {e}")
+            # Try cache fallback on IPC-level failures too
+            if bridge is not None:
+                try:
+                    cached = await bridge.page_get_cached(
+                        destination_hash=self.destination_hash,
+                        path=path,
+                    )
+                    if cached and cached.get("found"):
+                        self._show_cached_page(
+                            path, cached["content"], cached["fetched_at"],
+                            f"Connection failed: {e}"
+                        )
+                    else:
+                        self._set_error(f"Failed to load page: {e}")
+                except Exception:
+                    self._set_error(f"Failed to load page: {e}")
+            else:
+                self._set_error(f"Failed to load page: {e}")
 
         finally:
             self.loading = False
@@ -349,7 +366,7 @@ class PageBrowserWidget(Widget):
                 destination_hash=self.destination_hash,
                 display_name=display_name,
             )
-            self.notify(f"Site saved — will refresh periodically", severity="information")
+            self.notify("Site saved — will refresh periodically", severity="information")
         except Exception as e:
             self.notify(f"Failed to save site: {e}", severity="error")
 

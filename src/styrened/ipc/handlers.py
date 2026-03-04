@@ -2417,13 +2417,19 @@ class IPCHandlers:
             return ErrorResponse.invalid_request("destination_hash is required")
 
         try:
-            pages_cached = await self.daemon._page_cache_service.crawl_site(
-                destination_hash=req.destination_hash,
-                max_depth=req.max_depth,
+            import asyncio
+
+            # Fire-and-forget: crawl can take minutes over mesh,
+            # far exceeding the 30s IPC timeout.  Return immediately.
+            asyncio.create_task(
+                self.daemon._page_cache_service.crawl_site(
+                    destination_hash=req.destination_hash,
+                    max_depth=req.max_depth,
+                )
             )
-            return ResultResponse(data={"pages_cached": pages_cached})
+            return ResultResponse(data={"started": True})
         except Exception as e:
-            return ErrorResponse.internal_error(f"Failed to crawl site: {e}")
+            return ErrorResponse.internal_error(f"Failed to start crawl: {e}")
 
     async def handle_cmd_page_get_cached(self, request: IPCRequest) -> IPCResponse:
         """Get a cached page by destination and path."""
