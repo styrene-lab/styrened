@@ -11,7 +11,7 @@ CI/CD runs on **Argo Workflows** on the brutus K3s cluster, triggered by **Argo 
 3. **PR Validation** (`pr-validation.yaml`) - Smoke tests on pull requests
 4. **Nightly Tests** (`nightly-tests.yaml`) - Tiered test suite run via cron
 
-Argo Events maps GitHub webhook events (push, tag, pull_request) to workflow submissions via a sensor in the vanderlyn repo (`apps/argo-events/sensor-styrened.yaml`).
+Argo Events maps GitHub webhook events (push, tag, pull_request) to workflow submissions via a sensor in the infrastructure repo (`apps/argo-events/sensor-styrened.yaml`).
 
 ## Release Workflow
 
@@ -193,7 +193,7 @@ Nightly builds run tiered test suites:
 
 1. **Version mismatch**: Ensure `src/styrened/__init__.py` and `VERSION` match the tag (run `just check-versions`)
 2. **GHCR push denied**: Check package permissions at https://github.com/orgs/styrene-lab/packages/container/package/styrened/settings
-3. **Build fails**: Check workflow logs in Argo UI at https://argo.vanderlyn.house
+3. **Build fails**: Check workflow logs in Argo UI at https://argo.example.com
 
 ### Integration Tests Fail
 
@@ -232,7 +232,7 @@ Nightly builds run tiered test suites:
 | `ghcr-secret` Secret | `styrene-infra` | GHCR auth source for test namespace copies |
 | `operate-workflow-sa` ServiceAccount | `argo-events` | Sensor → Workflow submission |
 
-### Argo Events (vanderlyn repo)
+### Argo Events (infrastructure repo)
 
 | File | Purpose |
 |------|---------|

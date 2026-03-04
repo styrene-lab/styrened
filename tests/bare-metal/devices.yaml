@@ -5,7 +5,7 @@
 devices:
   t100ta:
     # ASUS T100TA - Low-power x86_64 (Atom) test node
-    host: t100ta.vanderlyn.local
+    host: device-1.local
     hardware: ASUS T100TA
     cpu: Intel Atom Z3740
     arch: x86_64
@@ -20,7 +20,7 @@ devices:
 
   minigmk:
     # GMKtec mini PC - Intel N150 test node
-    host: minigmk.vanderlyn.local
+    host: device-2.local
     hardware: GMKtec Mini PC
     cpu: Intel N150
     arch: x86_64
@@ -35,7 +35,7 @@ devices:
 
   mobilepi:
     # Raspberry Pi 4 Model B Rev 1.5 - First aarch64 test node
-    host: mobilepi.vanderlyn.local
+    host: device-3.local
     hardware: Raspberry Pi 4 Model B Rev 1.5
     cpu: Cortex-A72
     arch: aarch64
@@ -63,7 +63,7 @@ admin:
     # Identity: "Styrene Admin (admin@styrene.io)"
     # Role: Known-good x86_64 NixOS system for integration testing,
     #        deployment operations, and remote fleet management via RPC.
-    host: styrene-node.vanderlyn.local
+    host: device-4.local
     hardware: ASUS Q502LA
     cpu: Intel Core i5-4210U
     arch: x86_64

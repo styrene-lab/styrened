@@ -23,9 +23,9 @@ Before deploying to production:
 
 ### 2. Vanderlyn Repository Structure
 
-Create these directories/files in vanderlyn repo:
+Create these directories/files in infrastructure repo:
 ```
-vanderlyn/
+infrastructure/
 ├── apps/
 │   ├── argocd/
 │   │   └── applications/
@@ -74,8 +74,8 @@ gh api /orgs/styrene-lab/packages/container/styrened/versions
 ### Step 1: Prepare Manifests
 
 ```bash
-# In vanderlyn repository
-cd /Users/cwilson/workspace/vanderlyn
+# In infrastructure repository
+cd /path/to/infrastructure
 
 # Create directory structure
 mkdir -p apps/styrened
@@ -114,13 +114,13 @@ styrene:
 ingress:
   enabled: true
   hosts:
-    - host: styrened.vanderlyn.house
+    - host: styrened.example.com
 ```
 
 ### Step 3: Commit and Push
 
 ```bash
-# In vanderlyn repository
+# In infrastructure repository
 git add apps/argocd/applications/styrened.yaml
 git add apps/styrened/values.yaml
 
@@ -186,7 +186,7 @@ rnsh styrened-test-0.styrened-test.styrened.svc.cluster.local:4242
 **Via ingress** (if enabled):
 ```bash
 # Access HTTP API
-curl https://styrened.vanderlyn.house/api/status
+curl https://styrened.example.com/api/status
 
 # Check ingress
 kubectl --kubeconfig ~/.kube/config-brutus get ingress -n styrened
@@ -205,7 +205,7 @@ kubectl --kubeconfig ~/.kube/config-brutus patch application styrened -n argocd 
 argocd app sync styrened
 
 # Or via ArgoCD UI
-# Navigate to: https://argocd.vanderlyn.house/applications/styrened
+# Navigate to: https://argocd.example.com/applications/styrened
 # Click "Sync" button
 ```
 
@@ -215,7 +215,7 @@ If deployment fails or has issues:
 
 ### Option 1: Git Revert
 ```bash
-# In vanderlyn repository
+# In infrastructure repository
 git revert <commit-sha>
 git push origin main
 
@@ -250,8 +250,8 @@ kubectl --kubeconfig ~/.kube/config-brutus patch application styrened -n argocd 
 All updates go through git:
 
 ```bash
-# In vanderlyn repository
-cd /Users/cwilson/workspace/vanderlyn
+# In infrastructure repository
+cd /path/to/infrastructure
 
 # Edit values
 vim apps/styrened/values.yaml
@@ -303,7 +303,7 @@ If you need to completely remove the deployment:
 kubectl --kubeconfig ~/.kube/config-brutus delete application styrened -n argocd
 
 # Or remove from git (ArgoCD will auto-prune)
-cd /Users/cwilson/workspace/vanderlyn
+cd /path/to/infrastructure
 git rm apps/argocd/applications/styrened.yaml
 git rm -r apps/styrened
 git commit -m "Remove styrened deployment"
@@ -314,7 +314,7 @@ git push origin main
 
 ### ArgoCD UI
 
-Access at: `https://argocd.vanderlyn.house`
+Access at: `https://argocd.example.com`
 
 View:
 - Sync status
@@ -385,4 +385,4 @@ When styrened is ready for production:
 - [ARGOCD-INTEGRATION-ASSESSMENT.md](../../ARGOCD-INTEGRATION-ASSESSMENT.md) - Full analysis
 - [REMOTE-TESTING.md](../../../tests/k8s/REMOTE-TESTING.md) - Remote cluster testing guide
 - [CONTAINERS.md](../../CONTAINERS.md) - Container build pipeline
-- Vanderlyn ArgoCD skill: `/Users/cwilson/workspace/vanderlyn/.claude/skills/argocd-operations/`
+- Infrastructure ArgoCD documentation

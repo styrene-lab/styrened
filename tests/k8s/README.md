@@ -651,7 +651,7 @@ kubectl get workflow <name> -n argo -w
 kubectl logs -n argo -l workflows.argoproj.io/workflow=<name> --tail=100
 
 # View via Argo UI
-# https://argo.vanderlyn.house/workflows/argo/<name>
+# https://argo.example.com/workflows/argo/<name>
 ```
 
 #### Accessing Test Results
@@ -723,7 +723,7 @@ Triggered on tag push matching `v*`:
 **Build failures:**
 ```bash
 # Check workflow logs in Argo UI
-# https://argo.vanderlyn.house/workflows/argo/<workflow-name>
+# https://argo.example.com/workflows/argo/<workflow-name>
 
 # Test build locally (same command as CI)
 just build-test

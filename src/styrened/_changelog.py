@@ -142,4 +142,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.33", "feat(vpn): migrate VPN handshake from DirectLink to LXMF protocol"),
     ("0.13.34", "fix(tui): _dest_hash property displaced _load_device from __init__"),
     ("0.13.35", "fix(direct-link): establish() handles identity hash and has timeout"),
+    ("0.13.36", "fix(direct-link): announce datalink destination for path discovery"),
 ]
