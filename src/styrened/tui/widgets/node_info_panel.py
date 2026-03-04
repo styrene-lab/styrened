@@ -10,6 +10,8 @@ import re
 
 import RNS  # type: ignore
 from rich.cells import cell_len as rich_cell_len
+from rich.table import Table
+from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import Static
 
@@ -289,14 +291,15 @@ class NodeInfoPanel(Static):
 
         return lines
 
-    def render(self) -> str:
-        """Render two-column node info display.
+    def render(self) -> Table:
+        """Render two-column node info display using a Rich Table.
 
         Left column: SYSTEM, DAEMON, IDENTITY
         Right column: RETICULUM, STYRENE, VERSION
 
-        Uses Rich Columns for side-by-side layout within a single Static.
-        Falls back to single-column if terminal is narrow.
+        Uses a borderless Rich Table so column widths are computed by Rich's
+        own layout engine rather than manual character counting — immune to
+        ambiguous-width Unicode, emoji, and font-specific glyph widths.
         """
         cascade = get_color_cascade()
         left = self._render_left_column(cascade)
@@ -309,20 +312,14 @@ class NodeInfoPanel(Static):
         while len(right) < max_lines:
             right.append("")
 
-        # Build side-by-side: use a fixed column width for the left side
-        # Rich markup makes exact character counting unreliable, so we
-        # use a generous fixed width and let the right column fill remaining space
-        col_width = 44
-        output_lines = []
-        for l_line, r_line in zip(left, right):
-            # Pad left line to fixed width — strip Rich tags, then measure
-            # using Rich's own cell_len which matches Textual's rendering
-            stripped = re.sub(r"\[.*?\]", "", l_line)
-            visible_len = rich_cell_len(stripped)
-            pad = max(0, col_width - visible_len)
-            output_lines.append(f"{l_line}{' ' * pad}{r_line}")
+        table = Table.grid(padding=(0, 2))
+        table.add_column(min_width=42, no_wrap=False)
+        table.add_column(no_wrap=False)
 
-        return "\n".join(output_lines)
+        for l_line, r_line in zip(left, right):
+            table.add_row(Text.from_markup(l_line), Text.from_markup(r_line))
+
+        return table
 
     def on_mount(self) -> None:
         """Load all node data on mount."""

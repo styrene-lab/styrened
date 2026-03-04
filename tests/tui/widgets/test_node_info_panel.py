@@ -4,10 +4,29 @@ Tests IPC-aware daemon section, uptime formatting, nuanced RNS labels,
 and gating of local queries behind ipc_managed flag.
 """
 
+import io
 from unittest.mock import MagicMock, patch
+
+from rich.console import Console
 
 from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
+
+
+def _render_panel(panel: NodeInfoPanel) -> str:
+    """Render a NodeInfoPanel to plain text for assertion.
+
+    panel.render() returns a Rich Table (RenderableType). We capture it
+    through a Rich Console so string assertions work regardless of the
+    underlying renderable type.
+    """
+    renderable = panel.render()
+    if isinstance(renderable, str):
+        return renderable
+    buf = io.StringIO()
+    console = Console(file=buf, highlight=False, markup=False, width=140)
+    console.print(renderable)
+    return buf.getvalue()
 
 
 class TestFormatUptime:
@@ -55,7 +74,7 @@ class TestDaemonSection:
             panel = NodeInfoPanel()
             panel.hardware_error = "skip"
             # daemon_connected defaults to None (legacy mode)
-            rendered = panel.render()
+            rendered = _render_panel(panel)
             assert "DAEMON" not in rendered
 
     def test_render_ipc_connected(self) -> None:
@@ -69,7 +88,7 @@ class TestDaemonSection:
             panel.daemon_connected = True
             panel.daemon_version = "0.9.1"
             panel.daemon_uptime = 8100.0  # 2h 15m
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "DAEMON" in rendered
             assert "connected" in rendered
@@ -85,7 +104,7 @@ class TestDaemonSection:
             panel = NodeInfoPanel()
             panel.hardware_error = "skip"
             panel.daemon_connected = False
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "DAEMON" in rendered
             assert "disconnected" in rendered
@@ -107,13 +126,13 @@ class TestRNSLabels:
             panel.hardware_error = "skip"
             panel.rns_online = True
             panel.interface_count = 3
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "online" in rendered
             assert "3 if" in rendered
 
     def test_rns_online_no_interfaces_shows_no_peers(self) -> None:
-        """rns_online=True with 0 interfaces shows 'no peers'."""
+        """rns_online=True with 0 interfaces shows 'no interfaces'."""
         with patch(
             "styrened.tui.widgets.node_info_panel.get_system_info",
             side_effect=Exception("skip"),
@@ -122,9 +141,9 @@ class TestRNSLabels:
             panel.hardware_error = "skip"
             panel.rns_online = True
             panel.interface_count = 0
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
-            assert "no peers" in rendered
+            assert "no interfaces" in rendered
             # Should NOT say "offline"
             assert "offline" not in rendered.split("RETICULUM")[1].split("STYRENE")[0]
 
@@ -138,7 +157,7 @@ class TestRNSLabels:
             panel.hardware_error = "skip"
             panel.rns_online = False
             panel.error_state = None
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             # Find the RNS line in RETICULUM section
             reticulum_section = rendered.split("RETICULUM")[1].split("STYRENE")[0]
@@ -157,7 +176,7 @@ class TestRNSLabels:
                 category=RNSErrorCategory.PORT_CONFLICT,
                 message="Port 4242 in use",
             )
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "Port Conflict" in rendered
 
@@ -177,7 +196,7 @@ class TestIdentitySection:
             panel.identity_icon = "🖥️"
             panel.identity_short_name = "alice"
             panel.identity_hash = "abc123def456abc123def456abc12345"
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "IDENTITY" in rendered
             assert "Alice" in rendered
@@ -196,7 +215,7 @@ class TestIdentitySection:
             panel.identity_display_name = "Bob"
             panel.identity_icon = "📱"
             panel.identity_short_name = None
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "IDENTITY" in rendered
             assert "not set" in rendered
@@ -211,7 +230,7 @@ class TestIdentitySection:
             panel.hardware_error = "skip"
             panel.identity_display_name = ""
             panel.identity_icon = ""
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "IDENTITY" not in rendered
 
@@ -230,7 +249,7 @@ class TestSecurityTierDisplay:
             panel.identity_display_name = "Alice"
             panel.identity_icon = ""
             panel.security_tier = "PQC_HYBRID"
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "SEC:" in rendered
             assert "PQC_HYBRID" in rendered
@@ -246,7 +265,7 @@ class TestSecurityTierDisplay:
             panel.identity_display_name = "Bob"
             panel.identity_icon = ""
             panel.security_tier = "RNS_ONLY"
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "SEC:" in rendered
             assert "RNS_ONLY" in rendered
@@ -262,7 +281,7 @@ class TestSecurityTierDisplay:
             panel.identity_display_name = "Carol"
             panel.identity_icon = ""
             panel.security_tier = ""
-            rendered = panel.render()
+            rendered = _render_panel(panel)
 
             assert "SEC:" not in rendered
 
