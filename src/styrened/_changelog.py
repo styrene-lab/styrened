@@ -126,4 +126,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.17", "fix: micron renderer visual quality — colored headings, links, dividers"),
     ("0.13.18", "fix: auto-restart TUI after successful upgrade — no manual button"),
     ("0.13.19", "fix: add diagnostic logging to page browser link establishment"),
+    ("0.13.20", "fix: debounce TCP reconnection storm + preserve active page browser links"),
 ]

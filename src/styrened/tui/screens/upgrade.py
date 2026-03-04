@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import time
 
 from textual import work
 from textual.app import ComposeResult
@@ -29,6 +31,26 @@ def _kill_daemon() -> None:
             ["pkill", "-f", _DAEMON_PKILL_PATTERN],
             capture_output=True,
             timeout=5,
+        )
+    except Exception:
+        pass
+
+
+def _start_daemon() -> None:
+    """Start the styrened daemon in the background.
+
+    Finds the styrened binary (freshly installed by the upgrade) and
+    launches it as a detached subprocess.
+    """
+    exe = shutil.which("styrened")
+    if not exe:
+        return
+    try:
+        subprocess.Popen(
+            [exe, "daemon"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
     except Exception:
         pass
@@ -273,8 +295,13 @@ class UpgradeScreen(ModalScreen[bool]):
 
             if result.returncode == 0:
                 self.app.call_from_thread(self._safe_log, "\n✅ Upgrade complete!")
-                self.app.call_from_thread(self._safe_log, "Restarting daemon...")
+                self.app.call_from_thread(self._safe_log, "Stopping old daemon...")
                 _kill_daemon()
+                time.sleep(1)  # Let socket close
+                self.app.call_from_thread(self._safe_log, "Starting new daemon...")
+                _start_daemon()
+                time.sleep(2)  # Let daemon initialize
+                self.app.call_from_thread(self._safe_log, "Restarting TUI...")
                 self.app.call_from_thread(self._finish_success)
             else:
                 self.app.call_from_thread(
