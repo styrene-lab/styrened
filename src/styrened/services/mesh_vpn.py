@@ -15,6 +15,7 @@ no manual key management or config files needed.
 
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -35,6 +36,31 @@ HANDSHAKE_VERSION = 1
 # RFC 4193 ULA (fd00::/8) — guaranteed not to conflict with public IPv6
 DEFAULT_SUBNET_PREFIX = "fd73:7479:7265:6e65"
 DEFAULT_LISTEN_PORT = 51820
+
+
+def extract_prefix(mesh_ip: str, prefix_len: int = 64) -> str:
+    """Extract the network prefix from an IPv6 address.
+
+    Uses ipaddress module to handle all IPv6 forms (compressed, expanded).
+
+    Args:
+        mesh_ip: IPv6 address string.
+        prefix_len: Prefix length (default 64).
+
+    Returns:
+        Network prefix string (no /prefix suffix), e.g. "fd73:7479:7265:6e65".
+        Empty string if parsing fails.
+    """
+    try:
+        net = ipaddress.IPv6Network(f"{mesh_ip}/{prefix_len}", strict=False)
+        # Format the network address in expanded form, take first 4 groups
+        addr = net.network_address
+        parts = addr.exploded.split(":")
+        # For /64, first 4 groups are the prefix
+        group_count = prefix_len // 16
+        return ":".join(parts[:group_count])
+    except (ValueError, TypeError):
+        return ""
 
 
 # =============================================================================
@@ -170,7 +196,7 @@ def build_handshake_request(
         "version": HANDSHAKE_VERSION,
         "wg_pubkey": public_key,
         "mesh_ip": mesh_ip,
-        "subnet_prefix": mesh_ip.rsplit(":", 4)[0] if ":" in mesh_ip else "",
+        "subnet_prefix": extract_prefix(mesh_ip),
         "endpoint": endpoint or "",
     }
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -197,7 +223,7 @@ def build_handshake_response(
         "version": HANDSHAKE_VERSION,
         "wg_pubkey": public_key,
         "mesh_ip": mesh_ip,
-        "subnet_prefix": mesh_ip.rsplit(":", 4)[0] if ":" in mesh_ip else "",
+        "subnet_prefix": extract_prefix(mesh_ip),
         "endpoint": endpoint or "",
         "gateway": gateway,
     }
@@ -220,6 +246,11 @@ def parse_handshake_request(data: bytes) -> PeerInfo:
     payload = json.loads(data)
     if "wg_pubkey" not in payload or "mesh_ip" not in payload:
         raise ValueError("Handshake missing required fields: wg_pubkey, mesh_ip")
+    version = payload.get("version", 0)
+    if version != HANDSHAKE_VERSION:
+        raise ValueError(
+            f"Unsupported handshake version {version} (expected {HANDSHAKE_VERSION})"
+        )
     return PeerInfo(
         public_key=payload["wg_pubkey"],
         mesh_ip=payload["mesh_ip"],
@@ -237,11 +268,19 @@ def parse_handshake_response(data: bytes) -> PeerInfo:
         PeerInfo with the responder's WireGuard details.
 
     Raises:
-        ValueError: If required fields are missing.
+        ValueError: If required fields are missing or version mismatches.
     """
     payload = json.loads(data)
+    # Check for error responses
+    if "error" in payload:
+        raise ValueError(f"Handshake rejected: {payload['error']}")
     if "wg_pubkey" not in payload or "mesh_ip" not in payload:
         raise ValueError("Handshake missing required fields: wg_pubkey, mesh_ip")
+    version = payload.get("version", 0)
+    if version != HANDSHAKE_VERSION:
+        raise ValueError(
+            f"Unsupported handshake version {version} (expected {HANDSHAKE_VERSION})"
+        )
     return PeerInfo(
         public_key=payload["wg_pubkey"],
         mesh_ip=payload["mesh_ip"],
@@ -250,12 +289,8 @@ def parse_handshake_response(data: bytes) -> PeerInfo:
     )
 
 
-# =============================================================================
-# Configuration
-# =============================================================================
-
 # Re-export from models for backward compatibility
-from styrened.models.config import MeshVPNConfig  # noqa: E402
+from styrened.models.config import MeshVPNConfig  # noqa: E402, F401
 
 
 # =============================================================================
@@ -370,8 +405,9 @@ class MeshVPNService:
             f"platform={self._platform.value}"
         )
 
-        # Create WireGuard interface
-        await self._create_interface()
+        # Create WireGuard interface — raises on failure
+        if not await self._create_interface():
+            logger.error("MeshVPN failed to create WireGuard interface — starting in degraded mode")
         self._started = True
         logger.info("MeshVPN started")
 
@@ -387,6 +423,15 @@ class MeshVPNService:
     # -------------------------------------------------------------------------
     # Handshake handler (called from daemon's datalink destination)
     # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _on_peer_config_done(task: Any) -> None:
+        """Log exceptions from peer configuration tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error(f"Peer configuration failed: {exc}")
 
     def handle_handshake(
         self,
@@ -418,7 +463,7 @@ class MeshVPNService:
             )
 
             # Verify subnet prefix agreement
-            peer_prefix = peer_info.mesh_ip.rsplit(":", 4)[0] if ":" in peer_info.mesh_ip else ""
+            peer_prefix = extract_prefix(peer_info.mesh_ip)
             our_prefix = self.config.subnet_prefix
             if peer_prefix and our_prefix and peer_prefix != our_prefix:
                 logger.warning(
@@ -449,7 +494,8 @@ class MeshVPNService:
             import asyncio
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                loop.create_task(self._configure_peer(remote_hash, peer_info))
+                task = loop.create_task(self._configure_peer(remote_hash, peer_info))
+                task.add_done_callback(self._on_peer_config_done)
 
             return response
 
@@ -461,14 +507,15 @@ class MeshVPNService:
     # WireGuard interface management (platform-specific)
     # -------------------------------------------------------------------------
 
-    async def _create_interface(self) -> None:
-        """Create the WireGuard interface."""
+    async def _create_interface(self) -> bool:
+        """Create the WireGuard interface. Returns True on success."""
         if self._platform == VPNPlatform.LINUX:
-            await self._create_interface_linux()
+            return await self._create_interface_linux()
         elif self._platform == VPNPlatform.MACOS:
-            await self._create_interface_macos()
+            return await self._create_interface_macos()
         else:
             logger.warning(f"WireGuard not supported on {self._platform.value}")
+            return False
 
     async def _destroy_interface(self) -> None:
         """Tear down the WireGuard interface."""
@@ -477,37 +524,40 @@ class MeshVPNService:
         elif self._platform == VPNPlatform.MACOS:
             await self._destroy_interface_macos()
 
-    async def _create_interface_linux(self) -> None:
-        """Create WireGuard interface on Linux using ip + wg."""
+    async def _create_interface_linux(self) -> bool:
+        """Create WireGuard interface on Linux using ip + wg. Returns True on success."""
         import asyncio
-
-        cmds = [
-            # Create WireGuard interface
-            ["ip", "link", "add", "dev", self._interface_name, "type", "wireguard"],
-            # Set private key (via temp file for security)
-            # Handled separately below
-        ]
-
-        for cmd in cmds:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                # Interface may already exist
-                if b"RTNETLINK answers: File exists" not in stderr:
-                    logger.error(f"Failed: {' '.join(cmd)}: {stderr.decode()}")
-                    return
-
-        # Write private key to temp file and configure
+        import shutil
         import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False) as f:
-            f.write(self.private_key)
-            key_path = f.name
 
+        # Check required binaries
+        for binary in ("ip", "wg"):
+            if not shutil.which(binary):
+                logger.error(f"Required binary '{binary}' not found in PATH")
+                return False
+        if self.config.gateway and not shutil.which("batctl"):
+            logger.error("Gateway mode requires 'batctl' but it's not in PATH")
+            return False
+
+        # Create WireGuard interface
+        proc = await asyncio.create_subprocess_exec(
+            "ip", "link", "add", "dev", self._interface_name, "type", "wireguard",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            if b"RTNETLINK answers: File exists" not in stderr:
+                logger.error(f"Failed to create WG interface: {stderr.decode()}")
+                return False
+
+        # Write private key to temp file with restricted permissions
+        fd, key_path = tempfile.mkstemp(prefix="wg_", suffix=".key")
         try:
+            os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
+            os.write(fd, self.private_key.encode())
+            os.close(fd)
+
             proc = await asyncio.create_subprocess_exec(
                 "wg", "set", self._interface_name,
                 "listen-port", str(self.config.listen_port),
@@ -518,7 +568,7 @@ class MeshVPNService:
             _, stderr = await proc.communicate()
             if proc.returncode != 0:
                 logger.error(f"wg set failed: {stderr.decode()}")
-                return
+                return False
         finally:
             os.unlink(key_path)
 
@@ -537,13 +587,17 @@ class MeshVPNService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.communicate()
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error(f"Failed to bring up {self._interface_name}: {stderr.decode()}")
+            return False
 
         # If gateway, add WG interface to bat0
         if self.config.gateway:
             await self._add_to_batman()
 
         logger.info(f"WireGuard interface {self._interface_name} up: {self.mesh_ip}/64")
+        return True
 
     async def _destroy_interface_linux(self) -> None:
         """Remove WireGuard interface on Linux."""
@@ -560,13 +614,17 @@ class MeshVPNService:
         await proc.communicate()
         logger.info(f"WireGuard interface {self._interface_name} removed")
 
-    async def _create_interface_macos(self) -> None:
-        """Create WireGuard tunnel on macOS using wireguard-go + wg."""
+    async def _create_interface_macos(self) -> bool:
+        """Create WireGuard tunnel on macOS using wg-quick. Returns True on success."""
         import asyncio
+        import shutil
 
-        # macOS uses userspace wireguard-go, managed via wg-quick or
-        # the WireGuard app. For programmatic control, we write a config
-        # and use wg-quick.
+        if not shutil.which("wg-quick"):
+            logger.error("wg-quick not found — install WireGuard: brew install wireguard-tools")
+            return False
+
+        # macOS uses userspace wireguard-go, managed via wg-quick.
+        # Write config and bring up the tunnel.
         conf_path = self._styrene_dir / f"{self._interface_name}.conf"
         conf_content = (
             f"[Interface]\n"
@@ -577,19 +635,23 @@ class MeshVPNService:
         conf_path.write_text(conf_content)
         conf_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
-        # Try wg-quick (installed via brew install wireguard-tools)
+        # wg-quick on macOS requires sudo for utun creation
         proc = await asyncio.create_subprocess_exec(
-            "wg-quick", "up", str(conf_path),
+            "sudo", "wg-quick", "up", str(conf_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             logger.error(f"wg-quick up failed: {stderr.decode()}")
-            logger.error("Install WireGuard: brew install wireguard-tools")
-            return
+            logger.error(
+                "WireGuard requires root on macOS. Either run with sudo, "
+                "or use the WireGuard.app GUI to manage tunnels."
+            )
+            return False
 
         logger.info(f"WireGuard tunnel up on macOS: {self.mesh_ip}/64")
+        return True
 
     async def _destroy_interface_macos(self) -> None:
         """Tear down WireGuard tunnel on macOS."""
@@ -597,7 +659,7 @@ class MeshVPNService:
 
         conf_path = self._styrene_dir / f"{self._interface_name}.conf"
         proc = await asyncio.create_subprocess_exec(
-            "wg-quick", "down", str(conf_path),
+            "sudo", "wg-quick", "down", str(conf_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

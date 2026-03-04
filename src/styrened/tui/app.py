@@ -105,33 +105,37 @@ class StyreneApp(App[None]):
         # Already on dashboard — notify about double-press to quit
         self.notify("Press Ctrl+C again to quit", severity="warning", timeout=2)
 
+    def _screen_in_stack(self, screen_type: type) -> bool:
+        """Return True if any screen in the current stack is an instance of screen_type."""
+        return any(isinstance(s, screen_type) for s in self.screen_stack)
+
     def action_push_screen_settings(self) -> None:
-        """Push settings screen with current config (no-op if already on top)."""
-        if isinstance(self.screen, SettingsScreen):
+        """Push settings screen with current config (no-op if already in stack)."""
+        if self._screen_in_stack(SettingsScreen):
             return
         self.push_screen(SettingsScreen(self.config))
 
     def action_open_inbox(self) -> None:
-        """Open inbox screen showing all conversations (no-op if already on top)."""
+        """Open inbox screen showing all conversations (no-op if already in stack)."""
         if self._lifecycle.ipc_bridge is None:
             self.notify("Chat requires daemon mode", severity="warning")
             return
 
         from styrened.tui.screens.inbox import InboxScreen
 
-        if isinstance(self.screen, InboxScreen):
+        if self._screen_in_stack(InboxScreen):
             return
         self.push_screen(InboxScreen())
 
     def action_open_contacts(self) -> None:
-        """Push contacts screen (no-op if already on top)."""
-        if isinstance(self.screen, ContactsScreen):
+        """Push contacts screen (no-op if already in stack)."""
+        if self._screen_in_stack(ContactsScreen):
             return
         self.push_screen("contacts")
 
     def action_open_provision(self) -> None:
-        """Push provision screen (no-op if already on top)."""
-        if isinstance(self.screen, ProvisionScreen):
+        """Push provision screen (no-op if already in stack)."""
+        if self._screen_in_stack(ProvisionScreen):
             return
         self.push_screen("provision")
 
@@ -541,8 +545,11 @@ class StyreneApp(App[None]):
         atexit.register(_do_exec)
 
     def _show_upgrade_screen(self, current: str, latest: str) -> None:
-        """Push the upgrade modal screen."""
+        """Push the upgrade modal screen (no-op if already in stack)."""
         from styrened.tui.screens.upgrade import UpgradeScreen
+
+        if self._screen_in_stack(UpgradeScreen):
+            return
 
         def _on_upgrade_result(should_restart: bool | None) -> None:
             if should_restart:
