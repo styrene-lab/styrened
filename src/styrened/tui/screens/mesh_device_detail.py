@@ -183,6 +183,9 @@ class MeshDeviceDetailScreen(Screen[None]):
         self.initial_status = initial_status
         self.initial_tab = initial_tab
         self.device: MeshDevice | None = device
+        # Load device only if not pre-supplied
+        if self.device is None:
+            self._load_device()
 
     @property
     def _dest_hash(self) -> str:
@@ -195,9 +198,6 @@ class MeshDeviceDetailScreen(Screen[None]):
         if self.device and self.device.destination_hash:
             return self.device.destination_hash
         return self.device_identity
-        # Load device only if not pre-supplied
-        if self.device is None:
-            self._load_device()
 
     def _load_device(self) -> None:
         """Load device from mesh discovery and NodeStore."""
