@@ -183,6 +183,18 @@ class MeshDeviceDetailScreen(Screen[None]):
         self.initial_status = initial_status
         self.initial_tab = initial_tab
         self.device: MeshDevice | None = device
+
+    @property
+    def _dest_hash(self) -> str:
+        """Destination hash for datalink operations.
+
+        DirectLinkService needs a destination hash (not identity hash)
+        for RNS.Identity.recall(). Falls back to identity hash if
+        device object lacks a destination_hash.
+        """
+        if self.device and self.device.destination_hash:
+            return self.device.destination_hash
+        return self.device_identity
         # Load device only if not pre-supplied
         if self.device is None:
             self._load_device()
@@ -382,7 +394,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
             if bridge:
                 link_info = await bridge.datalink_status(
-                    destination_hash=self.device_identity,
+                    destination_hash=self._dest_hash,
                 )
                 status_widget.link_info = link_info
         except Exception:
@@ -401,7 +413,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             try:
                 if bridge and status_widget.link_info and status_widget.link_info.get("connected"):
                     result = await bridge.datalink_query(
-                        destination_hash=self.device_identity,
+                        destination_hash=self._dest_hash,
                     )
                     if result and "status_data" in result:
                         sd = result["status_data"]
@@ -490,14 +502,14 @@ class MeshDeviceDetailScreen(Screen[None]):
         """Background worker: establish datalink and refresh status."""
         try:
             result = await bridge.datalink_establish(
-                destination_hash=self.device_identity,
+                destination_hash=self._dest_hash,
             )
             status = result.get("status", "failed")
 
             try:
                 sw = self.query_one("#status-widget", DeviceStatusWidget)
                 link_info = await bridge.datalink_status(
-                    destination_hash=self.device_identity,
+                    destination_hash=self._dest_hash,
                 )
                 sw.link_info = link_info
             except Exception:
@@ -530,7 +542,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         # Check if link is active
         try:
             link_info = await bridge.datalink_status(
-                destination_hash=self.device_identity,
+                destination_hash=self._dest_hash,
             )
             if not link_info.get("connected"):
                 self.notify("No active link — press L to establish first", severity="warning")
@@ -546,7 +558,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         """Background worker: run speedtest and display results."""
         try:
             result = await bridge.datalink_speedtest(
-                destination_hash=self.device_identity,
+                destination_hash=self._dest_hash,
             )
             results = result.get("results", [])
 

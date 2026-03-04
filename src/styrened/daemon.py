@@ -1276,7 +1276,7 @@ class StyreneDaemon:
         Sets up:
         1. DirectLinkService for outgoing links to peers
         2. ("styrene", "datalink") IN destination for accepting incoming links
-        3. Request handlers for /status, /ping, /vpn/handshake on the destination
+        3. Request handlers for /status, /ping, /speedtest on the destination
         4. MeshVPNService for WireGuard tunnel management (if enabled)
         """
         try:
@@ -1333,13 +1333,7 @@ class StyreneDaemon:
                 allow=RNS.Destination.ALLOW_ALL,
             )
 
-            # Register VPN handshake handler if mesh VPN is enabled
-            if self._mesh_vpn_service and self._mesh_vpn_service.enabled:
-                self._datalink_destination.register_request_handler(
-                    "/vpn/handshake",
-                    response_generator=self._mesh_vpn_service.handle_handshake,
-                    allow=RNS.Destination.ALLOW_ALL,
-                )
+            # Note: VPN handshake now uses LXMF (StyreneProtocol), not datalink
 
             # Set link established callback for logging
             self._datalink_destination.set_link_established_callback(
@@ -1358,7 +1352,7 @@ class StyreneDaemon:
             from styrened.services.mesh_vpn import MeshVPNService
             from styrened.services.reticulum import get_operator_identity_object
 
-            vpn_config = getattr(self._config, "mesh_vpn", None)
+            vpn_config = getattr(self.config, "mesh_vpn", None)
             if vpn_config is None:
                 return
 
@@ -1375,6 +1369,23 @@ class StyreneDaemon:
                 await self._mesh_vpn_service.start(
                     identity_hash=identity_hash,
                 )
+
+                # Register LXMF handlers on StyreneProtocol
+                if self._styrene_protocol:
+                    from styrened.models.styrene_wire import StyreneMessageType
+                    self._mesh_vpn_service._styrene_protocol = self._styrene_protocol
+                    self._styrene_protocol.register_handler(
+                        StyreneMessageType.VPN_HANDSHAKE_REQUEST,
+                        self._mesh_vpn_service.handle_handshake_request,
+                    )
+                    self._styrene_protocol.register_handler(
+                        StyreneMessageType.VPN_HANDSHAKE_RESPONSE,
+                        self._mesh_vpn_service.handle_handshake_response,
+                    )
+                    logger.info("VPN handshake handlers registered on StyreneProtocol")
+                else:
+                    logger.warning("StyreneProtocol not available — VPN handshakes won't work")
+
                 logger.info("Mesh VPN service started")
         except Exception as e:
             logger.error(f"Failed to start mesh VPN: {e}")

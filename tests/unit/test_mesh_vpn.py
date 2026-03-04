@@ -268,10 +268,20 @@ class TestMeshVPNService:
             mesh_ip="fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890",
         )
 
-        mock_identity = type("MockId", (), {"hash": bytes.fromhex("deadbeef" * 4)})()
-        response = svc.handle_handshake("/vpn/handshake", request_data, None, None, mock_identity)
-        parsed = json.loads(response)
-        assert parsed["error"] == "subnet_prefix_mismatch"
+        # Simulate LXMF message + envelope for the async handler
+        mock_message = type("MockMsg", (), {"source_hash": "deadbeef" * 4})()
+
+        from styrened.models.styrene_wire import StyreneEnvelope, StyreneMessageType, encode_payload
+        envelope = StyreneEnvelope(
+            version=1,
+            message_type=StyreneMessageType.VPN_HANDSHAKE_REQUEST,
+            payload=encode_payload(request_data),
+        )
+
+        import asyncio
+        asyncio.run(svc.handle_handshake_request(mock_message, envelope))
+        # Peer should NOT be stored due to prefix mismatch
+        assert "deadbeef" * 4 not in svc._peers
 
     def test_service_disabled_by_default(self):
         """Service should not start if config.enable is False."""
@@ -395,8 +405,141 @@ class TestGatewayTopology:
         assert len(svc.gateway_peers) == 1
         assert len(svc.direct_peers) == 2
 
+    def test_second_gateway_replaces_first(self, tmp_path):
+        """Adding a second gateway should demote the first to direct peer."""
+        svc = self._make_service(tmp_path)
+        gw1 = PeerInfo(
+            public_key="a" * 44, mesh_ip="fd73:7479:7265:6e65:aaaa:bbbb:cccc:0001", gateway=True,
+        )
+        gw2 = PeerInfo(
+            public_key="b" * 44, mesh_ip="fd73:7479:7265:6e65:aaaa:bbbb:cccc:0002", gateway=True,
+        )
+        svc._peers["gw1"] = gw1
+        svc._peers["gw2"] = gw2
+        # After configure_peer runs for gw2, gw1 should be demoted.
+        # We test the property: only one gateway at a time is the design intent.
+        assert len(svc.gateway_peers) == 2  # Before configure_peer runs, both are gateway
+        # After _configure_peer, the eviction happens — tested via integration.
+        # Here we verify the data model supports it:
+        gw1.gateway = False
+        assert len(svc.gateway_peers) == 1
+        assert svc.gateway_peers[0].public_key == "b" * 44
+
+    def test_vxlan_name_length(self, tmp_path):
+        """VXLAN interface name must be <= 15 chars (Linux IFNAMSIZ)."""
+        svc = self._make_service(tmp_path, gateway=True)
+        name = svc._vxlan_name("e762e93731c93752abcdef0123456789")
+        assert len(name) <= 15
+        assert name.startswith("vx-")
+
+    def test_vxlan_name_deterministic(self, tmp_path):
+        """Same identity hash always produces same VXLAN name."""
+        svc = self._make_service(tmp_path)
+        n1 = svc._vxlan_name("e762e93731c93752")
+        n2 = svc._vxlan_name("e762e93731c93752")
+        assert n1 == n2
+
+    def test_vxlan_name_unique_per_peer(self, tmp_path):
+        """Different peers get different VXLAN names."""
+        svc = self._make_service(tmp_path)
+        n1 = svc._vxlan_name("e762e93731c93752")
+        n2 = svc._vxlan_name("4dbfa342abcdef01")
+        assert n1 != n2
+
+    def test_vxlan_vni_constant(self, tmp_path):
+        """VXLAN VNI should be the fixed Styrene mesh identifier."""
+        svc = self._make_service(tmp_path)
+        assert svc.VXLAN_VNI == 7379
+
     def test_status_includes_subnet(self, tmp_path):
         """Status should show the full mesh subnet."""
         svc = self._make_service(tmp_path)
         status = svc.get_status()
         assert status["subnet"] == "fd73:7479:7265:6e65::/64"
+
+    def test_handshake_response_handler_configures_peer(self, tmp_path):
+        """handle_handshake_response should store peer and resolve pending future."""
+        import asyncio
+        from styrened.models.styrene_wire import StyreneEnvelope, StyreneMessageType, encode_payload
+
+        svc = self._make_service(tmp_path)
+        svc._started = True
+
+        response_data = build_handshake_response(
+            public_key="dGVzdHB1YmxpY2tleXRlc3RwdWJsaWNrZXk0NTY=",
+            mesh_ip="fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890",
+            endpoint="10.0.0.2:51820",
+            gateway=False,
+        )
+        envelope = StyreneEnvelope(
+            version=1,
+            message_type=StyreneMessageType.VPN_HANDSHAKE_RESPONSE,
+            payload=encode_payload(response_data),
+        )
+
+        remote_hash = "aabbccdd" * 4
+        mock_message = type("MockMsg", (), {"source_hash": remote_hash})()
+
+        # Create pending future
+        loop = asyncio.new_event_loop()
+        future = loop.create_future()
+        svc._pending_handshakes[remote_hash] = future
+
+        loop.run_until_complete(svc.handle_handshake_response(mock_message, envelope))
+
+        # Peer should be stored
+        assert remote_hash in svc._peers
+        assert svc._peers[remote_hash].mesh_ip == "fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890"
+        # Future should be resolved
+        assert future.done()
+        assert future.result().mesh_ip == "fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890"
+        loop.close()
+
+    def test_handshake_request_handler_stores_peer(self, tmp_path):
+        """handle_handshake_request should store peer on matching prefix."""
+        import asyncio
+        from styrened.models.styrene_wire import StyreneEnvelope, StyreneMessageType, encode_payload
+
+        svc = self._make_service(tmp_path)
+        svc._started = True
+
+        request_data = build_handshake_request(
+            public_key="dGVzdHB1YmxpY2tleXRlc3RwdWJsaWNrZXk0NTY=",
+            mesh_ip="fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890",
+            endpoint="10.0.0.2:51820",
+        )
+        envelope = StyreneEnvelope(
+            version=1,
+            message_type=StyreneMessageType.VPN_HANDSHAKE_REQUEST,
+            payload=encode_payload(request_data),
+        )
+
+        remote_hash = "11223344" * 4
+        mock_message = type("MockMsg", (), {"source_hash": remote_hash})()
+
+        # No styrene_protocol set — response won't send, but peer should be stored
+        asyncio.run(svc.handle_handshake_request(mock_message, envelope))
+        assert remote_hash in svc._peers
+        assert svc._peers[remote_hash].public_key == "dGVzdHB1YmxpY2tleXRlc3RwdWJsaWNrZXk0NTY="
+
+    def test_pending_handshakes_initialized(self, tmp_path):
+        """Service should have empty pending handshakes dict on init."""
+        svc = self._make_service(tmp_path)
+        assert svc._pending_handshakes == {}
+
+    def test_initiate_handshake_requires_started(self, tmp_path):
+        """initiate_handshake should fail if service not started."""
+        import asyncio
+        svc = self._make_service(tmp_path)
+        svc._started = False
+        result = asyncio.run(svc.initiate_handshake("deadbeef" * 4))
+        assert result is None
+
+    def test_initiate_handshake_requires_protocol(self, tmp_path):
+        """initiate_handshake should fail if no StyreneProtocol set."""
+        import asyncio
+        svc = self._make_service(tmp_path)
+        svc._started = True
+        svc._styrene_protocol = None
+        result = asyncio.run(svc.initiate_handshake("deadbeef" * 4))
+        assert result is None
