@@ -2714,6 +2714,46 @@ class IPCHandlers:
             return ErrorResponse.internal_error("Direct link service not initialized")
         return None
 
+    async def handle_cmd_block_peer(self, request: IPCRequest) -> IPCResponse:
+        """Block a peer — silently drop all future messages."""
+        from styrened.ipc.messages import CmdBlockPeerRequest
+
+        assert isinstance(request, CmdBlockPeerRequest)
+        peer_hash = request.peer_hash
+        if not peer_hash:
+            return ErrorResponse(message="peer_hash required")
+
+        from styrened.services.lxmf_service import get_lxmf_service
+
+        svc = get_lxmf_service()
+        if svc.block_peer(peer_hash):
+            return ResultResponse(data={"blocked": True, "peer_hash": peer_hash})
+        return ErrorResponse(message="Failed to block peer")
+
+    async def handle_cmd_unblock_peer(self, request: IPCRequest) -> IPCResponse:
+        """Unblock a previously blocked peer."""
+        from styrened.ipc.messages import CmdUnblockPeerRequest
+
+        assert isinstance(request, CmdUnblockPeerRequest)
+        peer_hash = request.peer_hash
+        if not peer_hash:
+            return ErrorResponse(message="peer_hash required")
+
+        from styrened.services.lxmf_service import get_lxmf_service
+
+        svc = get_lxmf_service()
+        if svc.unblock_peer(peer_hash):
+            return ResultResponse(data={"unblocked": True, "peer_hash": peer_hash})
+        return ErrorResponse(message="Failed to unblock peer")
+
+    async def handle_query_blocked_peers(self, request: IPCRequest) -> IPCResponse:
+        """List all blocked peers."""
+        from styrened.services.lxmf_service import get_lxmf_service
+
+        svc = get_lxmf_service()
+        blocked = svc.get_blocked_peers()
+        return ResultResponse(data={"blocked_peers": blocked})
+
     async def handle_cmd_datalink_establish(self, request: IPCRequest) -> IPCResponse:
         """Establish a direct data link to a Styrene peer."""
         err = self._check_direct_link()

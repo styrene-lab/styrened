@@ -101,6 +101,10 @@ class LXMFService:
         # raw_mode=False means callback receives (source_hash, payload_dict)
         self._message_callbacks: list[tuple[Callable, bool]] = []
 
+        # In-memory blocklist cache (set of peer_hash strings).
+        # Loaded from DB on first check, invalidated by block/unblock IPC.
+        self._blocked_peers: set[str] | None = None
+
     @property
     def is_initialized(self) -> bool:
         """Check if LXMF is initialized.
@@ -949,6 +953,134 @@ class LXMFService:
 
         return payload
 
+    # ------------------------------------------------------------------
+    # Blocklist management
+    # ------------------------------------------------------------------
+
+    def _load_blocklist(self) -> set[str]:
+        """Load blocked peer hashes from the contacts DB."""
+        try:
+            from sqlalchemy import create_engine, text
+
+            from styrened import paths
+
+            db_path = str(paths.messages_db())
+            engine = create_engine(f"sqlite:///{db_path}")
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT peer_hash FROM contacts WHERE blocked = 1")
+                ).fetchall()
+            return {row[0] for row in rows}
+        except Exception as e:
+            logger.warning(f"Failed to load blocklist: {e}")
+            return set()
+
+    def _is_blocked(self, source_hash: str) -> bool:
+        """Check if a peer is blocked. Uses in-memory cache."""
+        if self._blocked_peers is None:
+            self._blocked_peers = self._load_blocklist()
+        return source_hash in self._blocked_peers
+
+    def invalidate_blocklist(self) -> None:
+        """Clear the in-memory blocklist cache (call after block/unblock)."""
+        self._blocked_peers = None
+
+    def block_peer(self, peer_hash: str) -> bool:
+        """Block a peer — all future messages silently dropped.
+
+        Creates a contact record if one doesn't exist. Returns True on success.
+        """
+        import time as _time
+
+        try:
+            from sqlalchemy import create_engine, text
+
+            from styrened import paths
+
+            db_path = str(paths.messages_db())
+            engine = create_engine(f"sqlite:///{db_path}")
+            now = _time.time()
+            with engine.connect() as conn:
+                # Upsert: create contact if missing, set blocked
+                existing = conn.execute(
+                    text("SELECT peer_hash FROM contacts WHERE peer_hash = :h"),
+                    {"h": peer_hash},
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        text(
+                            "UPDATE contacts SET blocked = 1, blocked_at = :t, updated_at = :t "
+                            "WHERE peer_hash = :h"
+                        ),
+                        {"h": peer_hash, "t": now},
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "INSERT INTO contacts (peer_hash, alias, blocked, blocked_at, created_at, updated_at) "
+                            "VALUES (:h, :a, 1, :t, :t, :t)"
+                        ),
+                        {"h": peer_hash, "a": peer_hash[:8], "t": now},
+                    )
+                conn.commit()
+            self.invalidate_blocklist()
+            logger.info(f"Blocked peer {peer_hash[:16]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to block peer: {e}")
+            return False
+
+    def unblock_peer(self, peer_hash: str) -> bool:
+        """Unblock a previously blocked peer. Returns True on success."""
+        import time as _time
+
+        try:
+            from sqlalchemy import create_engine, text
+
+            from styrened import paths
+
+            db_path = str(paths.messages_db())
+            engine = create_engine(f"sqlite:///{db_path}")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE contacts SET blocked = 0, blocked_at = NULL, updated_at = :t "
+                        "WHERE peer_hash = :h"
+                    ),
+                    {"h": peer_hash, "t": _time.time()},
+                )
+                conn.commit()
+            self.invalidate_blocklist()
+            logger.info(f"Unblocked peer {peer_hash[:16]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to unblock peer: {e}")
+            return False
+
+    def get_blocked_peers(self) -> list[dict]:
+        """Return list of blocked peers with metadata."""
+        try:
+            from sqlalchemy import create_engine, text
+
+            from styrened import paths
+
+            db_path = str(paths.messages_db())
+            engine = create_engine(f"sqlite:///{db_path}")
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT peer_hash, alias, blocked_at FROM contacts "
+                        "WHERE blocked = 1 ORDER BY blocked_at DESC"
+                    )
+                ).fetchall()
+            return [
+                {"peer_hash": r[0], "alias": r[1], "blocked_at": r[2]}
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get blocked peers: {e}")
+            return []
+
     def _handle_lxmf_message(self, message: "LXMF.LXMessage") -> None:
         """Handle incoming LXMF message.
 
@@ -964,6 +1096,11 @@ class LXMFService:
 
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
+
+        # Check if sender is blocked — silently drop all messages from blocked peers
+        if self._is_blocked(source_hash):
+            logger.info(f"Dropped message from blocked peer {source_hash[:16]}...")
+            return
 
         # Normalize message content for non-raw callbacks
         # Handles both JSON payloads (styrened) and plain text (Sideband/NomadNet)

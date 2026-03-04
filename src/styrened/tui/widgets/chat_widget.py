@@ -26,6 +26,7 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Input, Static
+from textual import work
 from textual.worker import Worker, WorkerState
 
 from styrened.ipc import IPCMessageType
@@ -109,6 +110,7 @@ class ChatWidget(Widget, can_focus=True):
         Binding("a", "attach_file", "Attach", show=True),
         Binding("ctrl+y", "attach_clipboard", "📋 Attach", priority=True),
         Binding("ctrl+v", "paste_attachment", "Paste", show=False),
+        Binding("B", "block_peer", "Block", show=True),
     ]
 
     loading: reactive[bool] = reactive(False)
@@ -1264,6 +1266,56 @@ class ChatWidget(Widget, can_focus=True):
             self._set_status("[dim]Copied to clipboard[/]")
         except Exception:
             self._set_status("[red]Copy failed[/]")
+
+    # -------------------------------------------------------------------------
+    # Block actions
+    # -------------------------------------------------------------------------
+
+    def action_block_peer(self) -> None:
+        """Block this peer — silently drop all future messages (B key).
+
+        First press shows confirmation prompt, second press within 5s executes.
+        """
+        if not self._ipc_bridge or not self.peer_hash:
+            return
+
+        import time as _time
+
+        now = _time.time()
+        if (
+            hasattr(self, "_block_confirm_time")
+            and self._block_confirm_time
+            and now - self._block_confirm_time < 5.0
+            and getattr(self, "_block_confirm_hash", None) == self.peer_hash
+        ):
+            # Second press — execute
+            self._block_confirm_time = None
+            self._block_peer_async()
+        else:
+            # First press — prompt
+            self._block_confirm_time = now
+            self._block_confirm_hash = self.peer_hash
+            self.notify(
+                f"Press B again within 5s to block {self.peer_hash[:8]}...\n"
+                "All future messages will be silently dropped.",
+                title="⚠ Confirm Block",
+                severity="warning",
+            )
+
+    @work(exclusive=True, thread=False)
+    async def _block_peer_async(self) -> None:
+        """Block the peer via IPC."""
+        bridge = self._ipc_bridge
+        if not bridge:
+            return
+        try:
+            result = await bridge.block_peer(self.peer_hash)
+            self.notify(
+                f"Blocked {self.peer_hash[:8]}... — messages will be dropped",
+                title="Peer Blocked",
+            )
+        except Exception as e:
+            self.notify(f"Block failed: {e}", severity="error")
 
     # -------------------------------------------------------------------------
     # Attachment actions

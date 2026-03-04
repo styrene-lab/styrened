@@ -570,6 +570,18 @@ class IPCBridge:
 
     # ── Direct data link methods ──────────────────────────────────
 
+    async def block_peer(self, peer_hash: str) -> dict:
+        """Block a peer."""
+        return await self._call("block_peer", peer_hash=peer_hash)
+
+    async def unblock_peer(self, peer_hash: str) -> dict:
+        """Unblock a peer."""
+        return await self._call("unblock_peer", peer_hash=peer_hash)
+
+    async def get_blocked_peers(self) -> dict:
+        """List blocked peers."""
+        return await self._call("get_blocked_peers")
+
     async def datalink_establish(self, destination_hash: str) -> dict:
         """Establish a direct data link to a Styrene peer."""
         return await self._call("datalink_establish", destination_hash=destination_hash)

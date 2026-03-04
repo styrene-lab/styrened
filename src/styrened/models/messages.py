@@ -415,6 +415,19 @@ def init_db(db_path: str | None = None) -> Engine:
     except Exception:
         pass  # Table already exists or was created by create_all
 
+    # Migrate contacts table: add blocked columns if missing
+    for col_name, col_type in [
+        ("blocked", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("blocked_at", "REAL"),
+    ]:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE contacts ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+                logger.info(f"Added '{col_name}' column to contacts table")
+        except Exception:
+            pass  # Column already exists
+
     # Create FTS5 virtual table for full-text search
     # This enables searching message content and titles efficiently
     with engine.connect() as conn:
