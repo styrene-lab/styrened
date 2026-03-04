@@ -25,6 +25,25 @@ if TYPE_CHECKING:
     from styrened.rpc.messages import StatusResponse
     from styrened.tui.app import StyreneApp
 
+# ── Status cache ──────────────────────────────────────────────────
+# Simple TTL cache: {identity_hash: (StatusResponse, timestamp)}
+# Avoids redundant LXMF RPC round-trips when re-opening a device.
+import time as _time
+
+_STATUS_CACHE: dict[str, tuple[Any, float]] = {}
+_STATUS_CACHE_TTL = 120.0  # 2 minutes
+
+
+def _cache_status(identity: str, status: Any) -> None:
+    _STATUS_CACHE[identity] = (status, _time.time())
+
+
+def _get_cached_status(identity: str) -> Any | None:
+    entry = _STATUS_CACHE.get(identity)
+    if entry and (_time.time() - entry[1]) < _STATUS_CACHE_TTL:
+        return entry[0]
+    return None
+
 
 def _format_bytes(n: int) -> str:
     """Format byte count as human-readable label."""
@@ -141,6 +160,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         device_identity: str,
         initial_status: "StatusResponse | None" = None,
         initial_tab: str | None = None,
+        device: MeshDevice | None = None,
     ) -> None:
         """Initialize mesh device detail screen.
 
@@ -148,14 +168,16 @@ class MeshDeviceDetailScreen(Screen[None]):
             device_identity: Reticulum identity hash of device.
             initial_status: Optional pre-fetched status response.
             initial_tab: Optional tab ID to open initially (e.g. "chat", "fleet-ops", "terminal").
+            device: Optional pre-resolved MeshDevice (avoids re-query).
         """
         super().__init__()
         self.device_identity = device_identity
         self.initial_status = initial_status
         self.initial_tab = initial_tab
-        self.device: MeshDevice | None = None
-        # Load device before compose() runs
-        self._load_device()
+        self.device: MeshDevice | None = device
+        # Load device only if not pre-supplied
+        if self.device is None:
+            self._load_device()
 
     def _load_device(self) -> None:
         """Load device from mesh discovery and NodeStore."""
@@ -357,34 +379,45 @@ class MeshDeviceDetailScreen(Screen[None]):
         except Exception:
             pass
 
-        # Try datalink query first (low latency if link exists)
+        # Check status cache first (avoids LXMF round-trip on re-open)
         got_status = False
-        try:
-            if bridge and status_widget.link_info and status_widget.link_info.get("connected"):
-                result = await bridge.datalink_query(
-                    destination_hash=self.device_identity,
-                )
-                if result and "status_data" in result:
-                    sd = result["status_data"]
-                    from styrened.rpc.messages import StatusResponse
+        cached = _get_cached_status(self.device_identity)
+        if cached is not None:
+            status_widget.status = cached
+            got_status = True
+            # Still try to refresh in background, but don't block render
+            status_widget.loading = False
 
-                    status_widget.status = StatusResponse(
-                        uptime=sd.get("uptime", 0),
-                        ip=sd.get("ip", ""),
-                        services=sd.get("services", []),
-                        disk_used=sd.get("disk_used", 0),
-                        disk_total=sd.get("disk_total", 0),
-                        styrened_version=sd.get("styrened_version"),
-                        hostname=sd.get("hostname"),
-                        arch=sd.get("arch"),
-                        os_id=sd.get("os_id"),
-                        os_version=sd.get("os_version"),
-                        nixos_generation=sd.get("nixos_generation"),
-                        available_commands=sd.get("available_commands"),
+        # Try datalink query (low latency if link exists)
+        if not got_status:
+            try:
+                if bridge and status_widget.link_info and status_widget.link_info.get("connected"):
+                    result = await bridge.datalink_query(
+                        destination_hash=self.device_identity,
                     )
-                    got_status = True
-        except Exception:
-            pass
+                    if result and "status_data" in result:
+                        sd = result["status_data"]
+                        from styrened.rpc.messages import StatusResponse
+
+                        resp = StatusResponse(
+                            uptime=sd.get("uptime", 0),
+                            ip=sd.get("ip", ""),
+                            services=sd.get("services", []),
+                            disk_used=sd.get("disk_used", 0),
+                            disk_total=sd.get("disk_total", 0),
+                            styrened_version=sd.get("styrened_version"),
+                            hostname=sd.get("hostname"),
+                            arch=sd.get("arch"),
+                            os_id=sd.get("os_id"),
+                            os_version=sd.get("os_version"),
+                            nixos_generation=sd.get("nixos_generation"),
+                            available_commands=sd.get("available_commands"),
+                        )
+                        status_widget.status = resp
+                        _cache_status(self.device_identity, resp)
+                        got_status = True
+            except Exception:
+                pass
 
         # Fall back to RPC over LXMF
         if not got_status:
@@ -395,6 +428,7 @@ class MeshDeviceDetailScreen(Screen[None]):
                     timeout=30.0,
                 )
                 status_widget.status = response
+                _cache_status(self.device_identity, response)
             except Exception:
                 # No RPC data — status widget shows announce data only
                 pass

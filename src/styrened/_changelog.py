@@ -133,4 +133,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.24", "fix: page cache assessment fixes"),
     ("0.13.25", "feat: direct data link service + status tab redesign"),
     ("0.13.26", "feat: datalink speedtest + LoRa-hardened timeouts"),
+    ("0.13.27", "feat: exploration screen status filtering — hide lost/stale, dim inactive"),
 ]

@@ -922,13 +922,26 @@ class ExplorationScreen(Screen[None]):
             pass
         self._update_status_bar()
 
+    def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
+        """Look up a MeshDevice from the active table's device list."""
+        table = self._get_active_table()
+        if table and hasattr(table, "_all_devices"):
+            for d in table._all_devices:
+                if d.identity == identity:
+                    return d
+        return None
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle DataTable enter key — navigate to device detail screen."""
         if event.row_key and event.row_key.value and event.row_key.value != "-":
             device_identity = str(event.row_key.value)
+            device = self._find_device_by_identity(device_identity)
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
-            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+            self.app.push_screen(MeshDeviceDetailScreen(
+                device_identity=device_identity,
+                device=device,
+            ))
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         """Handle column header click — sort by that column."""
@@ -1006,20 +1019,26 @@ class ExplorationScreen(Screen[None]):
         """Handle device selection — navigate to device detail screen."""
         device_identity = self._get_selected_identity()
         if device_identity:
+            device = self._find_device_by_identity(device_identity)
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
             self.app.push_screen(
-                MeshDeviceDetailScreen(device_identity=device_identity)
+                MeshDeviceDetailScreen(device_identity=device_identity, device=device)
             )
 
     def action_open_chat(self) -> None:
         """Open chat tab directly for the selected device."""
         device_identity = self._get_selected_identity()
         if device_identity:
+            device = self._find_device_by_identity(device_identity)
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
             self.app.push_screen(
-                MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    initial_tab="chat",
+                    device=device,
+                )
             )
 
     def action_preview_page(self) -> None:
