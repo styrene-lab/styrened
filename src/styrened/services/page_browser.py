@@ -207,8 +207,11 @@ class PageBrowserService:
                     )
                 await asyncio.sleep(0.2)
 
+        logger.info(f"Path found for {destination_hash[:16]}..., recalling identity")
+
         # Step 2: Recall identity
         identity = RNS.Identity.recall(dest_hash_bytes)
+        logger.info(f"Identity recall for {destination_hash[:16]}...: {'OK' if identity else 'FAILED'}")
         if identity is None:
             return PageResponse(
                 content="",
@@ -432,10 +435,14 @@ class PageBrowserService:
 
         established_future: asyncio.Future[bool] = asyncio.Future()
 
+        logger.info(f"Creating link to {destination_hash[:16]}... (dest_hash={destination.hash.hex()[:16]})")
         link = RNS.Link(destination)
+        logger.info(f"RNS.Link created, status={link.status}, waiting for establishment...")
 
         def link_established(lnk: "RNS.Link") -> None:
+            logger.info(f"Link ESTABLISHED callback fired for {destination_hash[:16]}...")
             if self._event_loop is None:
+                logger.warning("No event loop in link_established callback!")
                 return
             asyncio.run_coroutine_threadsafe(
                 self._resolve_future(established_future, True),
@@ -444,7 +451,7 @@ class PageBrowserService:
 
         def link_closed(lnk: "RNS.Link") -> None:
             dest_hash = destination_hash
-            logger.debug(f"Link to {dest_hash[:16]}... closed")
+            logger.info(f"Link CLOSED callback fired for {dest_hash[:16]}... (teardown_reason={getattr(lnk, 'teardown_reason', 'unknown')})")
             self._links.pop(dest_hash, None)
             if self._event_loop is not None and not established_future.done():
                 asyncio.run_coroutine_threadsafe(

@@ -124,4 +124,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.15", "fix: upgrade changelog fetches target version's bundled entries from PyPI"),
     ("0.13.16", "fix: detect NomadNet identity for announce even without page_server"),
     ("0.13.17", "fix: micron renderer visual quality — colored headings, links, dividers"),
+    ("0.13.18", "fix: auto-restart TUI after successful upgrade — no manual button"),
 ]
