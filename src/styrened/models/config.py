@@ -646,6 +646,28 @@ class PQCConfig:
 
 
 @dataclass
+class MeshVPNConfig:
+    """Mesh VPN configuration.
+
+    WireGuard tunnels bootstrapped over RNS.Link for IP connectivity
+    across the Styrene mesh. Gateway nodes bridge VPN into bat0.
+
+    Attributes:
+        enable: Whether the mesh VPN service is active.
+        listen_port: WireGuard listen port.
+        subnet_prefix: ULA IPv6 prefix (default: fd73:7479:7265:6e65).
+        gateway: Whether this node bridges VPN traffic into bat0.
+        endpoint: Public WireGuard endpoint (IP:port). Auto-detected if empty.
+    """
+
+    enable: bool = False
+    listen_port: int = 51820
+    subnet_prefix: str = "fd73:7479:7265:6e65"
+    gateway: bool = False
+    endpoint: str = ""
+
+
+@dataclass
 class CoreConfig:
     """Core Styrene configuration for headless applications.
 
@@ -666,6 +688,7 @@ class CoreConfig:
         terminal: Terminal session configuration.
         page_server: NomadNet page server configuration.
         pqc: Post-quantum cryptographic session layer configuration.
+        mesh_vpn: WireGuard mesh VPN configuration.
     """
 
     profile: Profile = Profile.OPERATOR
@@ -681,3 +704,4 @@ class CoreConfig:
     terminal: TerminalConfig = field(default_factory=TerminalConfig)
     page_server: PageServerConfig = field(default_factory=PageServerConfig)
     pqc: PQCConfig = field(default_factory=PQCConfig)
+    mesh_vpn: MeshVPNConfig = field(default_factory=MeshVPNConfig)

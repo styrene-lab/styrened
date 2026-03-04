@@ -116,8 +116,9 @@ class HighlightedPanel(Vertical):
         self._update_borders()
 
     def on_resize(self) -> None:
-        if self.size.width != self._last_width:
-            self._last_width = self.size.width
+        new_width = self.size.width
+        if new_width != self._last_width:
+            self._last_width = new_width
             self._update_borders()
 
     def _update_borders(self) -> None:

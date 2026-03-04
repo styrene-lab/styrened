@@ -581,6 +581,19 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             auto_initiate=_parse_bool(pqc.get("auto_initiate", True)),
         )
 
+    # Parse mesh_vpn section
+    if "mesh_vpn" in data and isinstance(data["mesh_vpn"], dict):
+        from styrened.models.config import MeshVPNConfig
+
+        mvpn = data["mesh_vpn"]
+        config.mesh_vpn = MeshVPNConfig(
+            enable=_parse_bool(mvpn.get("enable", False)),
+            listen_port=int(mvpn.get("listen_port", 51820)),
+            subnet_prefix=str(mvpn.get("subnet_prefix", "fd73:7479:7265:6e65")),
+            gateway=_parse_bool(mvpn.get("gateway", False)),
+            endpoint=str(mvpn.get("endpoint", "")),
+        )
+
     return config
 
 
@@ -819,6 +832,13 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "terminal": terminal_dict,
         "page_server": page_server_dict,
         "pqc": pqc_dict,
+        "mesh_vpn": {
+            "enable": config.mesh_vpn.enable,
+            "listen_port": config.mesh_vpn.listen_port,
+            "subnet_prefix": config.mesh_vpn.subnet_prefix,
+            "gateway": config.mesh_vpn.gateway,
+            "endpoint": config.mesh_vpn.endpoint,
+        },
     }
 
 
