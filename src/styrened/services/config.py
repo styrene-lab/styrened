@@ -594,6 +594,10 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             endpoint=str(mvpn.get("endpoint", "")),
         )
 
+    # Parse banned_peers list
+    if "banned_peers" in data and isinstance(data["banned_peers"], list):
+        config.banned_peers = [str(h) for h in data["banned_peers"] if h]
+
     return config
 
 
@@ -839,6 +843,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
             "gateway": config.mesh_vpn.gateway,
             "endpoint": config.mesh_vpn.endpoint,
         },
+        "banned_peers": config.banned_peers,
     }
 
 
