@@ -93,6 +93,7 @@ class RNSService:
 
     # Minimum interval between interface status checks (seconds)
     INTERFACE_CHECK_INTERVAL = 5.0
+    _RECONNECT_DEBOUNCE = 30.0  # Suppress repeated reconnect handling for 30s
 
     def __init__(self) -> None:
         """Initialize the RNSService (not the RNS instance yet)."""
@@ -501,15 +502,27 @@ class RNSService:
                 # RNS TCPClientInterface recreates the socket on reconnect,
                 # so we also track the object id to detect silent reconnects
                 # that don't toggle the online flag (e.g., network switch).
+                # Debounced: skip if we handled a reconnection within the
+                # cooldown period to avoid reconnection storms when multiple
+                # TCP peers cycle rapidly.
                 if "TCPClientInterface" in iface_type:
                     obj_id = id(iface)
                     prev_id = self._last_interface_ids.get(name)
                     if prev_id is not None and prev_id != obj_id:
-                        logger.info(
-                            f"[RECONNECT] TCP interface object changed: {name} "
-                            f"(id {prev_id} -> {obj_id}) — triggering re-announce"
-                        )
-                        self._handle_reconnection(iface_type, name)
+                        now = time.monotonic()
+                        last_reconnect = getattr(self, "_last_reconnect_time", 0.0)
+                        if now - last_reconnect > self._RECONNECT_DEBOUNCE:
+                            logger.info(
+                                f"[RECONNECT] TCP interface object changed: {name} "
+                                f"(id {prev_id} -> {obj_id}) — triggering re-announce"
+                            )
+                            self._handle_reconnection(iface_type, name)
+                            self._last_reconnect_time = now
+                        else:
+                            logger.debug(
+                                f"[RECONNECT] TCP interface churn suppressed for {name} "
+                                f"(debounce {self._RECONNECT_DEBOUNCE}s)"
+                            )
                     self._last_interface_ids[name] = obj_id
 
                 # Update tracked state

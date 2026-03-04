@@ -12,8 +12,8 @@ from styrened.services.page_browser import PageBrowserService
 class TestHandleReconnection:
     """Tests for link invalidation on network reconnect."""
 
-    def test_clears_links(self):
-        """handle_reconnection() tears down and clears all cached links."""
+    def test_preserves_active_links(self):
+        """handle_reconnection() keeps active links intact (no teardown)."""
         service = PageBrowserService()
 
         # Simulate two cached links
@@ -26,9 +26,10 @@ class TestHandleReconnection:
 
         service.handle_reconnection()
 
-        mock_link1.teardown.assert_called_once()
-        mock_link2.teardown.assert_called_once()
-        assert len(service._links) == 0
+        # Links are preserved — stale ones fail naturally on next use
+        mock_link1.teardown.assert_not_called()
+        mock_link2.teardown.assert_not_called()
+        assert len(service._links) == 2
 
     def test_sets_force_path_rediscovery(self):
         """handle_reconnection() flags force_path_rediscovery."""
@@ -43,12 +44,11 @@ class TestHandleReconnection:
         """handle_reconnection() doesn't raise if link.teardown() throws."""
         service = PageBrowserService()
         mock_link = MagicMock()
-        mock_link.teardown.side_effect = RuntimeError("already closed")
         service._links = {"aabb": MagicMock(link=mock_link)}
 
-        # Should not raise
+        # Should not raise, links preserved
         service.handle_reconnection()
-        assert len(service._links) == 0
+        assert len(service._links) == 1
         assert service._force_path_rediscovery is True
 
     def test_empty_links_is_noop(self):
