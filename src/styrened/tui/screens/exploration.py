@@ -67,6 +67,8 @@ class ReticumAnnounceTable(DataTable[str]):
         self._filter_text: str = ""
         self._sort_column: str = "last_announce"
         self._sort_reverse: bool = True  # Most recent first by default
+        self._hide_lost: bool = True  # Hide LOST by default
+        self._hide_stale: bool = False
 
     def on_mount(self) -> None:
         self.add_columns(
@@ -138,9 +140,43 @@ class ReticumAnnounceTable(DataTable[str]):
 
         self._rebuild_table()
 
+    @property
+    def status_counts(self) -> dict[str, int]:
+        """Count devices by status (pre-text-filter, post-type-filter)."""
+        counts = {"active": 0, "stale": 0, "lost": 0}
+        for d in self._all_devices:
+            counts[d.status.value] = counts.get(d.status.value, 0) + 1
+        return counts
+
+    def toggle_hide_lost(self) -> bool:
+        """Toggle hide-lost filter. Returns new state."""
+        self._hide_lost = not self._hide_lost
+        self._rebuild_table()
+        return self._hide_lost
+
+    def toggle_hide_stale(self) -> bool:
+        """Toggle hide-stale filter. Returns new state."""
+        self._hide_stale = not self._hide_stale
+        self._rebuild_table()
+        return self._hide_stale
+
+    @property
+    def hiding_lost(self) -> bool:
+        return self._hide_lost
+
+    @property
+    def hiding_stale(self) -> bool:
+        return self._hide_stale
+
     def _rebuild_table(self) -> None:
         """Rebuild the visible table rows from stored devices, applying filter and sort."""
         devices = self._all_devices
+
+        # Apply status filters
+        if self._hide_lost:
+            devices = [d for d in devices if d.status != NodeStatus.LOST]
+        if self._hide_stale:
+            devices = [d for d in devices if d.status != NodeStatus.STALE]
 
         # Apply search filter
         if self._filter_text:
@@ -199,32 +235,54 @@ class ReticumAnnounceTable(DataTable[str]):
         }
 
         for device in devices_sorted:
+            # Stale rows get full dim treatment
+            is_stale = device.status == NodeStatus.STALE
+            is_lost = device.status == NodeStatus.LOST
+            dim = is_stale or is_lost
+            c = cascade.dim if dim else cascade.medium
+
             type_text = type_icons.get(device.device_type, f"[{cascade.dim}]?[/]")
+            if dim:
+                # Override type icon to dim
+                type_label = {
+                    DeviceType.RNODE: "RNODE",
+                    DeviceType.LXMF_PEER: "LXMF",
+                    DeviceType.PROPAGATION_NODE: "PROPNODE",
+                    DeviceType.NOMADNET_NODE: "NOMAD",
+                    DeviceType.GENERIC: "GENERIC",
+                    DeviceType.UNKNOWN: "UNKNOWN",
+                }.get(device.device_type, "?")
+                type_text = f"[{cascade.dim}]{type_label}[/]"
 
             status_color = status_colors.get(device.status, cascade.medium)
-            status_text = f"[{status_color}]{device.status.value.upper()}[/]"
+            status_icon = {
+                NodeStatus.ACTIVE: "●",
+                NodeStatus.STALE: "◐",
+                NodeStatus.LOST: "○",
+            }.get(device.status, "?")
+            status_text = f"[{status_color}]{status_icon} {device.status.value.upper()}[/]"
 
-            identity_text = device.destination_hash[:16] + "..."
+            identity_text = f"[{c}]{device.destination_hash[:16]}...[/]"
 
-            # Name styling: brighter for typed devices
-            if device.device_type in (
-                DeviceType.RNODE, DeviceType.LXMF_PEER,
-                DeviceType.PROPAGATION_NODE, DeviceType.NOMADNET_NODE,
-            ):
-                name_text = f"[{cascade.medium}]{device.name}[/]"
-            else:
+            # Name styling: active=bright, stale/lost=dim
+            if device.status == NodeStatus.ACTIVE:
+                name_text = f"[{cascade.bright}]{device.name}[/]"
+            elif is_stale:
                 name_text = f"[{cascade.dim}]{device.name}[/]"
+            else:
+                name_text = f"[{c}]{device.name}[/]"
 
             last_seen_text = device.last_seen_display
             if device.announce_count > 1:
                 last_seen_text += f" ({device.announce_count})"
+            last_seen_text = f"[{c}]{last_seen_text}[/]"
 
             # Hops display
             if device.hops is not None:
                 if device.hops == 0:
-                    hops_text = f"[{cascade.medium}]direct[/]"
+                    hops_text = f"[{c}]direct[/]"
                 else:
-                    hops_text = f"[{cascade.dim}]{device.hops}[/]"
+                    hops_text = f"[{c}]{device.hops}[/]"
             else:
                 hops_text = f"[{cascade.dim}]—[/]"
 
@@ -317,10 +375,37 @@ class StyreneFleetTable(DataTable[str]):
         self._filter_text: str = ""
         self._sort_column: str = "last_announce"
         self._sort_reverse: bool = True
+        self._hide_lost: bool = True
+        self._hide_stale: bool = False
 
     @property
     def device_count(self) -> int:
         return len(self._all_devices)
+
+    @property
+    def status_counts(self) -> dict[str, int]:
+        counts = {"active": 0, "stale": 0, "lost": 0}
+        for d in self._all_devices:
+            counts[d.status.value] = counts.get(d.status.value, 0) + 1
+        return counts
+
+    def toggle_hide_lost(self) -> bool:
+        self._hide_lost = not self._hide_lost
+        self._rebuild_table()
+        return self._hide_lost
+
+    def toggle_hide_stale(self) -> bool:
+        self._hide_stale = not self._hide_stale
+        self._rebuild_table()
+        return self._hide_stale
+
+    @property
+    def hiding_lost(self) -> bool:
+        return self._hide_lost
+
+    @property
+    def hiding_stale(self) -> bool:
+        return self._hide_stale
 
     def on_mount(self) -> None:
         self.add_columns(
@@ -344,6 +429,12 @@ class StyreneFleetTable(DataTable[str]):
 
     def _rebuild_table(self) -> None:
         devices = self._all_devices
+
+        # Status filters
+        if self._hide_lost:
+            devices = [d for d in devices if d.status != NodeStatus.LOST]
+        if self._hide_stale:
+            devices = [d for d in devices if d.status != NodeStatus.STALE]
 
         if self._filter_text:
             query = self._filter_text.lower()
@@ -539,6 +630,12 @@ class ExplorationScreen(Screen[None]):
         display: none;
     }
 
+    #explore-status-bar {
+        height: 1;
+        padding: 0 1;
+        color: $panel;
+    }
+
     #explore-count {
         height: 1;
         padding: 0 1;
@@ -592,6 +689,8 @@ class ExplorationScreen(Screen[None]):
         Binding("enter", "select_device", "Select"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
+        Binding("h", "toggle_hide_lost", "Hide Lost"),
+        Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),
         Binding("v", "preview_page", "Preview", show=True),
     ]
@@ -651,6 +750,7 @@ class ExplorationScreen(Screen[None]):
                 id="explore-search-bar",
                 classes="hidden",
             )
+            yield Static("", id="explore-status-bar")
             with TabbedContent(id="explore-tabs"):
                 with TabPane("Styrene", id="tab-styrene"):
                     yield StyreneFleetTable(
@@ -772,6 +872,7 @@ class ExplorationScreen(Screen[None]):
                 table.load_from_devices(exploration_devices)
 
         self._update_tab_labels()
+        self._update_status_bar()
 
     def _update_tab_labels(self) -> None:
         """Update tab labels with device counts."""
@@ -787,10 +888,14 @@ class ExplorationScreen(Screen[None]):
             for table_id, (pane_id, base_label) in label_map.items():
                 try:
                     table = self.query_one(table_id, DataTable)
-                    count = getattr(table, "device_count", 0)
+                    total = getattr(table, "device_count", 0)
+                    visible = table.row_count
                     tab = tabs_widget.get_tab(pane_id)
-                    if count > 0:
-                        tab.label = f"{base_label} ({count})"
+                    if total > 0:
+                        if visible < total:
+                            tab.label = f"{base_label} ({visible}/{total})"
+                        else:
+                            tab.label = f"{base_label} ({total})"
                     else:
                         tab.label = base_label
                 except Exception:
@@ -815,6 +920,7 @@ class ExplorationScreen(Screen[None]):
                     table.set_filter("")
         except Exception:
             pass
+        self._update_status_bar()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle DataTable enter key — navigate to device detail screen."""
@@ -949,6 +1055,62 @@ class ExplorationScreen(Screen[None]):
                     classes="explore-inline-browser",
                 )
                 browser_section.mount(browser)
+        except Exception:
+            pass
+
+    def action_toggle_hide_lost(self) -> None:
+        """Toggle visibility of LOST nodes."""
+        table = self._get_active_table()
+        if table and hasattr(table, "toggle_hide_lost"):
+            now_hiding = table.toggle_hide_lost()
+            verb = "hidden" if now_hiding else "shown"
+            self.notify(f"Lost nodes {verb}", severity="information")
+            self._update_status_bar()
+            self._update_tab_labels()
+
+    def action_toggle_hide_stale(self) -> None:
+        """Toggle visibility of STALE nodes."""
+        table = self._get_active_table()
+        if table and hasattr(table, "toggle_hide_stale"):
+            now_hiding = table.toggle_hide_stale()
+            verb = "hidden" if now_hiding else "shown"
+            self.notify(f"Stale nodes {verb}", severity="information")
+            self._update_status_bar()
+            self._update_tab_labels()
+
+    def _update_status_bar(self) -> None:
+        """Update the status filter bar with counts and filter state."""
+        table = self._get_active_table()
+        if not table or not hasattr(table, "status_counts"):
+            return
+
+        cascade = get_color_cascade()
+        counts = table.status_counts
+        hiding_lost = getattr(table, "hiding_lost", False)
+        hiding_stale = getattr(table, "hiding_stale", False)
+
+        parts = []
+        # Active — always bright
+        n_active = counts.get("active", 0)
+        parts.append(f"[{cascade.bright}]● {n_active} active[/]")
+
+        # Stale
+        n_stale = counts.get("stale", 0)
+        if hiding_stale:
+            parts.append(f"[{cascade.dim}]◐ {n_stale} stale (hidden)[/]")
+        else:
+            parts.append(f"[{cascade.medium}]◐ {n_stale} stale[/]")
+
+        # Lost
+        n_lost = counts.get("lost", 0)
+        if hiding_lost:
+            parts.append(f"[{cascade.dim}]○ {n_lost} lost (hidden)[/]")
+        else:
+            parts.append(f"[{cascade.medium}]○ {n_lost} lost[/]")
+
+        try:
+            bar = self.query_one("#explore-status-bar", Static)
+            bar.update("  ".join(parts))
         except Exception:
             pass
 

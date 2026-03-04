@@ -132,4 +132,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.23", "feat: NomadNet page caching system"),
     ("0.13.24", "fix: page cache assessment fixes"),
     ("0.13.25", "feat: direct data link service + status tab redesign"),
+    ("0.13.26", "feat: datalink speedtest + LoRa-hardened timeouts"),
 ]
