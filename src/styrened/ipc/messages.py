@@ -493,6 +493,76 @@ class CmdPageRegenerateRequest(IPCRequest):
 
 
 @dataclass
+class CmdPageSaveSiteRequest(IPCRequest):
+    """Save a NomadNet node for periodic background crawling."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_SAVE_SITE
+    destination_hash: str = ""
+    display_name: str = ""
+    refresh_interval: int = 3600
+    max_depth: int = 3
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination_hash": self.destination_hash,
+            "display_name": self.display_name,
+            "refresh_interval": self.refresh_interval,
+            "max_depth": self.max_depth,
+        }
+
+
+@dataclass
+class CmdPageRemoveSiteRequest(IPCRequest):
+    """Remove a saved NomadNet site."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_REMOVE_SITE
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class CmdPageListSitesRequest(IPCRequest):
+    """List all saved NomadNet sites."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_LIST_SITES
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
+@dataclass
+class CmdPageCrawlSiteRequest(IPCRequest):
+    """Manually trigger a full site crawl."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_CRAWL_SITE
+    destination_hash: str = ""
+    max_depth: int = 3
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination_hash": self.destination_hash,
+            "max_depth": self.max_depth,
+        }
+
+
+@dataclass
+class CmdPageGetCachedRequest(IPCRequest):
+    """Get a cached page by destination and path."""
+
+    MSG_TYPE = IPCMessageType.CMD_PAGE_GET_CACHED
+    destination_hash: str = ""
+    path: str = "/page/index.mu"
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "destination_hash": self.destination_hash,
+            "path": self.path,
+        }
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -1265,6 +1335,29 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         )
     elif msg_type == IPCMessageType.CMD_PAGE_REGENERATE:
         return CmdPageRegenerateRequest()
+    elif msg_type == IPCMessageType.CMD_PAGE_SAVE_SITE:
+        return CmdPageSaveSiteRequest(
+            destination_hash=payload.get("destination_hash", ""),
+            display_name=payload.get("display_name", ""),
+            refresh_interval=payload.get("refresh_interval", 3600),
+            max_depth=payload.get("max_depth", 3),
+        )
+    elif msg_type == IPCMessageType.CMD_PAGE_REMOVE_SITE:
+        return CmdPageRemoveSiteRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_PAGE_LIST_SITES:
+        return CmdPageListSitesRequest()
+    elif msg_type == IPCMessageType.CMD_PAGE_CRAWL_SITE:
+        return CmdPageCrawlSiteRequest(
+            destination_hash=payload.get("destination_hash", ""),
+            max_depth=payload.get("max_depth", 3),
+        )
+    elif msg_type == IPCMessageType.CMD_PAGE_GET_CACHED:
+        return CmdPageGetCachedRequest(
+            destination_hash=payload.get("destination_hash", ""),
+            path=payload.get("path", "/page/index.mu"),
+        )
     elif msg_type == IPCMessageType.CMD_REBOOT_DEVICE:
         return CmdRebootDeviceRequest(
             destination=payload.get("destination", ""),

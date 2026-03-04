@@ -81,6 +81,8 @@ class PageBrowserWidget(Widget):
         Binding("backspace", "go_back", "Back", show=True),
         Binding("f5", "reload", "Reload", show=True),
         Binding("u", "focus_url", "URL", show=True),
+        Binding("s", "save_site", "Save Site", show=True),
+        Binding("c", "crawl_site", "Crawl", show=True),
     ]
 
     loading: reactive[bool] = reactive(False)
@@ -203,22 +205,28 @@ class PageBrowserWidget(Widget):
 
                 self._set_status(f"{size_str} in {transfer_time:.1f}s")
 
-            elif status == "path_not_found":
-                self._set_error(
-                    error_detail or "Path not found — node may be offline or unreachable"
-                )
-            elif status == "timeout":
-                self._set_error(error_detail or "Request timed out")
-            elif status == "link_failed":
-                self._set_error(
-                    error_detail or "Failed to establish link to node"
-                )
-            elif status == "not_found":
-                self._set_error(error_detail or f"Page not found: {path}")
-            elif status == "error":
-                self._set_error(
-                    error_detail or "Page fetch failed — check daemon logs for details"
-                )
+            elif status in ("path_not_found", "timeout", "link_failed", "not_found", "error"):
+                # Check for cached fallback from daemon
+                cached_content = result.get("cached_content")
+                cached_at = result.get("cached_at")
+
+                if cached_content and cached_at:
+                    # Show cached content with timestamp indicator
+                    self._show_cached_page(
+                        path, cached_content, cached_at,
+                        error_detail or f"Live fetch failed ({status})"
+                    )
+                else:
+                    error_messages = {
+                        "path_not_found": "Path not found — node may be offline or unreachable",
+                        "timeout": "Request timed out",
+                        "link_failed": "Failed to establish link to node",
+                        "not_found": f"Page not found: {path}",
+                        "error": "Page fetch failed — check daemon logs for details",
+                    }
+                    self._set_error(
+                        error_detail or error_messages.get(status, f"Unexpected: {status}")
+                    )
             else:
                 self._set_error(
                     error_detail or f"Unexpected response status: {status}"
@@ -257,6 +265,57 @@ class PageBrowserWidget(Widget):
             pass
         self._set_status("Error")
 
+    def _show_cached_page(
+        self, path: str, content: str, cached_at: float, error_reason: str
+    ) -> None:
+        """Display cached page content with a staleness indicator.
+
+        Shows the last successfully fetched version of a page when
+        the live fetch fails, with a banner explaining the situation.
+
+        Args:
+            path: Page path.
+            content: Cached micron content.
+            cached_at: Unix timestamp of when the page was cached.
+            error_reason: Why the live fetch failed.
+        """
+        import time as _time
+
+        # Format cache age
+        age_seconds = _time.time() - cached_at
+        if age_seconds < 60:
+            age_str = f"{int(age_seconds)}s ago"
+        elif age_seconds < 3600:
+            age_str = f"{int(age_seconds / 60)}m ago"
+        elif age_seconds < 86400:
+            age_str = f"{int(age_seconds / 3600)}h ago"
+        else:
+            age_str = f"{int(age_seconds / 86400)}d ago"
+
+        # Render cached content
+        elements = parse_micron(content)
+        self._form_fields = {}
+        rendered = render_to_rich(elements, form_state=self._form_fields)
+
+        # Prepend cache banner
+        banner = (
+            f"[bold yellow]⚠ Cached page[/bold yellow] [dim]({age_str})[/dim]\n"
+            f"[dim]{error_reason} — showing last cached version[/dim]\n"
+            f"[dim]Press F5 to retry live fetch[/dim]\n\n"
+        )
+
+        self._page_content = content
+        self.current_path = path
+
+        try:
+            body = self.query_one("#page-body", _PageBody)
+            body.update(banner + rendered)
+            body.remove_class("placeholder-text")
+        except Exception:
+            pass
+
+        self._set_status(f"cached {age_str}")
+
     def action_go_back(self) -> None:
         """Navigate back in history."""
         if not self._history:
@@ -272,6 +331,48 @@ class PageBrowserWidget(Widget):
     def action_focus_url(self) -> None:
         """Focus URL bar for manual navigation (placeholder)."""
         self.notify("Manual URL entry coming soon", severity="information")
+
+    def action_save_site(self) -> None:
+        """Save this node for periodic background crawling and caching."""
+        self.run_worker(self._do_save_site(), exclusive=True, group="page-save")
+
+    async def _do_save_site(self) -> None:
+        """Save site via IPC."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            self.notify("Requires daemon mode", severity="error")
+            return
+        try:
+            # Get display name from URL bar
+            display_name = self.destination_hash[:16]
+            await bridge.page_save_site(
+                destination_hash=self.destination_hash,
+                display_name=display_name,
+            )
+            self.notify(f"Site saved — will refresh periodically", severity="information")
+        except Exception as e:
+            self.notify(f"Failed to save site: {e}", severity="error")
+
+    def action_crawl_site(self) -> None:
+        """Crawl and cache all reachable pages from this node."""
+        self.run_worker(self._do_crawl_site(), exclusive=True, group="page-crawl")
+
+    async def _do_crawl_site(self) -> None:
+        """Crawl site via IPC."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            self.notify("Requires daemon mode", severity="error")
+            return
+        try:
+            self.notify("Crawling site...", severity="information")
+            self._set_status("Crawling...")
+            pages = await bridge.page_crawl_site(
+                destination_hash=self.destination_hash,
+            )
+            self.notify(f"Cached {pages} pages", severity="information")
+            self._set_status(f"Crawled {pages} pages")
+        except Exception as e:
+            self.notify(f"Crawl failed: {e}", severity="error")
 
     def on__field_clicked(self, message: _FieldClicked) -> None:
         """Handle form field click — open input dialog."""

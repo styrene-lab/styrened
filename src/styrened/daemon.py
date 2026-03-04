@@ -96,6 +96,7 @@ class StyreneDaemon:
         self._notification_service: Any = None  # Notification dispatch service
         self._callback_backend: Any = None  # For TUI/GUI callback registration
         self._page_browser_service: Any = None  # NomadNet page browsing service
+        self._page_cache_service: Any = None  # NomadNet page caching service
         self._page_server_service: Any = None  # NomadNet page server service
         self._pqc_service: Any = None  # PQC session layer service
 
@@ -1190,13 +1191,28 @@ class StyreneDaemon:
         """Start the page browser service for NomadNet page fetching.
 
         Creates the PageBrowserService which manages outgoing RNS.Links
-        to NomadNet nodes for browsing their served pages.
+        to NomadNet nodes for browsing their served pages.  Also starts
+        the PageCacheService for write-through caching and saved sites.
         """
         try:
             from styrened.services.page_browser import PageBrowserService
+            from styrened.services.page_cache import PageCacheService
 
             self._page_browser_service = PageBrowserService()
             await self._page_browser_service.start()
+
+            # Start cache service with the message DB engine
+            try:
+                from styrened.models.messages import init_db
+
+                db_engine = init_db()
+                self._page_cache_service = PageCacheService(db_engine)
+                self._page_cache_service.set_page_browser(self._page_browser_service)
+                await self._page_cache_service.start()
+                logger.info("Page cache service started")
+            except Exception as e:
+                logger.warning(f"Failed to start page cache service: {e}")
+
             logger.info("Page browser service started")
 
         except Exception as e:
@@ -1678,6 +1694,14 @@ class StyreneDaemon:
 
         # Stop page server service
         self._stop_page_server()
+
+        # Stop page cache service
+        if self._page_cache_service:
+            try:
+                await self._page_cache_service.stop()
+            except Exception as e:
+                logger.error(f"Error stopping page cache service: {e}")
+            self._page_cache_service = None
 
         # Stop page browser service
         if self._page_browser_service:

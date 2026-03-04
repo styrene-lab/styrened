@@ -507,6 +507,53 @@ class IPCBridge:
             destination_hash=destination_hash,
         )
 
+    async def page_save_site(
+        self,
+        destination_hash: str,
+        display_name: str = "",
+        refresh_interval: int = 3600,
+        max_depth: int = 3,
+    ) -> bool:
+        """Save a NomadNet node for periodic background crawling."""
+        return await self._call(
+            "page_save_site",
+            destination_hash=destination_hash,
+            display_name=display_name,
+            refresh_interval=refresh_interval,
+            max_depth=max_depth,
+        )
+
+    async def page_remove_site(self, destination_hash: str) -> bool:
+        """Remove a saved NomadNet site."""
+        return await self._call(
+            "page_remove_site",
+            destination_hash=destination_hash,
+        )
+
+    async def page_list_sites(self) -> list[dict[str, Any]]:
+        """List all saved NomadNet sites."""
+        return await self._call("page_list_sites")
+
+    async def page_crawl_site(
+        self, destination_hash: str, max_depth: int = 3
+    ) -> int:
+        """Manually trigger a full site crawl."""
+        return await self._call(
+            "page_crawl_site",
+            destination_hash=destination_hash,
+            max_depth=max_depth,
+        )
+
+    async def page_get_cached(
+        self, destination_hash: str, path: str = "/page/index.mu"
+    ) -> dict[str, Any] | None:
+        """Get a cached page."""
+        return await self._call(
+            "page_get_cached",
+            destination_hash=destination_hash,
+            path=path,
+        )
+
     # -------------------------------------------------------------------------
     # Event subscriptions
     # -------------------------------------------------------------------------
