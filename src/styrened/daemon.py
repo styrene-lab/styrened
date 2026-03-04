@@ -120,6 +120,10 @@ class StyreneDaemon:
             logger.error("Failed to initialize services")
             sys.exit(1)
 
+        # Seed blocklist from config (for hub operators)
+        if self.config.banned_peers:
+            self._seed_config_bans()
+
         # Create and cache the operator destination once
         self._init_operator_destination()
 
@@ -178,6 +182,20 @@ class StyreneDaemon:
 
         # Main loop with periodic announces
         await self._run_loop()
+
+    def _seed_config_bans(self) -> None:
+        """Block peers listed in config.banned_peers (hub operator banlist)."""
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            svc = get_lxmf_service()
+            for peer_hash in self.config.banned_peers:
+                svc.block_peer(peer_hash)
+            logger.info(
+                f"Seeded {len(self.config.banned_peers)} banned peers from config"
+            )
+        except Exception as e:
+            logger.error(f"Failed to seed config bans: {e}")
 
     def _emit_activity_event(
         self,

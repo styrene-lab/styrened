@@ -705,3 +705,4 @@ class CoreConfig:
     page_server: PageServerConfig = field(default_factory=PageServerConfig)
     pqc: PQCConfig = field(default_factory=PQCConfig)
     mesh_vpn: MeshVPNConfig = field(default_factory=MeshVPNConfig)
+    banned_peers: list[str] = field(default_factory=list)

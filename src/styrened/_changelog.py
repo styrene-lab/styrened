@@ -145,4 +145,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.36", "fix(direct-link): announce datalink destination for path discovery"),
     ("0.13.37", "chore: clean up for public repo"),
     ("0.13.38", "fix(chat): remove optimistic bubbles before appending real messages"),
+    ("0.13.39", "feat(blocklist): block/unblock peers — silently drop all messages"),
 ]
