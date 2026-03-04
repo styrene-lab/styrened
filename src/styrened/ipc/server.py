@@ -265,6 +265,10 @@ class ControlServer:
             IPCMessageType.CMD_PAGE_LIST_SITES: self._handlers.handle_cmd_page_list_sites,
             IPCMessageType.CMD_PAGE_CRAWL_SITE: self._handlers.handle_cmd_page_crawl_site,
             IPCMessageType.CMD_PAGE_GET_CACHED: self._handlers.handle_cmd_page_get_cached,
+            # Blocklist
+            IPCMessageType.CMD_BLOCK_PEER: self._handlers.handle_cmd_block_peer,
+            IPCMessageType.CMD_UNBLOCK_PEER: self._handlers.handle_cmd_unblock_peer,
+            IPCMessageType.QUERY_BLOCKED_PEERS: self._handlers.handle_query_blocked_peers,
             # Direct data link
             IPCMessageType.CMD_DATALINK_ESTABLISH: self._handlers.handle_cmd_datalink_establish,
             IPCMessageType.CMD_DATALINK_TEARDOWN: self._handlers.handle_cmd_datalink_teardown,

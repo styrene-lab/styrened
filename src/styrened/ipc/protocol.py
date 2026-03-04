@@ -103,6 +103,9 @@ class IPCMessageType(IntEnum):
     CMD_TERMINAL_CLOSE = 0x53
 
     # Direct data link commands (0x60-0x6F)
+    CMD_BLOCK_PEER = 0x4A
+    CMD_UNBLOCK_PEER = 0x4B
+    QUERY_BLOCKED_PEERS = 0x4C
     CMD_DATALINK_ESTABLISH = 0x60
     CMD_DATALINK_TEARDOWN = 0x61
     CMD_DATALINK_STATUS = 0x62

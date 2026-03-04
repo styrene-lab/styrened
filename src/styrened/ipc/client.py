@@ -1078,6 +1078,24 @@ class ControlClient:
     # Direct data link methods
     # -------------------------------------------------------------------------
 
+    async def block_peer(self, peer_hash: str) -> dict[str, Any]:
+        """Block a peer — silently drop all future messages from them."""
+        from styrened.ipc.messages import CmdBlockPeerRequest
+
+        return await self._request(CmdBlockPeerRequest(peer_hash=peer_hash))
+
+    async def unblock_peer(self, peer_hash: str) -> dict[str, Any]:
+        """Unblock a previously blocked peer."""
+        from styrened.ipc.messages import CmdUnblockPeerRequest
+
+        return await self._request(CmdUnblockPeerRequest(peer_hash=peer_hash))
+
+    async def get_blocked_peers(self) -> dict[str, Any]:
+        """List all blocked peers."""
+        from styrened.ipc.messages import QueryBlockedPeersRequest
+
+        return await self._request(QueryBlockedPeersRequest())
+
     async def datalink_establish(self, destination_hash: str) -> dict[str, Any]:
         """Establish a direct data link to a Styrene peer."""
         from styrened.ipc.messages import CmdDatalinkEstablishRequest

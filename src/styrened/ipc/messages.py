@@ -563,6 +563,50 @@ class CmdPageGetCachedRequest(IPCRequest):
 
 
 @dataclass
+class CmdBlockPeerRequest(IPCRequest):
+    """Block a peer — silently drop all future messages from them."""
+
+    MSG_TYPE = IPCMessageType.CMD_BLOCK_PEER
+    peer_hash: str = ""
+
+    def to_payload(self) -> dict:
+        return {"peer_hash": self.peer_hash}
+
+    @classmethod
+    def from_payload(cls, data: dict) -> "CmdBlockPeerRequest":
+        return cls(peer_hash=data.get("peer_hash", ""))
+
+
+@dataclass
+class CmdUnblockPeerRequest(IPCRequest):
+    """Unblock a previously blocked peer."""
+
+    MSG_TYPE = IPCMessageType.CMD_UNBLOCK_PEER
+    peer_hash: str = ""
+
+    def to_payload(self) -> dict:
+        return {"peer_hash": self.peer_hash}
+
+    @classmethod
+    def from_payload(cls, data: dict) -> "CmdUnblockPeerRequest":
+        return cls(peer_hash=data.get("peer_hash", ""))
+
+
+@dataclass
+class QueryBlockedPeersRequest(IPCRequest):
+    """List all blocked peers."""
+
+    MSG_TYPE = IPCMessageType.QUERY_BLOCKED_PEERS
+
+    def to_payload(self) -> dict:
+        return {}
+
+    @classmethod
+    def from_payload(cls, data: dict) -> "QueryBlockedPeersRequest":
+        return cls()
+
+
+@dataclass
 class CmdDatalinkEstablishRequest(IPCRequest):
     """Establish a direct data link to a Styrene peer."""
 
@@ -1471,6 +1515,12 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdTerminalCloseRequest(
             session_id=payload.get("session_id", ""),
         )
+    elif msg_type == IPCMessageType.CMD_BLOCK_PEER:
+        return CmdBlockPeerRequest.from_payload(payload)
+    elif msg_type == IPCMessageType.CMD_UNBLOCK_PEER:
+        return CmdUnblockPeerRequest.from_payload(payload)
+    elif msg_type == IPCMessageType.QUERY_BLOCKED_PEERS:
+        return QueryBlockedPeersRequest.from_payload(payload)
     elif msg_type == IPCMessageType.CMD_DATALINK_ESTABLISH:
         return CmdDatalinkEstablishRequest(
             destination_hash=payload.get("destination_hash", ""),

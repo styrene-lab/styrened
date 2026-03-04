@@ -2734,7 +2734,98 @@ def create_parser() -> argparse.ArgumentParser:
     )
     menubar_parser.set_defaults(func=cmd_menubar)
 
+    # Block/unblock commands
+    block_parser = subparsers.add_parser(
+        "block", help="Block a peer (silently drop all future messages)"
+    )
+    block_parser.add_argument("peer_hash", help="LXMF destination hash of peer to block")
+    block_parser.set_defaults(func=cmd_block)
+
+    unblock_parser = subparsers.add_parser(
+        "unblock", help="Unblock a previously blocked peer"
+    )
+    unblock_parser.add_argument("peer_hash", help="LXMF destination hash of peer to unblock")
+    unblock_parser.set_defaults(func=cmd_unblock)
+
+    blocked_parser = subparsers.add_parser(
+        "blocked", help="List all blocked peers"
+    )
+    blocked_parser.set_defaults(func=cmd_blocked)
+
     return parser
+
+
+def cmd_block(args: argparse.Namespace) -> int:
+    """Block a peer."""
+    import asyncio
+
+    from styrened.ipc.client import ControlClient
+
+    async def _run() -> int:
+        client = ControlClient()
+        await client.connect()
+        try:
+            result = await client.block_peer(args.peer_hash)
+            print(f"Blocked {args.peer_hash[:16]}...")
+            return 0
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        finally:
+            await client.disconnect()
+
+    return asyncio.run(_run())
+
+
+def cmd_unblock(args: argparse.Namespace) -> int:
+    """Unblock a peer."""
+    import asyncio
+
+    from styrened.ipc.client import ControlClient
+
+    async def _run() -> int:
+        client = ControlClient()
+        await client.connect()
+        try:
+            result = await client.unblock_peer(args.peer_hash)
+            print(f"Unblocked {args.peer_hash[:16]}...")
+            return 0
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        finally:
+            await client.disconnect()
+
+    return asyncio.run(_run())
+
+
+def cmd_blocked(args: argparse.Namespace) -> int:
+    """List blocked peers."""
+    import asyncio
+
+    from styrened.ipc.client import ControlClient
+
+    async def _run() -> int:
+        client = ControlClient()
+        await client.connect()
+        try:
+            result = await client.get_blocked_peers()
+            peers = result.get("blocked_peers", [])
+            if not peers:
+                print("No blocked peers")
+                return 0
+            for p in peers:
+                alias = p.get("alias", "")
+                blocked_at = p.get("blocked_at", "")
+                print(f"  {p['peer_hash'][:16]}...  {alias}  (blocked: {blocked_at})")
+            return 0
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        finally:
+            await client.disconnect()
+
+    return asyncio.run(_run())
 
 
 def cmd_menubar(args: argparse.Namespace) -> int:
