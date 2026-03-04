@@ -2701,3 +2701,105 @@ class IPCHandlers:
         except Exception as e:
             logger.warning(f"Error closing terminal: {e}")
             return ErrorResponse.internal_error(f"Failed to close terminal: {e}")
+
+    # ── Direct data link handlers ──────────────────────────────────
+
+    def _check_direct_link(self) -> ErrorResponse | None:
+        """Check if direct link service is available."""
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+        if not getattr(self.daemon, "_direct_link_service", None):
+            return ErrorResponse.internal_error("Direct link service not initialized")
+        return None
+
+    async def handle_cmd_datalink_establish(self, request: IPCRequest) -> IPCResponse:
+        """Establish a direct data link to a Styrene peer."""
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkEstablishRequest
+
+        req = request if isinstance(request, CmdDatalinkEstablishRequest) else CmdDatalinkEstablishRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            info = await self.daemon._direct_link_service.establish(req.destination_hash)
+            return ResultResponse(data={
+                "status": info.status,
+                "rtt": info.rtt,
+                "established_at": info.established_at,
+            })
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to establish link: {e}")
+
+    async def handle_cmd_datalink_teardown(self, request: IPCRequest) -> IPCResponse:
+        """Tear down a direct data link."""
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkTeardownRequest
+
+        req = request if isinstance(request, CmdDatalinkTeardownRequest) else CmdDatalinkTeardownRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            result = await self.daemon._direct_link_service.teardown(req.destination_hash)
+            return ResultResponse(data={"torn_down": result})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to teardown link: {e}")
+
+    async def handle_cmd_datalink_status(self, request: IPCRequest) -> IPCResponse:
+        """Get direct link status for a peer."""
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkStatusRequest
+
+        req = request if isinstance(request, CmdDatalinkStatusRequest) else CmdDatalinkStatusRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            info = self.daemon._direct_link_service.get_link_info(req.destination_hash)
+            if info is None:
+                return ResultResponse(data={"connected": False, "status": "none"})
+            return ResultResponse(data={
+                "connected": info.status == "active",
+                "status": info.status,
+                "rtt": info.rtt,
+                "established_at": info.established_at,
+                "last_activity": info.last_activity,
+            })
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Failed to get link status: {e}")
+
+    async def handle_cmd_datalink_query(self, request: IPCRequest) -> IPCResponse:
+        """Query peer status over an established direct link."""
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkQueryRequest
+
+        req = request if isinstance(request, CmdDatalinkQueryRequest) else CmdDatalinkQueryRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            status = await self.daemon._direct_link_service.request_status(req.destination_hash)
+            if status is None:
+                return ErrorResponse.not_found("No active link or query failed")
+            return ResultResponse(data={"status_data": status})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Datalink query failed: {e}")

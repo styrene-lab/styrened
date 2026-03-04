@@ -265,6 +265,11 @@ class ControlServer:
             IPCMessageType.CMD_PAGE_LIST_SITES: self._handlers.handle_cmd_page_list_sites,
             IPCMessageType.CMD_PAGE_CRAWL_SITE: self._handlers.handle_cmd_page_crawl_site,
             IPCMessageType.CMD_PAGE_GET_CACHED: self._handlers.handle_cmd_page_get_cached,
+            # Direct data link
+            IPCMessageType.CMD_DATALINK_ESTABLISH: self._handlers.handle_cmd_datalink_establish,
+            IPCMessageType.CMD_DATALINK_TEARDOWN: self._handlers.handle_cmd_datalink_teardown,
+            IPCMessageType.CMD_DATALINK_STATUS: self._handlers.handle_cmd_datalink_status,
+            IPCMessageType.CMD_DATALINK_QUERY: self._handlers.handle_cmd_datalink_query,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
             IPCMessageType.CMD_SELF_UPDATE: self._handlers.handle_cmd_self_update,
             IPCMessageType.CMD_SET_IDENTITY: self._handlers.handle_cmd_set_identity,

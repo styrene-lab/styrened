@@ -563,6 +563,50 @@ class CmdPageGetCachedRequest(IPCRequest):
 
 
 @dataclass
+class CmdDatalinkEstablishRequest(IPCRequest):
+    """Establish a direct data link to a Styrene peer."""
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_ESTABLISH
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class CmdDatalinkTeardownRequest(IPCRequest):
+    """Tear down a direct data link."""
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_TEARDOWN
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class CmdDatalinkStatusRequest(IPCRequest):
+    """Get direct link status for a peer."""
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_STATUS
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class CmdDatalinkQueryRequest(IPCRequest):
+    """Query peer status over an established direct link."""
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_QUERY
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -1415,6 +1459,22 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
     elif msg_type == IPCMessageType.CMD_TERMINAL_CLOSE:
         return CmdTerminalCloseRequest(
             session_id=payload.get("session_id", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_ESTABLISH:
+        return CmdDatalinkEstablishRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_TEARDOWN:
+        return CmdDatalinkTeardownRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_STATUS:
+        return CmdDatalinkStatusRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_QUERY:
+        return CmdDatalinkQueryRequest(
+            destination_hash=payload.get("destination_hash", ""),
         )
     elif msg_type == IPCMessageType.SUB_MESSAGES:
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))

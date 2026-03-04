@@ -568,6 +568,26 @@ class IPCBridge:
             peer_hashes=peer_hashes,
         )
 
+    # ── Direct data link methods ──────────────────────────────────
+
+    async def datalink_establish(self, destination_hash: str) -> dict:
+        """Establish a direct data link to a Styrene peer."""
+        return await self._call("datalink_establish", destination_hash=destination_hash)
+
+    async def datalink_teardown(self, destination_hash: str) -> dict:
+        """Tear down a direct data link."""
+        return await self._call("datalink_teardown", destination_hash=destination_hash)
+
+    async def datalink_status(self, destination_hash: str) -> dict:
+        """Get direct link status for a peer."""
+        return await self._call("datalink_status", destination_hash=destination_hash)
+
+    async def datalink_query(self, destination_hash: str) -> dict:
+        """Query peer status over an established direct link."""
+        return await self._call("datalink_query", destination_hash=destination_hash)
+
+    # ── Subscriptions ──────────────────────────────────────────────
+
     async def subscribe_devices(self) -> bool:
         """Subscribe to real-time device events."""
         return await self._call("subscribe_devices")
