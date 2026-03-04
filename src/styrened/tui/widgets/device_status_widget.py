@@ -41,6 +41,7 @@ class DeviceStatusWidget(Static):
 
     status: reactive[StatusResponse | None] = reactive(None)
     link_info: reactive[dict | None] = reactive(None)
+    speedtest_results: reactive[list | None] = reactive(None)
     loading: reactive[bool] = reactive(False)
     error: reactive[str | None] = reactive(None)
     last_updated: reactive[str | None] = reactive(None)
@@ -175,6 +176,30 @@ class DeviceStatusWidget(Static):
             if s.available_commands:
                 lines.append(f"  Commands: [{cascade.dim}]{len(s.available_commands)} available[/]")
 
+        # ── SPEEDTEST ── (from most recent run)
+        if self.speedtest_results:
+            lines.append("")
+            lines.append(f"[{cascade.bright}]SPEEDTEST[/]")
+            ok_results = [r for r in self.speedtest_results if r.get("status") == "ok"]
+            for r in ok_results:
+                sz = r.get("size", 0)
+                kbps = r.get("throughput_kbps", 0)
+                rtt = r.get("rtt", 0)
+                label = f"{sz // 1024}K" if sz >= 1024 else f"{sz}B"
+                bar_len = min(20, max(1, int(kbps / 50)))  # scale bar to ~1000kbps max
+                bar = "█" * bar_len + "░" * (20 - bar_len)
+                lines.append(f"  {label:>5} [{cascade.medium}]{bar}[/] {kbps:.0f}kbps")
+            if ok_results:
+                best = max(ok_results, key=lambda r: r.get("throughput_kbps", 0))
+                lines.append(f"  Peak: [{cascade.bright}]{best['throughput_kbps']:.1f} kbps[/]")
+            # Show failed/skipped
+            failed = [r for r in self.speedtest_results if r.get("status") not in ("ok", "skipped")]
+            if failed:
+                for r in failed:
+                    sz = r.get("size", 0)
+                    label = f"{sz // 1024}K" if sz >= 1024 else f"{sz}B"
+                    lines.append(f"  {label:>5} [{cascade.dim}]{r['status']}[/]")
+
         # ── UPDATED ──
         if self.last_updated:
             lines.append("")
@@ -212,6 +237,10 @@ class DeviceStatusWidget(Static):
             self.refresh()
 
     def watch_link_info(self, link_info: dict | None) -> None:
+        if self.is_mounted:
+            self.refresh()
+
+    def watch_speedtest_results(self, results: list | None) -> None:
         if self.is_mounted:
             self.refresh()
 
