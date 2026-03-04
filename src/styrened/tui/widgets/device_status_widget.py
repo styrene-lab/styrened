@@ -181,12 +181,12 @@ class DeviceStatusWidget(Static):
             lines.append("")
             lines.append(f"[{cascade.bright}]SPEEDTEST[/]")
             ok_results = [r for r in self.speedtest_results if r.get("status") == "ok"]
+            max_kbps = max((r.get("throughput_kbps", 0) for r in ok_results), default=1) or 1
             for r in ok_results:
                 sz = r.get("size", 0)
                 kbps = r.get("throughput_kbps", 0)
-                rtt = r.get("rtt", 0)
                 label = f"{sz // 1024}K" if sz >= 1024 else f"{sz}B"
-                bar_len = min(20, max(1, int(kbps / 50)))  # scale bar to ~1000kbps max
+                bar_len = min(20, max(1, int(kbps / max_kbps * 20)))
                 bar = "█" * bar_len + "░" * (20 - bar_len)
                 lines.append(f"  {label:>5} [{cascade.medium}]{bar}[/] {kbps:.0f}kbps")
             if ok_results:

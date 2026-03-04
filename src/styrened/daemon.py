@@ -1833,6 +1833,14 @@ class StyreneDaemon:
         # Stop terminal service (closes all sessions)
         self._stop_terminal_service()
 
+        # Stop direct link service
+        if self._direct_link_service:
+            try:
+                await self._direct_link_service.stop()
+            except Exception as e:
+                logger.error(f"Error stopping direct link service: {e}")
+            self._direct_link_service = None
+
         # Stop page server service
         self._stop_page_server()
 

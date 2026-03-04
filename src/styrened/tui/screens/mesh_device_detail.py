@@ -26,22 +26,30 @@ if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
 
 # ── Status cache ──────────────────────────────────────────────────
-# Simple TTL cache: {identity_hash: (StatusResponse, timestamp)}
-# Avoids redundant LXMF RPC round-trips when re-opening a device.
-import time as _time
+# LRU TTL cache: {identity_hash: (StatusResponse, timestamp)}
+# Shows cached data instantly on re-open; background refresh still runs.
+import time
 
 _STATUS_CACHE: dict[str, tuple[Any, float]] = {}
 _STATUS_CACHE_TTL = 120.0  # 2 minutes
+_STATUS_CACHE_MAX = 64  # Max cached devices — evict oldest on overflow
 
 
 def _cache_status(identity: str, status: Any) -> None:
-    _STATUS_CACHE[identity] = (status, _time.time())
+    _STATUS_CACHE[identity] = (status, time.time())
+    # Evict oldest entries if over capacity
+    if len(_STATUS_CACHE) > _STATUS_CACHE_MAX:
+        oldest_key = min(_STATUS_CACHE, key=lambda k: _STATUS_CACHE[k][1])
+        _STATUS_CACHE.pop(oldest_key, None)
 
 
 def _get_cached_status(identity: str) -> Any | None:
     entry = _STATUS_CACHE.get(identity)
-    if entry and (_time.time() - entry[1]) < _STATUS_CACHE_TTL:
+    if entry and (time.time() - entry[1]) < _STATUS_CACHE_TTL:
         return entry[0]
+    # Expired — remove it
+    if entry:
+        _STATUS_CACHE.pop(identity, None)
     return None
 
 
@@ -369,6 +377,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         status_widget.error = None
 
         # Check datalink status (non-blocking, just reads cached state)
+        bridge = None
         try:
             bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
             if bridge:
@@ -379,14 +388,13 @@ class MeshDeviceDetailScreen(Screen[None]):
         except Exception:
             pass
 
-        # Check status cache first (avoids LXMF round-trip on re-open)
+        # Check status cache — show stale data instantly, then refresh
         got_status = False
         cached = _get_cached_status(self.device_identity)
         if cached is not None:
             status_widget.status = cached
-            got_status = True
-            # Still try to refresh in background, but don't block render
-            status_widget.loading = False
+            status_widget.loading = False  # Stop spinner, show cached data
+            # Don't set got_status — still attempt a fresh fetch below
 
         # Try datalink query (low latency if link exists)
         if not got_status:
