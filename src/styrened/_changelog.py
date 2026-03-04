@@ -146,4 +146,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.37", "chore: clean up for public repo"),
     ("0.13.38", "fix(chat): remove optimistic bubbles before appending real messages"),
     ("0.13.39", "feat(blocklist): block/unblock peers — silently drop all messages"),
+    ("0.13.40", "feat(moderation): hub-side ban via config.banned_peers"),
 ]

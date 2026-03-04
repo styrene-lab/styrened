@@ -35,6 +35,7 @@ class ConversationScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back"),
         Binding("ctrl+d", "delete_conversation", "Delete All", show=True),
+        Binding("B", "block_peer", "Block", show=True),
     ]
 
     CSS = """
@@ -173,6 +174,43 @@ class ConversationScreen(Screen[None]):
         """Cancel delete conversation pending state."""
         self._delete_conv_pending = False
         self._cancel_delete_conv_timer()
+
+    def action_block_peer(self) -> None:
+        """Block this peer — double-press B within 5s to confirm."""
+        import time as _time
+
+        now = _time.time()
+        if (
+            hasattr(self, "_block_confirm_time")
+            and self._block_confirm_time
+            and now - self._block_confirm_time < 5.0
+        ):
+            self._block_confirm_time = None
+            self.run_worker(self._execute_block_peer(), group="conv-block")
+        else:
+            self._block_confirm_time = now
+            self.notify(
+                f"Press B again to block {self.peer_hash[:8]}...\n"
+                "All future messages will be silently dropped.",
+                title="⚠ Confirm Block",
+                severity="warning",
+            )
+
+    async def _execute_block_peer(self) -> None:
+        """Execute peer block and pop screen."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            await bridge.block_peer(self.peer_hash)
+            self.notify(
+                f"Blocked {self.peer_hash[:8]}... — messages will be dropped",
+                title="Peer Blocked",
+            )
+            self.app.pop_screen()
+        except Exception as e:
+            logger.error(f"Failed to block peer: {e}")
+            self.notify(f"Block failed: {e}", severity="error")
 
     async def _execute_delete_conversation(self) -> None:
         """Execute conversation deletion and pop screen."""
