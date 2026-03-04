@@ -1,10 +1,7 @@
 """Tests for MeshVPN service — WireGuard mesh VPN bootstrapped over RNS.Link."""
 
 import json
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,6 +10,7 @@ from styrened.services.mesh_vpn import (
     MeshVPNService,
     PeerInfo,
     derive_mesh_ip,
+    extract_prefix,
     generate_keypair,
     parse_handshake_request,
     parse_handshake_response,
@@ -110,6 +108,23 @@ class TestIPDerivation:
         ip = derive_mesh_ip("e762e93731c93752", subnet_prefix="fd00:aaaa:bbbb:cccc")
         assert ip.startswith("fd00:aaaa:bbbb:cccc:")
 
+    def test_extract_prefix_expanded(self):
+        """extract_prefix should work on expanded IPv6."""
+        assert extract_prefix("fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890") == "fd73:7479:7265:6e65"
+
+    def test_extract_prefix_compressed(self):
+        """extract_prefix should handle compressed IPv6 (:: notation)."""
+        assert extract_prefix("fd73:7479:7265:6e65::1") == "fd73:7479:7265:6e65"
+
+    def test_extract_prefix_all_zeros_iid(self):
+        """extract_prefix should handle all-zero interface ID."""
+        assert extract_prefix("fd73:7479:7265:6e65::") == "fd73:7479:7265:6e65"
+
+    def test_extract_prefix_invalid_returns_empty(self):
+        """extract_prefix should return empty string for invalid input."""
+        assert extract_prefix("not-an-ip") == ""
+        assert extract_prefix("") == ""
+
     def test_derive_mesh_ip_valid_ipv6(self):
         """Result should parse as valid IPv6."""
         import ipaddress
@@ -184,6 +199,22 @@ class TestHandshakeProtocol:
         parsed = json.loads(req)
         assert parsed["subnet_prefix"] == "fd73:7479:7265:6e65"
 
+    def test_handshake_rejects_wrong_version(self):
+        """Handshake with wrong version should raise ValueError."""
+        data = json.dumps({
+            "version": 99,
+            "wg_pubkey": "dGVzdHB1YmxpY2tleXRlc3RwdWJsaWNrZXk0NTY=",
+            "mesh_ip": "fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890",
+        }).encode()
+        with pytest.raises(ValueError, match="Unsupported handshake version"):
+            parse_handshake_request(data)
+
+    def test_parse_response_detects_error(self):
+        """Error response from peer should raise ValueError."""
+        data = json.dumps({"error": "subnet_prefix_mismatch"}).encode()
+        with pytest.raises(ValueError, match="Handshake rejected"):
+            parse_handshake_response(data)
+
     def test_handshake_rejects_missing_fields(self):
         """Malformed handshake should raise ValueError."""
         with pytest.raises((ValueError, KeyError)):
@@ -219,6 +250,28 @@ class TestPlatformDetection:
 
 class TestMeshVPNService:
     """Service init, start, stop."""
+
+    def test_handshake_handler_rejects_prefix_mismatch(self, tmp_path):
+        """Handler should reject peers with different subnet prefix."""
+        svc = MeshVPNService(
+            config=MeshVPNConfig(enable=True, subnet_prefix="fd00:aaaa:bbbb:cccc"),
+            styrene_dir=tmp_path,
+            identity_hash="abc123",
+        )
+        svc._ensure_keypair()
+        svc.mesh_ip = "fd00:aaaa:bbbb:cccc:1111:2222:3333:4444"
+        svc._started = True
+
+        # Peer has different prefix
+        request_data = build_handshake_request(
+            public_key="dGVzdHB1YmxpY2tleXRlc3RwdWJsaWNrZXk0NTY=",
+            mesh_ip="fd73:7479:7265:6e65:a1b2:c3d4:e5f6:7890",
+        )
+
+        mock_identity = type("MockId", (), {"hash": bytes.fromhex("deadbeef" * 4)})()
+        response = svc.handle_handshake("/vpn/handshake", request_data, None, None, mock_identity)
+        parsed = json.loads(response)
+        assert parsed["error"] == "subnet_prefix_mismatch"
 
     def test_service_disabled_by_default(self):
         """Service should not start if config.enable is False."""

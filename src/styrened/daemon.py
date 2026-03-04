@@ -1356,19 +1356,24 @@ class StyreneDaemon:
         """Start the mesh VPN service if enabled in config."""
         try:
             from styrened.services.mesh_vpn import MeshVPNService
+            from styrened.services.reticulum import get_operator_identity_object
 
             vpn_config = getattr(self._config, "mesh_vpn", None)
             if vpn_config is None:
                 return
 
+            # Get identity hash from operator identity
+            identity = get_operator_identity_object()
+            identity_hash = identity.hash.hex() if identity else ""
+
             self._mesh_vpn_service = MeshVPNService(
                 config=vpn_config,
-                identity_hash=self._identity_hash or "",
+                identity_hash=identity_hash,
             )
 
             if vpn_config.enable:
                 await self._mesh_vpn_service.start(
-                    identity_hash=self._identity_hash or "",
+                    identity_hash=identity_hash,
                 )
                 logger.info("Mesh VPN service started")
         except Exception as e:

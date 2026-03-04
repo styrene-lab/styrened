@@ -211,15 +211,23 @@ class DirectLinkService:
         logger.info(f"Datalink torn down to {lxmf_destination_hash[:16]}...")
         return True
 
-    async def request_status(
+    async def request(
         self,
         lxmf_destination_hash: str,
+        path: str,
+        data: Any = None,
         timeout: float = REQUEST_TIMEOUT,
-    ) -> dict[str, Any] | None:
-        """Request status from peer over direct link.
+    ) -> bytes | None:
+        """Send a generic request over a direct link.
+
+        Args:
+            lxmf_destination_hash: Target peer's LXMF dest hash.
+            path: Request path (e.g. "/vpn/handshake").
+            data: Request payload (bytes or serializable).
+            timeout: Response timeout in seconds.
 
         Returns:
-            Status dict or None if link not active / request failed.
+            Raw response bytes, or None on failure/timeout.
         """
         import RNS
 
@@ -246,23 +254,39 @@ class DirectLinkService:
 
         try:
             entry.link.request(
-                "/status",
-                data=None,
+                path,
+                data=data,
                 response_callback=on_response,
                 failed_callback=on_failed,
             )
         except Exception as e:
-            logger.error(f"Failed to send /status over datalink: {e}")
+            logger.error(f"Failed to send {path} over datalink: {e}")
             return None
 
         try:
-            data = await asyncio.wait_for(response_future, timeout=timeout)
-            if data:
-                return json.loads(data)
+            return await asyncio.wait_for(response_future, timeout=timeout)
         except TimeoutError:
-            logger.warning(f"Datalink /status timed out for {lxmf_destination_hash[:16]}...")
-        except (json.JSONDecodeError, Exception) as e:
-            logger.warning(f"Datalink /status decode error: {e}")
+            logger.warning(f"Datalink {path} timed out for {lxmf_destination_hash[:16]}...")
+        except Exception as e:
+            logger.warning(f"Datalink {path} error: {e}")
+        return None
+
+    async def request_status(
+        self,
+        lxmf_destination_hash: str,
+        timeout: float = REQUEST_TIMEOUT,
+    ) -> dict[str, Any] | None:
+        """Request status from peer over direct link.
+
+        Returns:
+            Status dict or None if link not active / request failed.
+        """
+        data = await self.request(lxmf_destination_hash, "/status", timeout=timeout)
+        if data:
+            try:
+                return json.loads(data)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Datalink /status decode error: {e}")
         return None
 
     async def run_speedtest(

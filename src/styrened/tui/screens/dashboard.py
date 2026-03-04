@@ -348,7 +348,7 @@ class DashboardScreen(Screen[None]):
         self.app.push_screen(ExplorationScreen())
 
     def action_refresh(self) -> None:
-        """Refresh all data on the dashboard."""
+        """Refresh all data on the dashboard and re-check for updates."""
         self._refresh_device_table()
 
         try:
@@ -367,6 +367,9 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+
+        # Re-check for updates so 'r' can surface a pending upgrade notification
+        self.app._check_for_updates()
 
     async def _fetch_daemon_status(self) -> None:
         """Fetch daemon status and comms data via IPC bridge."""

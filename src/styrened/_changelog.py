@@ -138,4 +138,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.29", "fix: critical IPC collision + audit fixes"),
     ("0.13.30", "feat: mesh VPN service + fix TUI announce spacing and column alignment"),
     ("0.13.31", "fix: TUI NodeInfoPanel Rich Table layout, HighlightedPanel border rendering"),
+    ("0.13.32", "fix: screen stack deduplication, r-key triggers update check"),
 ]
