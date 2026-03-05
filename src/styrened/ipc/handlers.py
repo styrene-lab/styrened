@@ -1558,11 +1558,11 @@ class IPCHandlers:
             # Resolve additional hashes so we delete messages stored
             # under different hash types (operator vs LXMF delivery)
             additional_hashes = self._resolve_peer_hashes(req.peer_hash)
-            all_hashes = [req.peer_hash, *additional_hashes]
 
-            count = 0
-            for h in all_hashes:
-                count += self.daemon._conversation_service.delete_conversation(h)
+            count = self.daemon._conversation_service.delete_conversation(
+                req.peer_hash,
+                additional_peer_hashes=additional_hashes,
+            )
 
             self.daemon._emit_activity_event(
                 "conversation_deleted", peer_hash=req.peer_hash

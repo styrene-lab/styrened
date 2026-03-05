@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, case, desc, func, literal_column, or_
+from sqlalchemy import and_, case, desc, func, literal_column, or_, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -365,8 +365,9 @@ class ConversationService:
     def list_conversations(self) -> list[ConversationInfo]:
         """List all conversations ordered by most recent message.
 
-        Uses SQL aggregation (GROUP BY) to compute per-conversation stats
-        in a single query instead of loading all messages into Python.
+        Uses two SQL queries total (no per-conversation N+1):
+        1. GROUP BY aggregation for counts/timestamps
+        2. ROW_NUMBER() window function for last-message previews
 
         Returns:
             List of ConversationInfo sorted by last_message_time descending
@@ -380,7 +381,7 @@ class ConversationService:
                 else_=Message.source_hash,
             ).label("peer_hash")
 
-            # Aggregate per conversation in one query
+            # Query 1: Aggregate per conversation
             agg_rows = (
                 session.query(
                     peer_hash_expr,
@@ -405,45 +406,45 @@ class ConversationService:
             if not agg_rows:
                 return []
 
+            # Query 2: Get last message preview for ALL conversations at once
+            # using ROW_NUMBER() window function — eliminates N+1 queries.
+            last_msg_sql = text("""
+                SELECT peer_hash, content, source_hash FROM (
+                    SELECT
+                        CASE WHEN source_hash = :local
+                             THEN destination_hash
+                             ELSE source_hash
+                        END AS peer_hash,
+                        content, source_hash,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY CASE WHEN source_hash = :local
+                                              THEN destination_hash
+                                              ELSE source_hash END
+                            ORDER BY timestamp DESC
+                        ) AS rn
+                    FROM messages
+                    WHERE protocol_id = 'chat'
+                    AND (source_hash = :local OR destination_hash = :local)
+                ) WHERE rn = 1
+            """)
+            last_msg_rows = session.execute(
+                last_msg_sql, {"local": self._local_identity_hash}
+            ).fetchall()
+            last_msg_map: dict[str, tuple[str | None, bool]] = {}
+            for row in last_msg_rows:
+                preview = row[1][:100] if row[1] else None
+                is_outgoing = row[2] == self._local_identity_hash
+                last_msg_map[row[0]] = (preview, is_outgoing)
+
             # Batch-resolve display names for all peers at once
             peer_hashes = [row.peer_hash for row in agg_rows]
             display_names = self._batch_get_display_names(peer_hashes)
 
-            # For each conversation, fetch the last message preview with a
-            # single targeted query (indexed on source+dest, ordered by timestamp).
+            # Build result — no per-conversation queries needed
             result: list[ConversationInfo] = []
             for row in agg_rows:
                 ph = row.peer_hash
-
-                # Get last message preview and direction
-                last_msg = (
-                    session.query(
-                        Message.content,
-                        Message.source_hash,
-                    )
-                    .filter(
-                        Message.protocol_id == "chat",
-                        or_(
-                            and_(
-                                Message.source_hash == self._local_identity_hash,
-                                Message.destination_hash == ph,
-                            ),
-                            and_(
-                                Message.source_hash == ph,
-                                Message.destination_hash == self._local_identity_hash,
-                            ),
-                        ),
-                    )
-                    .order_by(desc(Message.timestamp))
-                    .limit(1)
-                    .first()
-                )
-
-                preview = None
-                is_outgoing = None
-                if last_msg is not None:
-                    preview = last_msg.content[:100] if last_msg.content else None
-                    is_outgoing = last_msg.source_hash == self._local_identity_hash
+                preview, is_outgoing = last_msg_map.get(ph, (None, None))
 
                 result.append(
                     ConversationInfo(
@@ -463,66 +464,67 @@ class ConversationService:
     def get_conversation(self, peer_hash: str) -> ConversationInfo | None:
         """Get information about a specific conversation.
 
+        Uses a single aggregate query + one lightweight last-message fetch
+        instead of two full queries.
+
         Args:
             peer_hash: LXMF destination hash of the peer
 
         Returns:
             ConversationInfo or None if no messages exist
         """
+        peer_filter = or_(
+            and_(
+                Message.source_hash == self._local_identity_hash,
+                Message.destination_hash == peer_hash,
+            ),
+            and_(
+                Message.source_hash == peer_hash,
+                Message.destination_hash == self._local_identity_hash,
+            ),
+        )
+
         with Session(self._db_engine) as session:
-            # Get most recent message
-            last_msg = (
-                session.query(Message)
-                .filter(
-                    Message.protocol_id == "chat",
-                    or_(
-                        and_(
-                            Message.source_hash == self._local_identity_hash,
-                            Message.destination_hash == peer_hash,
-                        ),
-                        and_(
-                            Message.source_hash == peer_hash,
-                            Message.destination_hash == self._local_identity_hash,
-                        ),
-                    ),
+            # Single aggregate query for count + timestamp + attachments
+            agg = (
+                session.query(
+                    func.count(Message.id).label("message_count"),
+                    func.max(Message.timestamp).label("last_message_time"),
+                    func.sum(
+                        case((Message.has_attachment == True, 1), else_=0)  # noqa: E712
+                    ).label("attachment_count"),
                 )
-                .order_by(desc(Message.timestamp))
+                .filter(Message.protocol_id == "chat", peer_filter)
                 .first()
             )
 
-            if last_msg is None:
+            if agg is None or agg.message_count == 0:
                 return None
 
-            # Count total messages
-            count = (
-                session.query(func.count(Message.id))
-                .filter(
-                    Message.protocol_id == "chat",
-                    or_(
-                        and_(
-                            Message.source_hash == self._local_identity_hash,
-                            Message.destination_hash == peer_hash,
-                        ),
-                        and_(
-                            Message.source_hash == peer_hash,
-                            Message.destination_hash == self._local_identity_hash,
-                        ),
-                    ),
-                )
-                .scalar()
+            # Lightweight fetch for last message preview (only content + source)
+            last_msg = (
+                session.query(Message.content, Message.source_hash)
+                .filter(Message.protocol_id == "chat", peer_filter)
+                .order_by(desc(Message.timestamp))
+                .limit(1)
+                .first()
             )
 
-            is_outgoing = last_msg.source_hash == self._local_identity_hash
-            preview = last_msg.content[:100] if last_msg.content else None
+            preview = None
+            is_outgoing = None
+            if last_msg is not None:
+                preview = last_msg.content[:100] if last_msg.content else None
+                is_outgoing = last_msg.source_hash == self._local_identity_hash
 
             return ConversationInfo(
                 peer_hash=peer_hash,
                 display_name=self._get_display_name(peer_hash),
                 unread_count=self._unread_counts.get(peer_hash, 0),
-                last_message_time=last_msg.timestamp,
+                last_message_time=agg.last_message_time,
                 last_message_preview=preview,
                 last_message_outgoing=is_outgoing,
-                message_count=count or 0,
+                message_count=agg.message_count,
+                attachment_count=int(agg.attachment_count or 0),
             )
 
     def get_messages(
@@ -626,7 +628,6 @@ class ConversationService:
             List of matching messages, most recent first.
             Returns empty list if query has invalid FTS5 syntax.
         """
-        from sqlalchemy import text
         from sqlalchemy.exc import OperationalError
 
         with Session(self._db_engine) as session:
@@ -666,14 +667,21 @@ class ConversationService:
                 # Re-raise other operational errors (db locked, connection issues, etc.)
                 raise
 
-            # Fetch full Message objects
-            messages = []
-            for msg_id in message_ids:
-                msg = session.get(Message, msg_id)
-                if msg:
-                    messages.append(MessageInfo.from_message(msg, self._local_identity_hash))
+            if not message_ids:
+                return []
 
-            return messages
+            # Fetch all matching messages in a single IN query (not N+1)
+            messages = (
+                session.query(Message)
+                .filter(Message.id.in_(message_ids))
+                .all()
+            )
+
+            # Preserve FTS ranking order (message_ids is already sorted by relevance)
+            id_order = {mid: idx for idx, mid in enumerate(message_ids)}
+            messages.sort(key=lambda m: id_order.get(m.id, 0))
+
+            return [MessageInfo.from_message(msg, self._local_identity_hash) for msg in messages]
 
     def save_incoming_message(
         self,
@@ -877,6 +885,8 @@ class ConversationService:
     def update_message_status(self, message_id: int, status: str) -> bool:
         """Update the delivery status of a message.
 
+        Uses a single UPDATE statement instead of SELECT + modify + flush.
+
         Args:
             message_id: Database ID of the message
             status: New status (use MessageStatus constants)
@@ -885,15 +895,17 @@ class ConversationService:
             True if message was found and updated
         """
         with Session(self._db_engine) as session:
-            msg = session.query(Message).filter(Message.id == message_id).first()
-            if msg is None:
-                return False
-
-            msg.status = status
+            count = (
+                session.query(Message)
+                .filter(Message.id == message_id)
+                .update({Message.status: status}, synchronize_session=False)
+            )
             session.commit()
 
-        logger.debug(f"Updated message {message_id} status to {status}")
-        return True
+        if count > 0:
+            logger.debug(f"Updated message {message_id} status to {status}")
+            return True
+        return False
 
     def on_delivery_callback(self, lxmf_hash: bytes) -> None:
         """Handle LXMF delivery success callback.
@@ -1107,49 +1119,73 @@ class ConversationService:
         with self._lock:
             return sum(self._unread_counts.values())
 
-    def delete_conversation(self, peer_hash: str) -> int:
+    def delete_conversation(
+        self,
+        peer_hash: str,
+        additional_peer_hashes: list[str] | None = None,
+    ) -> int:
         """Delete all messages in a conversation.
 
         Also deletes associated attachment files from the filesystem.
 
         Args:
             peer_hash: LXMF destination hash of the peer
+            additional_peer_hashes: Additional hashes for the same peer
+                (e.g. LXMF delivery hash when peer_hash is operator hash).
+                Messages matching ANY of these hashes are deleted.
 
         Returns:
             Number of messages deleted
         """
+        all_hashes = [peer_hash]
+        if additional_peer_hashes:
+            all_hashes.extend(h for h in additional_peer_hashes if h != peer_hash)
+
         with Session(self._db_engine) as session:
-            count = (
-                session.query(Message)
-                .filter(
-                    Message.protocol_id == "chat",
-                    or_(
-                        and_(
-                            Message.source_hash == self._local_identity_hash,
-                            Message.destination_hash == peer_hash,
-                        ),
-                        and_(
-                            Message.source_hash == peer_hash,
-                            Message.destination_hash == self._local_identity_hash,
-                        ),
+            if len(all_hashes) == 1:
+                peer_filter = or_(
+                    and_(
+                        Message.source_hash == self._local_identity_hash,
+                        Message.destination_hash == peer_hash,
+                    ),
+                    and_(
+                        Message.source_hash == peer_hash,
+                        Message.destination_hash == self._local_identity_hash,
                     ),
                 )
-                .delete()
+            else:
+                peer_filter = or_(
+                    and_(
+                        Message.source_hash == self._local_identity_hash,
+                        Message.destination_hash.in_(all_hashes),
+                    ),
+                    and_(
+                        Message.source_hash.in_(all_hashes),
+                        Message.destination_hash == self._local_identity_hash,
+                    ),
+                )
+
+            count = (
+                session.query(Message)
+                .filter(Message.protocol_id == "chat", peer_filter)
+                .delete(synchronize_session=False)
             )
             session.commit()
 
-        # Clear unread count
+        # Clear unread counts for all hashes
         with self._lock:
-            self._unread_counts.pop(peer_hash, None)
+            for h in all_hashes:
+                self._unread_counts.pop(h, None)
 
         # Delete associated attachment files
-        try:
-            from styrened.services.attachment_store import get_attachment_store
+        for h in all_hashes:
+            try:
+                from styrened.services.attachment_store import get_attachment_store
 
-            store = get_attachment_store()
-            store.delete_for_peer(peer_hash)
-        except Exception as e:
-            logger.warning(f"Failed to clean up attachments for {peer_hash[:8]}: {e}")
+                store = get_attachment_store()
+                store.delete_for_peer(h)
+            except Exception as e:
+                logger.warning(f"Failed to clean up attachments for {h[:8]}: {e}")
 
         logger.info(f"Deleted {count} messages in conversation with {peer_hash[:16]}...")
         return count
@@ -1274,8 +1310,9 @@ class ConversationService:
             List of hex-encoded LXMF message hashes
         """
         with Session(self._db_engine) as session:
-            messages = (
-                session.query(Message)
+            # Select only the lxmf_hash column — no need to load full ORM objects
+            rows = (
+                session.query(Message.lxmf_hash)
                 .filter(
                     Message.protocol_id == "chat",
                     Message.source_hash == peer_hash,
@@ -1287,7 +1324,7 @@ class ConversationService:
                 .all()
             )
 
-            return [m.lxmf_hash for m in messages if m.lxmf_hash]
+            return [row[0] for row in rows if row[0]]
 
     def mark_receipts_sent(self, lxmf_hashes: list[str]) -> int:
         """Mark messages as having had read receipts sent.
