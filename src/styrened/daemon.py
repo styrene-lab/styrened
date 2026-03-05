@@ -148,7 +148,12 @@ class StyreneDaemon:
         # This ensures discovered devices are persisted and their identity_hash
         # mappings are available for identity resolution when sending messages
         self._node_store = get_node_store()
-        start_discovery(callback=self._on_device_discovered, node_store=self._node_store)
+        start_discovery(
+            callback=self._on_device_discovered,
+            node_store=self._node_store,
+            access_mode=self.config.discovery.access_mode,
+            allowed_peers=self.config.discovery.allowed_peers,
+        )
 
         # Start path table snapshot service for topology edge data
         self._path_snapshot = PathSnapshotService(self._node_store)
