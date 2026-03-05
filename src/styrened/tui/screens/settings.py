@@ -14,6 +14,7 @@ from styrened.models.config import (
     COMMUNITY_HUB_PROPAGATION_HASH,
     WELL_KNOWN_HUBS,
     DeploymentMode,
+    MeshAccessMode,
     PeerConfig,
     validate_short_name,
 )
@@ -439,7 +440,64 @@ class SettingsScreen(Screen[None]):
                             title="PROVISIONING DEFAULTS",
                         )
 
-                # ── Tab 4: System ────────────────────────────────────────
+                # ── Tab 4: Security ──────────────────────────────────────
+                with TabPane("Security", id="tab-security"):
+                    with VerticalScroll(classes="settings-tab-scroll"):
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Access Mode:", classes="setting-label"),
+                                Select(
+                                    [
+                                        ("Open — admit all announces", MeshAccessMode.OPEN),
+                                        ("Allowlist — default deny", MeshAccessMode.ALLOWLIST),
+                                    ],
+                                    value=self.config.core.discovery.access_mode,
+                                    id="mesh_access_mode",
+                                    classes="setting-select",
+                                    allow_blank=False,
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "Open: every announcing Reticulum node is accepted (default). "
+                                "Allowlist: only nodes whose identity hash is listed below "
+                                "will appear in the device list and be permitted to interact "
+                                "with this node. All others are silently dropped at the "
+                                "announce boundary.",
+                                classes="setting-description",
+                            ),
+                            title="MESH ACCESS CONTROL",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Static(
+                                    "[b]Identity Hash[/b]",
+                                    classes="allowed-peer-hash-input allowed-peer-header",
+                                ),
+                                Static("", classes="allowed-peer-remove-btn"),
+                                classes="allowed-peer-header-row",
+                            ),
+                            *self._compose_allowed_peer_rows(),
+                            Horizontal(
+                                Button(
+                                    "+ Add Identity",
+                                    id="btn-add-allowed-peer",
+                                    classes="setting-btn",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "32-character hex identity hash for each permitted peer. "
+                                "Find a peer's identity hash in their dashboard or via "
+                                "'styrened identity' on their node. "
+                                "Only consulted when Access Mode is Allowlist.",
+                                classes="setting-description",
+                            ),
+                            title="ALLOWED IDENTITIES",
+                            id="allowed-peers-panel",
+                        )
+
+                # ── Tab 5: System ────────────────────────────────────────
                 with TabPane("System", id="tab-system"):
                     with VerticalScroll(classes="settings-tab-scroll"):
                         yield HighlightedPanel(
@@ -614,13 +672,42 @@ class SettingsScreen(Screen[None]):
             )
         return rows
 
+    def _compose_allowed_peer_rows(self) -> list:
+        """Generate allowed-peer hash input rows from current config."""
+        rows = []
+        for i, identity_hash in enumerate(sorted(self.config.core.discovery.allowed_peers)):
+            rows.append(
+                Horizontal(
+                    Input(
+                        value=identity_hash,
+                        placeholder="32-char hex identity hash",
+                        id=f"allowed_peer_hash_{i}",
+                        classes="allowed-peer-hash-input",
+                    ),
+                    Button(
+                        "✕",
+                        id=f"btn-remove-allowed-peer-{i}",
+                        classes="allowed-peer-remove-btn",
+                        variant="error",
+                    ),
+                    classes="allowed-peer-row",
+                    id=f"allowed-peer-row-{i}",
+                )
+            )
+        return rows
+
+    def _allowed_peer_count(self) -> int:
+        """Count current allowed-peer rows in the DOM."""
+        return len(list(self.query(".allowed-peer-row")))
+
     def _peer_count(self) -> int:
         """Count current peer rows in the DOM."""
         return len(list(self.query(".peer-row")))
 
     def on_mount(self) -> None:
-        """Set initial visibility of server fields."""
+        """Set initial visibility of server fields and access-mode-dependent panels."""
         self._update_server_visibility()
+        self._update_allowed_peers_visibility()
 
     def action_save(self) -> None:
         """Save configuration."""
@@ -768,6 +855,48 @@ class SettingsScreen(Screen[None]):
         """Show/hide server IP and port fields."""
         self._update_server_visibility()
 
+    @on(Select.Changed, "#mesh_access_mode")
+    def on_mesh_access_mode_changed(self, event: Select.Changed) -> None:
+        """Show/hide the allowed-identities panel when access mode changes."""
+        self._update_allowed_peers_visibility()
+
+    @on(Button.Pressed, "#btn-add-allowed-peer")
+    def on_add_allowed_peer(self) -> None:
+        """Add a new blank identity hash row to the allowed-identities panel."""
+        idx = self._allowed_peer_count()
+        new_row = Horizontal(
+            Input(
+                value="",
+                placeholder="32-char hex identity hash",
+                id=f"allowed_peer_hash_{idx}",
+                classes="allowed-peer-hash-input",
+            ),
+            Button(
+                "✕",
+                id=f"btn-remove-allowed-peer-{idx}",
+                classes="allowed-peer-remove-btn",
+                variant="error",
+            ),
+            classes="allowed-peer-row",
+            id=f"allowed-peer-row-{idx}",
+        )
+        try:
+            add_btn = self.query_one("#btn-add-allowed-peer")
+            add_btn_row = add_btn.parent
+            if add_btn_row and add_btn_row.parent:
+                add_btn_row.parent.mount(new_row, before=add_btn_row)
+            else:
+                self.query_one("#allowed-peers-panel").mount(new_row)
+        except Exception:
+            pass
+
+    @on(Button.Pressed, ".allowed-peer-remove-btn")
+    def on_remove_allowed_peer(self, event: Button.Pressed) -> None:
+        """Remove an identity hash row from the allowed-identities panel."""
+        widget = event.button.parent
+        if widget and "allowed-peer-row" in widget.classes:
+            widget.remove()
+
     def _update_server_visibility(self) -> None:
         """Show or hide server config fields based on server enabled checkbox."""
         try:
@@ -778,6 +907,18 @@ class SettingsScreen(Screen[None]):
                     row.remove_class("hidden")
                 else:
                     row.add_class("hidden")
+        except Exception:
+            pass
+
+    def _update_allowed_peers_visibility(self) -> None:
+        """Show or hide the allowed-identities panel based on access mode."""
+        try:
+            mode_select = self.query_one("#mesh_access_mode", Select)
+            panel = self.query_one("#allowed-peers-panel")
+            if mode_select.value == MeshAccessMode.ALLOWLIST:
+                panel.remove_class("hidden")
+            else:
+                panel.add_class("hidden")
         except Exception:
             pass
 
@@ -1034,6 +1175,29 @@ class SettingsScreen(Screen[None]):
             self.config.core.reticulum.interfaces.server = ServerInterfaceConfig(
                 enabled=server_enabled, listen_ip=server_ip, port=server_port,
             )
+
+            # Read Security / mesh access control settings
+            mode_select = self.query_one("#mesh_access_mode", Select)
+            if isinstance(mode_select.value, MeshAccessMode):
+                self.config.core.discovery.access_mode = mode_select.value
+            else:
+                self.config.core.discovery.access_mode = MeshAccessMode.OPEN
+
+            allowed_peers: set[str] = set()
+            for row in self.query(".allowed-peer-row"):
+                hash_inputs = list(row.query(".allowed-peer-hash-input"))
+                if not hash_inputs:
+                    continue
+                h = hash_inputs[0].value.strip().lower()
+                if not h:
+                    continue
+                if len(h) != 32 or not all(c in "0123456789abcdef" for c in h):
+                    self._show_error(
+                        f"Invalid identity hash '{h[:16]}…': must be 32 hex characters"
+                    )
+                    return
+                allowed_peers.add(h)
+            self.config.core.discovery.allowed_peers = allowed_peers
 
             # Page server settings
             self.config.core.page_server.enabled = self.query_one(

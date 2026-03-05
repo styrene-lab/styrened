@@ -610,6 +610,32 @@ Header {
     min-width: 5;
 }
 
+/* Allowed-peer rows (Security tab) */
+.allowed-peer-row {
+    height: auto;
+    min-height: 3;
+    margin-bottom: 1;
+}
+
+.allowed-peer-hash-input {
+    width: 1fr;
+}
+
+.allowed-peer-remove-btn {
+    width: 5;
+    min-width: 5;
+}
+
+.allowed-peer-header-row {
+    height: 1;
+    margin-bottom: 1;
+}
+
+.allowed-peer-header {
+    color: $text-muted;
+    text-style: bold;
+}
+
 #settings-actions {
     height: 3;
     margin-top: 1;
