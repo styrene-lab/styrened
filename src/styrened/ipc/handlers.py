@@ -105,6 +105,8 @@ class IPCHandlers:
         self.daemon = daemon
         # Terminal session tracking: session_id_hex -> (TerminalClientSession, client_ref)
         self._terminal_sessions: dict[str, Any] = {}
+        # Cache for peer hash resolution (identity mappings are stable)
+        self._peer_hash_cache: dict[str, list[str]] = {}
 
     def _check_daemon(self) -> ErrorResponse | None:
         """Check if daemon is available.
@@ -793,12 +795,19 @@ class IPCHandlers:
         related hashes so message queries can match both outgoing (operator hash)
         and incoming (LXMF hash) messages.
 
+        Results are cached because identity mappings are stable — a peer's
+        operator hash and LXMF delivery hash don't change.
+
         Args:
             peer_hash: Hash to resolve (operator or LXMF delivery hash).
 
         Returns:
             List of additional hashes (may be empty if resolution fails).
         """
+        # Check cache first (avoids repeated RNS crypto)
+        if peer_hash in self._peer_hash_cache:
+            return self._peer_hash_cache[peer_hash]
+
         additional: list[str] = []
         try:
             from styrened.services.lxmf_service import get_lxmf_service
@@ -812,6 +821,7 @@ class IPCHandlers:
 
             identity = lxmf_service._resolve_identity(peer_hash)
             if identity is None:
+                # Don't cache misses — identity may appear later
                 return additional
 
             # Compute the LXMF delivery destination hash from the identity
@@ -834,6 +844,9 @@ class IPCHandlers:
         except Exception as e:
             logger.debug(f"Could not resolve peer hashes for {peer_hash[:16]}...: {e}")
 
+        # Cache the result (including empty lists for successful but
+        # single-hash identities)
+        self._peer_hash_cache[peer_hash] = additional
         return additional
 
     async def handle_query_conversations(self, request: IPCRequest) -> IPCResponse:

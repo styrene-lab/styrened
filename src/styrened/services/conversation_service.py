@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, desc, func, or_
+from sqlalchemy import and_, case, desc, func, literal_column, or_
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -365,21 +365,31 @@ class ConversationService:
     def list_conversations(self) -> list[ConversationInfo]:
         """List all conversations ordered by most recent message.
 
+        Uses SQL aggregation (GROUP BY) to compute per-conversation stats
+        in a single query instead of loading all messages into Python.
+
         Returns:
             List of ConversationInfo sorted by last_message_time descending
         """
         with Session(self._db_engine) as session:
-            # Get distinct peers we've communicated with
-            # A peer is either a source (incoming) or destination (outgoing)
-            # We need to normalize to get the "peer_hash" for each conversation
+            # Compute peer_hash in SQL: for outgoing messages it's
+            # destination_hash, for incoming it's source_hash.
+            peer_hash_expr = case(
+                (Message.source_hash == self._local_identity_hash,
+                 Message.destination_hash),
+                else_=Message.source_hash,
+            ).label("peer_hash")
 
-            # Subquery to get the peer hash for each message
-            # For incoming: peer is source_hash
-            # For outgoing: peer is destination_hash
-
-            # Get all chat messages involving us
-            messages = (
-                session.query(Message)
+            # Aggregate per conversation in one query
+            agg_rows = (
+                session.query(
+                    peer_hash_expr,
+                    func.count().label("message_count"),
+                    func.max(Message.timestamp).label("last_message_time"),
+                    func.sum(
+                        case((Message.has_attachment == True, 1), else_=0)  # noqa: E712
+                    ).label("attachment_count"),
+                )
                 .filter(
                     Message.protocol_id == "chat",
                     or_(
@@ -387,46 +397,66 @@ class ConversationService:
                         Message.destination_hash == self._local_identity_hash,
                     ),
                 )
-                .order_by(desc(Message.timestamp))
+                .group_by(literal_column("peer_hash"))
+                .order_by(desc("last_message_time"))
                 .all()
             )
 
-            # Build conversation map
-            conversations: dict[str, ConversationInfo] = {}
+            if not agg_rows:
+                return []
 
-            for msg in messages:
-                # Determine peer hash
-                if msg.source_hash == self._local_identity_hash:
-                    peer_hash = msg.destination_hash
-                    is_outgoing = True
-                else:
-                    peer_hash = msg.source_hash
-                    is_outgoing = False
+            # Batch-resolve display names for all peers at once
+            peer_hashes = [row.peer_hash for row in agg_rows]
+            display_names = self._batch_get_display_names(peer_hashes)
 
-                if peer_hash not in conversations:
-                    # First message for this peer (most recent due to ordering)
-                    preview = msg.content[:100] if msg.content else None
-                    conversations[peer_hash] = ConversationInfo(
-                        peer_hash=peer_hash,
-                        display_name=self._get_display_name(peer_hash),
-                        unread_count=self._unread_counts.get(peer_hash, 0),
-                        last_message_time=msg.timestamp,
+            # For each conversation, fetch the last message preview with a
+            # single targeted query (indexed on source+dest, ordered by timestamp).
+            result: list[ConversationInfo] = []
+            for row in agg_rows:
+                ph = row.peer_hash
+
+                # Get last message preview and direction
+                last_msg = (
+                    session.query(
+                        Message.content,
+                        Message.source_hash,
+                    )
+                    .filter(
+                        Message.protocol_id == "chat",
+                        or_(
+                            and_(
+                                Message.source_hash == self._local_identity_hash,
+                                Message.destination_hash == ph,
+                            ),
+                            and_(
+                                Message.source_hash == ph,
+                                Message.destination_hash == self._local_identity_hash,
+                            ),
+                        ),
+                    )
+                    .order_by(desc(Message.timestamp))
+                    .limit(1)
+                    .first()
+                )
+
+                preview = None
+                is_outgoing = None
+                if last_msg is not None:
+                    preview = last_msg.content[:100] if last_msg.content else None
+                    is_outgoing = last_msg.source_hash == self._local_identity_hash
+
+                result.append(
+                    ConversationInfo(
+                        peer_hash=ph,
+                        display_name=display_names.get(ph),
+                        unread_count=self._unread_counts.get(ph, 0),
+                        last_message_time=row.last_message_time,
                         last_message_preview=preview,
                         last_message_outgoing=is_outgoing,
-                        message_count=1,
-                        attachment_count=1 if msg.has_attachment else 0,
+                        message_count=row.message_count,
+                        attachment_count=int(row.attachment_count or 0),
                     )
-                else:
-                    conversations[peer_hash].message_count += 1
-                    if msg.has_attachment:
-                        conversations[peer_hash].attachment_count += 1
-
-            # Sort by last message time (most recent first)
-            result = sorted(
-                conversations.values(),
-                key=lambda c: c.last_message_time or 0,
-                reverse=True,
-            )
+                )
 
             return result
 
@@ -1284,6 +1314,24 @@ class ConversationService:
 
         logger.debug(f"Marked {count} messages as having receipts sent")
         return count
+
+    def _batch_get_display_names(self, peer_hashes: list[str]) -> dict[str, str | None]:
+        """Resolve display names for multiple peers at once.
+
+        Delegates to ContactService / NodeStore per-peer but avoids repeated
+        service lookups when possible. Returns a mapping from peer_hash to
+        display name (None if unresolved).
+
+        Args:
+            peer_hashes: List of LXMF destination hashes to resolve.
+
+        Returns:
+            Dict mapping each peer_hash to its display name or None.
+        """
+        result: dict[str, str | None] = {}
+        for ph in peer_hashes:
+            result[ph] = self._get_display_name(ph)
+        return result
 
     def _get_display_name(self, peer_hash: str) -> str | None:
         """Get display name for a peer.
