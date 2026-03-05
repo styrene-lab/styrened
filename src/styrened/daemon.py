@@ -185,8 +185,18 @@ class StyreneDaemon:
         await self._run_loop()
 
     def _seed_config_bans(self) -> None:
-        """Block peers listed in config.banned_peers (hub operator banlist)."""
+        """Block peers listed in config.banned_peers (hub operator banlist).
+
+        Ensures the contacts table exists even if chat is disabled,
+        because block_peer() writes directly to the contacts table.
+        """
         try:
+            from styrened.models.messages import init_db
+
+            # Guarantee contacts table exists — _init_conversation_service
+            # skips init_db() when chat.enabled=False
+            init_db()
+
             from styrened.services.lxmf_service import get_lxmf_service
 
             svc = get_lxmf_service()
@@ -1735,7 +1745,7 @@ class StyreneDaemon:
 
                 import RNS
 
-                nn_identity_paths = [  # noqa: N806
+                nn_identity_paths = [
                     Path.home() / ".nomadnetwork" / "storage" / "identity",
                     Path.home() / ".config" / "nomadnetwork" / "storage" / "identity",
                     Path("/etc/nomadnetwork/storage/identity"),

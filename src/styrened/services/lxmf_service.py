@@ -976,10 +976,22 @@ class LXMFService:
             return set()
 
     def _is_blocked(self, source_hash: str) -> bool:
-        """Check if a peer is blocked. Uses in-memory cache."""
+        """Check if a peer is blocked. Uses in-memory cache.
+
+        Supports both exact and prefix matching — config files may use
+        short hashes (e.g. 'ca3e9813') while LXMF delivers full hashes.
+        """
         if self._blocked_peers is None:
             self._blocked_peers = self._load_blocklist()
-        return source_hash in self._blocked_peers
+        if source_hash in self._blocked_peers:
+            return True
+        # Prefix match: blocked entry 'ca3e9813' matches source 'ca3e981348d3bb48...'
+        for blocked in self._blocked_peers:
+            if len(blocked) < len(source_hash) and source_hash.startswith(blocked):
+                return True
+            if len(source_hash) < len(blocked) and blocked.startswith(source_hash):
+                return True
+        return False
 
     def invalidate_blocklist(self) -> None:
         """Clear the in-memory blocklist cache (call after block/unblock)."""
