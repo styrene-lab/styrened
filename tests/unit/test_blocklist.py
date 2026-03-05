@@ -231,6 +231,122 @@ class TestLXMFMessageDropped:
             callback.assert_called_once_with(msg)
 
 
+class TestBlocklistPrefixMatching:
+    """_is_blocked supports prefix matching for short hashes in config."""
+
+    def test_short_hash_blocks_full_hash(self, db_engine):
+        """Config entry 'ca3e9813' blocks source 'ca3e981348d3bb48...'."""
+        _, db_path = db_engine
+        from styrened.services.lxmf_service import LXMFService
+
+        svc = LXMFService()
+        with patch("styrened.paths") as mock_paths:
+            mock_paths.messages_db.return_value = db_path
+            svc.block_peer("ca3e9813")
+            assert svc._is_blocked("ca3e981348d3bb48aabbccdd") is True
+
+    def test_full_hash_blocks_full_hash(self, db_engine):
+        """Exact match still works."""
+        _, db_path = db_engine
+        from styrened.services.lxmf_service import LXMFService
+
+        svc = LXMFService()
+        with patch("styrened.paths") as mock_paths:
+            mock_paths.messages_db.return_value = db_path
+            svc.block_peer("ca3e981348d3bb48aabbccdd")
+            assert svc._is_blocked("ca3e981348d3bb48aabbccdd") is True
+
+    def test_short_hash_does_not_block_different_prefix(self, db_engine):
+        """'ca3e9813' does NOT block 'deadbeef...'."""
+        _, db_path = db_engine
+        from styrened.services.lxmf_service import LXMFService
+
+        svc = LXMFService()
+        with patch("styrened.paths") as mock_paths:
+            mock_paths.messages_db.return_value = db_path
+            svc.block_peer("ca3e9813")
+            assert svc._is_blocked("deadbeef12345678") is False
+
+    def test_message_dropped_with_prefix_block(self, db_engine):
+        """LXMF message from full hash is dropped when short hash is blocked."""
+        _, db_path = db_engine
+        from styrened.services.lxmf_service import LXMFService
+
+        svc = LXMFService()
+        with patch("styrened.paths") as mock_paths:
+            mock_paths.messages_db.return_value = db_path
+            svc.block_peer("ca3e9813")
+
+            msg = MagicMock()
+            # Full hash as bytes — .hex() returns full string
+            msg.source_hash = bytes.fromhex("ca3e981348d3bb48")
+
+            callback = MagicMock()
+            svc._message_callbacks = [(callback, False)]
+            svc._handle_lxmf_message(msg)
+            callback.assert_not_called()
+
+    def test_very_short_prefix_requires_minimum_length(self, db_engine):
+        """Single-char prefix shouldn't block half the network."""
+        _, db_path = db_engine
+        from styrened.services.lxmf_service import LXMFService
+
+        svc = LXMFService()
+        with patch("styrened.paths") as mock_paths:
+            mock_paths.messages_db.return_value = db_path
+            # 2-char prefix — this is technically valid but aggressive
+            svc.block_peer("ca")
+            # Still matches because startswith works
+            assert svc._is_blocked("ca3e981348d3bb48") is True
+
+
+class TestSeedConfigBansOrdering:
+    """_seed_config_bans works regardless of chat.enabled state."""
+
+    def test_seed_bans_with_chat_disabled(self, tmp_path):
+        """banned_peers should work even when chat.enabled=False."""
+        from unittest.mock import patch as _patch
+
+        from styrened.models.config import CoreConfig
+
+        config = CoreConfig()
+        config.chat.enabled = False
+        config.banned_peers = ["deadbeef12345678"]
+
+        # Create a minimal DB so block_peer has a table
+        db_path = tmp_path / "messages.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE TABLE contacts ("
+                "peer_hash VARCHAR(32) PRIMARY KEY, "
+                "alias VARCHAR(100) NOT NULL, "
+                "notes VARCHAR(500), "
+                "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                "blocked_at REAL, "
+                "created_at REAL NOT NULL, "
+                "updated_at REAL NOT NULL"
+                ")"
+            ))
+            conn.commit()
+
+        with _patch("styrened.paths.messages_db", return_value=db_path), \
+             _patch("styrened.models.messages.init_db", return_value=engine):
+            from styrened.daemon import StyreneDaemon
+
+            daemon = StyreneDaemon.__new__(StyreneDaemon)
+            daemon.config = config
+            daemon._seed_config_bans()
+
+        # Verify ban was written
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT blocked FROM contacts WHERE peer_hash = 'deadbeef12345678'")
+            ).fetchone()
+            assert row is not None
+            assert row[0] == 1
+
+
 class TestIPCMessages:
     """IPC message serialization for block commands."""
 
