@@ -378,6 +378,21 @@ class RPCConfig:
     allow_command_execution: bool = True
 
 
+class MeshAccessMode(Enum):
+    """Mesh admission control policy.
+
+    Controls which announcing nodes are admitted to the device list.
+
+    OPEN     — default; every announcing node is accepted (legacy behaviour).
+    ALLOWLIST — only nodes whose *identity hash* appears in
+               ``DiscoveryConfig.allowed_peers`` are admitted.  All others are
+               silently dropped at the announce-handler boundary.
+    """
+
+    OPEN = "open"
+    ALLOWLIST = "allowlist"
+
+
 @dataclass
 class DiscoveryConfig:
     """Device discovery configuration.
@@ -385,10 +400,18 @@ class DiscoveryConfig:
     Attributes:
         enabled: Whether to enable device discovery.
         auto_announce: Automatically announce presence on startup.
+        access_mode: Mesh admission policy.  ``OPEN`` (default) admits every
+            announcing node; ``ALLOWLIST`` enforces a default-deny policy where
+            only identity hashes listed in *allowed_peers* are accepted.
+        allowed_peers: Set of 32-char hex identity hashes permitted to appear
+            in the device list.  Only consulted when *access_mode* is
+            ``ALLOWLIST``.  Hashes are matched case-insensitively.
     """
 
     enabled: bool = True
     auto_announce: bool = True
+    access_mode: MeshAccessMode = MeshAccessMode.OPEN
+    allowed_peers: set[str] = field(default_factory=set)
 
 
 @dataclass

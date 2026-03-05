@@ -18,6 +18,7 @@ from styrened.models.config import (
     ConfigValidationError,
     CoreConfig,
     DeploymentMode,
+    MeshAccessMode,
     NotificationsConfig,
     PeerConfig,
     PQCConfig,
@@ -331,6 +332,20 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.discovery.enabled = _parse_bool(disc["enabled"])
         if "auto_announce" in disc:
             config.discovery.auto_announce = _parse_bool(disc["auto_announce"])
+        if "access_mode" in disc:
+            raw_mode = str(disc["access_mode"]).lower()
+            try:
+                config.discovery.access_mode = MeshAccessMode(raw_mode)
+            except ValueError:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Unknown discovery.access_mode '{raw_mode}', using 'open'"
+                )
+        if "allowed_peers" in disc and isinstance(disc["allowed_peers"], list):
+            config.discovery.allowed_peers = {
+                str(h).lower() for h in disc["allowed_peers"] if h
+            }
 
     # Parse chat section
     if "chat" in data and isinstance(data["chat"], dict):
@@ -702,6 +717,8 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     discovery_dict: dict[str, Any] = {
         "enabled": config.discovery.enabled,
         "auto_announce": config.discovery.auto_announce,
+        "access_mode": config.discovery.access_mode.value,
+        "allowed_peers": sorted(config.discovery.allowed_peers),
     }
 
     # Chat section

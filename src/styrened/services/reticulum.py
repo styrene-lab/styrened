@@ -75,7 +75,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from styrened import paths
-from styrened.models.config import CoreConfig, DeploymentMode
+from styrened.models.config import CoreConfig, DeploymentMode, MeshAccessMode
 from styrened.models.mesh_device import DeviceType, MeshDevice, create_mesh_device
 from styrened.models.reticulum import (
     ReticulumIdentity,
@@ -973,15 +973,26 @@ class StyreneAnnounceHandler:
         self,
         callback: Callable[[MeshDevice], None] | None = None,
         node_store: Any | None = None,
+        access_mode: MeshAccessMode | None = None,
+        allowed_peers: set[str] | None = None,
     ):
         """Initialize announce handler.
 
         Args:
             callback: Optional callback to invoke when a device is discovered/updated.
             node_store: Optional node store for persistence (dependency injection).
+            access_mode: Mesh admission policy (OPEN or ALLOWLIST).  Defaults to
+                OPEN so that existing callers that don't pass a config are
+                unaffected.
+            allowed_peers: Set of lower-cased 32-char hex identity hashes
+                permitted when *access_mode* is ALLOWLIST.
         """
         self.callback = callback
         self.node_store = node_store
+        self.access_mode: MeshAccessMode = access_mode or MeshAccessMode.OPEN
+        self._allowed_peers: set[str] = (
+            {h.lower() for h in allowed_peers} if allowed_peers else set()
+        )
         self.aspect_filter = None  # Listen to ALL announces
         self.receive_path_responses = False  # Don't interfere with RNS path discovery
         self.discovered_devices: dict[str, MeshDevice] = {}
@@ -1032,6 +1043,15 @@ class StyreneAnnounceHandler:
             f"destination_hash={dest_hash_hex[:16]}... (routing), "
             f"identity_hash={identity_hash_hex[:16]}... (for recall)"
         )
+
+        # Admission control: default-deny when access_mode is ALLOWLIST
+        if self.access_mode == MeshAccessMode.ALLOWLIST:
+            if identity_hash_hex.lower() not in self._allowed_peers:
+                logger.debug(
+                    f"[ACCESS] Blocked announce from identity "
+                    f"{identity_hash_hex[:16]}... — not in allowlist"
+                )
+                return
 
         # Check if we've seen this device before
         existing = self.discovered_devices.get(dest_hash_hex)
@@ -1192,6 +1212,8 @@ _announce_handler: StyreneAnnounceHandler | None = None
 def start_discovery(
     callback: Callable[[MeshDevice], None] | None = None,
     node_store: Any | None = None,
+    access_mode: MeshAccessMode | None = None,
+    allowed_peers: set[str] | None = None,
 ) -> None:
     """Start device discovery via RNS announces.
 
@@ -1202,12 +1224,15 @@ def start_discovery(
         callback: Optional callback to invoke when devices are discovered/updated.
                   Receives a MeshDevice object.
         node_store: Optional node store for persistence (dependency injection).
+        access_mode: Mesh admission policy.  When ``ALLOWLIST``, only nodes
+            whose identity hash appears in *allowed_peers* are accepted.
+        allowed_peers: Identity hashes permitted when *access_mode* is ALLOWLIST.
     """
     global _announce_handler
     if _announce_handler:
         return
 
-    _announce_handler = StyreneAnnounceHandler(callback, node_store)
+    _announce_handler = StyreneAnnounceHandler(callback, node_store, access_mode, allowed_peers)
     try:
         if not RNS:
             logger.error("RNS library not available. Install with: pip install rns")
