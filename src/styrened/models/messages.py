@@ -108,6 +108,15 @@ class Message(Base):
         Index("ix_messages_source_dest", "source_hash", "destination_hash"),
         # Unread count queries: find received messages by status
         Index("ix_messages_dest_status", "destination_hash", "status"),
+        # Conversation queries with ORDER BY timestamp (covers list_conversations,
+        # get_messages, get_conversation). The 4-column composite lets SQLite
+        # satisfy the filter + sort without a separate sort pass.
+        Index(
+            "ix_messages_chat_conv",
+            "protocol_id", "source_hash", "destination_hash", "timestamp",
+        ),
+        # Delivery callbacks, read receipts, and dedup lookups by LXMF hash
+        Index("ix_messages_lxmf_hash", "lxmf_hash"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -427,6 +436,28 @@ def init_db(db_path: str | None = None) -> Engine:
                 logger.info(f"Added '{col_name}' column to contacts table")
         except Exception:
             pass  # Column already exists
+
+    # Add performance indexes for conversation queries (idempotent)
+    perf_indexes = [
+        (
+            "ix_messages_chat_conv",
+            "CREATE INDEX IF NOT EXISTS ix_messages_chat_conv "
+            "ON messages (protocol_id, source_hash, destination_hash, timestamp)",
+        ),
+        (
+            "ix_messages_lxmf_hash",
+            "CREATE INDEX IF NOT EXISTS ix_messages_lxmf_hash "
+            "ON messages (lxmf_hash)",
+        ),
+    ]
+    for idx_name, idx_sql in perf_indexes:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(idx_sql))
+                conn.commit()
+                logger.debug(f"Ensured index {idx_name} exists")
+        except Exception:
+            pass  # Index already exists or migration not needed
 
     # Create FTS5 virtual table for full-text search
     # This enables searching message content and titles efficiently
