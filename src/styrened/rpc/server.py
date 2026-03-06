@@ -16,21 +16,29 @@ The RPC server handles:
 - CONFIG_UPDATE (0x42): Updates local configuration
 
 Security:
-    By default, all RPC commands except PING and STATUS_REQUEST require
-    authorization via the `authorized_identities` parameter. Dangerous
-    commands (EXEC, REBOOT, CONFIG_UPDATE) are disabled by default and
-    must be explicitly enabled via `enable_dangerous_commands=True`.
+    When an ``RBACPolicy`` is provided (recommended), every RPC message type
+    is mapped to a capability via ``MESSAGE_TYPE_CAPABILITY``. The policy's
+    ``has_capability()`` method is checked for every request — there are no
+    "public" bypasses. Unmapped message types are rejected (fail-closed).
+
+    Legacy mode (``rbac_policy=None``): PING and STATUS_REQUEST bypass auth.
+    Other commands require ``authorized_identities``. Dangerous commands
+    (EXEC, REBOOT, CONFIG_UPDATE) need ``enable_dangerous_commands=True``.
 
 Usage:
     from styrened.rpc import RPCServer
     from styrened.protocols.styrene import StyreneProtocol
+    from styrened.models.rbac import RBACPolicy, Role
 
-    # Initialize with StyreneProtocol and authorization
-    styrene_protocol = StyreneProtocol(router, identity, db_engine)
+    # RBAC mode (recommended)
+    policy = RBACPolicy(default_role=Role.PEER)
+    server = RPCServer(styrene_protocol, rbac_policy=policy)
+
+    # Legacy mode (deprecated — will be removed in v0.15.0)
     server = RPCServer(
         styrene_protocol,
         authorized_identities={"abc123...", "def456..."},
-        enable_dangerous_commands=True,  # Required for EXEC, REBOOT, CONFIG_UPDATE
+        enable_dangerous_commands=True,
     )
 
     # Start server
@@ -238,10 +246,17 @@ class RPCServer:
         self._daemon: Any = None
 
         # Log security configuration
-        if not self._authorized_identities:
+        if self._rbac_policy is not None:
+            logger.info(
+                f"[SECURITY] RPC server initialized with RBAC policy "
+                f"(default_role={self._rbac_policy.default_role.name}, "
+                f"roster={len(self._rbac_policy.roster)}, "
+                f"blocked={len(self._rbac_policy.blocked)})"
+            )
+        elif not self._authorized_identities:
             logger.warning(
                 "[SECURITY] RPC server initialized WITHOUT authorization - "
-                "all identities can execute public RPC commands"
+                "all identities can execute non-public RPC commands"
             )
         else:
             logger.info(
@@ -249,14 +264,16 @@ class RPCServer:
                 f"authorized identities"
             )
 
-        if enable_dangerous_commands:
-            logger.warning(
-                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are ENABLED"
-            )
-        else:
-            logger.info(
-                "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are DISABLED"
-            )
+        if self._rbac_policy is None:
+            # Legacy mode — log dangerous commands state
+            if enable_dangerous_commands:
+                logger.warning(
+                    "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are ENABLED"
+                )
+            else:
+                logger.info(
+                    "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are DISABLED"
+                )
 
         # Register default handlers
         self._register_default_handlers()
