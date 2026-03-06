@@ -51,6 +51,7 @@ class MeshDeviceTree(Tree[str]):
         # identity_hash is the stable public-key hash; destination_hash
         # is app+aspect-scoped and is stored in node.data for routing.
         # Cache: identity_hash → meta dict from /meta responses
+        # Bounded to _CACHE_MAX entries (FIFO eviction on overflow).
         self._meta_cache: dict[str, dict[str, Any]] = {}
         # Cache: identity_hash → info dict from /info responses.
         # None = node declined (info_respond=False).  Absent key = not yet queried.
@@ -59,6 +60,29 @@ class MeshDeviceTree(Tree[str]):
         self._meta_pending: set[str] = set()
         # Failure counter per identity_hash — give up after META_MAX_RETRIES failures
         self._meta_fail_count: dict[str, int] = {}
+
+    # Maximum number of entries in each identity-keyed cache.  In a large
+    # observable mesh (public hub scenario), the OTHER section could grow
+    # arbitrarily.  FIFO eviction keeps memory stable over long TUI sessions.
+    _CACHE_MAX: int = 512
+
+    def _cache_put(self, cache: dict, key: str, value: Any) -> None:
+        """Insert into a bounded cache dict.  Evicts the oldest entry (FIFO)
+        when the cache is full.  Python 3.7+ dicts maintain insertion order.
+        """
+        if key in cache:
+            # Update existing — no eviction needed
+            cache[key] = value
+            return
+        while len(cache) >= self._CACHE_MAX:
+            evicted = next(iter(cache))
+            del cache[evicted]
+        cache[key] = value
+
+    def _evict_stale_fail_counts(self) -> None:
+        """Keep _meta_fail_count bounded to _CACHE_MAX entries (FIFO eviction)."""
+        while len(self._meta_fail_count) >= self._CACHE_MAX:
+            del self._meta_fail_count[next(iter(self._meta_fail_count))]
 
     def on_mount(self) -> None:
         self._load_data()
@@ -347,9 +371,11 @@ class MeshDeviceTree(Tree[str]):
                 return
             meta = await bridge.datalink_meta(destination_hash)
             if meta:
-                self._meta_cache[identity_hash] = meta
+                self._cache_put(self._meta_cache, identity_hash, meta)
             else:
                 # Probe returned nothing — count as a failure
+                if identity_hash not in self._meta_fail_count:
+                    self._evict_stale_fail_counts()
                 self._meta_fail_count[identity_hash] = (
                     self._meta_fail_count.get(identity_hash, 0) + 1
                 )
@@ -359,6 +385,8 @@ class MeshDeviceTree(Tree[str]):
                 identity_hash[:12],
                 exc,
             )
+            if identity_hash not in self._meta_fail_count:
+                self._evict_stale_fail_counts()
             self._meta_fail_count[identity_hash] = (
                 self._meta_fail_count.get(identity_hash, 0) + 1
             )
@@ -455,14 +483,14 @@ class MeshDeviceTree(Tree[str]):
                 return
             info = await bridge.datalink_info(destination_hash)
             # Store result under identity_hash — None = declined (not an error)
-            self._info_cache[identity_hash] = info
+            self._cache_put(self._info_cache, identity_hash, info)
         except Exception as exc:
             logger.debug(
                 "Datalink /info request failed for %s: %s",
                 identity_hash[:12],
                 exc,
             )
-            self._info_cache[identity_hash] = None
+            self._cache_put(self._info_cache, identity_hash, None)
         self.call_later(self._refresh_other_labels)
 
     def _select_by_identity(self, identity: str) -> None:

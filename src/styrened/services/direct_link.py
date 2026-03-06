@@ -12,6 +12,7 @@ store-and-forward overhead.
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -37,11 +38,112 @@ META_MAX_RETRIES = 3
 CLEANUP_INTERVAL = 120.0
 IDLE_LINK_TIMEOUT = 900.0  # 15 min — link establishment is expensive on LoRa
 
+# Maximum response body size from any datalink endpoint.  Responses larger
+# than this are discarded without parsing — prevents memory exhaustion from
+# malicious or buggy nodes returning unbounded JSON.
+MAX_RESPONSE_BYTES = 32_768  # 32 KiB — no legitimate /meta or /info response is larger
+
+# Field length caps for external-sourced strings rendered in the TUI.
+# Prevents both markup injection and runaway label widths.
+_MAX_VERSION_LEN = 32
+_MAX_PROFILE_LEN = 32
+_MAX_ARCH_LEN = 20
+_MAX_OSID_LEN = 32
+_MAX_CAP_LEN = 64
+_MAX_NAME_LEN = 64
+_MAX_LABEL_LEN = 64
+_MAX_CAPS_COUNT = 32
+
+# Compiled pattern strips all Rich/Textual markup tags ([tag], [/tag], [#hex]).
+_RICH_MARKUP_RE = re.compile(r"\[/?[^\]]{0,64}\]")
+
 # Speedtest payload sets — selected by link RTT
 PAYLOAD_SET_FAST = [256, 1024, 4096, 16384, 65536, 262144]  # TCP/UDP, RTT <200ms
 PAYLOAD_SET_MEDIUM = [64, 256, 1024, 4096, 16384]  # WiFi mesh / fast LoRa, RTT 200ms-2s
 PAYLOAD_SET_SLOW = [64, 256, 1024, 4096]  # LoRa SF7-SF9, RTT 2s-5s
 PAYLOAD_SET_MINIMAL = [64, 256, 1024]  # LoRa SF10-SF12 / very slow, RTT >5s
+
+
+# ---------------------------------------------------------------------------
+# External-content sanitization helpers
+# ---------------------------------------------------------------------------
+
+
+def _sanitize_str(value: Any, max_len: int) -> str:
+    """Sanitize an externally-sourced string before use in the TUI.
+
+    Strips Rich/Textual markup tags, removes non-printable characters,
+    and caps the result at *max_len* characters.  Returns ``""`` for
+    non-string inputs so callers can treat a missing value and a bad
+    value identically.
+
+    This prevents a malicious remote node from injecting markup tags
+    (e.g. ``[red]evil[/red]``, ``][b]`` ) into the Textual widget tree.
+    """
+    if not isinstance(value, str):
+        return ""
+    # Remove Rich markup tags — e.g. [bold], [/bold], [#ff0000]
+    clean = _RICH_MARKUP_RE.sub("", value)
+    # Remove non-printable characters (control chars, null bytes, etc.)
+    clean = "".join(c for c in clean if c.isprintable())
+    return clean[:max_len]
+
+
+def _validate_meta_response(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate and sanitize a /meta response received from a remote peer.
+
+    Enforces:
+    - Only known fields are passed through
+    - All string fields are sanitized (markup stripped, length capped)
+    - ``capabilities`` must be a list of strings (non-strings are dropped)
+    - Non-conforming or empty responses return ``None``
+
+    This is the single ingress point for externally-sourced meta content
+    and must be called before any field is displayed or stored.
+    """
+    if not isinstance(data, dict):
+        return None
+    result: dict[str, Any] = {}
+    if "styrene_version" in data:
+        v = _sanitize_str(data["styrene_version"], _MAX_VERSION_LEN)
+        if v:
+            result["styrene_version"] = v
+    if "profile" in data:
+        p = _sanitize_str(data["profile"], _MAX_PROFILE_LEN)
+        if p:
+            result["profile"] = p
+    if "capabilities" in data:
+        raw_caps = data["capabilities"]
+        if isinstance(raw_caps, list):
+            clean_caps = [
+                _sanitize_str(c, _MAX_CAP_LEN)
+                for c in raw_caps
+                if isinstance(c, str)
+            ]
+            # Drop empty strings after sanitization
+            result["capabilities"] = [c for c in clean_caps if c][:_MAX_CAPS_COUNT]
+        # Non-list capabilities are silently dropped
+    if "arch" in data:
+        result["arch"] = _sanitize_str(data["arch"], _MAX_ARCH_LEN)
+    if "os_id" in data:
+        result["os_id"] = _sanitize_str(data["os_id"], _MAX_OSID_LEN)
+    return result if result else None
+
+
+def _validate_info_response(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate and sanitize a /info response received from a remote peer.
+
+    Only ``name`` and ``operator_label`` are accepted.  At least one of
+    them must be non-empty for the response to be considered a positive
+    identification (rather than a silent decline).
+    """
+    if not isinstance(data, dict):
+        return None
+    name = _sanitize_str(data.get("name", ""), _MAX_NAME_LEN)
+    label = _sanitize_str(data.get("operator_label", ""), _MAX_LABEL_LEN)
+    if not name and not label:
+        return None
+    return {"name": name, "operator_label": label}
 
 # Inter-test delay — longer for slow links to respect airtime
 SPEEDTEST_DELAY_FAST = 0.2
@@ -340,12 +442,21 @@ class DirectLinkService:
         """
         data = await self.request(lxmf_destination_hash, "/meta", timeout=timeout)
         if data:
+            if len(data) > MAX_RESPONSE_BYTES:
+                logger.warning(
+                    "Datalink /meta response too large (%d bytes) from %s — discarding",
+                    len(data),
+                    lxmf_destination_hash[:16],
+                )
+                return None
             try:
-                result = json.loads(data)
-                # Empty dict = peer is running an older version without /meta
-                return result if result else None
+                raw = json.loads(data)
+                if not raw:
+                    return None  # Empty dict = older node without /meta support
+                return _validate_meta_response(raw)
             except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"Datalink /meta decode error: {e}")
+                logger.warning("Datalink /meta decode error from %s: %s",
+                               lxmf_destination_hash[:16], e)
         return None
 
     async def request_info(
@@ -364,13 +475,21 @@ class DirectLinkService:
         """
         data = await self.request(lxmf_destination_hash, "/info", timeout=timeout)
         if data:
+            if len(data) > MAX_RESPONSE_BYTES:
+                logger.warning(
+                    "Datalink /info response too large (%d bytes) from %s — discarding",
+                    len(data),
+                    lxmf_destination_hash[:16],
+                )
+                return None
             try:
-                result = json.loads(data)
-                # Empty dict = node declined (info_respond=False) — return None
-                if result and any(v for v in result.values() if v):
-                    return result
+                raw = json.loads(data)
+                if not raw:
+                    return None  # Empty dict = node declined
+                return _validate_info_response(raw)
             except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"Datalink /info decode error: {e}")
+                logger.warning("Datalink /info decode error from %s: %s",
+                               lxmf_destination_hash[:16], e)
         return None
 
     async def run_speedtest(
