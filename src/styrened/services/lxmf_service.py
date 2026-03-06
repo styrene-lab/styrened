@@ -105,6 +105,18 @@ class LXMFService:
         # Loaded from DB on first check, invalidated by block/unblock IPC.
         self._blocked_peers: set[str] | None = None
 
+        # RBAC policy reference (injected by daemon after init)
+        self._rbac_policy: "RBACPolicy | None" = None
+
+    def set_rbac_policy(self, policy: "RBACPolicy") -> None:
+        """Inject RBAC policy for unified authorization checks.
+
+        Args:
+            policy: RBACPolicy instance from daemon config.
+        """
+        self._rbac_policy = policy
+        logger.info("RBAC policy injected into LXMFService")
+
     @property
     def is_initialized(self) -> bool:
         """Check if LXMF is initialized.
@@ -1036,6 +1048,9 @@ class LXMFService:
                     )
                 conn.commit()
             self.invalidate_blocklist()
+            # Sync to RBAC policy if available
+            if self._rbac_policy is not None:
+                self._rbac_policy.block(peer_hash)
             logger.info(f"Blocked peer {peer_hash[:16]}...")
             return True
         except Exception as e:
@@ -1063,6 +1078,9 @@ class LXMFService:
                 )
                 conn.commit()
             self.invalidate_blocklist()
+            # Sync to RBAC policy if available
+            if self._rbac_policy is not None:
+                self._rbac_policy.unblock(peer_hash)
             logger.info(f"Unblocked peer {peer_hash[:16]}...")
             return True
         except Exception as e:
@@ -1109,10 +1127,17 @@ class LXMFService:
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
 
-        # Check if sender is blocked — silently drop all messages from blocked peers
-        if self._is_blocked(source_hash):
-            logger.info(f"Dropped message from blocked peer {source_hash[:16]}...")
-            return
+        # Check if sender is blocked — RBAC policy takes precedence, legacy fallback
+        if self._rbac_policy is not None:
+            from styrened.models.rbac import Role
+
+            if self._rbac_policy.resolve_role(source_hash) == Role.BLOCKED:
+                logger.info(f"Dropped message from blocked peer {source_hash[:16]}... (RBAC)")
+                return
+        else:
+            if self._is_blocked(source_hash):
+                logger.info(f"Dropped message from blocked peer {source_hash[:16]}...")
+                return
 
         # Normalize message content for non-raw callbacks
         # Handles both JSON payloads (styrened) and plain text (Sideband/NomadNet)

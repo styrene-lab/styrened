@@ -598,3 +598,13 @@ class TestCapabilityRegistry:
         for cap in Capability.ALL:
             assert cap not in seen, f"Duplicate capability value: {cap}"
             seen.add(cap)
+
+
+def test_inbox_read_in_monitor_capabilities():
+    """INBOX_READ capability is available at MONITOR tier."""
+    assert Capability.INBOX_READ in ROLE_CAPABILITIES[Role.MONITOR]
+
+
+def test_inbox_read_not_in_peer_capabilities():
+    """PEER role does NOT have INBOX_READ capability."""
+    assert Capability.INBOX_READ not in ROLE_CAPABILITIES[Role.PEER]

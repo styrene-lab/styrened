@@ -503,6 +503,10 @@ class StyreneDaemon:
                 logger.warning("LXMF not initialized, conversation service not started")
                 return
 
+            # Inject RBAC policy into LXMF service for unified blocklist checks
+            if hasattr(self.config, "rbac") and self.config.rbac is not None:
+                lxmf_service.set_rbac_policy(self.config.rbac)
+
             # Get local LXMF destination hash for determining message direction
             # This must be the LXMF delivery destination hash, NOT the identity hash,
             # because LXMF messages use destination hashes for source/dest identification
@@ -1179,6 +1183,7 @@ class StyreneDaemon:
             self._rpc_server = RPCServer(
                 self._styrene_protocol,
                 enable_dangerous_commands=self.config.rpc.allow_command_execution,
+                rbac_policy=self.config.rbac,
             )
             self._rpc_server._daemon = self
 
