@@ -401,6 +401,19 @@ def create_auth_router(
 
     @router.post("/verify")
     async def verify(request: Request, body: VerifyRequest) -> JSONResponse:
+        # RBAC re-check: identity may have been blocked between challenge and verify
+        rbac = daemon.config.rbac
+        if rbac is not None:
+            from styrened.models.rbac import Capability
+
+            if not rbac.has_capability(body.identity_hash.lower(), Capability.WEB_READ):
+                # Consume the challenge to prevent replay
+                challenge_store.consume(body.challenge)
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Identity not authorized (RBAC)"},
+                )
+
         # Consume the challenge (single-use)
         pending = challenge_store.consume(body.challenge)
         if pending is None:

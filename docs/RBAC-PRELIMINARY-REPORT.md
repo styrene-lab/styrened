@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-06  
 **Version:** v0.13.43  
-**Status:** Exploratory / RFC
+**Status:** Phases 1–4 COMPLETE (v0.14.7) — Phase 5 (legacy removal) planned for v0.15.0
 
 ---
 
@@ -256,35 +256,46 @@ The `RBACPolicy` instance lives on the daemon and is injected into every service
 
 ## 5. Migration Strategy
 
-### Phase 1: Model + Central Policy (non-breaking)
-- Add `src/styrened/models/rbac.py` with `Role`, `Capability`, `RBACPolicy`
-- Add `rbac` section to `CoreConfig` with parsing in `services/config.py`
-- Add `RBACPolicy` to daemon, populated from config
-- **No behavioral changes** — existing `authorized_identities` still works
+### Phase 1: Model + Central Policy (non-breaking) — ✅ COMPLETE (v0.14.3)
+- Added `src/styrened/models/rbac.py` with `Role`, `Capability`, `RBACPolicy`, `RosterEntry`
+- Added `rbac` section to `CoreConfig` with parsing in `services/config.py`
+- Added `RBACPolicy` to daemon, populated from config
+- ~60 unit tests covering role resolution, capability checks, grants, hierarchy
 
-### Phase 2: RPC + Terminal Integration
-- Replace RPC `_is_authorized()` with capability checks
-- Replace Terminal identity check with capability checks
-- Map legacy `authorized_identities` → `admin` role, `enable_dangerous_commands` → preserved as override
-- Fix fail-open/fail-closed inconsistency (both should respect `default_role`)
-- **Deprecation warnings** for `authorized_identities` in config
+### Phase 2: RPC + LXMF Integration — ✅ COMPLETE (v0.14.6)
+- Replaced RPC `_is_authorized()` with `rbac.has_capability()` per message type
+- Fixed fail-open vulnerability: empty whitelist now denies when RBAC active
+- Unified LXMF blocklist: `_is_blocked()` uses `rbac.resolve_role()==BLOCKED`
+- Dual-write: `block_peer()`/`unblock_peer()` write to both contacts DB and RBAC
+- `_seed_contacts_blocks_to_rbac()` loads runtime blocks into RBAC on startup
+- 61 RBAC tests across `test_rpc_rbac.py` and `test_lxmf_rbac.py`
 
-### Phase 3: DirectLink + VPN Gating
-- Add capability check to DirectLink incoming link acceptance
-- Gate VPN handshake behind `VPN_HANDSHAKE` capability
-- Add capability check to datalink request handlers
+### Phase 3: DirectLink ALLOW_LIST Enforcement — ✅ COMPLETE (v0.14.7)
+- All 5 DirectLink handlers switched from ALLOW_ALL to RBAC-gated allow mode
+- Added `DATALINK_PING`, `DATALINK_META`, `DATALINK_INFO` capabilities at PEER tier
+- Moved `DATALINK_STATUS` from MONITOR to PEER tier (app-layer still gates full data)
+- `_datalink_allow_mode()` computes (allow_flag, allowed_list) per capability
+- `_reregister_datalink_handlers()` for roster-change re-registration
+- App-layer RBAC gates on all 5 handlers (defense-in-depth)
+- 39 tests via strict TDD in `test_datalink_rbac.py`
 
-### Phase 4: Web API + LXMF Layer
-- Replace `WebAuthConfig.authorized_identities` with RBAC role check
-- Map `public_mode` to `default_role: monitor`
-- Add optional LXMF-layer allow-list (inbound chat restricted to PEER+ roles)
-- Deprecate `banned_peers` in favor of `rbac.blocked`
+### Phase 4: Terminal + Web API — ✅ COMPLETE (v0.14.7)
+- `TerminalService.is_authorized()` checks `TERMINAL_RESTRICTED`/`TERMINAL_FULL`
+- `TerminalService.authorization_level()` returns "full", "restricted", or None
+- Web API `challenge()` checks `WEB_READ` via RBAC before issuing challenge nonce
+- Web API `verify()` re-checks RBAC before issuing session token (TOCTOU fix)
+- `AuthMiddleware` gates mutating methods (POST/PUT/PATCH/DELETE) on `WEB_WRITE`
+- GET-only endpoints require `WEB_READ` (session) only
+- Legacy fallback preserved when `rbac_policy=None` across all surfaces
+- 23 terminal RBAC tests + 16 web auth RBAC tests
 
-### Phase 5: Cleanup
+### Phase 5: Cleanup — ⬜ PLANNED (v0.15.0)
 - Remove all per-subsystem `authorized_identities` fields
 - Remove `enable_dangerous_commands` (replaced by role-based capability)
 - Remove `banned_peers` (replaced by `rbac.blocked`)
+- Remove `allow_unauthenticated` fields
 - Update all documentation and TUI settings screens
+- **Breaking config change** → major version bump
 
 ---
 

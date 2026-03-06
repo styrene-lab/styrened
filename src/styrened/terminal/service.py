@@ -56,6 +56,8 @@ from styrened.terminal.messages import (
     serialize_message,
 )
 
+from styrened.models.rbac import Capability
+
 if TYPE_CHECKING:
     import RNS
 
@@ -446,6 +448,26 @@ class TerminalService:
         """Set or replace the RBAC policy for authorization checks."""
         self._rbac_policy = policy
 
+    def authorization_level(self, identity_hash: str) -> str | None:
+        """Return the terminal authorization level for an identity.
+
+        Returns:
+            "full" if TERMINAL_FULL capability (ADMIN),
+            "restricted" if TERMINAL_RESTRICTED capability (OPERATOR),
+            None if no terminal access.
+        """
+        if self._rbac_policy is not None:
+            if self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL):
+                return "full"
+            if self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED):
+                return "restricted"
+            return None
+
+        # Legacy: authorized → restricted, unauthorized → None
+        if self.is_authorized(identity_hash):
+            return "restricted"
+        return None
+
     def is_authorized(self, identity_hash: str) -> bool:
         """Check if an identity is authorized for terminal access.
 
@@ -461,8 +483,6 @@ class TerminalService:
         """
         # RBAC path: check terminal capabilities
         if self._rbac_policy is not None:
-            from styrened.models.rbac import Capability
-
             has_terminal = (
                 self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED)
                 or self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL)
