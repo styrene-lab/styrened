@@ -1892,6 +1892,7 @@ class StyreneDaemon:
                 "session_idle_timeout": self.config.terminal.session_idle_timeout,
                 "max_sessions_per_identity": self.config.terminal.max_sessions_per_identity,
                 "max_total_sessions": self.config.terminal.max_total_sessions,
+                "rbac_policy": self.config.rbac,
             }
 
             # Only pass default_shell if configured
