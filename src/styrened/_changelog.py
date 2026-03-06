@@ -152,5 +152,6 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.43", "fix: blocklist prefix matching, init_db guarantee"),
     ("0.14.0", "feat(rbac): unified role-based access control model; docs: RBAC mesh identity design assessment; feat(tui): expose mesh access policy in Settings > Security tab; feat(discovery): default-deny mesh admission via allowlist policy; perf(conversations): full optimization pass on database layer and IPC boundary; perf(inbox): replace full-table scan with SQL aggregation in list_conversations; fix: blocklist prefix matching, init_db guarantee"),
     ("0.14.1", "fix(tui): upgrade screen changelog formatting"),
-    ("0.14.2", "feat(mesh): MY MESH vs OTHER split; /meta non-identifiable endpoint; /info default-deny opt-in endpoint; discovery.info_respond config flag; 40 new tests"),
+    ("0.14.2", "feat(mesh): MY MESH vs OTHER STYRENE NODES dashboard split"),
+    ("0.14.3", "fix(mesh): structural fixes for MY MESH/OTHER split — hash-key consistency (destination_hash throughout node.data), fix dead /info request path, fix _info_cache write/read key mismatch, fix _gather_info default-name leak, thread-safe label refresh via call_later, meta probe retry cap (META_MAX_RETRIES=3), DISCOVERY_TIMEOUT=10s for meta/info probes, load RBAC config once per tree rebuild"),
 ]
