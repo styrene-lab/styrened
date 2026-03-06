@@ -150,4 +150,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.41", "fix(tui): Block binding on ConversationScreen (works from any focus)"),
     ("0.13.42", "fix: seed banned_peers after init_db, lint cleanup"),
     ("0.13.43", "fix: blocklist prefix matching, init_db guarantee"),
+    ("0.14.0", "feat(rbac): unified role-based access control model"),
 ]
