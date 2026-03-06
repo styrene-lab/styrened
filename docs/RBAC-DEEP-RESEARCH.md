@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-06  
 **Prerequisite:** [RBAC-PRELIMINARY-REPORT.md](RBAC-PRELIMINARY-REPORT.md)  
-**Status:** Research complete — ready for implementation planning
+**Status:** Phases 1–4 implemented (v0.14.7) — Phase 5 (legacy removal) planned for v0.15.0
 
 ---
 
@@ -887,55 +887,88 @@ These subsume the existing `CMD_BLOCK_PEER` / `CMD_UNBLOCK_PEER` / `QUERY_BLOCKE
 
 ## 9. Migration Path from Current State
 
-### Phase 1: Foundation (Non-Breaking)
-**Estimate: 1 session**
+### Phase 1: Foundation (Non-Breaking) — ✅ COMPLETE (v0.14.3)
 
-- [ ] Create `src/styrened/models/rbac.py` with `Role`, `Capability`, `RBACPolicy`, `RosterEntry`
-- [ ] Add `rbac` section parsing to `services/config.py`
-- [ ] Add `RBACPolicy` field to `CoreConfig`
-- [ ] Instantiate `RBACPolicy` on daemon, inject into services
-- [ ] Write unit tests for resolution logic, capability checks, prefix blocking, legacy migration
-- [ ] **No behavioral changes** — all existing auth paths untouched
+- [x] Create `src/styrened/models/rbac.py` with `Role`, `Capability`, `RBACPolicy`, `RosterEntry`
+- [x] Add `rbac` section parsing to `services/config.py`
+- [x] Add `RBACPolicy` field to `CoreConfig`
+- [x] Instantiate `RBACPolicy` on daemon, inject into services
+- [x] Write unit tests (~60 tests covering resolution, capabilities, grants, hierarchy, config, serialization)
+- [x] **No behavioral changes** — all existing auth paths untouched
 
-### Phase 2: RPC + LXMF Integration (Behavioral)
-**Estimate: 1 session**
+**Implementation note:** `Capability` uses `ClassVar[str]` constants (not `str, Enum`) for YAML config readability. `RosterEntry` supports per-identity `grants: frozenset[str]` for orthogonal capabilities.
 
-- [ ] Replace `RPCServer._is_authorized()` with `rbac.has_capability(source, cap)`
-- [ ] Map each `StyreneMessageType` to a `Capability`
-- [ ] Remove `enable_dangerous_commands` toggle (subsumed by role capabilities)
-- [ ] Replace `lxmf_service._is_blocked()` with `rbac.has_capability(source, CHAT_RECEIVE)`
-- [ ] Add `_migrate_legacy_auth()` for backward compatibility
-- [ ] Emit deprecation warnings for old config fields
-- [ ] Tests: verify role-based command gating, verify blocked identity behavior preserved
+### Phase 2: RPC + LXMF Integration (Behavioral) — ✅ COMPLETE (v0.14.6)
 
-### Phase 3: DirectLink + VPN Gating (Security-Critical)
-**Estimate: 1 session**
+- [x] Replace `RPCServer._is_authorized()` with `rbac.has_capability(source, cap)`
+- [x] Map each `StyreneMessageType` to a `Capability` via `MESSAGE_TYPE_CAPABILITY` dict
+- [x] Fix fail-open vulnerability: empty whitelist now denies when RBAC active
+- [x] Replace `lxmf_service._is_blocked()` with `rbac.resolve_role()==BLOCKED`
+- [x] Dual-write: `block_peer()`/`unblock_peer()` write to both contacts DB and RBAC
+- [x] `_seed_contacts_blocks_to_rbac()` loads runtime blocks into RBAC on startup
+- [x] Added `INBOX_READ` capability at MONITOR tier
+- [x] 61 RBAC tests across `test_rpc_rbac.py` and `test_lxmf_rbac.py`
 
-- [ ] Switch datalink request handlers from `ALLOW_ALL` to capability-gated `ALLOW_LIST`
-- [ ] Add link identification timeout for `default_role=NONE` configurations
-- [ ] Gate VPN handshake behind `VPN_HANDSHAKE` capability
-- [ ] Add `get_allow_list()` cache invalidation on roster changes
-- [ ] Tests: verify unauthenticated link behavior per default_role
+**Implementation note:** `enable_dangerous_commands` NOT removed yet — preserved for legacy fallback. Removal deferred to Phase 5.
 
-### Phase 4: Terminal + Web API (Completeness)
-**Estimate: 1 session**
+### Phase 3: DirectLink ALLOW_LIST Enforcement — ✅ COMPLETE (v0.14.7)
 
-- [ ] Replace `TerminalService.authorized_identities` with capability checks
-- [ ] Implement `TERMINAL_RESTRICTED` vs `TERMINAL_FULL` differentiation
-- [ ] Replace `WebAuthConfig.authorized_identities` with RBAC middleware
-- [ ] Map `public_mode` to `default_role: monitor`
-- [ ] New IPC commands: `CMD_RBAC_*` family
-- [ ] TUI: RBAC management screen (view roster, add/remove/change roles)
+- [x] Switch all 5 datalink request handlers from `ALLOW_ALL` to capability-gated `ALLOW_LIST`
+- [x] Added `DATALINK_PING`, `DATALINK_META`, `DATALINK_INFO` capabilities at PEER tier
+- [x] Moved `DATALINK_STATUS` from MONITOR to PEER tier (app-layer gates full data to MONITOR+)
+- [x] `DATALINK_HANDLER_CAPABILITY` dict, `_datalink_allow_mode()`, `_reregister_datalink_handlers()`
+- [x] App-layer RBAC gates on all 5 handlers (defense-in-depth)
+- [x] `get_allow_list()` cache invalidation via `invalidate_cache()` on roster mutations
+- [x] 39 tests via strict TDD in `test_datalink_rbac.py`
+- [ ] Link identification timeout for `default_role=NONE` — deferred (not critical with app-layer gates)
+- [ ] VPN handshake gating — deferred (VPN handshake now uses LXMF, gated by Phase 2 RBAC)
 
-### Phase 5: Cleanup + Deprecation Removal
-**Estimate: 1 session, deferred**
+### Phase 4: Terminal + Web API — ✅ COMPLETE (v0.14.7)
 
-- [ ] Remove all per-subsystem `authorized_identities` fields
-- [ ] Remove `enable_dangerous_commands`
-- [ ] Remove `banned_peers` (fully replaced by `rbac.blocked`)
-- [ ] Remove legacy `CMD_BLOCK_PEER` / `CMD_UNBLOCK_PEER` IPC commands
-- [ ] Update all documentation
-- [ ] Bump to next minor version (0.15.0?)
+- [x] `TerminalService.is_authorized()` checks `TERMINAL_RESTRICTED`/`TERMINAL_FULL` via RBAC
+- [x] `TerminalService.authorization_level()` returns "full", "restricted", or None
+- [x] `TerminalService.set_rbac_policy()` for runtime policy injection
+- [x] Web API `challenge()` checks `WEB_READ` via RBAC
+- [x] Web API `verify()` re-checks RBAC before issuing session (TOCTOU fix)
+- [x] `AuthMiddleware` gates POST/PUT/PATCH/DELETE on `WEB_WRITE` capability
+- [x] Legacy fallback preserved when `rbac_policy=None` across all surfaces
+- [x] 23 terminal RBAC tests + 16 web auth RBAC tests
+- [ ] IPC commands `CMD_RBAC_*` (0x70-0x76) — deferred to Phase 5 or later
+- [ ] TUI RBAC management screen — deferred to Phase 5 or later
+- [ ] Map `public_mode` to `default_role: monitor` — deferred to Phase 5
+
+### Phase 5: Cleanup + Legacy Removal — ⬜ PLANNED (v0.15.0)
+
+**Scope:** Remove all legacy config fields and dual-path auth code.
+
+Config fields to remove:
+- [ ] `RPCConfig.authorized_identities` / `authorized_identities_file` (`models/config.py`)
+- [ ] `RPCConfig.enable_dangerous_commands` (`models/config.py`)
+- [ ] `TerminalConfig.authorized_identities` / `authorized_identities_file` (`models/config.py`)
+- [ ] `TerminalConfig.allow_unauthenticated` (`models/config.py`)
+- [ ] `WebAuthConfig.authorized_identities` (`models/config.py`)
+- [ ] `WebAuthConfig.allow_unauthenticated` (`models/config.py`)
+- [ ] `CoreConfig.banned_peers` (`models/config.py`)
+
+Code to simplify (remove `if rbac is None` legacy branches):
+- [ ] `RPCServer._is_authorized()` — remove legacy whitelist path
+- [ ] `LXMFService._is_blocked()` — remove contacts.blocked fallback
+- [ ] `TerminalService.is_authorized()` — remove `authorized_identities` + `allow_unauthenticated` path
+- [ ] `web/auth.py challenge()` — remove legacy `authorized_identities` path
+- [ ] `web/auth.py verify()` — RBAC check becomes unconditional
+- [ ] `web/auth_middleware.py` — WEB_WRITE check becomes unconditional
+- [ ] `daemon.py _datalink_allow_mode()` — remove `rbac is None` → ALLOW_ALL fallback
+- [ ] `daemon.py _datalink_rbac_role()` — remove `rbac is None` → PEER fallback
+- [ ] `daemon.py _serve_datalink_speedtest()` — remove `config.rbac is not None` conditional
+
+Other cleanup:
+- [ ] Remove `_seed_contacts_blocks_to_rbac()` — no longer needed when blocklist is RBAC-only
+- [ ] Remove `_migrate_legacy_to_rbac()` config migration code
+- [ ] Wire `set_rbac_policy()` into config reload path for terminal service
+- [ ] Add deprecation warnings in a v0.14.x release before removal
+- [ ] Migration guide documentation
+- [ ] Update TUI settings screens (remove legacy auth fields)
+- [ ] Bump to v0.15.0 (breaking config change)
 
 ---
 
