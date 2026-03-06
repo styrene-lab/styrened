@@ -331,8 +331,14 @@ class StyreneDaemon:
         only contains config-file blocks. Runtime blocks created via IPC
         block_peer() live in the contacts DB. This method loads them into
         the in-memory RBAC policy so they survive daemon restart.
+
+        Calls init_db() first to ensure the contacts table exists — this
+        is idempotent and safe to call multiple times.
         """
         try:
+            from styrened.models.messages import init_db
+
+            init_db()  # Ensure contacts table exists before querying
             blocked_set = lxmf_service._load_blocklist()
             if not blocked_set or self.config.rbac is None:
                 return
