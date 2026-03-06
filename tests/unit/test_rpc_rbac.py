@@ -324,3 +324,240 @@ class TestLegacyFallback:
         envelope = _make_envelope(StyreneMessageType.EXEC)
         await srv._protocol_handler(_make_message("authid123"), envelope)
         srv._handlers[StyreneMessageType.EXEC].assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed: unmapped message type
+# ---------------------------------------------------------------------------
+
+class TestRBACFailClosed:
+    """Unmapped message types must be rejected in RBAC mode."""
+
+    @pytest.mark.asyncio
+    async def test_unmapped_message_type_rejected(self):
+        """A message type with no capability mapping is fail-closed."""
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = True
+
+        # Register a handler for TERMINAL_REQUEST (not in MESSAGE_TYPE_CAPABILITY)
+        srv._handlers[StyreneMessageType.TERMINAL_REQUEST] = MagicMock()
+
+        envelope = _make_envelope(StyreneMessageType.TERMINAL_REQUEST)
+        await srv._protocol_handler(_make_message(ADMIN_HASH), envelope)
+
+        srv._handlers[StyreneMessageType.TERMINAL_REQUEST].assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unmapped_message_type_sends_error(self):
+        """Unmapped message type sends error response when request_id is set."""
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = True
+
+        srv._handlers[StyreneMessageType.TERMINAL_REQUEST] = MagicMock()
+
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.TERMINAL_REQUEST,
+            payload=b"",
+            request_id=b"\x01" * 16,
+        )
+        await srv._protocol_handler(_make_message(ADMIN_HASH), envelope)
+
+        proto.send_typed_message.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Server not running
+# ---------------------------------------------------------------------------
+
+class TestServerNotRunning:
+    """Messages are silently dropped when server is not running."""
+
+    @pytest.mark.asyncio
+    async def test_rbac_mode_not_running(self):
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = False
+        srv._handlers[StyreneMessageType.PING] = MagicMock()
+
+        await srv._protocol_handler(_make_message(ADMIN_HASH), _make_envelope(StyreneMessageType.PING))
+        srv._handlers[StyreneMessageType.PING].assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_legacy_mode_not_running(self):
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=None)
+        srv._running = False
+        srv._handlers[StyreneMessageType.PING] = MagicMock()
+
+        await srv._protocol_handler(_make_message("anyone"), _make_envelope(StyreneMessageType.PING))
+        srv._handlers[StyreneMessageType.PING].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NO_CORRELATION suppresses error response
+# ---------------------------------------------------------------------------
+
+class TestNoCorrelationSuppressesError:
+    """Rejected messages with NO_CORRELATION don't trigger error responses."""
+
+    @pytest.mark.asyncio
+    async def test_rbac_denied_no_error_when_no_correlation(self):
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = True
+        srv._handlers[StyreneMessageType.EXEC] = MagicMock()
+
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.EXEC,
+            payload=b"",
+            request_id=NO_CORRELATION,
+        )
+        await srv._protocol_handler(_make_message(PEER_HASH), envelope)
+
+        srv._handlers[StyreneMessageType.EXEC].assert_not_called()
+        proto.send_typed_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_envelope_rejects_empty_request_id(self):
+        """StyreneEnvelope enforces 16-byte request_id — empty is invalid."""
+        with pytest.raises(ValueError, match="request_id must be 16 bytes"):
+            StyreneEnvelope(
+                version=2,
+                message_type=StyreneMessageType.EXEC,
+                payload=b"",
+                request_id=b"",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Replay protection in RBAC mode
+# ---------------------------------------------------------------------------
+
+class TestReplayProtectionRBAC:
+    """Replay protection in RBAC mode uses explicit skip set."""
+
+    @pytest.mark.asyncio
+    async def test_exec_replay_caught_in_rbac_mode(self):
+        """Duplicate EXEC request_id is rejected as replay."""
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = True
+        srv._handlers[StyreneMessageType.EXEC] = MagicMock()
+
+        req_id = b"\xaa" * 16
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.EXEC,
+            payload=b"",
+            request_id=req_id,
+        )
+
+        # First call — dispatched
+        await srv._protocol_handler(_make_message(ADMIN_HASH), envelope)
+        assert srv._handlers[StyreneMessageType.EXEC].call_count == 1
+
+        # Second call — replay
+        await srv._protocol_handler(_make_message(ADMIN_HASH), envelope)
+        assert srv._handlers[StyreneMessageType.EXEC].call_count == 1  # still 1
+
+    @pytest.mark.asyncio
+    async def test_ping_replay_not_tracked_in_rbac_mode(self):
+        """PING replays are not tracked (skip set) in RBAC mode."""
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = True
+        srv._handlers[StyreneMessageType.PING] = MagicMock()
+
+        req_id = b"\xbb" * 16
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.PING,
+            payload=b"",
+            request_id=req_id,
+        )
+
+        await srv._protocol_handler(_make_message(PEER_HASH), envelope)
+        await srv._protocol_handler(_make_message(PEER_HASH), envelope)
+        assert srv._handlers[StyreneMessageType.PING].call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting fires after RBAC auth
+# ---------------------------------------------------------------------------
+
+class TestRateLimitingWithRBAC:
+    """Rate limiting still applies after RBAC authorization succeeds."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_after_rbac_pass(self):
+        """Authorized identity is rate-limited after exceeding threshold."""
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy(), rate_limit=3)
+        srv._running = True
+        srv._handlers[StyreneMessageType.STATUS_REQUEST] = MagicMock()
+
+        for i in range(5):
+            envelope = StyreneEnvelope(
+                version=2,
+                message_type=StyreneMessageType.STATUS_REQUEST,
+                payload=b"",
+                request_id=i.to_bytes(16, "big"),
+            )
+            await srv._protocol_handler(_make_message(ADMIN_HASH), envelope)
+
+        # First 3 should succeed, rest rate-limited
+        assert srv._handlers[StyreneMessageType.STATUS_REQUEST].call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Explicit grant overrides role tier
+# ---------------------------------------------------------------------------
+
+class TestExplicitGrants:
+    """Explicit grants on roster entries override role-based capabilities."""
+
+    @pytest.mark.asyncio
+    async def test_peer_with_exec_grant_can_exec(self):
+        """PEER with explicit rpc.exec grant can execute EXEC."""
+        proto = _make_protocol()
+        policy = _policy(
+            default_role=Role.NONE,
+            roster={
+                PEER_HASH: RosterEntry(
+                    identity_hash=PEER_HASH,
+                    role=Role.PEER,
+                    grants=frozenset([Capability.EXEC]),
+                ),
+            },
+        )
+        srv = RPCServer(proto, rbac_policy=policy)
+        srv._running = True
+        srv._handlers[StyreneMessageType.EXEC] = MagicMock()
+
+        envelope = _make_envelope(StyreneMessageType.EXEC)
+        await srv._protocol_handler(_make_message(PEER_HASH), envelope)
+
+        srv._handlers[StyreneMessageType.EXEC].assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_peer_without_grant_cannot_exec(self):
+        """PEER without explicit grant still cannot EXEC."""
+        proto = _make_protocol()
+        policy = _policy(
+            default_role=Role.NONE,
+            roster={
+                PEER_HASH: RosterEntry(identity_hash=PEER_HASH, role=Role.PEER),
+            },
+        )
+        srv = RPCServer(proto, rbac_policy=policy)
+        srv._running = True
+        srv._handlers[StyreneMessageType.EXEC] = MagicMock()
+
+        envelope = _make_envelope(StyreneMessageType.EXEC)
+        await srv._protocol_handler(_make_message(PEER_HASH), envelope)
+
+        srv._handlers[StyreneMessageType.EXEC].assert_not_called()

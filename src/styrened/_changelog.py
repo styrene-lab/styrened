@@ -156,4 +156,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.14.3", "fix(mesh): structural robustness fixes for MY MESH/OTHER split (v0.14.3)"),
     ("0.14.4", "security: datalink hardening pass (v0.14.4)"),
     ("0.14.5", "fix(rbac): decouple LXMF RBAC injection from chat.enabled; fix(rbac): address adversarial review findings for Phase 2; feat(rbac): Phase 2 - RBAC-gated RPC server and LXMF blocklist"),
+    ("0.14.6", "fix(rbac): address second adversarial review findings"),
 ]
