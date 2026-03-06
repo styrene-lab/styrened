@@ -124,7 +124,11 @@ _ADMIN_CAPS: frozenset[str] = _OPERATOR_CAPS | frozenset(
         Capability.REBOOT,
         Capability.SELF_UPDATE,
         Capability.TERMINAL_FULL,
-        Capability.VPN_HANDSHAKE,
+        # NOTE: VPN_HANDSHAKE is intentionally NOT in _ADMIN_CAPS.
+        # It is a pure orthogonal grant — an identity must be given explicit
+        # ``grants: [vpn.handshake]`` in the roster regardless of role tier.
+        # This prevents all ADMIN-role nodes from automatically receiving VPN
+        # access; the operator must explicitly opt each identity in.
     }
 )
 

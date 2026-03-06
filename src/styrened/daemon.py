@@ -29,6 +29,7 @@ import signal
 import sys
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,80 @@ from styrened.services.path_snapshot import PathSnapshotService
 from styrened.services.reticulum import discover_devices, start_discovery
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Datalink security constants
+# ---------------------------------------------------------------------------
+
+# Maximum speedtest payload accepted from a remote (avoids memory exhaustion
+# from a malicious node sending arbitrarily large payloads).
+_SPEEDTEST_MAX_PAYLOAD_BYTES = 1_048_576  # 1 MiB
+
+# Datalink per-identity rate limits (requests per minute).
+# Light endpoints (meta/info/ping/status): cheap to serve.
+# Heavy endpoints (speedtest): CPU and memory cost per call.
+_DL_LIGHT_LIMIT = 20
+_DL_HEAVY_LIMIT = 3
+_DL_WINDOW_SECONDS = 60.0
+# Maximum number of unique identities tracked in the rate limiter.
+# Old entries are evicted (FIFO) when this limit is reached to bound memory.
+_DL_MAX_TRACKED = 512
+
+
+class _DataLinkRateLimiter:
+    """Per-identity token-bucket rate limiter for DataLink request handlers.
+
+    Maintains a sliding-window counter per identity.  Two tiers:
+    - ``light``: for low-cost endpoints (/meta, /info, /ping, /status)
+    - ``heavy``: for expensive endpoints (/speedtest)
+
+    Thread-safety: not needed — all datalink handlers are called from
+    the RNS thread pool synchronously, so contention is limited.
+    However, the dict is bounded to avoid unbounded memory growth.
+    """
+
+    def __init__(self) -> None:
+        # identity_hex → deque of call timestamps (float, seconds)
+        self._ts: dict[str, deque[float]] = {}
+        # Insertion-order tracking for FIFO eviction
+        self._order: deque[str] = deque()
+
+    def _evict_if_needed(self) -> None:
+        while len(self._order) >= _DL_MAX_TRACKED:
+            old = self._order.popleft()
+            self._ts.pop(old, None)
+
+    def _prune(self, identity: str, now: float) -> deque[float]:
+        """Prune timestamps outside the window and return the remaining queue."""
+        cutoff = now - _DL_WINDOW_SECONDS
+        ts = self._ts.get(identity)
+        if ts is None:
+            self._evict_if_needed()
+            ts = deque()
+            self._ts[identity] = ts
+            self._order.append(identity)
+        while ts and ts[0] <= cutoff:
+            ts.popleft()
+        return ts
+
+    def check(self, identity: str, heavy: bool = False) -> bool:
+        """Return True if the request is within limits, False if rate-limited.
+
+        Args:
+            identity: Hex identity hash of the remote caller.
+            heavy: True for the speedtest endpoint.
+        """
+        if not identity:
+            # Unknown identity — allow (RNS link was established but identify()
+            # not called; restrict at Phase 3 when ALLOW_LIST is enforced).
+            return True
+        now = time.time()
+        limit = _DL_HEAVY_LIMIT if heavy else _DL_LIGHT_LIMIT
+        ts = self._prune(identity, now)
+        if len(ts) >= limit:
+            return False
+        ts.append(now)
+        return True
 
 
 class StyreneDaemon:
@@ -102,6 +177,7 @@ class StyreneDaemon:
         self._direct_link_service: Any = None  # Direct data link service
         self._datalink_destination: Any = None  # Incoming datalink RNS.Destination
         self._mesh_vpn_service: Any = None  # WireGuard mesh VPN service
+        self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -1329,6 +1405,45 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to start direct link service: {e}")
 
+    def _datalink_identity_hex(self, remote_identity: Any) -> str:
+        """Extract the hex identity hash from a remote RNS.Identity object.
+
+        Returns empty string if the identity is None or has no hash —
+        callers treat empty-string identity as unknown/unauthenticated.
+        The rate limiter allows unknown identities through; Phase 3 will
+        enforce ALLOW_LIST which requires a valid identity on the link.
+        """
+        try:
+            if remote_identity is not None and hasattr(remote_identity, "hash"):
+                return remote_identity.hash.hex()
+        except Exception:
+            pass
+        return ""
+
+    def _datalink_rbac_role(self, remote_identity_hex: str) -> int:
+        """Resolve the RBAC role for a datalink caller.
+
+        Returns the integer Role value.  Returns Role.NONE (1) on error,
+        which is the most restrictive non-blocked default — callers that
+        cannot be looked up get no elevated privileges.
+
+        Note: Loading config per-request has low overhead (config is
+        typically cached by the OS page cache) and ensures we always
+        reflect the latest roster without a restart.
+        """
+        try:
+            from styrened.models.rbac import Role
+            rbac = self.config.rbac
+            if rbac is None:
+                # No RBAC configured — fall back to configured default_role.
+                # With default_role=PEER (built-in default), all callers are
+                # considered peers.  Operators must set default_role=NONE to
+                # make this restrictive.
+                return int(Role.PEER)
+            return int(rbac.resolve_role(remote_identity_hex))
+        except Exception:
+            return 1  # Role.NONE
+
     def _setup_datalink_destination(self) -> None:
         """Register ("styrene", "datalink") destination for incoming links."""
         try:
@@ -1451,19 +1566,43 @@ class StyreneDaemon:
         remote_identity: Any,
         requested_at: Any,
     ) -> bytes:
-        """Serve /status request over direct link.
+        """Serve /status over direct link — RBAC-gated identifiable data.
 
-        Returns the same status data as RPC STATUS_RESPONSE but serialized
-        as JSON over the direct link for lower latency.
+        Access tiers:
+        - MONITOR+ (role ≥ 20): full status (uptime, ip, hostname, disk, etc.)
+        - PEER / NONE (role 1–19): non-identifiable meta only (same as /meta)
+        - BLOCKED (role 0): empty response
+
+        Rate limited (light tier: 20 req/min).
+        This replaces the previous ALLOW_ALL-with-no-gating behaviour.
         """
-        import json
+        identity_hex = self._datalink_identity_hex(remote_identity)
+        if not self._datalink_rl.check(identity_hex):
+            logger.warning("Datalink /status rate-limited for %s", identity_hex[:16] or "unknown")
+            return json.dumps({"error": "rate_limited"}).encode("utf-8")
 
+        role = self._datalink_rbac_role(identity_hex)
         try:
-            status_data = self._rpc_server._gather_status() if self._rpc_server else {}
-            return json.dumps(status_data).encode("utf-8")
-        except Exception as e:
-            logger.error(f"Datalink /status handler error: {e}")
-            return json.dumps({"error": str(e)}).encode("utf-8")
+            from styrened.models.rbac import Role
+            if role <= int(Role.BLOCKED):
+                logger.info("Datalink /status blocked for %s", identity_hex[:16] or "unknown")
+                return json.dumps({}).encode("utf-8")
+            if role >= int(Role.MONITOR):
+                # Full status — caller is a trusted monitor or operator
+                status_data = self._rpc_server._gather_status() if self._rpc_server else {}
+                logger.debug(
+                    "Datalink /status (full) served to %s (role=%d)",
+                    identity_hex[:16] or "unknown",
+                    role,
+                )
+                return json.dumps(status_data).encode("utf-8")
+            else:
+                # PEER/NONE — return only non-identifiable meta (same as /meta)
+                meta = self._rpc_server._gather_meta(self.config) if self._rpc_server else {}
+                return json.dumps(meta).encode("utf-8")
+        except Exception:
+            logger.exception("Datalink /status handler error")
+            return json.dumps({"error": "internal_error"}).encode("utf-8")
 
     def _serve_datalink_speedtest(
         self,
@@ -1474,11 +1613,29 @@ class StyreneDaemon:
         remote_identity: Any,
         requested_at: Any,
     ) -> bytes:
-        """Serve /speedtest — receive payload, return ack with byte count."""
-        import json
+        """Serve /speedtest — receive payload, return ack with byte count.
+
+        Rate limited (heavy tier: 3 req/min) to prevent bandwidth flooding.
+        Payload size is capped at _SPEEDTEST_MAX_PAYLOAD_BYTES to prevent
+        memory exhaustion from malicious oversized submissions.
+        """
+        identity_hex = self._datalink_identity_hex(remote_identity)
+        if not self._datalink_rl.check(identity_hex, heavy=True):
+            logger.warning(
+                "Datalink /speedtest rate-limited for %s", identity_hex[:16] or "unknown"
+            )
+            return json.dumps({"error": "rate_limited"}).encode("utf-8")
 
         t0 = time.time()
-        received = len(data) if data else 0
+        raw_bytes = data if data else b""
+        if len(raw_bytes) > _SPEEDTEST_MAX_PAYLOAD_BYTES:
+            logger.warning(
+                "Datalink /speedtest payload too large (%d bytes) from %s — truncating",
+                len(raw_bytes),
+                identity_hex[:16] or "unknown",
+            )
+            raw_bytes = raw_bytes[:_SPEEDTEST_MAX_PAYLOAD_BYTES]
+        received = len(raw_bytes)
         process_ms = (time.time() - t0) * 1000
         return json.dumps({
             "bytes_received": received,
@@ -1495,9 +1652,13 @@ class StyreneDaemon:
         remote_identity: Any,
         requested_at: Any,
     ) -> bytes:
-        """Serve /ping request over direct link."""
-        import json
+        """Serve /ping request over direct link.
 
+        Rate limited (light tier: 20 req/min).
+        """
+        identity_hex = self._datalink_identity_hex(remote_identity)
+        if not self._datalink_rl.check(identity_hex):
+            return json.dumps({"error": "rate_limited"}).encode("utf-8")
         return json.dumps({"pong": True, "timestamp": time.time()}).encode("utf-8")
 
     def _serve_datalink_meta(
@@ -1509,18 +1670,22 @@ class StyreneDaemon:
         remote_identity: Any,
         requested_at: Any,
     ) -> bytes:
-        """Serve /meta request — non-identifiable node metadata.
+        """Serve /meta — non-identifiable node metadata.
 
+        Safe to serve to any caller (no identity or RBAC required).
         Returns styrene_version, profile, capabilities, arch, os_id.
-        No hostname, IP, uptime, disk, or operator identity.
-        Safe to serve to any caller, including unknown nodes.
+        Deliberately excludes hostname, IP, uptime, disk, operator identity.
+
+        Rate limited (light tier: 20 req/min) to prevent stat-flooding.
         """
-        import json
+        identity_hex = self._datalink_identity_hex(remote_identity)
+        if not self._datalink_rl.check(identity_hex):
+            return json.dumps({"error": "rate_limited"}).encode("utf-8")
 
         try:
             meta = self._rpc_server._gather_meta(self.config) if self._rpc_server else {}
-        except Exception as e:
-            logger.error(f"Datalink /meta handler error: {e}")
+        except Exception:
+            logger.exception("Datalink /meta handler error")
             meta = {}
         return json.dumps(meta).encode("utf-8")
 
@@ -1533,20 +1698,31 @@ class StyreneDaemon:
         remote_identity: Any,
         requested_at: Any,
     ) -> bytes:
-        """Serve /info request — identifiable operator metadata.
+        """Serve /info — opt-in operator identification.
 
         Returns name and operator_label only when discovery.info_respond=True.
-        Default is to return an empty dict (silent deny without error code).
-        Once RBAC Phase 3 lands, this will also check the roster.
+        Silently returns {} when declined — this is intentional and not an error.
+        The caller cannot distinguish "node declined" from "node doesn't support /info".
+
+        Rate limited (light tier: 20 req/min).
+
+        Phase 3 TODO: also gate /info on RBAC role of the requester — only
+        PEER+ should receive the identity response even when info_respond=True.
         """
-        import json
+        identity_hex = self._datalink_identity_hex(remote_identity)
+        if not self._datalink_rl.check(identity_hex):
+            return json.dumps({"error": "rate_limited"}).encode("utf-8")
 
         try:
             if not self.config.discovery.info_respond:
                 return json.dumps({}).encode("utf-8")
             info = self._rpc_server._gather_info(self.config) if self._rpc_server else {}
-        except Exception as e:
-            logger.error(f"Datalink /info handler error: {e}")
+            if info:
+                logger.debug(
+                    "Datalink /info served to %s", identity_hex[:16] or "unknown"
+                )
+        except Exception:
+            logger.exception("Datalink /info handler error")
             info = {}
         return json.dumps(info).encode("utf-8")
 

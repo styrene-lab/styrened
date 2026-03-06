@@ -113,9 +113,21 @@ class TestHasCapability:
     def test_admin_has_exec(self, policy: RBACPolicy) -> None:
         assert policy.has_capability(HASH_ADMIN, Capability.EXEC)
 
-    def test_admin_has_all_capabilities(self, policy: RBACPolicy) -> None:
-        for cap in Capability.ALL:
-            assert policy.has_capability(HASH_ADMIN, cap), f"ADMIN missing {cap}"
+    def test_admin_has_all_role_capabilities(self, policy: RBACPolicy) -> None:
+        """ADMIN role grants all role-derived capabilities.
+
+        VPN_HANDSHAKE is an orthogonal grant (not role-derived) — it must be
+        explicitly granted per-identity regardless of role.  See rbac.py.
+        """
+        from styrened.models.rbac import ROLE_CAPABILITIES, Role
+        admin_role_caps = ROLE_CAPABILITIES[Role.ADMIN]
+        for cap in admin_role_caps:
+            assert policy.has_capability(HASH_ADMIN, cap), f"ADMIN missing role cap {cap}"
+        # VPN_HANDSHAKE must NOT be auto-granted to ADMIN without explicit grant
+        assert not policy.has_capability(HASH_ADMIN, Capability.VPN_HANDSHAKE), (
+            "VPN_HANDSHAKE should not be auto-granted by ADMIN role — "
+            "it is an orthogonal capability requiring explicit roster grant"
+        )
 
     def test_operator_has_config_update(self, policy: RBACPolicy) -> None:
         assert policy.has_capability(HASH_OPERATOR, Capability.CONFIG_UPDATE)
@@ -282,8 +294,13 @@ class TestAllowList:
     def test_allow_list_includes_grants(self, policy: RBACPolicy) -> None:
         result = policy.get_allow_list(Capability.VPN_HANDSHAKE)
         hashes = {h.hex() for h in result}
-        assert HASH_ADMIN in hashes  # ADMIN has VPN
-        assert HASH_VPN_PEER in hashes  # explicit grant
+        # VPN_HANDSHAKE is an orthogonal grant — ADMIN role alone is insufficient.
+        # Only identities with an explicit 'grants: [vpn.handshake]' entry should appear.
+        assert HASH_ADMIN not in hashes, (
+            "ADMIN role must NOT auto-grant VPN_HANDSHAKE — "
+            "explicit roster grant required"
+        )
+        assert HASH_VPN_PEER in hashes  # has explicit grant in test fixture
 
 
 # ---------------------------------------------------------------------------
@@ -554,12 +571,26 @@ class TestCapabilityRegistry:
                 assert val in Capability.ALL, f"{attr}={val} not in Capability.ALL"
 
     def test_all_capabilities_in_some_role(self) -> None:
-        """Every capability is granted by at least one role."""
+        """Every non-orthogonal capability is granted by at least one role.
+
+        VPN_HANDSHAKE is the only orthogonal capability — it is intentionally
+        absent from ROLE_CAPABILITIES and only grantable via explicit roster
+        entries.  All other capabilities must be reachable through some role.
+        """
+        # Capabilities that are purely orthogonal (not in any role tier)
+        orthogonal_caps = {Capability.VPN_HANDSHAKE}
+
         all_granted = set()
         for caps in ROLE_CAPABILITIES.values():
             all_granted |= caps
         for cap in Capability.ALL:
-            assert cap in all_granted, f"{cap} not granted by any role"
+            if cap in orthogonal_caps:
+                # Must NOT be in any role — orthogonal means explicit grant only
+                assert cap not in all_granted, (
+                    f"{cap} is documented as orthogonal but appears in ROLE_CAPABILITIES"
+                )
+            else:
+                assert cap in all_granted, f"{cap} not granted by any role"
 
     def test_no_duplicate_capability_values(self) -> None:
         """All capability string values are unique."""
