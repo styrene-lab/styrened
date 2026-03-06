@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from styrened import __version__ as _styrened_version
+from styrened.models.rbac import Capability, RBACPolicy
 from styrened.models.styrene_wire import (
     NO_CORRELATION,
     StyreneEnvelope,
@@ -133,6 +134,19 @@ PUBLIC_RPC_COMMANDS: frozenset[StyreneMessageType] = frozenset(
     }
 )
 
+# RBAC: map each RPC message type to the capability required to invoke it.
+# Used when an RBACPolicy is active; legacy auth is bypassed entirely.
+MESSAGE_TYPE_CAPABILITY: dict[StyreneMessageType, str] = {
+    StyreneMessageType.PING: Capability.PING,
+    StyreneMessageType.STATUS_REQUEST: Capability.STATUS_QUERY,
+    StyreneMessageType.EXEC: Capability.EXEC,
+    StyreneMessageType.REBOOT: Capability.REBOOT,
+    StyreneMessageType.CONFIG_UPDATE: Capability.CONFIG_UPDATE,
+    StyreneMessageType.SELF_UPDATE: Capability.SELF_UPDATE,
+    StyreneMessageType.INBOX_QUERY: "rpc.inbox_read",
+    StyreneMessageType.MESSAGES_QUERY: "rpc.inbox_read",
+}
+
 
 # Error codes for RPC errors
 class RPCErrorCode:
@@ -176,6 +190,7 @@ class RPCServer:
         authorized_identities_file: Path | None = None,
         enable_dangerous_commands: bool = False,
         rate_limit: int = DEFAULT_RPC_RATE_LIMIT,
+        rbac_policy: RBACPolicy | None = None,
     ) -> None:
         """Initialize RPC server.
 
@@ -191,8 +206,12 @@ class RPCServer:
             enable_dangerous_commands: If True, enable EXEC, REBOOT, CONFIG_UPDATE.
                             Defaults to False for security.
             rate_limit: Maximum requests per minute per identity.
+            rbac_policy: Optional RBACPolicy for capability-based authorization.
+                        When set, replaces legacy authorized_identities and
+                        enable_dangerous_commands checks entirely.
         """
         self._protocol = styrene_protocol
+        self._rbac_policy = rbac_policy
         self.allowed_commands = allowed_commands or set(DEFAULT_ALLOWED_COMMANDS)
         self._running = False
         self._handlers: dict[StyreneMessageType, Callable[[str, StyreneEnvelope], None]] = {}
@@ -335,28 +354,28 @@ class RPCServer:
             logger.debug(f"No RPC handler for message type: {msg_type.name}")
             return
 
-        # Security checks
-        # 1. Check if dangerous commands are enabled
-        if msg_type in DANGEROUS_RPC_COMMANDS and not self._enable_dangerous_commands:
-            logger.warning(
-                f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
-                f"dangerous commands disabled"
-            )
-            if envelope.request_id and envelope.request_id != NO_CORRELATION:
-                await self._send_error(
-                    source_hash,
-                    envelope.request_id,
-                    RPCErrorCode.COMMAND_NOT_ALLOWED,
-                    "Command not enabled on this node",
-                )
-            return
-
-        # 2. Check authorization for non-public commands
-        if msg_type not in PUBLIC_RPC_COMMANDS:
-            if not self._is_authorized(source_hash):
+        # Security checks — RBAC path or legacy path
+        if self._rbac_policy is not None:
+            # RBAC mode: every message type requires a capability check
+            required_cap = MESSAGE_TYPE_CAPABILITY.get(msg_type)
+            if required_cap is None:
                 logger.warning(
                     f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
-                    f"not authorized"
+                    f"no capability mapping (fail-closed)"
+                )
+                if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                    await self._send_error(
+                        source_hash,
+                        envelope.request_id,
+                        RPCErrorCode.COMMAND_NOT_ALLOWED,
+                        "Not authorized",
+                    )
+                return
+
+            if not self._rbac_policy.has_capability(source_hash, required_cap):
+                logger.warning(
+                    f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                    f"missing capability {required_cap}"
                 )
                 try:
                     from styrened.web.metrics import security_events_total
@@ -372,6 +391,44 @@ class RPCServer:
                         "Not authorized",
                     )
                 return
+        else:
+            # Legacy mode: dangerous commands gate + authorized_identities
+            # 1. Check if dangerous commands are enabled
+            if msg_type in DANGEROUS_RPC_COMMANDS and not self._enable_dangerous_commands:
+                logger.warning(
+                    f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                    f"dangerous commands disabled"
+                )
+                if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                    await self._send_error(
+                        source_hash,
+                        envelope.request_id,
+                        RPCErrorCode.COMMAND_NOT_ALLOWED,
+                        "Command not enabled on this node",
+                    )
+                return
+
+            # 2. Check authorization for non-public commands
+            if msg_type not in PUBLIC_RPC_COMMANDS:
+                if not self._is_authorized(source_hash):
+                    logger.warning(
+                        f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                        f"not authorized"
+                    )
+                    try:
+                        from styrened.web.metrics import security_events_total
+
+                        security_events_total.labels(type="auth_rejected").inc()
+                    except ImportError:
+                        pass
+                    if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                        await self._send_error(
+                            source_hash,
+                            envelope.request_id,
+                            RPCErrorCode.COMMAND_NOT_ALLOWED,
+                            "Not authorized",
+                        )
+                    return
 
         # 3. Check rate limit
         rate_limit_result = self._check_rate_limit(source_hash)

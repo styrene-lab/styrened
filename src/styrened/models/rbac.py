@@ -59,6 +59,7 @@ class Capability:
     STATUS_QUERY: ClassVar[str] = "rpc.status"
 
     # --- MONITOR tier (20) ---
+    INBOX_READ: ClassVar[str] = "rpc.inbox_read"
     WEB_READ: ClassVar[str] = "web.read"
     DATALINK_ESTABLISH: ClassVar[str] = "datalink.establish"
     DATALINK_STATUS: ClassVar[str] = "datalink.status"
@@ -103,6 +104,7 @@ _PEER_CAPS: frozenset[str] = frozenset(
 
 _MONITOR_CAPS: frozenset[str] = _PEER_CAPS | frozenset(
     {
+        Capability.INBOX_READ,
         Capability.WEB_READ,
         Capability.DATALINK_ESTABLISH,
         Capability.DATALINK_STATUS,
