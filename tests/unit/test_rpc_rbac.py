@@ -111,10 +111,10 @@ class TestMessageTypeCapabilityMapping:
         assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.SELF_UPDATE] == Capability.SELF_UPDATE
 
     def test_inbox_query_maps_to_inbox_read(self):
-        assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.INBOX_QUERY] == "rpc.inbox_read"
+        assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.INBOX_QUERY] == Capability.INBOX_READ
 
     def test_messages_query_maps_to_inbox_read(self):
-        assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.MESSAGES_QUERY] == "rpc.inbox_read"
+        assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.MESSAGES_QUERY] == Capability.INBOX_READ
 
 
 # ---------------------------------------------------------------------------

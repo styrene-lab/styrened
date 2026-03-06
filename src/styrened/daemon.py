@@ -202,6 +202,12 @@ class StyreneDaemon:
         # Start RPC server for incoming requests
         self._start_rpc_server()
 
+        # Inject RBAC policy into LXMF service — must happen before any
+        # message processing begins, regardless of chat.enabled state.
+        # LXMF receives both chat AND Styrene RPC messages; without RBAC
+        # injection, BLOCKED identities can still deliver LXMF messages.
+        self._inject_lxmf_rbac()
+
         # Initialize conversation service for chat backend (creates DB tables)
         self._init_conversation_service()
 
@@ -264,6 +270,35 @@ class StyreneDaemon:
 
         # Main loop with periodic announces
         await self._run_loop()
+
+    def _inject_lxmf_rbac(self) -> None:
+        """Inject RBAC policy into LXMFService for unified blocklist checks.
+
+        Called from start() independently of chat.enabled, because LXMF
+        receives both chat AND Styrene RPC messages. Without this, BLOCKED
+        identities could still deliver LXMF messages even when the RPC
+        server has RBAC active.
+
+        Also seeds contacts-DB blocks into the RBAC blocked list so that
+        runtime blocks (via IPC block_peer) survive daemon restart.
+        """
+        try:
+            from styrened.services.lxmf_service import get_lxmf_service
+
+            lxmf_service = get_lxmf_service()
+            if not lxmf_service.is_initialized:
+                logger.debug("LXMF not initialized, skipping RBAC injection")
+                return
+
+            if self.config.rbac is not None:
+                lxmf_service.set_rbac_policy(self.config.rbac)
+                self._seed_contacts_blocks_to_rbac(lxmf_service)
+            else:
+                logger.info(
+                    "No RBAC policy configured — LXMF using legacy blocklist"
+                )
+        except Exception as e:
+            logger.error(f"Failed to inject RBAC into LXMF service: {e}")
 
     def _seed_config_bans(self) -> None:
         """Block peers listed in config.banned_peers (hub operator banlist).
@@ -526,19 +561,6 @@ class StyreneDaemon:
             if not lxmf_service.is_initialized:
                 logger.warning("LXMF not initialized, conversation service not started")
                 return
-
-            # Inject RBAC policy into LXMF service for unified blocklist checks
-            if self.config.rbac is not None:
-                lxmf_service.set_rbac_policy(self.config.rbac)
-                # Seed contacts-DB blocks into RBAC blocked list so that
-                # runtime blocks (via IPC block_peer) survive daemon restart.
-                # Without this, only config-file blocks would be in the RBAC
-                # policy and contacts-DB-only blocks would be invisible.
-                self._seed_contacts_blocks_to_rbac(lxmf_service)
-            else:
-                logger.info(
-                    "No RBAC policy configured — LXMF using legacy blocklist"
-                )
 
             # Get local LXMF destination hash for determining message direction
             # This must be the LXMF delivery destination hash, NOT the identity hash,
