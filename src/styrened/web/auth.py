@@ -343,19 +343,30 @@ def create_auth_router(
     async def challenge(body: ChallengeRequest) -> JSONResponse:
         auth_config = daemon.config.api.auth
 
-        # Check if identity is authorized
-        if not auth_config.allow_unauthenticated:
-            if not auth_config.authorized_identities:
-                # Auth enabled but no identities configured — deny all
+        # RBAC path: check web.read capability
+        rbac = daemon.config.rbac
+        if rbac is not None:
+            from styrened.models.rbac import Capability
+
+            if not rbac.has_capability(body.identity_hash.lower(), Capability.WEB_READ):
                 return JSONResponse(
                     status_code=403,
-                    content={"detail": "No authorized identities configured"},
+                    content={"detail": "Identity not authorized (RBAC)"},
                 )
-            if body.identity_hash.lower() not in {h.lower() for h in auth_config.authorized_identities}:
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Identity not authorized"},
-                )
+        else:
+            # Legacy path: authorized_identities + allow_unauthenticated
+            if not auth_config.allow_unauthenticated:
+                if not auth_config.authorized_identities:
+                    # Auth enabled but no identities configured — deny all
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "No authorized identities configured"},
+                    )
+                if body.identity_hash.lower() not in {h.lower() for h in auth_config.authorized_identities}:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Identity not authorized"},
+                    )
 
         # Verify identity_hash matches public_key
         if not _verify_identity_hash(body.public_key, body.identity_hash):

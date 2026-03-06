@@ -42,6 +42,7 @@ class FakeAPIConfig:
 @dataclass
 class FakeDaemonConfig:
     api: FakeAPIConfig = field(default_factory=FakeAPIConfig)
+    rbac: None = None
 
 
 def _make_fake_identity() -> tuple[bytes, str]:

@@ -59,6 +59,7 @@ from styrened.terminal.messages import (
 if TYPE_CHECKING:
     import RNS
 
+    from styrened.models.rbac import RBACPolicy
     from styrened.protocols.styrene import StyreneProtocol
     from styrened.services.rns_service import RNSService
 
@@ -256,6 +257,7 @@ class TerminalService:
         allowed_shells: set[str] | None = None,
         allowed_commands: set[str] | None = None,
         disable_command_validation: bool = False,
+        rbac_policy: "RBACPolicy | None" = None,
     ):
         """Initialize terminal service.
 
@@ -287,6 +289,7 @@ class TerminalService:
         self.rns_service = rns_service
         self.styrene_protocol = styrene_protocol
         self.default_shell = default_shell
+        self._rbac_policy: RBACPolicy | None = rbac_policy
         self.sessions: dict[bytes, TerminalSession] = {}
         self._allow_unauthenticated = allow_unauthenticated
         self.session_idle_timeout = session_idle_timeout
@@ -439,8 +442,16 @@ class TerminalService:
             logger.error(f"Failed to send link packet: {e}")
             return False
 
+    def set_rbac_policy(self, policy: "RBACPolicy | None") -> None:
+        """Set or replace the RBAC policy for authorization checks."""
+        self._rbac_policy = policy
+
     def is_authorized(self, identity_hash: str) -> bool:
-        """Check if an identity is authorized.
+        """Check if an identity is authorized for terminal access.
+
+        When RBAC policy is set, checks for terminal.restricted or
+        terminal.full capability.  When RBAC is not set, falls back to
+        legacy authorized_identities + allow_unauthenticated behavior.
 
         Args:
             identity_hash: RNS identity hash to check
@@ -448,6 +459,21 @@ class TerminalService:
         Returns:
             True if authorized, False otherwise
         """
+        # RBAC path: check terminal capabilities
+        if self._rbac_policy is not None:
+            from styrened.models.rbac import Capability
+
+            has_terminal = (
+                self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED)
+                or self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL)
+            )
+            logger.debug(
+                f"[METRICS] auth_check identity={identity_hash[:16]} "
+                f"result={'allowed' if has_terminal else 'rejected'} reason=rbac"
+            )
+            return has_terminal
+
+        # Legacy path: authorized_identities + allow_unauthenticated
         # If no authorized identities configured
         if not self._authorized_identities:
             if self._allow_unauthenticated:
