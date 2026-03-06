@@ -45,6 +45,9 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from styrened.models.config import LXMFConfig
+    from styrened.models.rbac import RBACPolicy
+
+from styrened.models.rbac import Role
 
 from styrened import paths
 
@@ -1129,8 +1132,6 @@ class LXMFService:
 
         # Check if sender is blocked — RBAC policy takes precedence, legacy fallback
         if self._rbac_policy is not None:
-            from styrened.models.rbac import Role
-
             if self._rbac_policy.resolve_role(source_hash) == Role.BLOCKED:
                 logger.info(f"Dropped message from blocked peer {source_hash[:16]}... (RBAC)")
                 return

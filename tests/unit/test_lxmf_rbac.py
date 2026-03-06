@@ -208,3 +208,81 @@ class TestContactsDBBlocksSeededToRBAC:
 
         callback = lxmf_service._message_callbacks[0][0]
         callback.assert_not_called()
+
+
+class TestInjectLxmfRbacDaemonWiring:
+    """Regression tests for daemon._inject_lxmf_rbac().
+
+    Ensures RBAC is injected into LXMFService from start() regardless
+    of chat.enabled state. This was the bug fixed in commit cf94431.
+    """
+
+    def _make_daemon(self, rbac_policy=None):
+        """Create a minimal mock daemon with config."""
+        daemon = MagicMock()
+        daemon.config = MagicMock()
+        daemon.config.rbac = rbac_policy
+        # Bind the real method to our mock
+        from styrened.daemon import StyreneDaemon
+        daemon._inject_lxmf_rbac = StyreneDaemon._inject_lxmf_rbac.__get__(daemon)
+        daemon._seed_contacts_blocks_to_rbac = StyreneDaemon._seed_contacts_blocks_to_rbac.__get__(daemon)
+        return daemon
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    @patch("styrened.models.messages.init_db")
+    def test_rbac_injected_when_policy_present(self, mock_init_db, mock_get_svc):
+        """RBAC policy is injected into LXMFService when config.rbac is set."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        daemon = self._make_daemon(rbac_policy=policy)
+
+        mock_svc = MagicMock()
+        mock_svc.is_initialized = True
+        mock_svc._load_blocklist.return_value = set()
+        mock_get_svc.return_value = mock_svc
+
+        daemon._inject_lxmf_rbac()
+
+        mock_svc.set_rbac_policy.assert_called_once_with(policy)
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    def test_no_injection_when_policy_absent(self, mock_get_svc):
+        """No RBAC injection when config.rbac is None."""
+        daemon = self._make_daemon(rbac_policy=None)
+
+        mock_svc = MagicMock()
+        mock_svc.is_initialized = True
+        mock_get_svc.return_value = mock_svc
+
+        daemon._inject_lxmf_rbac()
+
+        mock_svc.set_rbac_policy.assert_not_called()
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    @patch("styrened.models.messages.init_db")
+    def test_contacts_blocks_seeded_during_injection(self, mock_init_db, mock_get_svc):
+        """Contacts-DB blocks are seeded into RBAC during injection."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        daemon = self._make_daemon(rbac_policy=policy)
+
+        mock_svc = MagicMock()
+        mock_svc.is_initialized = True
+        mock_svc._load_blocklist.return_value = {"deadbeef12345678"}
+        mock_get_svc.return_value = mock_svc
+
+        daemon._inject_lxmf_rbac()
+
+        assert "deadbeef12345678" in policy.blocked
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    def test_skips_when_lxmf_not_initialized(self, mock_get_svc):
+        """Gracefully skips when LXMF is not yet initialized."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        daemon = self._make_daemon(rbac_policy=policy)
+
+        mock_svc = MagicMock()
+        mock_svc.is_initialized = False
+        mock_get_svc.return_value = mock_svc
+
+        daemon._inject_lxmf_rbac()  # Should not raise
+
+        mock_svc.set_rbac_policy.assert_not_called()
