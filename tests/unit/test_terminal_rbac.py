@@ -150,9 +150,96 @@ class TestTerminalIsAuthorizedRBAC:
         # PEER has no terminal cap, so RBAC denies even though legacy would allow
         assert svc.is_authorized("dd" * 16) is False
 
+    def test_authorization_level_full_for_admin(self):
+        """ADMIN gets TERMINAL_FULL authorization level."""
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={"aa" * 16: RosterEntry(identity_hash="aa" * 16, role=Role.ADMIN)},
+        )
+        svc = self._make_service(rbac_policy=policy)
+        level = svc.authorization_level("aa" * 16)
+        assert level == "full"
+
+    def test_authorization_level_restricted_for_operator(self):
+        """OPERATOR gets TERMINAL_RESTRICTED authorization level."""
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={"bb" * 16: RosterEntry(identity_hash="bb" * 16, role=Role.OPERATOR)},
+        )
+        svc = self._make_service(rbac_policy=policy)
+        level = svc.authorization_level("bb" * 16)
+        assert level == "restricted"
+
+    def test_authorization_level_none_for_peer(self):
+        """PEER gets None authorization level (no terminal access)."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        svc = self._make_service(rbac_policy=policy)
+        level = svc.authorization_level("cc" * 16)
+        assert level is None
+
+    def test_authorization_level_legacy_returns_restricted(self):
+        """Legacy mode returns 'restricted' for authorized identities (backward compat)."""
+        svc = self._make_service(authorized_identities={"aa" * 16})
+        level = svc.authorization_level("aa" * 16)
+        assert level == "restricted"
+
+    def test_authorization_level_legacy_returns_none_for_unauthorized(self):
+        """Legacy mode returns None for unauthorized identities."""
+        svc = self._make_service(authorized_identities={"aa" * 16})
+        level = svc.authorization_level("bb" * 16)
+        assert level is None
+
 
 # ---------------------------------------------------------------------------
-# 3. is_authorized legacy mode (no RBAC)
+# 3. RBAC policy mutation propagation
+# ---------------------------------------------------------------------------
+
+
+class TestTerminalRBACMutationPropagation:
+    """RBAC policy mutations propagate to TerminalService checks."""
+
+    def _make_service(self, rbac_policy=None, **kwargs):
+        from styrened.terminal.service import TerminalService
+
+        return TerminalService(
+            rns_service=MagicMock(),
+            styrene_protocol=MagicMock(),
+            rbac_policy=rbac_policy,
+            **kwargs,
+        )
+
+    def test_block_propagates_to_is_authorized(self):
+        """Blocking an identity via rbac_policy.block() is seen by is_authorized()."""
+        identity = "aa" * 16
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={identity: RosterEntry(identity_hash=identity, role=Role.ADMIN)},
+        )
+        svc = self._make_service(rbac_policy=policy)
+        assert svc.is_authorized(identity) is True
+
+        # Block the identity
+        policy.block(identity[:2])
+        assert svc.is_authorized(identity) is False
+
+    def test_set_rbac_policy_replaces_stale_reference(self):
+        """set_rbac_policy() replaces a stale policy reference."""
+        identity = "bb" * 16
+        old_policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={identity: RosterEntry(identity_hash=identity, role=Role.ADMIN)},
+        )
+        svc = self._make_service(rbac_policy=old_policy)
+        assert svc.is_authorized(identity) is True
+
+        # Replace with a new policy that denies the identity
+        new_policy = RBACPolicy(default_role=Role.NONE)
+        svc.set_rbac_policy(new_policy)
+        assert svc.is_authorized(identity) is False
+
+
+# ---------------------------------------------------------------------------
+# 5. is_authorized legacy mode (no RBAC)
 # ---------------------------------------------------------------------------
 
 
@@ -186,7 +273,7 @@ class TestTerminalIsAuthorizedLegacy:
 
 
 # ---------------------------------------------------------------------------
-# 4. Daemon wiring: rbac_policy passed to TerminalService
+# 6. Daemon wiring: rbac_policy passed to TerminalService
 # ---------------------------------------------------------------------------
 
 

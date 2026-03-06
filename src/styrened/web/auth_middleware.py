@@ -91,6 +91,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         session = extract_session(request, self._session_store)
         if session is not None:
             request.state.identity_hash = session.identity_hash
+
+            # RBAC write gate: mutating methods require WEB_WRITE capability
+            rbac = daemon.config.rbac
+            if rbac is not None and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+                from styrened.models.rbac import Capability
+
+                if not rbac.has_capability(session.identity_hash, Capability.WEB_WRITE):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Write access denied (RBAC)"},
+                    )
+
             return await call_next(request)
 
         # No valid session — reject

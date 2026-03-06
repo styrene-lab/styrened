@@ -44,6 +44,7 @@ class FakeDaemonConfig:
     """Minimal daemon config for testing."""
 
     api: FakeAPIConfig = field(default_factory=FakeAPIConfig)
+    rbac: None = None
 
 
 def _create_app(
