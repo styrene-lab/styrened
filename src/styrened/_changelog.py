@@ -150,5 +150,6 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.41", "fix(tui): Block binding on ConversationScreen (works from any focus)"),
     ("0.13.42", "fix: seed banned_peers after init_db, lint cleanup"),
     ("0.13.43", "fix: blocklist prefix matching, init_db guarantee"),
-    ("0.14.0", "feat(rbac): unified role-based access control model"),
+    ("0.14.0", "feat(rbac): unified role-based access control model; docs: RBAC mesh identity design assessment; feat(tui): expose mesh access policy in Settings > Security tab; feat(discovery): default-deny mesh admission via allowlist policy; perf(conversations): full optimization pass on database layer and IPC boundary; perf(inbox): replace full-table scan with SQL aggregation in list_conversations; fix: blocklist prefix matching, init_db guarantee"),
+    ("0.14.1", "fix(tui): upgrade screen changelog formatting; split semicolon entries into bullets; fix dim header colors; fix oversized scrollbar"),
 ]
