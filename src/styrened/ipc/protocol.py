@@ -111,6 +111,8 @@ class IPCMessageType(IntEnum):
     CMD_DATALINK_STATUS = 0x62
     CMD_DATALINK_QUERY = 0x63  # Query peer status over direct link
     CMD_DATALINK_SPEEDTEST = 0x64  # Run bandwidth test over direct link
+    CMD_DATALINK_META = 0x65  # Request non-identifiable metadata from peer
+    CMD_DATALINK_INFO = 0x66  # Request identifiable metadata from peer (default-deny remote)
 
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30

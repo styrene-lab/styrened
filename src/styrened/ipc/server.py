@@ -274,6 +274,8 @@ class ControlServer:
             IPCMessageType.CMD_DATALINK_TEARDOWN: self._handlers.handle_cmd_datalink_teardown,
             IPCMessageType.CMD_DATALINK_STATUS: self._handlers.handle_cmd_datalink_status,
             IPCMessageType.CMD_DATALINK_QUERY: self._handlers.handle_cmd_datalink_query,
+            IPCMessageType.CMD_DATALINK_META: self._handlers.handle_cmd_datalink_meta,
+            IPCMessageType.CMD_DATALINK_INFO: self._handlers.handle_cmd_datalink_info,
             IPCMessageType.CMD_DATALINK_SPEEDTEST: self._handlers.handle_cmd_datalink_speedtest,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
             IPCMessageType.CMD_SELF_UPDATE: self._handlers.handle_cmd_self_update,

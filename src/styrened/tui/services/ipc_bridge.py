@@ -602,6 +602,31 @@ class IPCBridge:
         """Run bandwidth test over an established direct link."""
         return await self._call("datalink_speedtest", destination_hash=destination_hash)
 
+    async def datalink_meta(self, destination_hash: str) -> dict | None:
+        """Request non-identifiable metadata from peer over direct link.
+
+        Returns styrene_version, profile, capabilities, arch, os_id.
+        Returns None if the peer doesn't support /meta (older version) or link failed.
+        """
+        try:
+            result = await self._call("datalink_meta", destination_hash=destination_hash)
+            return result.get("meta") if isinstance(result, dict) else None
+        except Exception:
+            return None
+
+    async def datalink_info(self, destination_hash: str) -> dict | None:
+        """Request identifiable metadata from peer over direct link.
+
+        Returns name and operator_label if the remote has info_respond=True.
+        Returns None if the peer declined (default) or the request failed.
+        A None result is NOT an error — it means the node chose not to identify.
+        """
+        try:
+            result = await self._call("datalink_info", destination_hash=destination_hash)
+            return result.get("info") if isinstance(result, dict) else None
+        except Exception:
+            return None
+
     # ── Subscriptions ──────────────────────────────────────────────
 
     async def subscribe_devices(self) -> bool:

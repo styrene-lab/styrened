@@ -317,6 +317,54 @@ class DirectLinkService:
                 logger.warning(f"Datalink /status decode error: {e}")
         return None
 
+    async def request_meta(
+        self,
+        lxmf_destination_hash: str,
+        timeout: float = REQUEST_TIMEOUT,
+    ) -> dict[str, Any] | None:
+        """Request non-identifiable metadata from peer over direct link.
+
+        Returns styrene_version, profile, capabilities, arch, os_id.
+        Safe to call against any discovered node — remote default is allow.
+
+        Returns:
+            Meta dict or None if link not active / request failed.
+        """
+        data = await self.request(lxmf_destination_hash, "/meta", timeout=timeout)
+        if data:
+            try:
+                result = json.loads(data)
+                # Empty dict = peer is running an older version without /meta
+                return result if result else None
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Datalink /meta decode error: {e}")
+        return None
+
+    async def request_info(
+        self,
+        lxmf_destination_hash: str,
+        timeout: float = REQUEST_TIMEOUT,
+    ) -> dict[str, Any] | None:
+        """Request identifiable operator metadata from peer over direct link.
+
+        Returns name and operator_label only if the remote node has
+        discovery.info_respond=True.  An empty response means the node
+        declined to identify (default behaviour) — treat as anonymous.
+
+        Returns:
+            Info dict with at least one non-empty field, or None if declined/failed.
+        """
+        data = await self.request(lxmf_destination_hash, "/info", timeout=timeout)
+        if data:
+            try:
+                result = json.loads(data)
+                # Empty dict = node declined (info_respond=False) — return None
+                if result and any(v for v in result.values() if v):
+                    return result
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Datalink /info decode error: {e}")
+        return None
+
     async def run_speedtest(
         self,
         lxmf_destination_hash: str,

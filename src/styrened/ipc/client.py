@@ -1137,6 +1137,25 @@ class ControlClient:
             timeout=120.0,  # speedtest can take a while over slow links
         )
 
+    async def datalink_meta(self, destination_hash: str) -> dict[str, Any]:
+        """Request non-identifiable metadata from peer over direct link."""
+        from styrened.ipc.messages import CmdDatalinkMetaRequest
+
+        return await self._request(
+            CmdDatalinkMetaRequest(destination_hash=destination_hash),
+        )
+
+    async def datalink_info(self, destination_hash: str) -> dict[str, Any]:
+        """Request identifiable metadata from peer over direct link.
+
+        A result with info=None means the remote declined (info_respond=False).
+        """
+        from styrened.ipc.messages import CmdDatalinkInfoRequest
+
+        return await self._request(
+            CmdDatalinkInfoRequest(destination_hash=destination_hash),
+        )
+
     # -------------------------------------------------------------------------
     # Remote inbox methods (RPC over LXMF)
     # -------------------------------------------------------------------------

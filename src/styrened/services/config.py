@@ -442,6 +442,10 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.discovery.allowed_peers = {
                 str(h).lower() for h in disc["allowed_peers"] if h
             }
+        if "info_respond" in disc:
+            config.discovery.info_respond = _parse_bool(disc["info_respond"])
+        if "operator_label" in disc:
+            config.discovery.operator_label = str(disc["operator_label"]).strip()
 
     # Parse chat section
     if "chat" in data and isinstance(data["chat"], dict):
@@ -818,7 +822,10 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "auto_announce": config.discovery.auto_announce,
         "access_mode": config.discovery.access_mode.value,
         "allowed_peers": sorted(config.discovery.allowed_peers),
+        "info_respond": config.discovery.info_respond,
     }
+    if config.discovery.operator_label:
+        discovery_dict["operator_label"] = config.discovery.operator_label
 
     # Chat section
     chat_dict: dict[str, Any] = {

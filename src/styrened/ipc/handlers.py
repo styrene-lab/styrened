@@ -2863,6 +2863,48 @@ class IPCHandlers:
         except Exception as e:
             return ErrorResponse.internal_error(f"Datalink query failed: {e}")
 
+    async def handle_cmd_datalink_meta(self, request: IPCRequest) -> IPCResponse:
+        """Request non-identifiable metadata from peer over direct link."""
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkMetaRequest
+
+        req = request if isinstance(request, CmdDatalinkMetaRequest) else CmdDatalinkMetaRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            meta = await self.daemon._direct_link_service.request_meta(req.destination_hash)
+            return ResultResponse(data={"meta": meta})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Datalink meta request failed: {e}")
+
+    async def handle_cmd_datalink_info(self, request: IPCRequest) -> IPCResponse:
+        """Request identifiable metadata from peer over direct link.
+
+        A None result in the response means the remote node declined (default).
+        This is not an error — it means info_respond=False on the remote.
+        """
+        err = self._check_direct_link()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdDatalinkInfoRequest
+
+        req = request if isinstance(request, CmdDatalinkInfoRequest) else CmdDatalinkInfoRequest()
+        if not req.destination_hash:
+            return ErrorResponse.invalid_request("destination_hash is required")
+
+        try:
+            info = await self.daemon._direct_link_service.request_info(req.destination_hash)
+            return ResultResponse(data={"info": info})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Datalink info request failed: {e}")
+
     async def handle_cmd_datalink_speedtest(self, request: IPCRequest) -> IPCResponse:
         """Run bandwidth test over direct link — fire-and-forget style.
 

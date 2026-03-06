@@ -151,5 +151,6 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.13.42", "fix: seed banned_peers after init_db, lint cleanup"),
     ("0.13.43", "fix: blocklist prefix matching, init_db guarantee"),
     ("0.14.0", "feat(rbac): unified role-based access control model; docs: RBAC mesh identity design assessment; feat(tui): expose mesh access policy in Settings > Security tab; feat(discovery): default-deny mesh admission via allowlist policy; perf(conversations): full optimization pass on database layer and IPC boundary; perf(inbox): replace full-table scan with SQL aggregation in list_conversations; fix: blocklist prefix matching, init_db guarantee"),
-    ("0.14.1", "fix(tui): upgrade screen changelog formatting; split semicolon entries into bullets; fix dim header colors; fix oversized scrollbar"),
+    ("0.14.1", "fix(tui): upgrade screen changelog formatting"),
+    ("0.14.2", "feat(mesh): MY MESH vs OTHER split; /meta non-identifiable endpoint; /info default-deny opt-in endpoint; discovery.info_respond config flag; 40 new tests"),
 ]
