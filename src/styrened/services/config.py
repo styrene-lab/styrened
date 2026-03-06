@@ -4,6 +4,7 @@ This module provides functions to load and save CoreConfig for headless
 applications. For TUI applications, use styrene.services.config instead.
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,8 @@ from styrened.models.config import (
     YubiKeyConfig,
     validate_short_name,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_bool(value: Any) -> bool:
@@ -176,6 +179,99 @@ def get_default_core_config() -> CoreConfig:
         CoreConfig instance with operator profile defaults.
     """
     return get_profile_defaults(Profile.OPERATOR)
+
+
+def _parse_rbac(data: dict, config: CoreConfig):  # -> RBACPolicy
+    """Parse RBAC policy from config data, with legacy field migration.
+
+    Args:
+        data: Raw YAML config dict.
+        config: Partially-loaded CoreConfig (for legacy field migration).
+
+    Returns:
+        RBACPolicy instance.
+    """
+    from styrened.models.rbac import Capability, RBACPolicy, Role, RosterEntry
+
+    rbac_data = data.get("rbac", {})
+
+    # Parse default_role
+    default_role_str = str(rbac_data.get("default_role", "peer")).upper()
+    try:
+        default_role = Role[default_role_str]
+    except KeyError:
+        logger.warning(f"Unknown RBAC default_role '{default_role_str}', using PEER")
+        default_role = Role.PEER
+
+    # Parse roster
+    roster: dict[str, RosterEntry] = {}
+    for entry_data in rbac_data.get("roster", []):
+        identity = str(entry_data.get("identity", "")).lower().strip()
+        if not identity:
+            continue
+        role_str = str(entry_data.get("role", "peer")).upper()
+        try:
+            role = Role[role_str]
+        except KeyError:
+            logger.warning(f"Unknown role '{role_str}' for {identity[:16]}..., skipping")
+            continue
+        label = str(entry_data.get("label", ""))
+        grants_raw = entry_data.get("grants", [])
+        grants: set[str] = set()
+        for g in grants_raw:
+            g_str = str(g).strip()
+            if g_str in Capability.ALL:
+                grants.add(g_str)
+            else:
+                logger.warning(f"Unknown capability grant '{g_str}' for {identity[:16]}...")
+        roster[identity] = RosterEntry(
+            identity_hash=identity,
+            role=role,
+            label=label,
+            grants=frozenset(grants),
+        )
+
+    # Parse blocked list
+    blocked: list[str] = [
+        str(h).lower().strip()
+        for h in rbac_data.get("blocked", [])
+        if h
+    ]
+
+    # --- Legacy field migration ---
+    # Migrate terminal.authorized_identities → admin
+    for hash_hex in config.terminal.authorized_identities:
+        h = hash_hex.lower()
+        if h not in roster:
+            roster[h] = RosterEntry(
+                identity_hash=h,
+                role=Role.ADMIN,
+                label="(migrated: terminal.authorized_identities)",
+            )
+            logger.info(
+                f"[RBAC] Migrated terminal identity {h[:16]}... to admin role"
+            )
+
+    # Migrate api.auth.authorized_identities → monitor
+    for hash_hex in config.api.auth.authorized_identities:
+        h = hash_hex.lower()
+        if h not in roster:
+            roster[h] = RosterEntry(
+                identity_hash=h,
+                role=Role.MONITOR,
+                label="(migrated: api.auth.authorized_identities)",
+            )
+            logger.info(
+                f"[RBAC] Migrated web API identity {h[:16]}... to monitor role"
+            )
+
+    # Migrate banned_peers → blocked
+    for prefix in config.banned_peers:
+        p = prefix.lower()
+        if p not in blocked:
+            blocked.append(p)
+
+    return RBACPolicy(default_role=default_role, roster=roster, blocked=blocked)
 
 
 def load_core_config(config_path: Path | None = None) -> CoreConfig:
@@ -613,6 +709,9 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     if "banned_peers" in data and isinstance(data["banned_peers"], list):
         config.banned_peers = [str(h) for h in data["banned_peers"] if h]
 
+    # Parse RBAC policy
+    config.rbac = _parse_rbac(data, config)
+
     return config
 
 
@@ -839,7 +938,7 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         "auto_initiate": config.pqc.auto_initiate,
     }
 
-    return {
+    result: dict[str, Any] = {
         "profile": config.profile.value,
         "reticulum": reticulum_dict,
         "identity": identity_dict,
@@ -862,6 +961,28 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         },
         "banned_peers": config.banned_peers,
     }
+
+    # Serialize RBAC policy if present
+    if config.rbac is not None:
+        rbac_roster = []
+        for entry in sorted(config.rbac.roster.values(), key=lambda e: e.identity_hash):
+            d: dict[str, Any] = {
+                "identity": entry.identity_hash,
+                "role": entry.role.name.lower(),
+            }
+            if entry.label and not entry.label.startswith("(migrated"):
+                d["label"] = entry.label
+            if entry.grants:
+                d["grants"] = sorted(entry.grants)
+            rbac_roster.append(d)
+
+        result["rbac"] = {
+            "default_role": config.rbac.default_role.name.lower(),
+            "roster": rbac_roster,
+            "blocked": config.rbac.blocked,
+        }
+
+    return result
 
 
 def validate_core_config(
@@ -1100,6 +1221,27 @@ def validate_core_config(
                     ident,
                 )
             )
+
+    # --- RBAC ---
+    if config.rbac is not None:
+        for identity_hash, _entry in config.rbac.roster.items():
+            if len(identity_hash) != 32:
+                errors.append(
+                    ConfigFieldError(
+                        "rbac.roster",
+                        "Identity hash must be 32 hex characters",
+                        identity_hash,
+                    )
+                )
+        for prefix in config.rbac.blocked:
+            if len(prefix) < 4:
+                errors.append(
+                    ConfigFieldError(
+                        "rbac.blocked",
+                        "Blocked prefix should be at least 4 chars to avoid collisions",
+                        prefix,
+                    )
+                )
 
     # --- PQC ---
     if config.pqc.rekey_interval_hours < 1:
