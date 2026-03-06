@@ -289,6 +289,30 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to seed config bans: {e}")
 
+    def _seed_contacts_blocks_to_rbac(self, lxmf_service: Any) -> None:
+        """Load blocked peers from contacts DB into the RBAC blocked list.
+
+        On startup, the RBAC policy is rebuilt from core-config.yaml which
+        only contains config-file blocks. Runtime blocks created via IPC
+        block_peer() live in the contacts DB. This method loads them into
+        the in-memory RBAC policy so they survive daemon restart.
+        """
+        try:
+            blocked_set = lxmf_service._load_blocklist()
+            if not blocked_set or self.config.rbac is None:
+                return
+            seeded = 0
+            for peer_hash in blocked_set:
+                if peer_hash not in self.config.rbac.blocked:
+                    self.config.rbac.block(peer_hash)
+                    seeded += 1
+            if seeded:
+                logger.info(
+                    f"Seeded {seeded} contacts-DB blocks into RBAC policy"
+                )
+        except Exception as e:
+            logger.error(f"Failed to seed contacts blocks to RBAC: {e}")
+
     def _emit_activity_event(
         self,
         event_type: str,
@@ -504,8 +528,17 @@ class StyreneDaemon:
                 return
 
             # Inject RBAC policy into LXMF service for unified blocklist checks
-            if hasattr(self.config, "rbac") and self.config.rbac is not None:
+            if self.config.rbac is not None:
                 lxmf_service.set_rbac_policy(self.config.rbac)
+                # Seed contacts-DB blocks into RBAC blocked list so that
+                # runtime blocks (via IPC block_peer) survive daemon restart.
+                # Without this, only config-file blocks would be in the RBAC
+                # policy and contacts-DB-only blocks would be invisible.
+                self._seed_contacts_blocks_to_rbac(lxmf_service)
+            else:
+                logger.info(
+                    "No RBAC policy configured — LXMF using legacy blocklist"
+                )
 
             # Get local LXMF destination hash for determining message direction
             # This must be the LXMF delivery destination hash, NOT the identity hash,

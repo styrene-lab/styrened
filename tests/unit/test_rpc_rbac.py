@@ -8,7 +8,7 @@ commands gating.  Also verifies legacy fallback when rbac_policy=None.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -178,14 +178,10 @@ class TestRBACProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_monitor_can_inbox_read(self, server):
-        """MONITOR role includes rpc.inbox_read (added by sibling task)."""
-        # Manually ensure the policy grants this cap at MONITOR level
-        # (sibling task adds it to _MONITOR_CAPS; we verify the server
-        #  delegates correctly when the policy says yes)
-        with patch.object(server._rbac_policy, "has_capability", return_value=True):
-            envelope = _make_envelope(StyreneMessageType.INBOX_QUERY)
-            await server._protocol_handler(_make_message(MONITOR_HASH), envelope)
-            server._handlers[StyreneMessageType.INBOX_QUERY].assert_called_once()
+        """MONITOR role includes rpc.inbox_read — real policy check, no mock."""
+        envelope = _make_envelope(StyreneMessageType.INBOX_QUERY)
+        await server._protocol_handler(_make_message(MONITOR_HASH), envelope)
+        server._handlers[StyreneMessageType.INBOX_QUERY].assert_called_once()
 
     @pytest.mark.asyncio
     async def test_operator_can_config_update(self, server):
@@ -224,6 +220,43 @@ class TestRBACProtocolHandler:
         envelope = _make_envelope(StyreneMessageType.PING)
         await server._protocol_handler(_make_message(UNKNOWN_HASH), envelope)
         server._handlers[StyreneMessageType.PING].assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_blocked_peer_receives_error_response(self):
+        """BLOCKED peer gets COMMAND_NOT_ALLOWED error sent back."""
+        proto = _make_protocol()
+        srv = RPCServer(proto, rbac_policy=_full_policy())
+        srv._running = True
+        for mt in MESSAGE_TYPE_CAPABILITY:
+            srv._handlers[mt] = MagicMock()
+
+        # Use a real request_id (non-zero) so error response is sent
+        envelope = StyreneEnvelope(
+            version=2,
+            message_type=StyreneMessageType.PING,
+            payload=b"",
+            request_id=b"\x01" * 16,
+        )
+        await srv._protocol_handler(_make_message(BLOCKED_HASH), envelope)
+
+        # Handler should NOT have been called
+        srv._handlers[StyreneMessageType.PING].assert_not_called()
+        # Error response should have been sent via protocol
+        proto.send_typed_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_monitor_cannot_exec(self, server):
+        """MONITOR role does not include rpc.exec."""
+        envelope = _make_envelope(StyreneMessageType.EXEC)
+        await server._protocol_handler(_make_message(MONITOR_HASH), envelope)
+        server._handlers[StyreneMessageType.EXEC].assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_operator_cannot_exec(self, server):
+        """OPERATOR role does not include rpc.exec."""
+        envelope = _make_envelope(StyreneMessageType.EXEC)
+        await server._protocol_handler(_make_message(OPERATOR_HASH), envelope)
+        server._handlers[StyreneMessageType.EXEC].assert_not_called()
 
 
 # ---------------------------------------------------------------------------

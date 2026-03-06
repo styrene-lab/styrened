@@ -143,8 +143,8 @@ MESSAGE_TYPE_CAPABILITY: dict[StyreneMessageType, str] = {
     StyreneMessageType.REBOOT: Capability.REBOOT,
     StyreneMessageType.CONFIG_UPDATE: Capability.CONFIG_UPDATE,
     StyreneMessageType.SELF_UPDATE: Capability.SELF_UPDATE,
-    StyreneMessageType.INBOX_QUERY: "rpc.inbox_read",
-    StyreneMessageType.MESSAGES_QUERY: "rpc.inbox_read",
+    StyreneMessageType.INBOX_QUERY: Capability.INBOX_READ,
+    StyreneMessageType.MESSAGES_QUERY: Capability.INBOX_READ,
 }
 
 
@@ -452,8 +452,15 @@ class RPCServer:
                 )
             return
 
-        # 4. Check replay protection (for non-public commands with request_id)
-        if msg_type not in PUBLIC_RPC_COMMANDS and envelope.request_id:
+        # 4. Check replay protection (skip for cheap idempotent commands)
+        # In RBAC mode, all commands are capability-gated so replay of PING/STATUS
+        # is low-risk but we still skip replay tracking to avoid dict bloat.
+        _skip_replay = (
+            msg_type in PUBLIC_RPC_COMMANDS
+            if self._rbac_policy is None
+            else msg_type in {StyreneMessageType.PING, StyreneMessageType.STATUS_REQUEST}
+        )
+        if not _skip_replay and envelope.request_id:
             if self._is_replay(envelope.request_id):
                 logger.warning(
                     f"[SECURITY] Rejected replay of {msg_type.name} from {source_hash[:16]}... - "
@@ -1327,9 +1334,11 @@ class RPCServer:
             Dictionary with uptime, ip, services, disk info, system identity,
             and available commands.
 
-        Note: This response contains identifiable fields (ip, hostname). It
-        is only served to authorized callers (RBAC MONITOR+ in Phase 2).
-        For anonymous node metadata, use _gather_meta() instead.
+        Note: This response contains identifiable fields (ip, hostname).
+        Over DirectLink /status it is RBAC-gated to MONITOR+ (Phase 2).
+        Over RPC STATUS_REQUEST it is served to anyone with rpc.status
+        capability (PEER+ by default). For anonymous node metadata, use
+        _gather_meta() instead.
         """
         os_info = get_os_info()
         disk_used, disk_total = self._get_disk_usage()
