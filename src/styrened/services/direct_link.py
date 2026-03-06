@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 PATH_DISCOVERY_TIMEOUT = 45.0
 LINK_ESTABLISHMENT_TIMEOUT = 45.0
 REQUEST_TIMEOUT = 30.0
+# Shorter timeout for anonymous discovery probes (/meta, /info).
+# These run in background without user interaction, so we don't want
+# a 30s block per unreachable node.  If a node doesn't respond in
+# DISCOVERY_TIMEOUT seconds it's considered unavailable for now.
+DISCOVERY_TIMEOUT = 10.0
+# Maximum times we'll retry a /meta probe for an unreachable node
+# before giving up for the lifetime of the tree widget session.
+META_MAX_RETRIES = 3
 CLEANUP_INTERVAL = 120.0
 IDLE_LINK_TIMEOUT = 900.0  # 15 min — link establishment is expensive on LoRa
 
@@ -320,7 +328,7 @@ class DirectLinkService:
     async def request_meta(
         self,
         lxmf_destination_hash: str,
-        timeout: float = REQUEST_TIMEOUT,
+        timeout: float = DISCOVERY_TIMEOUT,
     ) -> dict[str, Any] | None:
         """Request non-identifiable metadata from peer over direct link.
 
@@ -343,7 +351,7 @@ class DirectLinkService:
     async def request_info(
         self,
         lxmf_destination_hash: str,
-        timeout: float = REQUEST_TIMEOUT,
+        timeout: float = DISCOVERY_TIMEOUT,
     ) -> dict[str, Any] | None:
         """Request identifiable operator metadata from peer over direct link.
 

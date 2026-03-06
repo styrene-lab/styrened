@@ -6,10 +6,13 @@ Tests cover:
 - DiscoveryConfig parsing: info_respond, operator_label
 - DiscoveryConfig serialization round-trip
 - RPCServer._gather_meta() field contract
-- RPCServer._gather_info() field contract
+- RPCServer._gather_info() field contract — including default-name suppression
 - DirectLinkService.request_meta/request_info response handling
 - IPC protocol: no duplicate command values after new additions
 - MeshDeviceTree._is_my_mesh() RBAC roster integration
+- MeshDeviceTree._device_by_destination_hash() hash-key correctness
+- MeshDeviceTree._queue_meta_requests() retry cap enforcement
+- MeshDeviceTree hash-type consistency: node.data == destination_hash throughout
 """
 
 from __future__ import annotations
@@ -215,6 +218,32 @@ class TestGatherInfo:
         info = server._gather_info(None)
         assert info["name"] == ""
         assert info["operator_label"] == ""
+
+    def test_info_does_not_leak_default_display_name(self) -> None:
+        """_gather_info must NOT return 'Anonymous Styrene' as a node name.
+
+        The default display_name is a placeholder for LXMF chat, not an
+        operator-chosen identifier.  Broadcasting it from /info would make
+        every default-configured node appear to be 'Anonymous Styrene',
+        which is both useless and misleading.
+        """
+        server = self._make_server()
+        config = CoreConfig()
+        # Verify the default is still the known sentinel
+        assert config.identity.display_name == "Anonymous Styrene"
+        info = server._gather_info(config)
+        # name must be empty — operator has not chosen a name
+        assert info["name"] == "", (
+            f"_gather_info leaked default display_name: {info['name']!r}"
+        )
+
+    def test_info_returns_name_when_explicitly_configured(self) -> None:
+        """_gather_info returns name only when operator has set a custom value."""
+        server = self._make_server()
+        config = CoreConfig()
+        config.identity.display_name = "my-node-alpha"
+        info = server._gather_info(config)
+        assert info["name"] == "my-node-alpha"
 
 
 # ---------------------------------------------------------------------------
@@ -442,3 +471,178 @@ class TestIsMymesh:
         with patch("styrened.services.config.load_core_config", return_value=config):
             device = self._make_device("cafebabe" * 4)
             assert tree._is_my_mesh(device) is True
+
+    def test_is_my_mesh_uses_preloaded_rbac(self) -> None:
+        """_is_my_mesh accepts a pre-loaded rbac arg to avoid disk reads."""
+        from styrened.tui.screens.dashboard import MeshDeviceTree
+
+        tree = MeshDeviceTree.__new__(MeshDeviceTree)
+        # default_role=NONE — only explicitly rostered nodes are trusted
+        rbac = RBACPolicy(
+            default_role=Role.NONE,
+            roster={"aabb1122" * 4: RosterEntry(
+                identity_hash="aabb1122" * 4,
+                role=Role.PEER,
+            )},
+        )
+        # With pre-loaded rbac, no config loading should occur
+        device_in = MagicMock()
+        device_in.identity_hash = "aabb1122" * 4
+        device_out = MagicMock()
+        device_out.identity_hash = "deadbeef" * 4
+
+        # Pass rbac directly — must not call load_core_config
+        with patch("styrened.services.config.load_core_config") as mock_load:
+            assert tree._is_my_mesh(device_in, rbac) is True
+            assert tree._is_my_mesh(device_out, rbac) is False
+            mock_load.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _device_by_destination_hash — hash-key correctness
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceByDestinationHash:
+    """_device_by_destination_hash must look up devices by destination_hash,
+    which is what node.data stores.  NOT by identity_hash.
+    """
+
+    def _make_full_device(
+        self,
+        destination_hash: str,
+        identity_hash: str,
+        name: str = "test",
+    ) -> MagicMock:
+        device = MagicMock(spec=["destination_hash", "identity_hash", "name"])
+        device.destination_hash = destination_hash
+        device.identity_hash = identity_hash
+        device.name = name
+        return device
+
+    def test_lookup_by_destination_hash_succeeds(self) -> None:
+        from styrened.tui.screens.dashboard import MeshDeviceTree
+
+        tree = MeshDeviceTree.__new__(MeshDeviceTree)
+
+        dest = "aabbccdd" * 4
+        idhash = "11223344" * 4
+        device = self._make_full_device(dest, idhash)
+
+        with (
+            patch("styrened.services.node_store.get_node_store") as mock_store,
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]),
+        ):
+            mock_store.return_value.get_styrene_nodes.return_value = [device]
+            result = tree._device_by_destination_hash(dest)
+            assert result is device
+
+    def test_lookup_by_identity_hash_returns_none(self) -> None:
+        """Passing identity_hash when node is keyed by destination_hash must miss."""
+        from styrened.tui.screens.dashboard import MeshDeviceTree
+
+        tree = MeshDeviceTree.__new__(MeshDeviceTree)
+
+        dest = "aabbccdd" * 4
+        idhash = "11223344" * 4
+        device = self._make_full_device(dest, idhash)
+
+        with (
+            patch("styrened.services.node_store.get_node_store") as mock_store,
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]),
+        ):
+            mock_store.return_value.get_styrene_nodes.return_value = [device]
+            # identity_hash lookup must NOT find the device
+            result = tree._device_by_destination_hash(idhash)
+            assert result is None
+
+    def test_live_node_overrides_stored(self) -> None:
+        """Live node (same destination_hash) overwrites stale stored entry."""
+        from styrened.tui.screens.dashboard import MeshDeviceTree
+
+        tree = MeshDeviceTree.__new__(MeshDeviceTree)
+
+        dest = "cafecafe" * 4
+        idhash = "deadbeef" * 4
+        stored = self._make_full_device(dest, idhash, name="stored")
+        live = self._make_full_device(dest, idhash, name="live")
+
+        with (
+            patch("styrened.services.node_store.get_node_store") as mock_store,
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[live]),
+        ):
+            mock_store.return_value.get_styrene_nodes.return_value = [stored]
+            result = tree._device_by_destination_hash(dest)
+            assert result is live
+
+
+# ---------------------------------------------------------------------------
+# _queue_meta_requests — retry cap
+# ---------------------------------------------------------------------------
+
+
+class TestQueueMetaRetries:
+    def _make_tree_with_caches(self) -> "MeshDeviceTree":  # type: ignore[name-defined]
+        from styrened.tui.screens.dashboard import MeshDeviceTree
+
+        tree = MeshDeviceTree.__new__(MeshDeviceTree)
+        tree._meta_cache = {}
+        tree._meta_pending = set()
+        tree._meta_fail_count = {}
+        tree._fetch_meta = MagicMock()
+        return tree
+
+    def _make_device(self, dest: str, ih: str) -> MagicMock:
+        d = MagicMock()
+        d.destination_hash = dest
+        d.identity_hash = ih
+        return d
+
+    def test_queues_uncached_device(self) -> None:
+        tree = self._make_tree_with_caches()
+        device = self._make_device("aabb" * 8, "1122" * 8)
+        tree._queue_meta_requests([device])
+        tree._fetch_meta.assert_called_once_with("aabb" * 8, "1122" * 8)
+        assert "1122" * 8 in tree._meta_pending
+
+    def test_skips_already_cached(self) -> None:
+        tree = self._make_tree_with_caches()
+        device = self._make_device("aabb" * 8, "1122" * 8)
+        tree._meta_cache["1122" * 8] = {"styrene_version": "0.14.0"}
+        tree._queue_meta_requests([device])
+        tree._fetch_meta.assert_not_called()
+
+    def test_skips_in_flight(self) -> None:
+        tree = self._make_tree_with_caches()
+        device = self._make_device("aabb" * 8, "1122" * 8)
+        tree._meta_pending.add("1122" * 8)
+        tree._queue_meta_requests([device])
+        tree._fetch_meta.assert_not_called()
+
+    def test_skips_after_max_retries(self) -> None:
+        """Nodes that have failed META_MAX_RETRIES times are not re-queued."""
+        from styrened.services.direct_link import META_MAX_RETRIES
+
+        tree = self._make_tree_with_caches()
+        device = self._make_device("aabb" * 8, "1122" * 8)
+        tree._meta_fail_count["1122" * 8] = META_MAX_RETRIES
+        tree._queue_meta_requests([device])
+        tree._fetch_meta.assert_not_called()
+
+    def test_queues_below_max_retries(self) -> None:
+        """One failure below the cap → still gets queued."""
+        from styrened.services.direct_link import META_MAX_RETRIES
+
+        tree = self._make_tree_with_caches()
+        device = self._make_device("aabb" * 8, "1122" * 8)
+        tree._meta_fail_count["1122" * 8] = META_MAX_RETRIES - 1
+        tree._queue_meta_requests([device])
+        tree._fetch_meta.assert_called_once()
+
+    def test_skips_device_missing_hashes(self) -> None:
+        """Devices with empty destination_hash or identity_hash are skipped."""
+        tree = self._make_tree_with_caches()
+        device_no_dest = self._make_device("", "1122" * 8)
+        device_no_id = self._make_device("aabb" * 8, "")
+        tree._queue_meta_requests([device_no_dest, device_no_id])
+        tree._fetch_meta.assert_not_called()

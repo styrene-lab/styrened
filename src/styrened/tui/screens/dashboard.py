@@ -47,12 +47,18 @@ class MeshDeviceTree(Tree[str]):
         super().__init__("Mesh Devices", **kwargs)
         self.show_root = False
         self.guide_depth = 3
+        # All caches are keyed by identity_hash (NOT destination_hash).
+        # identity_hash is the stable public-key hash; destination_hash
+        # is app+aspect-scoped and is stored in node.data for routing.
         # Cache: identity_hash → meta dict from /meta responses
         self._meta_cache: dict[str, dict[str, Any]] = {}
-        # Cache: identity_hash → info dict from /info responses (may be None = declined)
+        # Cache: identity_hash → info dict from /info responses.
+        # None = node declined (info_respond=False).  Absent key = not yet queried.
         self._info_cache: dict[str, dict[str, Any] | None] = {}
-        # Track pending meta queries to avoid duplicate in-flight requests
+        # Pending /meta probes (identity_hash) — avoid duplicate in-flight requests
         self._meta_pending: set[str] = set()
+        # Failure counter per identity_hash — give up after META_MAX_RETRIES failures
+        self._meta_fail_count: dict[str, int] = {}
 
     def on_mount(self) -> None:
         self._load_data()
@@ -83,21 +89,32 @@ class MeshDeviceTree(Tree[str]):
 
         return unread_counts
 
-    def _is_my_mesh(self, device: MeshDevice) -> bool:
-        """Return True if this device is in the local RBAC roster with role ≥ PEER."""
+    def _is_my_mesh(self, device: MeshDevice, rbac: Any = None) -> bool:
+        """Return True if this device is in the local RBAC roster with role ≥ PEER.
+
+        Args:
+            device: The MeshDevice to check.
+            rbac: Pre-loaded RBACPolicy to avoid repeated disk reads.  When
+                  None, loads config from disk (use only for one-off checks).
+        """
         try:
             from styrened.models.rbac import Role
-            from styrened.services.config import load_core_config
-            config = load_core_config()
-            if config.rbac is None:
+            if rbac is None:
+                from styrened.services.config import load_core_config
+                config = load_core_config()
+                rbac = config.rbac
+            if rbac is None:
                 return False
-            role = config.rbac.resolve_role(device.identity_hash)
-            return role >= Role.PEER
+            return rbac.resolve_role(device.identity_hash) >= Role.PEER
         except Exception:
             return False
 
     def _load_data(self) -> None:
-        """Load device data and rebuild tree into MY MESH / OTHER sections."""
+        """Load device data and rebuild tree into MY MESH / OTHER sections.
+
+        Config is loaded once per call and passed to helpers to avoid
+        repeated disk reads for every device in the list.
+        """
         try:
             from styrened.services.node_store import get_node_store
             stored_nodes = get_node_store().get_styrene_nodes()
@@ -106,6 +123,9 @@ class MeshDeviceTree(Tree[str]):
 
         live_nodes = discover_devices()
 
+        # Build by destination_hash — this is what node.data will store.
+        # destination_hash is the routing identifier; identity_hash is the
+        # public-key hash used for RBAC lookups.  Both fields live on MeshDevice.
         all_devices_dict = {n.destination_hash: n for n in stored_nodes}
         all_devices_dict.update({n.destination_hash: n for n in live_nodes})
 
@@ -119,6 +139,14 @@ class MeshDeviceTree(Tree[str]):
 
         unread_counts = self._get_unread_counts()
         cascade = get_color_cascade()
+
+        # Load RBAC policy once — passed to _is_my_mesh to avoid N disk reads.
+        rbac = None
+        try:
+            from styrened.services.config import load_core_config
+            rbac = load_core_config().rbac
+        except Exception:
+            pass
 
         # Restore cursor position
         selected_identity: str | None = None
@@ -134,9 +162,9 @@ class MeshDeviceTree(Tree[str]):
             )
             return
 
-        # Split into my mesh vs other
-        my_devices = [d for d in devices if self._is_my_mesh(d)]
-        other_devices = [d for d in devices if not self._is_my_mesh(d)]
+        # Split into my mesh vs other — single pass, single config read
+        my_devices = [d for d in devices if self._is_my_mesh(d, rbac)]
+        other_devices = [d for d in devices if not self._is_my_mesh(d, rbac)]
 
         # --- MY MESH section ---
         my_label = f"[{cascade.bright} bold]MY MESH[/]"
@@ -160,8 +188,9 @@ class MeshDeviceTree(Tree[str]):
                     iface_label = f"[{cascade.medium}]{group_key}[/]"
                 iface_branch = my_branch.add(iface_label, data=None, expand=True)
                 for device in group_devices:
-                    line = self._format_my_mesh_line(device, cascade, unread_counts)
-                    iface_branch.add_leaf(line, data=device.identity)
+                    line = self._format_my_mesh_line(device, cascade, unread_counts, rbac)
+                    # node.data stores destination_hash — used for all navigation.
+                    iface_branch.add_leaf(line, data=device.destination_hash)
         else:
             my_branch.add_leaf(
                 f"[{cascade.dim}]No trusted nodes — add nodes via Settings > Security[/]",
@@ -176,7 +205,8 @@ class MeshDeviceTree(Tree[str]):
             sorted_other = sorted(other_devices, key=lambda d: d.last_announce, reverse=True)
             for device in sorted_other:
                 line = self._format_other_line(device, cascade)
-                other_branch.add_leaf(line, data=device.identity)
+                # node.data stores destination_hash — used for all navigation.
+                other_branch.add_leaf(line, data=device.destination_hash)
             # Queue meta requests for any other nodes we haven't queried yet
             self._queue_meta_requests(other_devices)
         else:
@@ -193,8 +223,13 @@ class MeshDeviceTree(Tree[str]):
         device: MeshDevice,
         cascade: Any,
         unread_counts: dict[str, int],
+        rbac: Any = None,
     ) -> str:
-        """Format a trusted mesh node — full detail with role badge."""
+        """Format a trusted mesh node — full detail with role badge.
+
+        Args:
+            rbac: Pre-loaded RBACPolicy (avoids disk read per device).
+        """
         from styrened.models.rbac import Role
         status_syms = {
             NodeStatus.ACTIVE: f"[{cascade.bright}]●[/]",
@@ -204,13 +239,14 @@ class MeshDeviceTree(Tree[str]):
         status = status_syms.get(device.status, f"[{cascade.dim}]?[/]")
         name = f"[{cascade.bright} bold]{device.name}[/]"
 
-        # Role badge
+        # Role badge — use pre-loaded rbac if available, no extra disk read
         role_badge = ""
         try:
-            from styrened.services.config import load_core_config
-            config = load_core_config()
-            if config.rbac:
-                role = config.rbac.resolve_role(device.identity_hash)
+            if rbac is None:
+                from styrened.services.config import load_core_config
+                rbac = load_core_config().rbac
+            if rbac:
+                role = rbac.resolve_role(device.identity_hash)
                 if role >= Role.ADMIN:
                     role_badge = f" [{cascade.bright}][ADMIN][/]"
                 elif role >= Role.OPERATOR:
@@ -220,7 +256,8 @@ class MeshDeviceTree(Tree[str]):
         except Exception:
             pass
 
-        unread = unread_counts.get(device.identity, 0)
+        # unread_counts keyed by destination_hash (via device.identity alias)
+        unread = unread_counts.get(device.destination_hash, 0)
         unread_text = f" [{cascade.bright} bold]✉{unread}[/]" if unread > 0 else ""
 
         seen = device.last_seen_display
@@ -263,6 +300,9 @@ class MeshDeviceTree(Tree[str]):
                 meta_suffix += "[/]"
         elif device.identity_hash in self._meta_pending:
             meta_suffix = f" [{cascade.dim}]…[/]"
+        elif self._meta_fail_count.get(device.identity_hash, 0) > 0:
+            # Node unreachable or pre-/meta version — show nothing extra
+            pass
 
         seen = device.last_seen_display
         last_seen = f"[{cascade.dim}]{seen}[/]"
@@ -270,20 +310,36 @@ class MeshDeviceTree(Tree[str]):
         return f"{status} {display_name}{meta_suffix}  {last_seen}"
 
     def _queue_meta_requests(self, devices: list[MeshDevice]) -> None:
-        """Fire background meta requests for unknown nodes not yet queried."""
+        """Fire background /meta probes for OTHER nodes not yet queried.
+
+        Nodes that have failed META_MAX_RETRIES times are skipped — they're
+        likely running an older version without /meta support, or are
+        unreachable over direct link.
+        """
+        from styrened.services.direct_link import META_MAX_RETRIES
         for device in devices:
-            if (
-                device.identity_hash
-                and device.identity_hash not in self._meta_cache
-                and device.identity_hash not in self._meta_pending
-                and device.destination_hash  # need a link target
-            ):
-                self._meta_pending.add(device.identity_hash)
-                self._fetch_meta(device.destination_hash, device.identity_hash)
+            if not device.identity_hash or not device.destination_hash:
+                continue
+            ih = device.identity_hash
+            if ih in self._meta_cache:
+                continue  # already have it
+            if ih in self._meta_pending:
+                continue  # in-flight
+            if self._meta_fail_count.get(ih, 0) >= META_MAX_RETRIES:
+                continue  # gave up
+            self._meta_pending.add(ih)
+            self._fetch_meta(device.destination_hash, ih)
 
     @work(thread=False, exclusive=False, group="meta-fetch")
     async def _fetch_meta(self, destination_hash: str, identity_hash: str) -> None:
-        """Async worker: request /meta from an unknown node and update display."""
+        """Async worker: request /meta from an OTHER node and update labels.
+
+        Runs in the Textual event-loop (thread=False).  Mutations to widget
+        labels are deferred via call_later to ensure they occur during the
+        next message-pump cycle rather than mid-worker.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
         try:
             app: StyreneApp = self.app  # type: ignore[assignment]
             bridge = app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
@@ -292,88 +348,122 @@ class MeshDeviceTree(Tree[str]):
             meta = await bridge.datalink_meta(destination_hash)
             if meta:
                 self._meta_cache[identity_hash] = meta
-        except Exception:
-            pass
+            else:
+                # Probe returned nothing — count as a failure
+                self._meta_fail_count[identity_hash] = (
+                    self._meta_fail_count.get(identity_hash, 0) + 1
+                )
+        except Exception as exc:
+            logger.debug(
+                "Datalink /meta probe failed for %s: %s",
+                identity_hash[:12],
+                exc,
+            )
+            self._meta_fail_count[identity_hash] = (
+                self._meta_fail_count.get(identity_hash, 0) + 1
+            )
         finally:
             self._meta_pending.discard(identity_hash)
-        # Trigger a lightweight re-render of just this node's label
-        self._refresh_other_labels()
+        # Defer label refresh to the next pump cycle so we don't mutate
+        # tree nodes from within a worker callback.
+        self.call_later(self._refresh_other_labels)
 
     def _refresh_other_labels(self) -> None:
-        """Re-render labels in the OTHER branch without full data reload."""
+        """Re-render labels in the OTHER branch without a full data reload.
+
+        Walks the tree and updates labels for nodes in the OTHER section.
+        Must be called on the main event-loop (use call_later from workers).
+        Only OTHER nodes are updated — MY MESH node labels are left intact.
+        """
         try:
+            # Load RBAC once for the walk
+            rbac = None
+            try:
+                from styrened.services.config import load_core_config
+                rbac = load_core_config().rbac
+            except Exception:
+                pass
+
             cascade = get_color_cascade()
-            # Walk tree looking for OTHER branch
             for node in self._tree_walk(self.root):
-                if node.data is not None:
-                    # It's a device leaf — re-format if it's an "other" node
-                    identity = str(node.data)
-                    if identity not in self._get_my_mesh_identities():
-                        # Find the MeshDevice for this identity
-                        device = self._device_by_identity(identity)
-                        if device:
-                            node.set_label(self._format_other_line(device, cascade))
+                if node.data is None:
+                    continue
+                # node.data stores destination_hash
+                dest_hash = str(node.data)
+                # Look up the device by destination_hash
+                device = self._device_by_destination_hash(dest_hash)
+                if device is None:
+                    continue
+                # Only re-render OTHER nodes — leave MY MESH labels alone
+                if self._is_my_mesh(device, rbac):
+                    continue
+                node.set_label(self._format_other_line(device, cascade))
         except Exception:
             pass
 
-    def _get_my_mesh_identities(self) -> set[str]:
-        """Get set of identity hashes in MY MESH (cached for label refresh)."""
-        try:
-            from styrened.models.rbac import Role
-            from styrened.services.config import load_core_config
-            config = load_core_config()
-            if config.rbac is None:
-                return set()
-            return {
-                ih for ih, entry in config.rbac.roster.items()
-                if entry.role >= Role.PEER
-            }
-        except Exception:
-            return set()
+    def _device_by_destination_hash(self, destination_hash: str) -> MeshDevice | None:
+        """Look up a MeshDevice by destination_hash from live + stored nodes.
 
-    def _device_by_identity(self, identity: str) -> MeshDevice | None:
-        """Look up a MeshDevice by identity hash from live + stored nodes."""
+        Note: node.data stores destination_hash.  Do NOT pass identity_hash
+        here — use _is_my_mesh(device) to check RBAC membership instead.
+        """
         try:
             from styrened.services.node_store import get_node_store
             nodes = get_node_store().get_styrene_nodes()
             live = discover_devices()
-            all_devices = {n.identity_hash: n for n in nodes}
-            all_devices.update({n.identity_hash: n for n in live})
-            return all_devices.get(identity)
+            # Key by destination_hash to match what node.data stores
+            all_devices = {n.destination_hash: n for n in nodes}
+            all_devices.update({n.destination_hash: n for n in live})
+            return all_devices.get(destination_hash)
         except Exception:
             return None
 
     def request_info_for_selected(self) -> str | None:
         """Fire an /info request for the currently selected OTHER node.
 
-        Returns the identity_hash if a request was queued, None if not applicable.
+        Returns the destination_hash if a request was queued, else None.
+        The /info result is stored in _info_cache keyed by identity_hash.
+        Callers should use this return value only for notification display.
         """
         if not self.cursor_node or not self.cursor_node.data:
             return None
-        identity = str(self.cursor_node.data)
-        # Only for other nodes (not already in my mesh)
-        if identity in self._get_my_mesh_identities():
+        # node.data is destination_hash
+        dest_hash = str(self.cursor_node.data)
+        device = self._device_by_destination_hash(dest_hash)
+        if device is None:
             return None
-        device = self._device_by_identity(identity)
-        if device and device.destination_hash:
-            self._fetch_info(device.destination_hash, identity)
-            return identity
-        return None
+        # Only valid for OTHER nodes
+        if self._is_my_mesh(device):
+            return None
+        # /info result must be cached under identity_hash (matches _format_other_line read)
+        self._fetch_info(device.destination_hash, device.identity_hash)
+        return dest_hash
 
     @work(thread=False, exclusive=False, group="info-fetch")
     async def _fetch_info(self, destination_hash: str, identity_hash: str) -> None:
-        """Async worker: request /info from an unknown node and update display."""
+        """Async worker: request /info from an OTHER node and update labels.
+
+        Cache is keyed by identity_hash — matching _format_other_line reads.
+        Runs in the Textual event-loop (thread=False).
+        """
+        import logging
+        logger = logging.getLogger(__name__)
         try:
             app: StyreneApp = self.app  # type: ignore[assignment]
             bridge = app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
             if bridge is None:
                 return
             info = await bridge.datalink_info(destination_hash)
-            # Store result whether it's a dict or None (None = declined)
+            # Store result under identity_hash — None = declined (not an error)
             self._info_cache[identity_hash] = info
-        except Exception:
+        except Exception as exc:
+            logger.debug(
+                "Datalink /info request failed for %s: %s",
+                identity_hash[:12],
+                exc,
+            )
             self._info_cache[identity_hash] = None
-        self._refresh_other_labels()
+        self.call_later(self._refresh_other_labels)
 
     def _select_by_identity(self, identity: str) -> None:
         """Move cursor to the node matching the given identity."""

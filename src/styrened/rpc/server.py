@@ -1340,7 +1340,14 @@ class RPCServer:
         operator_label = ""
         if config is not None:
             try:
-                name = config.identity.display_name or ""
+                # Only include display_name if the operator has explicitly
+                # configured it — the default "Anonymous Styrene" is a
+                # placeholder and must not be broadcast as a node identifier.
+                from styrened.models.config import IdentityConfig
+                dn = config.identity.display_name or ""
+                default_dn = IdentityConfig.__dataclass_fields__["display_name"].default
+                if dn and dn != default_dn:
+                    name = dn
             except Exception:
                 pass
             try:
