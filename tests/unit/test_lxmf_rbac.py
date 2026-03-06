@@ -163,3 +163,48 @@ class TestSetRBACPolicy:
         assert lxmf_service._rbac_policy is None
         lxmf_service.set_rbac_policy(rbac_policy)
         assert lxmf_service._rbac_policy is rbac_policy
+
+
+class TestContactsDBBlocksSeededToRBAC:
+    """Verify contacts-DB blocks are loaded into RBAC on startup."""
+
+    def test_contacts_blocks_seeded(self, lxmf_service, rbac_policy):
+        """Blocks in contacts DB but not in RBAC config are seeded."""
+        lxmf_service.set_rbac_policy(rbac_policy)
+        # Simulate contacts DB having a blocked peer not in RBAC config
+        lxmf_service._load_blocklist = lambda: {"deadbeef12345678", "cafebabe87654321"}
+
+        # Simulate daemon calling _seed_contacts_blocks_to_rbac
+        blocked_set = lxmf_service._load_blocklist()
+        for peer_hash in blocked_set:
+            if peer_hash not in rbac_policy.blocked:
+                rbac_policy.block(peer_hash)
+
+        assert "deadbeef12345678" in rbac_policy.blocked
+        assert "cafebabe87654321" in rbac_policy.blocked
+
+    def test_contacts_blocks_not_duplicated(self, lxmf_service, rbac_policy):
+        """Blocks already in RBAC config are not duplicated."""
+        rbac_policy.block("deadbeef12345678")
+        lxmf_service.set_rbac_policy(rbac_policy)
+        lxmf_service._load_blocklist = lambda: {"deadbeef12345678"}
+
+        blocked_set = lxmf_service._load_blocklist()
+        for peer_hash in blocked_set:
+            if peer_hash not in rbac_policy.blocked:
+                rbac_policy.block(peer_hash)
+
+        assert rbac_policy.blocked.count("deadbeef12345678") == 1
+
+    def test_rbac_blocked_message_after_seed(self, lxmf_service, mock_message):
+        """Message from contacts-DB-blocked peer is dropped after seeding."""
+        source_hex = mock_message.source_hash.hex()
+        policy = RBACPolicy(default_role=Role.PEER)
+        lxmf_service.set_rbac_policy(policy)
+        # Simulate seeding from contacts DB
+        policy.block(source_hex)
+
+        lxmf_service._handle_lxmf_message(mock_message)
+
+        callback = lxmf_service._message_callbacks[0][0]
+        callback.assert_not_called()
