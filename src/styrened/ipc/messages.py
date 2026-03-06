@@ -662,6 +662,32 @@ class CmdDatalinkSpeedtestRequest(IPCRequest):
 
 
 @dataclass
+class CmdDatalinkMetaRequest(IPCRequest):
+    """Request non-identifiable metadata from peer over direct link."""
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_META
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
+class CmdDatalinkInfoRequest(IPCRequest):
+    """Request identifiable metadata from peer over direct link.
+
+    The remote node may decline (default) by returning an empty response.
+    A None result from the handler means the node chose not to identify.
+    """
+
+    MSG_TYPE = IPCMessageType.CMD_DATALINK_INFO
+    destination_hash: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"destination_hash": self.destination_hash}
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -1539,6 +1565,14 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         )
     elif msg_type == IPCMessageType.CMD_DATALINK_SPEEDTEST:
         return CmdDatalinkSpeedtestRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_META:
+        return CmdDatalinkMetaRequest(
+            destination_hash=payload.get("destination_hash", ""),
+        )
+    elif msg_type == IPCMessageType.CMD_DATALINK_INFO:
+        return CmdDatalinkInfoRequest(
             destination_hash=payload.get("destination_hash", ""),
         )
     elif msg_type == IPCMessageType.SUB_MESSAGES:

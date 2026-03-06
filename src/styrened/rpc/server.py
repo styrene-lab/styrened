@@ -1269,6 +1269,10 @@ class RPCServer:
         Returns:
             Dictionary with uptime, ip, services, disk info, system identity,
             and available commands.
+
+        Note: This response contains identifiable fields (ip, hostname). It
+        is only served to authorized callers (RBAC MONITOR+ in Phase 2).
+        For anonymous node metadata, use _gather_meta() instead.
         """
         os_info = get_os_info()
         disk_used, disk_total = self._get_disk_usage()
@@ -1285,6 +1289,67 @@ class RPCServer:
             "os_version": os_info["os_version"],
             "nixos_generation": os_info["nixos_generation"],
             "available_commands": self._get_available_commands(),
+        }
+
+    def _gather_meta(self, config: Any = None) -> dict[str, Any]:
+        """Gather non-identifiable node metadata for /meta requests.
+
+        Returns only information that cannot identify the operator or node:
+        - styrene_version: what software is running
+        - profile: node role (node/hub/workstation/edge-router)
+        - capabilities: feature flags (rpc, lxmf, datalink, etc.)
+        - arch: CPU architecture (aarch64, x86_64, etc.)
+        - os_id: OS family (nixos, debian, darwin)
+
+        Deliberately excluded: hostname, IP address, uptime, disk usage,
+        nixos_generation, operator identity, peer list.
+        """
+        os_info = get_os_info()
+        caps: list[str] = ["lxmf"]
+        if config and getattr(config.rpc, "enabled", False):
+            caps.append("rpc")
+        if config and getattr(config.api, "enabled", False):
+            caps.append("api")
+        caps.append("datalink")  # always present when daemon is up
+
+        profile = "node"
+        if config:
+            try:
+                profile = config.profile.value
+            except Exception:
+                pass
+
+        return {
+            "styrene_version": _styrened_version,
+            "profile": profile,
+            "capabilities": caps,
+            "arch": os_info.get("arch", ""),
+            "os_id": os_info.get("os_id", ""),
+        }
+
+    def _gather_info(self, config: Any = None) -> dict[str, Any]:
+        """Gather identifiable node metadata for /info requests.
+
+        Returns operator-chosen display metadata:
+        - name: display name set by operator in config
+        - operator_label: optional short label set by operator
+
+        Only served when discovery.info_respond = True in config.
+        """
+        name = ""
+        operator_label = ""
+        if config is not None:
+            try:
+                name = config.identity.display_name or ""
+            except Exception:
+                pass
+            try:
+                operator_label = config.discovery.operator_label or ""
+            except Exception:
+                pass
+        return {
+            "name": name,
+            "operator_label": operator_label,
         }
 
     def _get_uptime(self) -> int:

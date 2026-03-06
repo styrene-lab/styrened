@@ -1366,6 +1366,16 @@ class StyreneDaemon:
                 response_generator=self._serve_datalink_speedtest,
                 allow=RNS.Destination.ALLOW_ALL,
             )
+            self._datalink_destination.register_request_handler(
+                "/meta",
+                response_generator=self._serve_datalink_meta,
+                allow=RNS.Destination.ALLOW_ALL,
+            )
+            self._datalink_destination.register_request_handler(
+                "/info",
+                response_generator=self._serve_datalink_info,
+                allow=RNS.Destination.ALLOW_ALL,
+            )
 
             # Note: VPN handshake now uses LXMF (StyreneProtocol), not datalink
 
@@ -1489,6 +1499,56 @@ class StyreneDaemon:
         import json
 
         return json.dumps({"pong": True, "timestamp": time.time()}).encode("utf-8")
+
+    def _serve_datalink_meta(
+        self,
+        path: str,
+        data: Any,
+        request_id: Any,
+        link_id: Any,
+        remote_identity: Any,
+        requested_at: Any,
+    ) -> bytes:
+        """Serve /meta request — non-identifiable node metadata.
+
+        Returns styrene_version, profile, capabilities, arch, os_id.
+        No hostname, IP, uptime, disk, or operator identity.
+        Safe to serve to any caller, including unknown nodes.
+        """
+        import json
+
+        try:
+            meta = self._rpc_server._gather_meta(self.config) if self._rpc_server else {}
+        except Exception as e:
+            logger.error(f"Datalink /meta handler error: {e}")
+            meta = {}
+        return json.dumps(meta).encode("utf-8")
+
+    def _serve_datalink_info(
+        self,
+        path: str,
+        data: Any,
+        request_id: Any,
+        link_id: Any,
+        remote_identity: Any,
+        requested_at: Any,
+    ) -> bytes:
+        """Serve /info request — identifiable operator metadata.
+
+        Returns name and operator_label only when discovery.info_respond=True.
+        Default is to return an empty dict (silent deny without error code).
+        Once RBAC Phase 3 lands, this will also check the roster.
+        """
+        import json
+
+        try:
+            if not self.config.discovery.info_respond:
+                return json.dumps({}).encode("utf-8")
+            info = self._rpc_server._gather_info(self.config) if self._rpc_server else {}
+        except Exception as e:
+            logger.error(f"Datalink /info handler error: {e}")
+            info = {}
+        return json.dumps(info).encode("utf-8")
 
     def _start_terminal_service(self) -> None:
         """Start the terminal session service.

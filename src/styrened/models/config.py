@@ -406,12 +406,22 @@ class DiscoveryConfig:
         allowed_peers: Set of 32-char hex identity hashes permitted to appear
             in the device list.  Only consulted when *access_mode* is
             ``ALLOWLIST``.  Hashes are matched case-insensitively.
+        info_respond: Whether to respond to /info requests from unknown nodes.
+            False (default) — deny all /info requests silently.
+            True — respond with identifiable metadata (name, operator_label).
+            Even when True, the RBAC roster controls which identities receive
+            a response once RBAC Phase 3 is wired; this flag is the master
+            on/off switch.
+        operator_label: Optional short label included in /info responses when
+            info_respond is True.  Not included in /meta responses.
     """
 
     enabled: bool = True
     auto_announce: bool = True
     access_mode: MeshAccessMode = MeshAccessMode.OPEN
     allowed_peers: set[str] = field(default_factory=set)
+    info_respond: bool = False
+    operator_label: str = ""
 
 
 @dataclass
