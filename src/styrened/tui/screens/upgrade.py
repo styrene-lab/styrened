@@ -97,21 +97,25 @@ class UpgradeScreen(ModalScreen[bool]):
         margin: 0 0 1 0;
         border: solid $border;
         padding: 0 1;
-        overflow-y: scroll;
+        overflow-y: auto;
+        scrollbar-background: $surface;
+        scrollbar-color: $panel;
+        scrollbar-size-vertical: 1;
     }
 
     #changelog-title {
         text-style: bold;
-        color: $panel;
+        color: $primary-lighten-1;
         margin-bottom: 0;
     }
 
     #changelog-content {
         height: auto;
+        padding: 0 0 1 0;
     }
 
     #changelog-loading {
-        color: $panel;
+        color: $text-muted;
         text-style: italic;
     }
 
@@ -190,11 +194,19 @@ class UpgradeScreen(ModalScreen[bool]):
         # Build rich text
         parts: list[str] = []
         for line in lines:
-            # Highlight version prefixes
-            if line.strip().startswith("v0.") or line.strip().startswith("v1."):
-                parts.append(f"[{cascade.medium}]{line}[/]")
-            elif line.strip().startswith("fix:") or line.strip().startswith("feat:"):
+            stripped = line.strip()
+            # Version header lines
+            if stripped.startswith("v0.") or stripped.startswith("v1."):
+                parts.append(f"[{cascade.bright} bold]{line}[/]")
+            # feat/fix/perf bullets — color by type
+            elif "feat" in stripped[:10]:
                 parts.append(f"[{cascade.bright}]{line}[/]")
+            elif stripped.startswith("  • fix") or stripped.startswith("    • fix"):
+                parts.append(f"[yellow]{line}[/]")
+            elif stripped.startswith("  • perf") or stripped.startswith("    • perf"):
+                parts.append(f"[{cascade.medium}]{line}[/]")
+            elif stripped.startswith("  • docs") or stripped.startswith("    • docs"):
+                parts.append(f"[dim]{line}[/]")
             else:
                 parts.append(line)
 

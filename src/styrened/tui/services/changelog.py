@@ -73,17 +73,17 @@ class Changelog:
                 if current_ver:
                     lines.append("")  # blank line between versions
                 current_ver = entry.version
-                if entry.summary:
-                    lines.append(f"  v{entry.version}")
-                    lines.append(f"    {entry.summary}")
-                else:
-                    # Version-only entry (PyPI fallback, no commit messages)
-                    lines.append(f"  v{entry.version}")
-            elif entry.summary:
+                lines.append(f"  v{entry.version}")
+
+            if entry.summary:
+                # Split semicolon-joined summaries into individual bullet lines
+                items = [s.strip() for s in entry.summary.split(";") if s.strip()]
                 if entry.version:
-                    lines.append(f"    {entry.summary}")
+                    for item in items:
+                        lines.append(f"    • {item}")
                 else:
-                    lines.append(f"  • {entry.summary}")
+                    for item in items:
+                        lines.append(f"  • {item}")
 
         if len(lines) > max_lines:
             kept = max_lines - 2
