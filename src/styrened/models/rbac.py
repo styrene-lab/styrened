@@ -57,12 +57,15 @@ class Capability:
     PAGE_BROWSE: ClassVar[str] = "page.browse"
     PING: ClassVar[str] = "rpc.ping"
     STATUS_QUERY: ClassVar[str] = "rpc.status"
+    DATALINK_PING: ClassVar[str] = "datalink.ping"
+    DATALINK_META: ClassVar[str] = "datalink.meta"
+    DATALINK_INFO: ClassVar[str] = "datalink.info"
+    DATALINK_STATUS: ClassVar[str] = "datalink.status"
 
     # --- MONITOR tier (20) ---
     INBOX_READ: ClassVar[str] = "rpc.inbox_read"
     WEB_READ: ClassVar[str] = "web.read"
     DATALINK_ESTABLISH: ClassVar[str] = "datalink.establish"
-    DATALINK_STATUS: ClassVar[str] = "datalink.status"
     DATALINK_SPEEDTEST: ClassVar[str] = "datalink.speedtest"
 
     # --- OPERATOR tier (30) ---
@@ -99,6 +102,10 @@ _PEER_CAPS: frozenset[str] = frozenset(
         Capability.PAGE_BROWSE,
         Capability.PING,
         Capability.STATUS_QUERY,
+        Capability.DATALINK_PING,
+        Capability.DATALINK_META,
+        Capability.DATALINK_INFO,
+        Capability.DATALINK_STATUS,
     }
 )
 
@@ -107,7 +114,6 @@ _MONITOR_CAPS: frozenset[str] = _PEER_CAPS | frozenset(
         Capability.INBOX_READ,
         Capability.WEB_READ,
         Capability.DATALINK_ESTABLISH,
-        Capability.DATALINK_STATUS,
         Capability.DATALINK_SPEEDTEST,
     }
 )

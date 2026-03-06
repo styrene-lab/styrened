@@ -61,6 +61,20 @@ from styrened.services.reticulum import discover_devices, start_discovery
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Datalink RBAC: handler → capability mapping (Phase 3)
+# ---------------------------------------------------------------------------
+
+from styrened.models.rbac import Capability
+
+DATALINK_HANDLER_CAPABILITY: dict[str, str] = {
+    "/ping": Capability.DATALINK_PING,
+    "/meta": Capability.DATALINK_META,
+    "/info": Capability.DATALINK_INFO,
+    "/status": Capability.DATALINK_STATUS,
+    "/speedtest": Capability.DATALINK_SPEEDTEST,
+}
+
+# ---------------------------------------------------------------------------
 # Datalink security constants
 # ---------------------------------------------------------------------------
 
@@ -123,8 +137,8 @@ class _DataLinkRateLimiter:
             heavy: True for the speedtest endpoint.
         """
         if not identity:
-            # Unknown identity — allow (RNS link was established but identify()
-            # not called; restrict at Phase 3 when ALLOW_LIST is enforced).
+            # Unknown identity — allow through rate limiter.  RBAC enforcement
+            # happens at the handler level (app-layer) and link level (ALLOW_LIST).
             return True
         now = time.time()
         limit = _DL_HEAVY_LIMIT if heavy else _DL_LIGHT_LIMIT
@@ -1476,8 +1490,8 @@ class StyreneDaemon:
 
         Returns empty string if the identity is None or has no hash —
         callers treat empty-string identity as unknown/unauthenticated.
-        The rate limiter allows unknown identities through; Phase 3 will
-        enforce ALLOW_LIST which requires a valid identity on the link.
+        The rate limiter allows unknown identities through; RBAC
+        enforcement happens at both link level (ALLOW_LIST) and app layer.
         """
         try:
             if remote_identity is not None and hasattr(remote_identity, "hash"):
@@ -1510,6 +1524,54 @@ class StyreneDaemon:
         except Exception:
             return 1  # Role.NONE
 
+    def _datalink_allow_mode(self, capability: str) -> tuple[int, list[bytes] | None]:
+        """Compute RNS allow mode for a datalink capability.
+
+        Returns:
+            (allow_flag, allowed_list) where allow_flag is
+            0x00 (ALLOW_ALL) or 0x01 (ALLOW_LIST).
+        """
+        rbac = self.config.rbac
+        if rbac is None:
+            # Legacy: no RBAC → ALLOW_ALL
+            return (0x00, None)
+
+        if rbac.should_use_allow_all(capability):
+            return (0x00, None)
+
+        return (0x01, rbac.get_allow_list(capability))
+
+    def _reregister_datalink_handlers(self) -> None:
+        """Re-register all datalink request handlers with updated allow lists.
+
+        Call after roster changes to reflect new RBAC grants at the RNS
+        link level.
+        """
+        dest = self._datalink_destination
+        if dest is None:
+            return
+
+        handler_map = {
+            "/ping": self._serve_datalink_ping,
+            "/meta": self._serve_datalink_meta,
+            "/info": self._serve_datalink_info,
+            "/status": self._serve_datalink_status,
+            "/speedtest": self._serve_datalink_speedtest,
+        }
+
+        for path, handler in handler_map.items():
+            cap = DATALINK_HANDLER_CAPABILITY[path]
+            allow, allowed_list = self._datalink_allow_mode(cap)
+            kwargs: dict[str, Any] = {
+                "response_generator": handler,
+                "allow": allow,
+            }
+            if allowed_list is not None:
+                kwargs["allowed_list"] = allowed_list
+            dest.register_request_handler(path, **kwargs)
+
+        logger.debug("Datalink handlers re-registered with updated RBAC allow lists")
+
     def _setup_datalink_destination(self) -> None:
         """Register ("styrene", "datalink") destination for incoming links."""
         try:
@@ -1531,32 +1593,8 @@ class StyreneDaemon:
                 DATALINK_ASPECT,
             )
 
-            # Register request handlers
-            self._datalink_destination.register_request_handler(
-                "/status",
-                response_generator=self._serve_datalink_status,
-                allow=RNS.Destination.ALLOW_ALL,
-            )
-            self._datalink_destination.register_request_handler(
-                "/ping",
-                response_generator=self._serve_datalink_ping,
-                allow=RNS.Destination.ALLOW_ALL,
-            )
-            self._datalink_destination.register_request_handler(
-                "/speedtest",
-                response_generator=self._serve_datalink_speedtest,
-                allow=RNS.Destination.ALLOW_ALL,
-            )
-            self._datalink_destination.register_request_handler(
-                "/meta",
-                response_generator=self._serve_datalink_meta,
-                allow=RNS.Destination.ALLOW_ALL,
-            )
-            self._datalink_destination.register_request_handler(
-                "/info",
-                response_generator=self._serve_datalink_info,
-                allow=RNS.Destination.ALLOW_ALL,
-            )
+            # Register request handlers with RBAC-computed allow mode
+            self._reregister_datalink_handlers()
 
             # Note: VPN handshake now uses LXMF (StyreneProtocol), not datalink
 
@@ -1684,6 +1722,9 @@ class StyreneDaemon:
         Rate limited (heavy tier: 3 req/min) to prevent bandwidth flooding.
         Payload size is capped at _SPEEDTEST_MAX_PAYLOAD_BYTES to prevent
         memory exhaustion from malicious oversized submissions.
+
+        RBAC: requires MONITOR+ when RBAC active (app-layer defense-in-depth).
+        Legacy mode (no RBAC policy): open to all authenticated callers.
         """
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex, heavy=True):
@@ -1691,6 +1732,17 @@ class StyreneDaemon:
                 "Datalink /speedtest rate-limited for %s", identity_hex[:16] or "unknown"
             )
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
+
+        if self.config.rbac is not None:
+            role = self._datalink_rbac_role(identity_hex)
+            try:
+                from styrened.models.rbac import Role
+                if role < int(Role.MONITOR):
+                    logger.info("Datalink /speedtest denied for %s (role=%d)", identity_hex[:16] or "unknown", role)
+                    return json.dumps({"error": "forbidden"}).encode("utf-8")
+            except Exception:
+                logger.exception("Datalink /speedtest RBAC check error")
+                return json.dumps({"error": "internal_error"}).encode("utf-8")
 
         t0 = time.time()
         raw_bytes = data if data else b""
@@ -1720,11 +1772,18 @@ class StyreneDaemon:
     ) -> bytes:
         """Serve /ping request over direct link.
 
+        RBAC: PEER+ required (BLOCKED returns empty).
         Rate limited (light tier: 20 req/min).
         """
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex):
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
+
+        role = self._datalink_rbac_role(identity_hex)
+        from styrened.models.rbac import Role
+        if role <= int(Role.BLOCKED):
+            return json.dumps({}).encode("utf-8")
+
         return json.dumps({"pong": True, "timestamp": time.time()}).encode("utf-8")
 
     def _serve_datalink_meta(
@@ -1738,7 +1797,7 @@ class StyreneDaemon:
     ) -> bytes:
         """Serve /meta — non-identifiable node metadata.
 
-        Safe to serve to any caller (no identity or RBAC required).
+        RBAC: PEER+ required (BLOCKED returns empty).
         Returns styrene_version, profile, capabilities, arch, os_id.
         Deliberately excludes hostname, IP, uptime, disk, operator identity.
 
@@ -1747,6 +1806,11 @@ class StyreneDaemon:
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex):
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
+
+        role = self._datalink_rbac_role(identity_hex)
+        from styrened.models.rbac import Role
+        if role <= int(Role.BLOCKED):
+            return json.dumps({}).encode("utf-8")
 
         try:
             meta = self._rpc_server._gather_meta(self.config) if self._rpc_server else {}
@@ -1772,12 +1836,18 @@ class StyreneDaemon:
 
         Rate limited (light tier: 20 req/min).
 
-        Phase 3 TODO: also gate /info on RBAC role of the requester — only
-        PEER+ should receive the identity response even when info_respond=True.
+        RBAC: PEER+ required (BLOCKED returns empty). Config gate
+        (info_respond) is checked after RBAC — no point checking config
+        for a blocked identity.
         """
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex):
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
+
+        role = self._datalink_rbac_role(identity_hex)
+        from styrened.models.rbac import Role
+        if role <= int(Role.BLOCKED):
+            return json.dumps({}).encode("utf-8")
 
         try:
             if not self.config.discovery.info_respond:
