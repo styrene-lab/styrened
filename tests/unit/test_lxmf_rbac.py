@@ -7,6 +7,20 @@ import pytest
 from styrened.models.rbac import RBACPolicy, Role
 
 
+def _make_daemon(rbac_policy=None, banned_peers=None):
+    """Create a minimal mock daemon with real _inject_lxmf_rbac / _seed methods bound."""
+    from styrened.daemon import StyreneDaemon
+
+    daemon = MagicMock()
+    daemon.config = MagicMock()
+    daemon.config.rbac = rbac_policy
+    daemon.config.banned_peers = banned_peers or []
+    daemon._inject_lxmf_rbac = StyreneDaemon._inject_lxmf_rbac.__get__(daemon)
+    daemon._seed_contacts_blocks_to_rbac = StyreneDaemon._seed_contacts_blocks_to_rbac.__get__(daemon)
+    daemon._seed_config_bans = StyreneDaemon._seed_config_bans.__get__(daemon)
+    return daemon
+
+
 @pytest.fixture
 def lxmf_service():
     """Create a fresh LXMFService instance for testing."""
@@ -217,23 +231,12 @@ class TestInjectLxmfRbacDaemonWiring:
     of chat.enabled state. This was the bug fixed in commit cf94431.
     """
 
-    def _make_daemon(self, rbac_policy=None):
-        """Create a minimal mock daemon with config."""
-        daemon = MagicMock()
-        daemon.config = MagicMock()
-        daemon.config.rbac = rbac_policy
-        # Bind the real method to our mock
-        from styrened.daemon import StyreneDaemon
-        daemon._inject_lxmf_rbac = StyreneDaemon._inject_lxmf_rbac.__get__(daemon)
-        daemon._seed_contacts_blocks_to_rbac = StyreneDaemon._seed_contacts_blocks_to_rbac.__get__(daemon)
-        return daemon
-
     @patch("styrened.services.lxmf_service.get_lxmf_service")
     @patch("styrened.models.messages.init_db")
     def test_rbac_injected_when_policy_present(self, mock_init_db, mock_get_svc):
         """RBAC policy is injected into LXMFService when config.rbac is set."""
         policy = RBACPolicy(default_role=Role.PEER)
-        daemon = self._make_daemon(rbac_policy=policy)
+        daemon = _make_daemon(rbac_policy=policy)
 
         mock_svc = MagicMock()
         mock_svc.is_initialized = True
@@ -247,7 +250,7 @@ class TestInjectLxmfRbacDaemonWiring:
     @patch("styrened.services.lxmf_service.get_lxmf_service")
     def test_no_injection_when_policy_absent(self, mock_get_svc):
         """No RBAC injection when config.rbac is None."""
-        daemon = self._make_daemon(rbac_policy=None)
+        daemon = _make_daemon(rbac_policy=None)
 
         mock_svc = MagicMock()
         mock_svc.is_initialized = True
@@ -262,7 +265,7 @@ class TestInjectLxmfRbacDaemonWiring:
     def test_contacts_blocks_seeded_during_injection(self, mock_init_db, mock_get_svc):
         """Contacts-DB blocks are seeded into RBAC during injection."""
         policy = RBACPolicy(default_role=Role.PEER)
-        daemon = self._make_daemon(rbac_policy=policy)
+        daemon = _make_daemon(rbac_policy=policy)
 
         mock_svc = MagicMock()
         mock_svc.is_initialized = True
@@ -277,7 +280,7 @@ class TestInjectLxmfRbacDaemonWiring:
     def test_skips_when_lxmf_not_initialized(self, mock_get_svc):
         """Gracefully skips when LXMF is not yet initialized."""
         policy = RBACPolicy(default_role=Role.PEER)
-        daemon = self._make_daemon(rbac_policy=policy)
+        daemon = _make_daemon(rbac_policy=policy)
 
         mock_svc = MagicMock()
         mock_svc.is_initialized = False
@@ -286,3 +289,80 @@ class TestInjectLxmfRbacDaemonWiring:
         daemon._inject_lxmf_rbac()  # Should not raise
 
         mock_svc.set_rbac_policy.assert_not_called()
+
+
+class TestInjectLxmfRbacExceptionHandling:
+    """Verify _inject_lxmf_rbac degrades gracefully on errors."""
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service", side_effect=ImportError("no LXMF"))
+    def test_inject_survives_import_error(self, mock_get_svc):
+        """_inject_lxmf_rbac doesn't crash when LXMF is not installed."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        daemon = _make_daemon(rbac_policy=policy)
+        daemon._inject_lxmf_rbac()  # Should not raise
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    @patch("styrened.models.messages.init_db")
+    def test_seed_survives_load_blocklist_error(self, mock_init_db, mock_get_svc):
+        """_seed_contacts_blocks_to_rbac doesn't crash when DB query fails."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        daemon = _make_daemon(rbac_policy=policy)
+
+        mock_svc = MagicMock()
+        mock_svc.is_initialized = True
+        mock_svc._load_blocklist.side_effect = Exception("DB corrupted")
+        mock_get_svc.return_value = mock_svc
+
+        daemon._inject_lxmf_rbac()  # Should not raise
+        # Policy injection should have happened before the seeding error
+        mock_svc.set_rbac_policy.assert_called_once_with(policy)
+
+
+class TestSeedConfigBansDualWrite:
+    """_seed_config_bans dual-writes to both contacts DB and RBAC."""
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    @patch("styrened.models.messages.init_db")
+    def test_banned_peers_written_to_rbac(self, mock_init_db, mock_get_svc):
+        """Banned peers from config are dual-written to RBAC via block_peer."""
+        policy = RBACPolicy(default_role=Role.PEER)
+        daemon = _make_daemon(
+            rbac_policy=policy,
+            banned_peers=["deadbeef", "cafebabe"],
+        )
+
+        mock_svc = MagicMock()
+        mock_get_svc.return_value = mock_svc
+
+        daemon._seed_config_bans()
+
+        # block_peer should have been called for each banned peer
+        assert mock_svc.block_peer.call_count == 2
+        mock_svc.block_peer.assert_any_call("deadbeef")
+        mock_svc.block_peer.assert_any_call("cafebabe")
+
+
+class TestRBACReversePrefixMatch:
+    """Test the reverse prefix matching in resolve_role."""
+
+    def test_short_hash_matches_long_blocked_prefix(self):
+        """If blocked list has a long prefix and identity is short, still matches.
+
+        This covers the `prefix.startswith(identity_hash)` branch in resolve_role.
+        """
+        policy = RBACPolicy(
+            default_role=Role.PEER,
+            blocked=["abcdef1234567890abcdef1234567890"],
+        )
+        # Short identity hash that is a prefix of the blocked entry
+        role = policy.resolve_role("abcdef12")
+        assert role == Role.BLOCKED
+
+    def test_non_matching_prefix(self):
+        """Non-matching prefix does not block."""
+        policy = RBACPolicy(
+            default_role=Role.PEER,
+            blocked=["abcdef12"],
+        )
+        role = policy.resolve_role("99999999aabbccdd")
+        assert role == Role.PEER
