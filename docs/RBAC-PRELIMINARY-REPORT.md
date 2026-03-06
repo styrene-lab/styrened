@@ -1,7 +1,7 @@
 # Styrened RBAC — Preliminary Analysis & Recommendations
 
 **Date:** 2026-03-06  
-**Version:** v0.13.43  
+**Version:** v0.14.7  
 **Status:** Phases 1–4 COMPLETE (v0.14.7) — Phase 5 (legacy removal) planned for v0.15.0
 
 ---
@@ -104,35 +104,36 @@ The most dangerous inconsistency: **RPC fails open, Terminal fails closed.** An 
 
 ## 4. Proposed Unified RBAC Model
 
-### 4.1 Role Hierarchy
+### 4.1 Role Hierarchy (as implemented in `models/rbac.py`)
 
 ```
-ADMIN          — Full control: EXEC, REBOOT, CONFIG, SELF_UPDATE, terminal, VPN peering
-OPERATOR       — Fleet management: STATUS, CONFIG_UPDATE, terminal (restricted shells)
-MONITOR        — Read-only: STATUS, PING, page browsing, web dashboard (read-only)
-PEER           — Mesh peer: chat, page browsing, datalink (no VPN)
-VPN_PEER       — Trusted VPN peer: everything PEER has + VPN key exchange
-BLOCKED        — Explicit deny: all messages dropped
+ADMIN (40)     — Full control: EXEC, REBOOT, SELF_UPDATE, TERMINAL_FULL
+OPERATOR (30)  — Fleet management: CONFIG_UPDATE, TERMINAL_RESTRICTED, WEB_WRITE
+MONITOR (20)   — Read-only: INBOX_READ, WEB_READ, DATALINK_ESTABLISH, DATALINK_SPEEDTEST
+PEER (10)      — Mesh peer: chat, pages, ping, status, datalink info/meta/ping/status
+NONE (1)       — No capabilities (fail-closed default for edge devices)
+BLOCKED (0)    — Explicit deny: all requests dropped
 ```
 
-Roles are **cumulative** — higher roles include all lower capabilities. Exception: `VPN_PEER` is an explicit grant orthogonal to the main hierarchy (a MONITOR should not get VPN access, but a PEER might).
+Roles are **cumulative** — higher roles include all lower capabilities. `VPN_HANDSHAKE` is an **orthogonal grant** not included in any role tier — it must be explicitly granted per identity.
 
-### 4.2 Capability Mapping
+### 4.2 Capability Mapping (as implemented)
 
-| Capability | BLOCKED | (default) | PEER | VPN_PEER | MONITOR | OPERATOR | ADMIN |
-|-----------|---------|-----------|------|----------|---------|----------|-------|
-| Receive chat | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Browse pages | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| PING/STATUS | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Establish datalink | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| VPN handshake | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
-| Web API (read) | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Web API (write) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| CONFIG_UPDATE | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Terminal (restricted) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| EXEC / REBOOT | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Terminal (full shell) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| SELF_UPDATE | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Capability | BLOCKED | NONE | PEER | MONITOR | OPERATOR | ADMIN |
+|-----------|---------|------|------|---------|----------|-------|
+| chat.send / chat.receive | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| page.browse | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| rpc.ping / rpc.status | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| datalink.ping / meta / info / status | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| rpc.inbox_read | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| web.read | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| datalink.establish / speedtest | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| rpc.config_update | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| terminal.restricted | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| web.write | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| rpc.exec / rpc.reboot / rpc.self_update | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| terminal.full | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| vpn.handshake (orthogonal) | ❌ | grant | grant | grant | grant | ✅ |
 
 ### 4.3 Default Policy
 
@@ -176,81 +177,21 @@ rbac:
   # banned_peers → blocked
 ```
 
-### 4.5 Implementation Model
+### 4.5 Implementation Model (actual — see `src/styrened/models/rbac.py`)
 
-```python
-# src/styrened/models/rbac.py
+Capabilities use `ClassVar[str]` constants (not Enum) for config readability. `RosterEntry` supports per-identity `grants` for orthogonal capabilities (e.g., `vpn.handshake`). `RBACPolicy` includes `get_allow_list()` for RNS-native `ALLOW_LIST` enforcement and `should_use_allow_all()` for the ALLOW_ALL/ALLOW_LIST decision.
 
-from enum import IntEnum, auto
-from dataclasses import dataclass, field
+### 4.6 Integration Points (all implemented as of v0.14.7)
 
-class Role(IntEnum):
-    """Ordered role hierarchy. Higher value = more privilege."""
-    BLOCKED = 0
-    NONE = 1        # No explicit assignment, subject to default_role
-    PEER = 10
-    VPN_PEER = 15   # PEER + VPN capability
-    MONITOR = 20
-    OPERATOR = 30
-    ADMIN = 40
-
-class Capability(Enum):
-    CHAT_RECEIVE = auto()
-    PAGE_BROWSE = auto()
-    PING_STATUS = auto()
-    DATALINK = auto()
-    VPN_HANDSHAKE = auto()
-    WEB_READ = auto()
-    WEB_WRITE = auto()
-    CONFIG_UPDATE = auto()
-    TERMINAL_RESTRICTED = auto()
-    EXEC = auto()
-    TERMINAL_FULL = auto()
-    SELF_UPDATE = auto()
-    REBOOT = auto()
-
-# Role → capability mapping
-ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = { ... }
-
-@dataclass
-class RBACPolicy:
-    """Central authorization policy."""
-    default_role: Role = Role.PEER
-    roster: dict[str, Role] = field(default_factory=dict)  # identity_hash → Role
-    blocked: list[str] = field(default_factory=list)  # prefix-matching
-
-    def resolve_role(self, identity_hash: str) -> Role:
-        """Resolve effective role for an identity."""
-        # Check blocked first (prefix matching)
-        for prefix in self.blocked:
-            if identity_hash.startswith(prefix):
-                return Role.BLOCKED
-        # Check explicit roster
-        if identity_hash in self.roster:
-            return self.roster[identity_hash]
-        # Fall back to default
-        return self.default_role
-
-    def has_capability(self, identity_hash: str, cap: Capability) -> bool:
-        role = self.resolve_role(identity_hash)
-        return cap in ROLE_CAPABILITIES[role]
-```
-
-### 4.6 Integration Points
-
-Each subsystem replaces its own auth check with a single call:
-
-```python
-# Before (RPC server):
-if not self._is_authorized(source_hash):
-    ...
-
-# After:
-if not self._rbac.has_capability(source_hash, Capability.EXEC):
-    ...
-```
-
-The `RBACPolicy` instance lives on the daemon and is injected into every service that needs authorization.
+| Surface | Method | Gate |
+|---------|--------|------|
+| RPC | `RPCServer._is_authorized()` | `rbac.has_capability(source, MESSAGE_TYPE_CAPABILITY[msg_type])` |
+| LXMF | `LXMFService._is_blocked()` | `rbac.resolve_role(source) == BLOCKED` |
+| DirectLink | `daemon._datalink_allow_mode()` | RNS ALLOW_LIST per handler + app-layer RBAC |
+| Terminal | `TerminalService.is_authorized()` | `rbac.has_capability(id, TERMINAL_RESTRICTED \| TERMINAL_FULL)` |
+| Web challenge | `auth.challenge()` | `rbac.has_capability(id, WEB_READ)` |
+| Web verify | `auth.verify()` | RBAC re-check before session issuance |
+| Web middleware | `AuthMiddleware.dispatch()` | `rbac.has_capability(id, WEB_WRITE)` for POST/PUT/PATCH/DELETE |
 
 ---
 
@@ -315,20 +256,25 @@ The `RBACPolicy` instance lives on the daemon and is injected into every service
 
 ---
 
-## 7. Risk Assessment
+## 7. Risk Assessment (updated post-Phase 4)
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| DirectLink has zero auth today | **High** | Phase 3 priority; VPN handshake over unauthenticated channel is the worst gap |
-| RPC fail-open on empty whitelist | **High** | Phase 2 — default_role=none for ENDPOINT profile |
-| Migration breaks existing configs | **Medium** | Legacy field parsing preserved through Phase 4, deprecation warnings in Phase 2 |
-| Role hierarchy too rigid | **Low** | VPN_PEER orthogonal grant demonstrates extensibility; can add more |
-| Complexity for single-node operators | **Low** | `default_role: peer` + single admin identity covers 90% of deployments |
+| Risk | Severity | Status |
+|------|----------|--------|
+| DirectLink has zero auth today | **High** | ✅ RESOLVED — Phase 3 (ALLOW_LIST + app-layer gates) |
+| RPC fail-open on empty whitelist | **High** | ✅ RESOLVED — Phase 2 (fail-closed when RBAC active) |
+| Migration breaks existing configs | **Medium** | ✅ MITIGATED — Legacy fallback preserved through Phase 4; removal in Phase 5 (v0.15.0) |
+| Role hierarchy too rigid | **Low** | ✅ MITIGATED — Orthogonal grants (vpn.handshake) prove extensibility |
+| Complexity for single-node operators | **Low** | ✅ MITIGATED — `default_role: peer` + single admin identity covers 90% |
+| Phase 5 config breakage | **Medium** | ⬜ PENDING — Needs migration tooling and deprecation warnings before removal |
 
 ---
 
-## 8. Recommendation
+## 8. Current Status & Next Steps
 
-**Start with Phase 1 immediately** — the model is additive and non-breaking. Phase 2 should follow quickly to fix the fail-open RPC inconsistency, which is the most operationally dangerous gap today. Phase 3 (DirectLink/VPN gating) is the most security-critical and should land before any VPN feature is promoted beyond experimental.
+Phases 1–4 are complete as of v0.14.7. All 6 auth surfaces are RBAC-gated with legacy fallback. 2608 unit tests pass.
 
-The existing `authorized_identities` pattern has reached its limits. Five independent whitelists with inconsistent fail-open/fail-closed semantics is a bug farm. A unified RBAC model is the right abstraction for a fleet management daemon.
+**Phase 5 (v0.15.0)** is the final step: remove all legacy config fields. This is a **breaking config change** requiring:
+1. Deprecation warnings in a v0.14.x release for any config still using legacy fields
+2. Migration guide documentation
+3. `_migrate_legacy_to_rbac()` config rewriter (optional CLI tool)
+4. Major version bump to signal the break

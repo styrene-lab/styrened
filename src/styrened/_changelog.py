@@ -157,4 +157,5 @@ ENTRIES: list[tuple[str, str]] = [
     ("0.14.4", "security: datalink hardening pass (v0.14.4)"),
     ("0.14.5", "fix(rbac): decouple LXMF RBAC injection from chat.enabled; fix(rbac): address adversarial review findings for Phase 2; feat(rbac): Phase 2 - RBAC-gated RPC server and LXMF blocklist"),
     ("0.14.6", "fix(rbac): address second adversarial review findings"),
+    ("0.14.7", "fix(rbac): address adversarial review findings for Phase 4; feat(rbac): Phase 4 — Terminal + Web API auth migration; feat(rbac): Phase 3 — DirectLink ALLOW_LIST enforcement; test(rbac): harden Phase 2 test coverage — 16 new tests"),
 ]
