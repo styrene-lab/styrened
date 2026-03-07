@@ -103,13 +103,8 @@ class ReticumAnnounceTable(DataTable[str]):
 
         Standalone fallback — primary path uses load_from_devices().
         """
-        # Load historical data from NodeStore first
-        try:
-            from styrened.services.node_store import get_node_store
-
-            stored_nodes = get_node_store().get_all_nodes()
-        except Exception:
-            stored_nodes = []
+        # Load historical data — prefer live discovery, no direct daemon import
+        stored_nodes: list[MeshDevice] = []
 
         # Get live discovered devices
         live_nodes = discover_devices()
@@ -421,7 +416,7 @@ class StyreneFleetTable(DataTable[str]):
 
     def load_from_devices(self, devices: list[MeshDevice]) -> None:
         """Accept full device list, filter to Styrene nodes, deduplicate, rebuild."""
-        from styrened.services.reticulum import _deduplicate_by_identity
+        from styrened.tui.utils import _deduplicate_by_identity
 
         styrene = [d for d in devices if d.device_type == DeviceType.STYRENE_NODE]
         self._all_devices = _deduplicate_by_identity(styrene)
@@ -587,16 +582,12 @@ class StyreneFleetTable(DataTable[str]):
         self._rebuild_table()
 
     def refresh_data(self) -> None:
-        """Standalone fallback refresh."""
+        """Standalone fallback refresh using live discovery only."""
         try:
-            from styrened.services.node_store import get_node_store
-            from styrened.services.reticulum import _deduplicate_by_identity
+            from styrened.tui.utils import _deduplicate_by_identity
 
-            stored = get_node_store().get_styrene_nodes()
             live = discover_devices()
-            merged = {n.destination_hash: n for n in stored}
-            merged.update({n.destination_hash: n for n in live})
-            styrene = [d for d in merged.values() if d.device_type == DeviceType.STYRENE_NODE]
+            styrene = [d for d in live if d.device_type == DeviceType.STYRENE_NODE]
             self._all_devices = _deduplicate_by_identity(styrene)
             self._rebuild_table()
         except Exception:
@@ -828,11 +819,7 @@ class ExplorationScreen(Screen[None]):
         Returns:
             Tuple of (exploration devices with LXMF shadows filtered, all merged devices).
         """
-        try:
-            from styrened.services.node_store import get_node_store
-            stored_nodes = get_node_store().get_all_nodes()
-        except Exception:
-            stored_nodes = []
+        stored_nodes: list[MeshDevice] = []
 
         live_nodes = discover_devices()
 

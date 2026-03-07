@@ -201,13 +201,8 @@ class MeshDeviceDetailScreen(Screen[None]):
 
     def _load_device(self) -> None:
         """Load device from mesh discovery and NodeStore."""
-        # Load from NodeStore (works in IPC mode where discover_devices is empty)
-        try:
-            from styrened.services.node_store import get_node_store
-
-            stored_nodes = get_node_store().get_all_nodes()
-        except Exception:
-            stored_nodes = []
+        # Historical nodes — discovery provides live data
+        stored_nodes: list[MeshDevice] = []
 
         # Get live discovered devices (populated in legacy/standalone mode)
         live_nodes = discover_devices()
@@ -341,21 +336,7 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         from styrened.models.mesh_device import DeviceType
 
-        # Check persisted nodes
-        try:
-            from styrened.services.node_store import get_node_store
-
-            store = get_node_store()
-            for node in store.get_all_nodes():
-                if (
-                    node.identity_hash == target_identity
-                    and node.device_type == DeviceType.NOMADNET_NODE
-                ):
-                    return node.destination_hash
-        except Exception:
-            pass
-
-        # Check live discovered devices (in-memory, not yet persisted)
+        # Check live discovered devices
         try:
             live_nodes = discover_devices()
             for node in live_nodes:
@@ -391,7 +372,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         # Check datalink status (non-blocking, just reads cached state)
         bridge = None
         try:
-            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            bridge = self.app.services.bridge
             if bridge:
                 link_info = await bridge.datalink_status(
                     destination_hash=self._dest_hash,
@@ -482,7 +463,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             return
 
         try:
-            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            bridge = self.app.services.bridge
         except Exception:
             self.notify("Direct links require daemon mode", severity="warning")
             return
@@ -531,7 +512,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             return
 
         try:
-            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            bridge = self.app.services.bridge
         except Exception:
             self.notify("Speedtest requires daemon mode", severity="warning")
             return
@@ -620,7 +601,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             return
 
         try:
-            bridge = self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            bridge = self.app.services.bridge
         except Exception:
             self.notify("Contacts require daemon mode", severity="warning")
             return

@@ -84,7 +84,7 @@ class ConversationScreen(Screen[None]):
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge
         except Exception:
             return None
 

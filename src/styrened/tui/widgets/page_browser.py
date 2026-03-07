@@ -119,7 +119,7 @@ class PageBrowserWidget(Widget):
     def _ipc_bridge(self) -> Any | None:
         """Get IPCBridge from app lifecycle."""
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge
         except Exception:
             return None
 

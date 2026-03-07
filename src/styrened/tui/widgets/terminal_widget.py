@@ -309,7 +309,7 @@ class TerminalWidget(Widget, can_focus=True):
     def _get_bridge(self) -> Any:
         """Get the IPCBridge from the app lifecycle."""
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge
         except Exception:
             return None
 
