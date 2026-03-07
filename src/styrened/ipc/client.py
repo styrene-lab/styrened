@@ -1075,6 +1075,78 @@ class ControlClient:
         return await self._request(QueryPageServerStatusRequest())
 
     # -------------------------------------------------------------------------
+    # TUI-specific methods (nodes, core config, hub, unread)
+    # -------------------------------------------------------------------------
+
+    async def get_nodes(self, styrene_only: bool = False) -> list[DeviceInfo]:
+        """Get nodes from the persisted node store.
+
+        Unlike query_devices which merges in-memory discovery with persisted
+        data, this returns only persisted nodes from the node store.
+
+        Args:
+            styrene_only: If True, only return Styrene nodes.
+
+        Returns:
+            List of DeviceInfo instances.
+        """
+        from styrened.ipc.messages import GetNodesRequest
+
+        data = await self._request(GetNodesRequest(styrene_only=styrene_only))
+        nodes = data.get("nodes", [])
+        return [DeviceInfo.from_dict(n) for n in nodes]
+
+    async def get_core_config(self) -> dict[str, Any]:
+        """Get full serialized CoreConfig (round-trippable).
+
+        Unlike query_config which returns a sanitized subset, this
+        returns the complete config dict suitable for modification
+        and round-tripping through save_core_config.
+
+        Returns:
+            Full config dict.
+        """
+        from styrened.ipc.messages import GetCoreConfigRequest
+
+        data = await self._request(GetCoreConfigRequest())
+        return cast(dict[str, Any], data.get("config", {}))
+
+    async def save_core_config(self, config_dict: dict[str, Any]) -> bool:
+        """Save a modified CoreConfig dict to disk.
+
+        Args:
+            config_dict: Full serialized config dict.
+
+        Returns:
+            True if saved successfully.
+        """
+        from styrened.ipc.messages import SaveCoreConfigRequest
+
+        data = await self._request(SaveCoreConfigRequest(config_dict=config_dict))
+        return cast(bool, data.get("saved", False))
+
+    async def get_hub_status(self) -> dict[str, Any]:
+        """Get hub connection status.
+
+        Returns:
+            Dict with is_connected, hub_address, status fields.
+        """
+        from styrened.ipc.messages import GetHubStatusRequest
+
+        return await self._request(GetHubStatusRequest())
+
+    async def get_unread_counts(self) -> dict[str, int]:
+        """Get per-peer unread message counts.
+
+        Returns:
+            Dict mapping peer_hash to unread count.
+        """
+        from styrened.ipc.messages import GetUnreadCountsRequest
+
+        data = await self._request(GetUnreadCountsRequest())
+        return cast(dict[str, int], data.get("counts", {}))
+
+    # -------------------------------------------------------------------------
     # Direct data link methods
     # -------------------------------------------------------------------------
 
