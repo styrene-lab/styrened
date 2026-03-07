@@ -191,7 +191,7 @@ class DaemonSetupScreen(Screen[bool]):
             manager = DaemonManager(mode=DaemonMode.MANAGED)
             if await manager.ensure_running():
                 # Store reference so app can use it
-                self.app._daemon_manager_from_setup = manager  # type: ignore[attr-defined]
+                self.app._daemon_manager_from_setup = manager
                 self._show_status("Daemon started")
                 self.dismiss(True)
             else:

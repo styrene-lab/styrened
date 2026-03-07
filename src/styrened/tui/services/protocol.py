@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from styrened.tui.services.ipc_bridge import IPCBridge
+    from styrened.ipc.bridge import IPCBridge
 
 
 @runtime_checkable

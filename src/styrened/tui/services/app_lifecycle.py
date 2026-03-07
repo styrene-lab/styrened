@@ -134,7 +134,7 @@ class StyreneLifecycle:
         """Initialize via IPC — spawn daemon, connect bridge."""
         try:
             from styrened.tui.services.daemon_manager import DaemonManager, DaemonMode
-            from styrened.tui.services.ipc_bridge import IPCBridge
+            from styrened.ipc.bridge import IPCBridge
 
             self._daemon_manager = DaemonManager(mode=DaemonMode.MANAGED)
             if not await self._daemon_manager.ensure_running():

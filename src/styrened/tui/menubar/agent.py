@@ -75,7 +75,7 @@ def _relative_time(ts: float) -> str:
 
 async def _ipc_loop(state: MenuBarState) -> None:
     """Background asyncio loop polling daemon for state updates."""
-    from styrened.tui.services.ipc_bridge import IPCBridge
+    from styrened.ipc.bridge import IPCBridge
 
     bridge = IPCBridge()
 
