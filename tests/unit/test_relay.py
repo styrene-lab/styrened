@@ -27,6 +27,15 @@ from styrened.models.relay import (
 from styrened.services.relay import RelayService
 
 
+def _operator_svc(cfg: RelayConfig) -> RelayService:
+    """Create a RelayService with OPERATOR-default RBAC (grants permanent/priority)."""
+    svc = RelayService(cfg)
+    policy = RBACPolicy(default_role=Role.OPERATOR)
+    svc.set_rbac_policy(policy)
+    svc.set_target_rbac_policy(policy)
+    return svc
+
+
 # ---------------------------------------------------------------------------
 # RelayService — creation
 # ---------------------------------------------------------------------------
@@ -123,7 +132,7 @@ async def test_disconnect_propagation_default():
 async def test_disconnect_propagation_permanent():
     """Permanent session: disconnect keeps surviving half alive."""
     cfg = RelayConfig(enabled=True, allow_permanent=True)
-    svc = RelayService(cfg)
+    svc = _operator_svc(cfg)
     session = await svc.create_session("aaa", "bbb", permanent=True)
     sid = id(session)
     await svc.disconnect_peer(sid, "aaa")
@@ -140,7 +149,7 @@ async def test_disconnect_propagation_permanent():
 async def test_lru_eviction_oldest_non_priority():
     """Oldest non-priority session evicted when full and new priority arrives."""
     cfg = RelayConfig(enabled=True, max_sessions=2)
-    svc = RelayService(cfg)
+    svc = _operator_svc(cfg)
     s1 = await svc.create_session("a1", "b1")
     s1.created_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
     s2 = await svc.create_session("a2", "b2", priority=True)
@@ -156,7 +165,7 @@ async def test_lru_eviction_oldest_non_priority():
 async def test_lru_eviction_all_priority():
     """All priority sessions — no evictable, raises RelayMaxSessions."""
     cfg = RelayConfig(enabled=True, max_sessions=2)
-    svc = RelayService(cfg)
+    svc = _operator_svc(cfg)
     s1 = await svc.create_session("a1", "b1", priority=True)
     s2 = await svc.create_session("a2", "b2", priority=True)
     with pytest.raises(RelayMaxSessions):
@@ -185,7 +194,7 @@ async def test_byte_limit_exceeded():
 async def test_byte_limit_permanent_exempt():
     """Permanent sessions skip byte limit enforcement."""
     cfg = RelayConfig(enabled=True, max_bytes_per_session=1000, allow_permanent=True)
-    svc = RelayService(cfg)
+    svc = _operator_svc(cfg)
     session = await svc.create_session("aaa", "bbb", permanent=True)
     sid = id(session)
     session.record_bytes(2000)
@@ -216,7 +225,7 @@ async def test_idle_timeout():
 async def test_idle_timeout_permanent_exempt():
     """Permanent sessions are exempt from idle timeout."""
     cfg = RelayConfig(enabled=True, idle_timeout=5, allow_permanent=True)
-    svc = RelayService(cfg)
+    svc = _operator_svc(cfg)
     session = await svc.create_session("aaa", "bbb", permanent=True)
     sid = id(session)
     session.last_activity = datetime.now(timezone.utc) - timedelta(seconds=1800)
@@ -392,7 +401,7 @@ def test_start_relay_service_creates_service():
     daemon = MagicMock()
     daemon.config = MagicMock()
     daemon.config.relay = RelayConfig(enabled=True, max_sessions=4)
-    daemon.config.rbac = None
+    daemon.config.rbac = RBACPolicy()
     daemon._relay_service = None
 
     from styrened.daemon import StyreneDaemon
@@ -739,17 +748,17 @@ async def test_rbac_permanent_target_consent_granted():
 
 
 @pytest.mark.asyncio
-async def test_rbac_no_policy_allows_all():
-    """When no RBAC policy is set (None), all requests are allowed (legacy mode)."""
+async def test_rbac_default_policy_allows_peer():
+    """Default RBACPolicy (PEER) allows relay.request for create_session."""
     svc = RelayService(RelayConfig(enabled=True))
-    # No set_rbac_policy call
+    # Default policy has default_role=PEER which grants relay.request
     session = await svc.create_session("aaa", "bbb")
     assert session.requester_hash == "aaa"
 
 
 @pytest.mark.asyncio
-async def test_rbac_no_policy_permanent_allowed():
-    """When no RBAC policy, permanent requests are allowed (legacy mode)."""
+async def test_rbac_default_policy_blocks_permanent():
+    """Default RBACPolicy (PEER) denies relay.request_permanent."""
     svc = RelayService(RelayConfig(enabled=True, allow_permanent=True))
-    session = await svc.create_session("aaa", "bbb", permanent=True)
-    assert session.is_permanent is True
+    with pytest.raises(RelayPermanentDenied):
+        await svc.create_session("aaa", "bbb", permanent=True)

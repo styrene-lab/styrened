@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
 from styrened.models.relay import (
     RelayConfig,
     RelaySession,
@@ -23,8 +21,7 @@ from styrened.models.relay import (
     RelayEvicted,
 )
 
-if TYPE_CHECKING:
-    from styrened.models.rbac import RBACPolicy
+from styrened.models.rbac import RBACPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +37,8 @@ class RelayService:
         self._config = config
         self._sessions: dict[int, RelaySession] = {}
         self._lock = asyncio.Lock()
-        self._rbac_policy: RBACPolicy | None = None
-        self._target_rbac_policy: RBACPolicy | None = None
+        self._rbac_policy: RBACPolicy = RBACPolicy()
+        self._target_rbac_policy: RBACPolicy = RBACPolicy()
 
     def set_rbac_policy(self, policy: RBACPolicy) -> None:
         """Inject the hub-side RBAC policy for requester authorization."""
@@ -62,14 +59,10 @@ class RelayService:
     def _check_requester_rbac(self, requester_hash: str, permanent: bool) -> None:
         """Check requester has relay.request (and relay.request_permanent if needed).
 
-        No-op when no RBAC policy is set (legacy mode).
-
         Raises:
             RelayUnauthorized: Requester lacks relay.request.
             RelayPermanentDenied: Requester lacks relay.request_permanent.
         """
-        if self._rbac_policy is None:
-            return
         from styrened.models.rbac import Capability
         if not self._rbac_policy.has_capability(requester_hash, Capability.RELAY_REQUEST):
             raise RelayUnauthorized(f"Identity {requester_hash} lacks relay.request")
@@ -83,14 +76,10 @@ class RelayService:
     def _check_target_rbac(self, requester_hash: str, permanent: bool) -> None:
         """Check target-side RBAC: relay.accept, relay.reject, relay.accept_permanent.
 
-        No-op when no target RBAC policy is set (legacy mode).
-
         Raises:
             RelayTargetRejected: Target has relay.reject for requester.
             RelayPermanentConsentDenied: Target lacks relay.accept_permanent.
         """
-        if self._target_rbac_policy is None:
-            return
         from styrened.models.rbac import Capability
         # Check relay.reject first — explicit deny overrides accept
         if self._target_rbac_policy.has_capability(

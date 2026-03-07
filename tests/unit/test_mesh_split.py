@@ -443,17 +443,18 @@ class TestIsMymesh:
             device = self._make_device("deadbeef" * 4)
             assert tree._is_my_mesh(device) is False
 
-    def test_no_rbac_config_is_not_my_mesh(self) -> None:
+    def test_empty_rbac_config_is_not_my_mesh(self) -> None:
         from styrened.tui.screens.dashboard import MeshDeviceTree
 
         tree = MeshDeviceTree.__new__(MeshDeviceTree)
 
         config = CoreConfig()
-        config.rbac = None
+        config.rbac = RBACPolicy()  # empty roster, default PEER
 
         with patch("styrened.services.config.load_core_config", return_value=config):
             device = self._make_device("aabbccdd" * 4)
-            assert tree._is_my_mesh(device) is False
+            # Default PEER role means device IS in mesh (>= PEER)
+            assert tree._is_my_mesh(device) is True
 
     def test_admin_identity_is_my_mesh(self) -> None:
         from styrened.tui.screens.dashboard import MeshDeviceTree

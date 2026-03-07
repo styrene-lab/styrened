@@ -179,7 +179,7 @@ class RPCServer:
         styrene_protocol: "StyreneProtocol",
         allowed_commands: set[str] | None = None,
         rate_limit: int = DEFAULT_RPC_RATE_LIMIT,
-        rbac_policy: RBACPolicy | None = None,
+        rbac_policy: RBACPolicy | None = None,  # None → default RBACPolicy()
     ) -> None:
         """Initialize RPC server.
 
