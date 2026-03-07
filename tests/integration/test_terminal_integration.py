@@ -43,19 +43,15 @@ except ImportError:
 
     # Stub for tests until implemented
     class TerminalConfig:  # type: ignore[no-redef]
-        """Stub TerminalConfig for tests - to be implemented."""
+        """Stub TerminalConfig for tests."""
 
         def __init__(
             self,
             enabled: bool = False,
-            authorized_identities: set[str] | None = None,
-            allow_unauthenticated: bool = False,
             max_sessions_per_identity: int = 3,
             max_total_sessions: int = 10,
         ):
             self.enabled = enabled
-            self.authorized_identities = authorized_identities or set()
-            self.allow_unauthenticated = allow_unauthenticated
             self.max_sessions_per_identity = max_sessions_per_identity
             self.max_total_sessions = max_total_sessions
 
@@ -76,7 +72,6 @@ def minimal_config(tmp_path: Path) -> CoreConfig:
     if hasattr(config, "terminal"):
         config.terminal = TerminalConfig(
             enabled=True,
-            authorized_identities={"test_identity"},
         )
     return config
 
@@ -97,8 +92,6 @@ def terminal_enabled_config(tmp_path: Path) -> CoreConfig:
     if hasattr(config, "terminal"):
         config.terminal = TerminalConfig(
             enabled=True,
-            authorized_identities={"test_identity_hash"},
-            allow_unauthenticated=False,
             max_sessions_per_identity=3,
             max_total_sessions=10,
         )
@@ -137,7 +130,7 @@ class TestDaemonTerminalServiceIntegration:
         )
         if hasattr(terminal_enabled_config, "terminal"):
             assert terminal_enabled_config.terminal.enabled is True
-            assert "test_identity_hash" in terminal_enabled_config.terminal.authorized_identities
+            assert terminal_enabled_config.terminal.max_sessions_per_identity == 3
 
     @pytest.mark.asyncio
     @pytest.mark.requires_rns
@@ -234,17 +227,15 @@ class TestTerminalServiceInitialization:
         """Terminal service should be initialized with config values.
 
         When daemon creates TerminalService, it should pass:
-        - authorized_identities from config
-        - allow_unauthenticated from config
         - max_sessions_per_identity from config
         - max_total_sessions from config
+        - rbac_policy from config
         """
         config = terminal_enabled_config
 
         # Verify config values are accessible
         assert config.terminal.max_sessions_per_identity == 3
         assert config.terminal.max_total_sessions == 10
-        assert config.terminal.allow_unauthenticated is False
 
     def test_terminal_disabled_skips_initialization(
         self,
@@ -273,32 +264,15 @@ class TestTerminalConfigModel:
 
         # Check defaults
         assert config.enabled is False  # Should default to disabled
-        assert isinstance(config.authorized_identities, set)
-        assert config.allow_unauthenticated is False
 
     def test_terminal_config_from_dict(self) -> None:
         """TerminalConfig should be loadable from dict (YAML config)."""
-        config_dict = {
-            "enabled": True,
-            "authorized_identities": ["hash1", "hash2"],
-            "allow_unauthenticated": True,
-            "max_sessions_per_identity": 5,
-            "max_total_sessions": 20,
-        }
-
-        # This tests that CoreConfig can be loaded from YAML
-        # The actual loading mechanism depends on how config.py works
         config = TerminalConfig(
-            enabled=config_dict["enabled"],
-            authorized_identities=set(config_dict["authorized_identities"]),
-            allow_unauthenticated=config_dict["allow_unauthenticated"],
-            max_sessions_per_identity=config_dict["max_sessions_per_identity"],
-            max_total_sessions=config_dict["max_total_sessions"],
+            enabled=True,
+            max_sessions_per_identity=5,
+            max_total_sessions=20,
         )
 
         assert config.enabled is True
-        assert "hash1" in config.authorized_identities
-        assert "hash2" in config.authorized_identities
-        assert config.allow_unauthenticated is True
         assert config.max_sessions_per_identity == 5
         assert config.max_total_sessions == 20

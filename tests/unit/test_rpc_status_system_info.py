@@ -17,7 +17,6 @@ def rpc_server():
     mock_protocol = MagicMock()
     server = RPCServer(
         styrene_protocol=mock_protocol,
-        authorized_identities=set(),
     )
     return server
 

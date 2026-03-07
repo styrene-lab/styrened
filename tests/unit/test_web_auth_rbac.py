@@ -1,15 +1,8 @@
-"""Tests for RBAC-gated Web API authentication (Phase 4).
+"""Tests for RBAC-gated Web API authentication.
 
-TDD: Tests written BEFORE implementation.
-
-The challenge() endpoint must check RBAC when policy is set:
-- RBAC active: has_capability(identity, WEB_READ) to issue a challenge
-- RBAC inactive: preserve legacy (authorized_identities + allow_unauthenticated)
-- BLOCKED role: denied at challenge time (never gets a session)
-
-The verify() endpoint must re-check RBAC before issuing a session.
-
-The AuthMiddleware must enforce WEB_WRITE for mutating endpoints when RBAC active.
+The challenge() endpoint checks RBAC has_capability(identity, WEB_READ).
+The verify() endpoint re-checks RBAC before issuing a session.
+The AuthMiddleware enforces WEB_WRITE for mutating endpoints.
 """
 
 from __future__ import annotations
@@ -35,8 +28,6 @@ from styrened.models.rbac import (
 @dataclass
 class FakeAuthConfig:
     enabled: bool = True
-    authorized_identities: set[str] = field(default_factory=set)
-    allow_unauthenticated: bool = False
     exempt_localhost: bool = True
     session_ttl: int = 86400
 
@@ -50,20 +41,16 @@ class FakeAPIConfig:
 @dataclass
 class FakeDaemonConfig:
     api: FakeAPIConfig = field(default_factory=FakeAPIConfig)
-    rbac: RBACPolicy | None = None
+    rbac: RBACPolicy = field(default_factory=RBACPolicy)
 
 
-def _make_daemon_config(rbac_policy=None, allow_unauthenticated=False, authorized_identities=None):
-    auth = FakeAuthConfig(
-        allow_unauthenticated=allow_unauthenticated,
-        authorized_identities=authorized_identities or set(),
-    )
-    return FakeDaemonConfig(api=FakeAPIConfig(auth=auth), rbac=rbac_policy)
+def _make_daemon_config(rbac_policy=None):
+    return FakeDaemonConfig(rbac=rbac_policy or RBACPolicy())
 
 
-def _make_daemon(rbac_policy=None, allow_unauthenticated=False, authorized_identities=None):
+def _make_daemon(rbac_policy=None):
     daemon = MagicMock()
-    daemon.config = _make_daemon_config(rbac_policy, allow_unauthenticated, authorized_identities)
+    daemon.config = _make_daemon_config(rbac_policy)
     return daemon
 
 
@@ -269,7 +256,7 @@ class TestVerifyRBAC:
         from starlette.testclient import TestClient
 
         identity = "cc" * 16
-        daemon = _make_daemon(authorized_identities={identity})
+        daemon = _make_daemon(rbac_policy=RBACPolicy(default_role=Role.NONE, roster={identity: RosterEntry(identity_hash=identity, role=Role.MONITOR)}))
         app, cs, ss = _build_app(daemon)
 
         with TestClient(app) as client:
@@ -410,8 +397,8 @@ class TestAuthMiddlewareRBAC:
             resp = client.post("/api/test-write", cookies={"styrene_session": token})
             assert resp.status_code == 200
 
-    def test_no_rbac_no_write_gate(self):
-        """Without RBAC, all authenticated users can POST (legacy behavior)."""
+    def test_monitor_denied_write(self):
+        """MONITOR role can read but not write (missing WEB_WRITE)."""
         from fastapi import FastAPI
         from starlette.testclient import TestClient
 
@@ -419,7 +406,7 @@ class TestAuthMiddlewareRBAC:
         from styrened.web.auth_middleware import AuthMiddleware
 
         identity = "cc" * 16
-        daemon = _make_daemon(authorized_identities={identity})
+        daemon = _make_daemon(rbac_policy=RBACPolicy(default_role=Role.NONE, roster={identity: RosterEntry(identity_hash=identity, role=Role.MONITOR)}))
         app = FastAPI()
         cs = ChallengeStore()
         ss = SessionStore()
@@ -436,7 +423,7 @@ class TestAuthMiddlewareRBAC:
         with TestClient(app) as client:
             token = self._get_session_token(client, identity, app, daemon)
             resp = client.post("/api/test-write", cookies={"styrene_session": token})
-            assert resp.status_code == 200
+            assert resp.status_code == 403
 
     def test_get_always_read_only(self):
         """GET requests only need WEB_READ (session), not WEB_WRITE."""
@@ -472,20 +459,20 @@ class TestAuthMiddlewareRBAC:
 
 
 # ---------------------------------------------------------------------------
-# 4. Legacy mode (no RBAC) — challenge
+# 4. RBAC roster-based challenge
 # ---------------------------------------------------------------------------
 
 
-class TestChallengeLegacy:
-    """Legacy behavior preserved when config.rbac is None."""
+class TestChallengeRBACRoster:
+    """RBAC roster controls challenge access."""
 
     @patch("styrened.web.auth._verify_identity_hash", return_value=True)
-    def test_legacy_authorized_identity(self, mock_verify):
-        """Identity in legacy whitelist → accepted."""
+    def test_rostered_identity_accepted(self, mock_verify):
+        """Identity in RBAC roster → accepted."""
         from starlette.testclient import TestClient
 
         identity = "aa" * 16
-        daemon = _make_daemon(authorized_identities={identity})
+        daemon = _make_daemon(rbac_policy=RBACPolicy(default_role=Role.NONE, roster={identity: RosterEntry(identity_hash=identity, role=Role.MONITOR)}))
         app, _, _ = _build_app(daemon)
 
         with TestClient(app) as client:
@@ -495,11 +482,11 @@ class TestChallengeLegacy:
         assert resp.status_code == 200
 
     @patch("styrened.web.auth._verify_identity_hash", return_value=True)
-    def test_legacy_unauthorized_identity(self, mock_verify):
-        """Identity NOT in legacy whitelist → denied."""
+    def test_non_rostered_identity_denied(self, mock_verify):
+        """Identity NOT in RBAC roster with default_role=NONE → denied."""
         from starlette.testclient import TestClient
 
-        daemon = _make_daemon(authorized_identities={"aa" * 16})
+        daemon = _make_daemon(rbac_policy=RBACPolicy(default_role=Role.NONE, roster={"aa" * 16: RosterEntry(identity_hash="aa" * 16, role=Role.MONITOR)}))
         app, _, _ = _build_app(daemon)
 
         with TestClient(app) as client:
@@ -509,11 +496,11 @@ class TestChallengeLegacy:
         assert resp.status_code == 403
 
     @patch("styrened.web.auth._verify_identity_hash", return_value=True)
-    def test_legacy_allow_unauthenticated(self, mock_verify):
-        """allow_unauthenticated=True → any identity accepted."""
+    def test_default_monitor_allows_all(self, mock_verify):
+        """default_role=MONITOR → any identity accepted."""
         from starlette.testclient import TestClient
 
-        daemon = _make_daemon(allow_unauthenticated=True)
+        daemon = _make_daemon(rbac_policy=RBACPolicy(default_role=Role.MONITOR))
         app, _, _ = _build_app(daemon)
 
         with TestClient(app) as client:

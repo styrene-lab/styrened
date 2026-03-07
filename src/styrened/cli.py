@@ -2369,25 +2369,43 @@ def cmd_api_auth(args: argparse.Namespace) -> int:
     if action == "list":
         auth = config.api.auth
         if args.json:
+            # Show RBAC roster entries with WEB_READ capability
+            from styrened.models.rbac import Capability
+            web_identities = [
+                entry.identity_hash
+                for entry in config.rbac.roster.values()
+                if config.rbac.has_capability(entry.identity_hash, Capability.WEB_READ)
+            ]
             output = {
                 "enabled": auth.enabled,
                 "exempt_localhost": auth.exempt_localhost,
-                "allow_unauthenticated": auth.allow_unauthenticated,
                 "session_ttl": auth.session_ttl,
-                "authorized_identities": sorted(auth.authorized_identities),
+                "rbac_default_role": config.rbac.default_role.name,
+                "web_authorized_identities": sorted(web_identities),
             }
             print(json_mod.dumps(output, indent=2))
         else:
+            from styrened.models.rbac import Capability
             print(f"Auth enabled:           {auth.enabled}")
             print(f"Exempt localhost:       {auth.exempt_localhost}")
-            print(f"Allow unauthenticated:  {auth.allow_unauthenticated}")
             print(f"Session TTL:            {auth.session_ttl}s")
-            if auth.authorized_identities:
-                print(f"Authorized identities:  ({len(auth.authorized_identities)})")
-                for ident in sorted(auth.authorized_identities):
-                    print(f"  {ident}")
+            print(f"RBAC default role:      {config.rbac.default_role.name}")
+            web_identities = [
+                entry
+                for entry in config.rbac.roster.values()
+                if config.rbac.has_capability(entry.identity_hash, Capability.WEB_READ)
+            ]
+            if web_identities:
+                print(f"Web-authorized (RBAC):  ({len(web_identities)})")
+                for entry in sorted(web_identities, key=lambda e: e.identity_hash):
+                    label = f" ({entry.label})" if entry.label else ""
+                    print(f"  {entry.identity_hash} [{entry.role.name}]{label}")
             else:
-                print("Authorized identities:  (none)")
+                default_has_web = config.rbac.has_capability("0" * 32, Capability.WEB_READ)
+                if default_has_web:
+                    print("Web-authorized:         (all — default role grants WEB_READ)")
+                else:
+                    print("Web-authorized:         (none — add identities to RBAC roster)")
         return 0
 
     elif action == "add":
@@ -2401,22 +2419,28 @@ def cmd_api_auth(args: argparse.Namespace) -> int:
             print("Error: identity hash must be valid hexadecimal", file=sys.stderr)
             return 1
 
-        config.api.auth.authorized_identities.add(identity_hash)
+        from styrened.models.rbac import Role, RosterEntry
+        if identity_hash not in config.rbac.roster:
+            config.rbac.add_entry(RosterEntry(
+                identity_hash=identity_hash,
+                role=Role.MONITOR,
+                label="(added via web-auth CLI)",
+            ))
         if not config.api.auth.enabled:
             config.api.auth.enabled = True
             print("Auth auto-enabled (was disabled)")
         save_core_config(config)
-        print(f"Added {identity_hash} to authorized identities")
+        print(f"Added {identity_hash} to RBAC roster as MONITOR (grants WEB_READ)")
         return 0
 
     elif action == "remove":
         identity_hash = args.identity_hash.lower()
-        if identity_hash in config.api.auth.authorized_identities:
-            config.api.auth.authorized_identities.discard(identity_hash)
+        if identity_hash in config.rbac.roster:
+            config.rbac.remove_entry(identity_hash)
             save_core_config(config)
-            print(f"Removed {identity_hash} from authorized identities")
+            print(f"Removed {identity_hash} from RBAC roster")
         else:
-            print(f"Identity {identity_hash} not found in authorized set", file=sys.stderr)
+            print(f"Identity {identity_hash} not found in RBAC roster", file=sys.stderr)
             return 1
         return 0
 

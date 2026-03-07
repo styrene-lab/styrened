@@ -25,11 +25,12 @@ from styrened.web.auth import (
 # ---------------------------------------------------------------------------
 
 
+from styrened.models.rbac import RBACPolicy, Role, RosterEntry
+
+
 @dataclass
 class FakeAuthConfig:
     enabled: bool = True
-    authorized_identities: set[str] = field(default_factory=set)
-    allow_unauthenticated: bool = False
     exempt_localhost: bool = True
     session_ttl: int = 86400
 
@@ -42,7 +43,7 @@ class FakeAPIConfig:
 @dataclass
 class FakeDaemonConfig:
     api: FakeAPIConfig = field(default_factory=FakeAPIConfig)
-    rbac: None = None
+    rbac: RBACPolicy = field(default_factory=RBACPolicy)
 
 
 def _make_fake_identity() -> tuple[bytes, str]:
@@ -53,22 +54,16 @@ def _make_fake_identity() -> tuple[bytes, str]:
 
 
 def _create_test_app(
-    authorized_identities: set[str] | None = None,
-    allow_unauthenticated: bool = False,
+    rbac_policy: RBACPolicy | None = None,
 ) -> tuple[TestClient, ChallengeStore, SessionStore]:
     """Create a test app with auth router."""
     app = FastAPI()
     challenge_store = ChallengeStore()
     session_store = SessionStore()
 
-    auth_config = FakeAuthConfig(
-        enabled=True,
-        authorized_identities=authorized_identities or set(),
-        allow_unauthenticated=allow_unauthenticated,
-    )
     daemon = MagicMock()
     daemon.config = FakeDaemonConfig(
-        api=FakeAPIConfig(auth=auth_config),
+        rbac=rbac_policy or RBACPolicy(default_role=Role.MONITOR),
     )
 
     router = create_auth_router(daemon, challenge_store, session_store)
@@ -88,9 +83,11 @@ class TestChallengeEndpoint:
     def test_challenge_success(self) -> None:
         """Valid identity gets a challenge nonce."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(
-            authorized_identities={identity_hash},
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={identity_hash: RosterEntry(identity_hash=identity_hash, role=Role.MONITOR)},
         )
+        client, _, _ = _create_test_app(rbac_policy=policy)
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": identity_hash,
@@ -103,12 +100,14 @@ class TestChallengeEndpoint:
         assert data["expires_in"] == 60
 
     def test_challenge_unauthorized_identity(self) -> None:
-        """Identity not in authorized set gets 403."""
+        """Identity not in RBAC roster gets 403."""
         pub_bytes, identity_hash = _make_fake_identity()
         _, other_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(
-            authorized_identities={other_hash},
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={other_hash: RosterEntry(identity_hash=other_hash, role=Role.MONITOR)},
         )
+        client, _, _ = _create_test_app(rbac_policy=policy)
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": identity_hash,
@@ -116,12 +115,10 @@ class TestChallengeEndpoint:
         })
         assert resp.status_code == 403
 
-    def test_challenge_allow_unauthenticated(self) -> None:
-        """With allow_unauthenticated, any identity gets a challenge."""
+    def test_challenge_default_monitor_allows_all(self) -> None:
+        """With default_role=MONITOR, any identity gets a challenge."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(
-            allow_unauthenticated=True,
-        )
+        client, _, _ = _create_test_app()
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": identity_hash,
@@ -129,26 +126,23 @@ class TestChallengeEndpoint:
         })
         assert resp.status_code == 200
 
-    def test_challenge_empty_whitelist_denies_all(self) -> None:
-        """Empty authorized_identities with allow_unauthenticated=False denies all."""
+    def test_challenge_empty_roster_default_none_denies_all(self) -> None:
+        """Empty roster with default_role=NONE denies all."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(
-            authorized_identities=set(),
-            allow_unauthenticated=False,
-        )
+        policy = RBACPolicy(default_role=Role.NONE)
+        client, _, _ = _create_test_app(rbac_policy=policy)
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": identity_hash,
             "public_key": pub_bytes.hex(),
         })
-        # Empty whitelist = no one authorized, deny all
         assert resp.status_code == 403
 
     def test_challenge_pubkey_hash_mismatch(self) -> None:
         """Public key that doesn't match identity_hash gets 400."""
         pub_bytes, _ = _make_fake_identity()
         wrong_hash = "a" * 32
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": wrong_hash,
@@ -159,7 +153,7 @@ class TestChallengeEndpoint:
     def test_challenge_rate_limiting(self) -> None:
         """After 10 challenges, 429 is returned."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
 
         for _ in range(10):
             resp = client.post("/api/auth/challenge", json={
@@ -176,7 +170,7 @@ class TestChallengeEndpoint:
 
     def test_challenge_invalid_identity_hash_format(self) -> None:
         """Identity hash with wrong length gets 422 (Pydantic validation)."""
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": "tooshort",
             "public_key": "aa" * 64,
@@ -195,9 +189,11 @@ class TestVerifyEndpoint:
     def test_verify_success_with_mock_rns(self) -> None:
         """Full challenge-verify flow with mocked RNS signature verification."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, challenge_store, session_store = _create_test_app(
-            authorized_identities={identity_hash},
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={identity_hash: RosterEntry(identity_hash=identity_hash, role=Role.MONITOR)},
         )
+        client, challenge_store, session_store = _create_test_app(rbac_policy=policy)
 
         # Step 1: Get challenge
         resp = client.post("/api/auth/challenge", json={
@@ -232,7 +228,7 @@ class TestVerifyEndpoint:
 
     def test_verify_invalid_challenge(self) -> None:
         """Verify with unknown challenge gets 400."""
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
         resp = client.post("/api/auth/verify", json={
             "identity_hash": "a" * 32,
             "challenge": "b" * 64,
@@ -244,7 +240,7 @@ class TestVerifyEndpoint:
         """Verify with different identity than challenge gets 400."""
         pub_bytes, identity_hash = _make_fake_identity()
         _, other_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
 
         # Get challenge for identity_hash
         resp = client.post("/api/auth/challenge", json={
@@ -264,7 +260,7 @@ class TestVerifyEndpoint:
     def test_verify_bad_signature(self) -> None:
         """Invalid signature gets 401."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": identity_hash,
@@ -283,7 +279,7 @@ class TestVerifyEndpoint:
     def test_challenge_single_use(self) -> None:
         """Challenge can only be used once."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, _, _ = _create_test_app(allow_unauthenticated=True)
+        client, _, _ = _create_test_app()
 
         resp = client.post("/api/auth/challenge", json={
             "identity_hash": identity_hash,
@@ -331,9 +327,11 @@ class TestStatusEndpoint:
     def test_status_authenticated(self) -> None:
         """Status returns authenticated with identity when token provided."""
         pub_bytes, identity_hash = _make_fake_identity()
-        client, challenge_store, session_store = _create_test_app(
-            authorized_identities={identity_hash},
+        policy = RBACPolicy(
+            default_role=Role.NONE,
+            roster={identity_hash: RosterEntry(identity_hash=identity_hash, role=Role.MONITOR)},
         )
+        client, challenge_store, session_store = _create_test_app(rbac_policy=policy)
 
         # Create a session directly
         session = session_store.create(identity_hash)

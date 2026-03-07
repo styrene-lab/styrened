@@ -5,7 +5,7 @@ and bridges terminal I/O over RNS Links.
 
 Architecture:
     1. Client sends TERMINAL_REQUEST via LXMF (Styrene protocol)
-    2. Service validates identity against authorized_identities
+    2. Service validates identity via RBAC policy (TERMINAL_RESTRICTED/TERMINAL_FULL)
     3. Service allocates PTY and forks shell process
     4. Service responds with TERMINAL_ACCEPT containing Link destination
     5. Client establishes RNS Link for data plane
@@ -17,7 +17,7 @@ Usage:
     service = TerminalService(
         rns_service=rns_service,
         styrene_protocol=styrene_protocol,
-        authorized_identities={"abc123...", "def456..."},
+        rbac_policy=RBACPolicy(...),
     )
     service.start()
 """
@@ -34,7 +34,7 @@ import struct
 import termios
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
+
 from typing import TYPE_CHECKING, Any
 
 from styrened.models.styrene_wire import (
@@ -237,7 +237,6 @@ class TerminalService:
     Attributes:
         rns_service: RNS service for Link management
         styrene_protocol: Styrene protocol for LXMF messaging
-        authorized_identities: Set of identity hashes allowed to connect
         default_shell: Default shell for new sessions
         sessions: Active sessions by session_id
         session_idle_timeout: Idle timeout in seconds (default: 3600)
@@ -247,10 +246,7 @@ class TerminalService:
         self,
         rns_service: "RNSService",
         styrene_protocol: "StyreneProtocol",
-        authorized_identities: set[str] | None = None,
-        authorized_identities_file: Path | None = None,
         default_shell: str = DEFAULT_SHELL,
-        allow_unauthenticated: bool = False,
         allowed_signals: frozenset[int] | None = None,
         max_sessions_per_identity: int = DEFAULT_MAX_SESSIONS_PER_IDENTITY,
         max_total_sessions: int = DEFAULT_MAX_TOTAL_SESSIONS,
@@ -266,11 +262,7 @@ class TerminalService:
         Args:
             rns_service: RNS service for network operations
             styrene_protocol: Styrene protocol for message handling
-            authorized_identities: Set of identity hashes allowed to connect
-            authorized_identities_file: Path to file containing authorized identities
             default_shell: Default shell for new sessions
-            allow_unauthenticated: If True, allow connections when no identities are
-                configured. DANGEROUS - only for development. Default: False (fail-closed).
             allowed_signals: Set of signal numbers that clients can send to terminal
                 processes. Defaults to DEFAULT_ALLOWED_SIGNALS (SIGINT, SIGTERM, SIGHUP,
                 SIGTSTP, SIGCONT, SIGWINCH). Dangerous signals like SIGKILL, SIGSTOP,
@@ -287,13 +279,15 @@ class TerminalService:
                 are allowed. Paths are resolved to absolute paths for comparison.
             disable_command_validation: If True, skip command validation entirely.
                 DANGEROUS - allows arbitrary command execution. Default: False.
+            rbac_policy: RBACPolicy for capability-based authorization.
+                If None, a default PEER policy is used.
         """
+        from styrened.models.rbac import RBACPolicy as _RBACPolicy
         self.rns_service = rns_service
         self.styrene_protocol = styrene_protocol
         self.default_shell = default_shell
-        self._rbac_policy: RBACPolicy | None = rbac_policy
+        self._rbac_policy: RBACPolicy = rbac_policy or _RBACPolicy()
         self.sessions: dict[bytes, TerminalSession] = {}
-        self._allow_unauthenticated = allow_unauthenticated
         self.session_idle_timeout = session_idle_timeout
 
         # Signal whitelist - remove any blocked signals from the allowed set
@@ -338,88 +332,24 @@ class TerminalService:
         self._sessions_by_identity: dict[str, list[bytes]] = {}
         self._request_timestamps: dict[str, list[float]] = {}
 
-        # Identity authorization
-        self._authorized_identities: set[str] = authorized_identities or set()
-        self._authorized_identities_file = authorized_identities_file
-        if authorized_identities_file:
-            self._load_authorized_identities()
-
         # RNS Link destination for data plane connections
         self._link_destination: RNS.Destination | None = None
 
         # Registered with styrene protocol
         self._registered = False
 
-        if not self._authorized_identities and not allow_unauthenticated:
-            logger.warning(
-                "[METRICS] terminal_service_init mode=fail_closed "
-                "authorized_identities=0 - all connections will be REJECTED"
-            )
-        elif allow_unauthenticated:
-            logger.warning(
-                "[METRICS] terminal_service_init mode=unauthenticated "
-                "authorized_identities=0 - all connections will be ALLOWED (DANGEROUS)"
-            )
-        else:
-            logger.info(
-                f"[METRICS] terminal_service_init mode=authorized "
-                f"authorized_identities={len(self._authorized_identities)} "
-                f"max_sessions_per_identity={max_sessions_per_identity} "
-                f"max_total_sessions={max_total_sessions} "
-                f"rate_limit={session_request_rate_limit}/min "
-                f"idle_timeout={session_idle_timeout}s "
-                f"allowed_signals={len(self._allowed_signals)} "
-                f"allowed_shells={len(self._allowed_shells)} "
-                f"command_validation={'disabled' if disable_command_validation else 'enabled'}"
-            )
-
-    def _load_authorized_identities(self) -> None:
-        """Load authorized identities from file.
-
-        File format: one identity hash per line, # comments allowed.
-        """
-        if not self._authorized_identities_file:
-            return
-
-        if not self._authorized_identities_file.exists():
-            logger.warning(
-                f"Authorized identities file not found: {self._authorized_identities_file}"
-            )
-            return
-
-        try:
-            with open(self._authorized_identities_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        # Take first whitespace-separated token (allows comments after hash)
-                        identity = line.split()[0]
-                        self._authorized_identities.add(identity)
-
-            logger.info(
-                f"Loaded {len(self._authorized_identities)} authorized identities "
-                f"from {self._authorized_identities_file}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to load authorized identities: {e}")
-
-    def add_authorized_identity(self, identity_hash: str) -> None:
-        """Add an identity to the authorized set.
-
-        Args:
-            identity_hash: RNS identity hash to authorize
-        """
-        self._authorized_identities.add(identity_hash)
-        logger.info(f"Added authorized identity: {identity_hash[:16]}...")
-
-    def remove_authorized_identity(self, identity_hash: str) -> None:
-        """Remove an identity from the authorized set.
-
-        Args:
-            identity_hash: RNS identity hash to deauthorize
-        """
-        self._authorized_identities.discard(identity_hash)
-        logger.info(f"Removed authorized identity: {identity_hash[:16]}...")
+        logger.info(
+            f"[METRICS] terminal_service_init mode=rbac "
+            f"default_role={self._rbac_policy.default_role.name} "
+            f"roster={len(self._rbac_policy.roster)} "
+            f"max_sessions_per_identity={max_sessions_per_identity} "
+            f"max_total_sessions={max_total_sessions} "
+            f"rate_limit={session_request_rate_limit}/min "
+            f"idle_timeout={session_idle_timeout}s "
+            f"allowed_signals={len(self._allowed_signals)} "
+            f"allowed_shells={len(self._allowed_shells)} "
+            f"command_validation={'disabled' if disable_command_validation else 'enabled'}"
+        )
 
     def _send_link_packet(self, link: "RNS.Link", data: bytes) -> bool:
         """Send data packet over an RNS Link.
@@ -444,7 +374,7 @@ class TerminalService:
             logger.error(f"Failed to send link packet: {e}")
             return False
 
-    def set_rbac_policy(self, policy: "RBACPolicy | None") -> None:
+    def set_rbac_policy(self, policy: "RBACPolicy") -> None:
         """Set or replace the RBAC policy for authorization checks."""
         self._rbac_policy = policy
 
@@ -456,24 +386,16 @@ class TerminalService:
             "restricted" if TERMINAL_RESTRICTED capability (OPERATOR),
             None if no terminal access.
         """
-        if self._rbac_policy is not None:
-            if self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL):
-                return "full"
-            if self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED):
-                return "restricted"
-            return None
-
-        # Legacy: authorized → restricted, unauthorized → None
-        if self.is_authorized(identity_hash):
+        if self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL):
+            return "full"
+        if self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED):
             return "restricted"
         return None
 
     def is_authorized(self, identity_hash: str) -> bool:
         """Check if an identity is authorized for terminal access.
 
-        When RBAC policy is set, checks for terminal.restricted or
-        terminal.full capability.  When RBAC is not set, falls back to
-        legacy authorized_identities + allow_unauthenticated behavior.
+        Checks for TERMINAL_RESTRICTED or TERMINAL_FULL capability via RBAC.
 
         Args:
             identity_hash: RNS identity hash to check
@@ -481,41 +403,15 @@ class TerminalService:
         Returns:
             True if authorized, False otherwise
         """
-        # RBAC path: check terminal capabilities
-        if self._rbac_policy is not None:
-            has_terminal = (
-                self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED)
-                or self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL)
-            )
-            logger.debug(
-                f"[METRICS] auth_check identity={identity_hash[:16]} "
-                f"result={'allowed' if has_terminal else 'rejected'} reason=rbac"
-            )
-            return has_terminal
-
-        # Legacy path: authorized_identities + allow_unauthenticated
-        # If no authorized identities configured
-        if not self._authorized_identities:
-            if self._allow_unauthenticated:
-                logger.warning(
-                    f"[METRICS] auth_check identity={identity_hash[:16]} "
-                    f"result=allowed reason=unauthenticated_mode"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"[METRICS] auth_check identity={identity_hash[:16]} "
-                    f"result=rejected reason=fail_closed_no_identities"
-                )
-                return False
-
-        authorized = identity_hash in self._authorized_identities
+        has_terminal = (
+            self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_RESTRICTED)
+            or self._rbac_policy.has_capability(identity_hash, Capability.TERMINAL_FULL)
+        )
         logger.debug(
             f"[METRICS] auth_check identity={identity_hash[:16]} "
-            f"result={'allowed' if authorized else 'rejected'} "
-            f"reason={'in_authorized_set' if authorized else 'not_in_authorized_set'}"
+            f"result={'allowed' if has_terminal else 'rejected'} reason=rbac"
         )
-        return authorized
+        return has_terminal
 
     def is_signal_allowed(self, sig: int) -> bool:
         """Check if a signal is allowed to be sent to terminal processes.

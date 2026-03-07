@@ -343,30 +343,14 @@ def create_auth_router(
     async def challenge(body: ChallengeRequest) -> JSONResponse:
         auth_config = daemon.config.api.auth
 
-        # RBAC path: check web.read capability
-        rbac = daemon.config.rbac
-        if rbac is not None:
-            from styrened.models.rbac import Capability
+        # RBAC: check web.read capability
+        from styrened.models.rbac import Capability
 
-            if not rbac.has_capability(body.identity_hash.lower(), Capability.WEB_READ):
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Identity not authorized (RBAC)"},
-                )
-        else:
-            # Legacy path: authorized_identities + allow_unauthenticated
-            if not auth_config.allow_unauthenticated:
-                if not auth_config.authorized_identities:
-                    # Auth enabled but no identities configured — deny all
-                    return JSONResponse(
-                        status_code=403,
-                        content={"detail": "No authorized identities configured"},
-                    )
-                if body.identity_hash.lower() not in {h.lower() for h in auth_config.authorized_identities}:
-                    return JSONResponse(
-                        status_code=403,
-                        content={"detail": "Identity not authorized"},
-                    )
+        if not daemon.config.rbac.has_capability(body.identity_hash.lower(), Capability.WEB_READ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Identity not authorized (RBAC)"},
+            )
 
         # Verify identity_hash matches public_key
         if not _verify_identity_hash(body.public_key, body.identity_hash):
@@ -402,17 +386,15 @@ def create_auth_router(
     @router.post("/verify")
     async def verify(request: Request, body: VerifyRequest) -> JSONResponse:
         # RBAC re-check: identity may have been blocked between challenge and verify
-        rbac = daemon.config.rbac
-        if rbac is not None:
-            from styrened.models.rbac import Capability
+        from styrened.models.rbac import Capability
 
-            if not rbac.has_capability(body.identity_hash.lower(), Capability.WEB_READ):
-                # Consume the challenge to prevent replay
-                challenge_store.consume(body.challenge)
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Identity not authorized (RBAC)"},
-                )
+        if not daemon.config.rbac.has_capability(body.identity_hash.lower(), Capability.WEB_READ):
+            # Consume the challenge to prevent replay
+            challenge_store.consume(body.challenge)
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Identity not authorized (RBAC)"},
+            )
 
         # Consume the challenge (single-use)
         pending = challenge_store.consume(body.challenge)

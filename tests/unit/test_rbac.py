@@ -351,16 +351,13 @@ class TestMutations:
 class TestConfigParsing:
     def test_parse_rbac_minimal(self) -> None:
         """Config with no rbac section gets default policy."""
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
-        config = CoreConfig()
-        policy = _parse_rbac({}, config)
+        policy = _parse_rbac({})
         assert policy.default_role == Role.PEER
         assert len(policy.roster) == 0
 
     def test_parse_rbac_full_roster(self) -> None:
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
         data = {
@@ -373,8 +370,7 @@ class TestConfigParsing:
                 "blocked": ["ca3e9813"],
             }
         }
-        config = CoreConfig()
-        policy = _parse_rbac(data, config)
+        policy = _parse_rbac(data)
         assert policy.default_role == Role.MONITOR
         assert len(policy.roster) == 2
         assert policy.roster["a" * 32].role == Role.ADMIN
@@ -383,7 +379,6 @@ class TestConfigParsing:
         assert policy.blocked == ["ca3e9813"]
 
     def test_parse_rbac_with_grants(self) -> None:
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
         data = {
@@ -397,23 +392,19 @@ class TestConfigParsing:
                 ],
             }
         }
-        config = CoreConfig()
-        policy = _parse_rbac(data, config)
+        policy = _parse_rbac(data)
         entry = policy.roster["a" * 32]
         assert Capability.VPN_HANDSHAKE in entry.grants
         assert Capability.DATALINK_ESTABLISH in entry.grants
 
     def test_parse_rbac_case_insensitive(self) -> None:
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
         data = {"rbac": {"default_role": "ADMIN", "roster": []}}
-        config = CoreConfig()
-        policy = _parse_rbac(data, config)
+        policy = _parse_rbac(data)
         assert policy.default_role == Role.ADMIN
 
     def test_parse_rbac_unknown_role_skipped(self) -> None:
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
         data = {
@@ -421,21 +412,17 @@ class TestConfigParsing:
                 "roster": [{"identity": "a" * 32, "role": "superadmin"}],
             }
         }
-        config = CoreConfig()
-        policy = _parse_rbac(data, config)
+        policy = _parse_rbac(data)
         assert len(policy.roster) == 0
 
     def test_parse_rbac_unknown_default_role_falls_to_peer(self) -> None:
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
         data = {"rbac": {"default_role": "superuser"}}
-        config = CoreConfig()
-        policy = _parse_rbac(data, config)
+        policy = _parse_rbac(data)
         assert policy.default_role == Role.PEER
 
     def test_parse_rbac_unknown_grant_skipped(self) -> None:
-        from styrened.models.config import CoreConfig
         from styrened.services.config import _parse_rbac
 
         data = {
@@ -445,65 +432,11 @@ class TestConfigParsing:
                 ],
             }
         }
-        config = CoreConfig()
-        policy = _parse_rbac(data, config)
+        policy = _parse_rbac(data)
         assert len(policy.roster["a" * 32].grants) == 0
 
 
-# ---------------------------------------------------------------------------
-# Legacy Migration
-# ---------------------------------------------------------------------------
 
-
-class TestLegacyMigration:
-    def test_migrate_terminal_authorized_to_admin(self) -> None:
-        from styrened.models.config import CoreConfig
-        from styrened.services.config import _parse_rbac
-
-        config = CoreConfig()
-        config.terminal.authorized_identities = {"a" * 32}
-        policy = _parse_rbac({}, config)
-        assert "a" * 32 in policy.roster
-        assert policy.roster["a" * 32].role == Role.ADMIN
-
-    def test_migrate_web_authorized_to_monitor(self) -> None:
-        from styrened.models.config import CoreConfig
-        from styrened.services.config import _parse_rbac
-
-        config = CoreConfig()
-        config.api.auth.authorized_identities = {"b" * 32}
-        policy = _parse_rbac({}, config)
-        assert "b" * 32 in policy.roster
-        assert policy.roster["b" * 32].role == Role.MONITOR
-
-    def test_migrate_banned_peers_to_blocked(self) -> None:
-        from styrened.models.config import CoreConfig
-        from styrened.services.config import _parse_rbac
-
-        config = CoreConfig()
-        config.banned_peers = ["ca3e9813"]
-        policy = _parse_rbac({}, config)
-        assert "ca3e9813" in policy.blocked
-
-    def test_migrate_no_duplicates(self) -> None:
-        """Explicit roster entry takes precedence over migration."""
-        from styrened.models.config import CoreConfig
-        from styrened.services.config import _parse_rbac
-
-        data = {
-            "rbac": {
-                "roster": [{"identity": "a" * 32, "role": "operator"}],
-                "blocked": ["ca3e9813"],
-            }
-        }
-        config = CoreConfig()
-        config.terminal.authorized_identities = {"a" * 32}
-        config.banned_peers = ["ca3e9813"]
-        policy = _parse_rbac(data, config)
-        # Explicit roster wins — stays operator, not migrated to admin
-        assert policy.roster["a" * 32].role == Role.OPERATOR
-        # No duplicate blocked entries
-        assert policy.blocked.count("ca3e9813") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +453,7 @@ class TestSerialization:
         from styrened.models.config import CoreConfig
         from styrened.services.config import load_core_config, save_core_config
 
+        config = CoreConfig()
         policy = RBACPolicy(
             default_role=Role.MONITOR,
             roster={
@@ -537,7 +471,6 @@ class TestSerialization:
             blocked=["ca3e9813"],
         )
 
-        config = CoreConfig()
         config.rbac = policy
 
         with tempfile.TemporaryDirectory() as tmpdir:

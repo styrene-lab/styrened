@@ -7,17 +7,14 @@ import pytest
 from styrened.models.rbac import RBACPolicy, Role
 
 
-def _make_daemon(rbac_policy=None, banned_peers=None):
-    """Create a minimal mock daemon with real _inject_lxmf_rbac / _seed methods bound."""
+def _make_daemon(rbac_policy=None):
+    """Create a minimal mock daemon with real _inject_lxmf_rbac bound."""
     from styrened.daemon import StyreneDaemon
 
     daemon = MagicMock()
     daemon.config = MagicMock()
-    daemon.config.rbac = rbac_policy
-    daemon.config.banned_peers = banned_peers or []
+    daemon.config.rbac = rbac_policy or RBACPolicy()
     daemon._inject_lxmf_rbac = StyreneDaemon._inject_lxmf_rbac.__get__(daemon)
-    daemon._seed_contacts_blocks_to_rbac = StyreneDaemon._seed_contacts_blocks_to_rbac.__get__(daemon)
-    daemon._seed_config_bans = StyreneDaemon._seed_config_bans.__get__(daemon)
     return daemon
 
 
@@ -248,35 +245,6 @@ class TestInjectLxmfRbacDaemonWiring:
         mock_svc.set_rbac_policy.assert_called_once_with(policy)
 
     @patch("styrened.services.lxmf_service.get_lxmf_service")
-    def test_no_injection_when_policy_absent(self, mock_get_svc):
-        """No RBAC injection when config.rbac is None."""
-        daemon = _make_daemon(rbac_policy=None)
-
-        mock_svc = MagicMock()
-        mock_svc.is_initialized = True
-        mock_get_svc.return_value = mock_svc
-
-        daemon._inject_lxmf_rbac()
-
-        mock_svc.set_rbac_policy.assert_not_called()
-
-    @patch("styrened.services.lxmf_service.get_lxmf_service")
-    @patch("styrened.models.messages.init_db")
-    def test_contacts_blocks_seeded_during_injection(self, mock_init_db, mock_get_svc):
-        """Contacts-DB blocks are seeded into RBAC during injection."""
-        policy = RBACPolicy(default_role=Role.PEER)
-        daemon = _make_daemon(rbac_policy=policy)
-
-        mock_svc = MagicMock()
-        mock_svc.is_initialized = True
-        mock_svc._load_blocklist.return_value = {"deadbeef12345678"}
-        mock_get_svc.return_value = mock_svc
-
-        daemon._inject_lxmf_rbac()
-
-        assert "deadbeef12345678" in policy.blocked
-
-    @patch("styrened.services.lxmf_service.get_lxmf_service")
     def test_skips_when_lxmf_not_initialized(self, mock_get_svc):
         """Gracefully skips when LXMF is not yet initialized."""
         policy = RBACPolicy(default_role=Role.PEER)
@@ -301,45 +269,7 @@ class TestInjectLxmfRbacExceptionHandling:
         daemon = _make_daemon(rbac_policy=policy)
         daemon._inject_lxmf_rbac()  # Should not raise
 
-    @patch("styrened.services.lxmf_service.get_lxmf_service")
-    @patch("styrened.models.messages.init_db")
-    def test_seed_survives_load_blocklist_error(self, mock_init_db, mock_get_svc):
-        """_seed_contacts_blocks_to_rbac doesn't crash when DB query fails."""
-        policy = RBACPolicy(default_role=Role.PEER)
-        daemon = _make_daemon(rbac_policy=policy)
 
-        mock_svc = MagicMock()
-        mock_svc.is_initialized = True
-        mock_svc._load_blocklist.side_effect = Exception("DB corrupted")
-        mock_get_svc.return_value = mock_svc
-
-        daemon._inject_lxmf_rbac()  # Should not raise
-        # Policy injection should have happened before the seeding error
-        mock_svc.set_rbac_policy.assert_called_once_with(policy)
-
-
-class TestSeedConfigBansDualWrite:
-    """_seed_config_bans dual-writes to both contacts DB and RBAC."""
-
-    @patch("styrened.services.lxmf_service.get_lxmf_service")
-    @patch("styrened.models.messages.init_db")
-    def test_banned_peers_written_to_rbac(self, mock_init_db, mock_get_svc):
-        """Banned peers from config are dual-written to RBAC via block_peer."""
-        policy = RBACPolicy(default_role=Role.PEER)
-        daemon = _make_daemon(
-            rbac_policy=policy,
-            banned_peers=["deadbeef", "cafebabe"],
-        )
-
-        mock_svc = MagicMock()
-        mock_get_svc.return_value = mock_svc
-
-        daemon._seed_config_bans()
-
-        # block_peer should have been called for each banned peer
-        assert mock_svc.block_peer.call_count == 2
-        mock_svc.block_peer.assert_any_call("deadbeef")
-        mock_svc.block_peer.assert_any_call("cafebabe")
 
 
 class TestRBACReversePrefixMatch:

@@ -787,8 +787,6 @@ api:
         assert config.api.auth.enabled is False
         assert config.api.auth.exempt_localhost is True
         assert config.api.auth.session_ttl == 86400
-        assert config.api.auth.allow_unauthenticated is False
-        assert config.api.auth.authorized_identities == set()
 
     def test_auth_full_config(self) -> None:
         """Full auth config is parsed correctly."""
@@ -798,11 +796,7 @@ api:
   auth:
     enabled: true
     exempt_localhost: false
-    allow_unauthenticated: true
     session_ttl: 3600
-    authorized_identities:
-      - "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      - "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -811,31 +805,7 @@ api:
 
         assert config.api.auth.enabled is True
         assert config.api.auth.exempt_localhost is False
-        assert config.api.auth.allow_unauthenticated is True
         assert config.api.auth.session_ttl == 3600
-        assert config.api.auth.authorized_identities == {
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        }
-
-    def test_auth_invalid_identity_length_filtered(self) -> None:
-        """Identities with wrong length are filtered out."""
-        yaml_content = """
-api:
-  auth:
-    authorized_identities:
-      - "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      - "tooshort"
-      - "123"
-"""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            config = load_core_config(Path(f.name))
-
-        assert config.api.auth.authorized_identities == {
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        }
 
     def test_auth_string_bools(self) -> None:
         """Auth bools handle string representations."""
@@ -946,57 +916,13 @@ class TestPQCConfigLoading:
         assert loaded.pqc.rekey_interval_hours == 24
 
 
-class TestAuthorizedIdentitiesHexValidation:
-    """Tests for hex validation of api.auth.authorized_identities (W11)."""
+class TestRBACConfigLoading:
+    """Tests for RBAC configuration loading."""
 
-    def test_valid_hex_identity_accepted(self, tmp_path: Path) -> None:
-        """A valid 32-char hex identity is accepted."""
+    def test_rbac_defaults(self, tmp_path: Path) -> None:
+        """Default RBAC policy is always present."""
         config_file = tmp_path / "config.yaml"
-        config_file.write_text("""
-api:
-  auth:
-    authorized_identities:
-      - "aabbccdd11223344aabbccdd11223344"
-""")
+        config_file.write_text("api:\n  enabled: true\n")
         config = load_core_config(config_file)
-        assert "aabbccdd11223344aabbccdd11223344" in config.api.auth.authorized_identities
-
-    def test_non_hex_identity_rejected(self, tmp_path: Path) -> None:
-        """A 32-char string with non-hex characters is rejected (W11)."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("""
-api:
-  auth:
-    authorized_identities:
-      - "zzzzzzzz11223344aabbccdd11223344"
-""")
-        config = load_core_config(config_file)
-        assert len(config.api.auth.authorized_identities) == 0
-
-    def test_mixed_valid_invalid_identities(self, tmp_path: Path) -> None:
-        """Only valid hex identities are kept; non-hex are filtered out (W11)."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("""
-api:
-  auth:
-    authorized_identities:
-      - "aabbccdd11223344aabbccdd11223344"
-      - "not_valid_hex_but_len_is_32char"
-      - "1234567890abcdef1234567890abcdef"
-""")
-        config = load_core_config(config_file)
-        assert "aabbccdd11223344aabbccdd11223344" in config.api.auth.authorized_identities
-        assert "1234567890abcdef1234567890abcdef" in config.api.auth.authorized_identities
-        assert len(config.api.auth.authorized_identities) == 2
-
-    def test_uppercase_hex_identity_accepted(self, tmp_path: Path) -> None:
-        """Uppercase hex characters are accepted (W11)."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("""
-api:
-  auth:
-    authorized_identities:
-      - "AABBCCDD11223344AABBCCDD11223344"
-""")
-        config = load_core_config(config_file)
-        assert "AABBCCDD11223344AABBCCDD11223344" in config.api.auth.authorized_identities
+        from styrened.models.rbac import RBACPolicy
+        assert isinstance(config.rbac, RBACPolicy)
