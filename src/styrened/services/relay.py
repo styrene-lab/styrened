@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from styrened.models.relay import (
     RelayConfig,
@@ -14,9 +15,16 @@ from styrened.models.relay import (
     RelayMaxPerIdentity,
     RelayByteLimitExceeded,
     RelayIdleTimeout,
+    RelayPermanentDenied,
     RelayTargetOffline,
+    RelayTargetRejected,
+    RelayPermanentConsentDenied,
+    RelayUnauthorized,
     RelayEvicted,
 )
+
+if TYPE_CHECKING:
+    from styrened.models.rbac import RBACPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +40,71 @@ class RelayService:
         self._config = config
         self._sessions: dict[int, RelaySession] = {}
         self._lock = asyncio.Lock()
-        self._rbac_policy: Any = None
+        self._rbac_policy: RBACPolicy | None = None
+        self._target_rbac_policy: RBACPolicy | None = None
 
-    def set_rbac_policy(self, policy: Any) -> None:
-        """Inject the RBAC policy for authorization checks."""
+    def set_rbac_policy(self, policy: RBACPolicy) -> None:
+        """Inject the hub-side RBAC policy for requester authorization."""
         self._rbac_policy = policy
+
+    def set_target_rbac_policy(self, policy: RBACPolicy) -> None:
+        """Inject the target-side RBAC policy for target consent checks.
+
+        In production, this would be queried per-target. For now, a single
+        policy is used (hub acts as proxy for target's RBAC decisions).
+        """
+        self._target_rbac_policy = policy
 
     def _is_target_online(self, target_hash: str) -> bool:
         """Check if target peer is connected. Stub — always True."""
         return True
+
+    def _check_requester_rbac(self, requester_hash: str, permanent: bool) -> None:
+        """Check requester has relay.request (and relay.request_permanent if needed).
+
+        No-op when no RBAC policy is set (legacy mode).
+
+        Raises:
+            RelayUnauthorized: Requester lacks relay.request.
+            RelayPermanentDenied: Requester lacks relay.request_permanent.
+        """
+        if self._rbac_policy is None:
+            return
+        from styrened.models.rbac import Capability
+        if not self._rbac_policy.has_capability(requester_hash, Capability.RELAY_REQUEST):
+            raise RelayUnauthorized(f"Identity {requester_hash} lacks relay.request")
+        if permanent and not self._rbac_policy.has_capability(
+            requester_hash, Capability.RELAY_REQUEST_PERMANENT
+        ):
+            raise RelayPermanentDenied(
+                f"Identity {requester_hash} lacks relay.request_permanent"
+            )
+
+    def _check_target_rbac(self, requester_hash: str, permanent: bool) -> None:
+        """Check target-side RBAC: relay.accept, relay.reject, relay.accept_permanent.
+
+        No-op when no target RBAC policy is set (legacy mode).
+
+        Raises:
+            RelayTargetRejected: Target has relay.reject for requester.
+            RelayPermanentConsentDenied: Target lacks relay.accept_permanent.
+        """
+        if self._target_rbac_policy is None:
+            return
+        from styrened.models.rbac import Capability
+        # Check relay.reject first — explicit deny overrides accept
+        if self._target_rbac_policy.has_capability(
+            requester_hash, Capability.RELAY_REJECT
+        ):
+            raise RelayTargetRejected(
+                f"Target rejected relay from {requester_hash}"
+            )
+        if permanent and not self._target_rbac_policy.has_capability(
+            requester_hash, Capability.RELAY_ACCEPT_PERMANENT
+        ):
+            raise RelayPermanentConsentDenied(
+                f"Target lacks relay.accept_permanent for {requester_hash}"
+            )
 
     async def create_session(
         self,
@@ -53,12 +117,22 @@ class RelayService:
 
         Raises:
             RelayDisabled: Relay not enabled.
+            RelayUnauthorized: Requester lacks relay.request capability.
+            RelayPermanentDenied: Requester lacks relay.request_permanent.
+            RelayTargetRejected: Target has relay.reject for requester.
+            RelayPermanentConsentDenied: Target lacks relay.accept_permanent.
             RelayTargetOffline: Target not connected.
             RelayMaxPerIdentity: Requester at per-identity cap.
             RelayMaxSessions: Global cap reached (after LRU eviction attempt).
         """
         if not self._config.enabled:
             raise RelayDisabled("Relay is disabled")
+
+        # RBAC: requester authorization (hub-side)
+        self._check_requester_rbac(requester_hash, permanent)
+
+        # RBAC: target consent (target-side)
+        self._check_target_rbac(requester_hash, permanent)
 
         if not self._is_target_online(target_hash):
             raise RelayTargetOffline(f"Target {target_hash} is offline")

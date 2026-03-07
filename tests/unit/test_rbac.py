@@ -511,7 +511,9 @@ class TestCapabilityRegistry:
         entries.  All other capabilities must be reachable through some role.
         """
         # Capabilities that are purely orthogonal (not in any role tier)
-        orthogonal_caps = {Capability.VPN_HANDSHAKE}
+        # VPN_HANDSHAKE: explicit grant for VPN key exchange
+        # RELAY_REJECT: explicit grant to block specific identities from relaying
+        orthogonal_caps = {Capability.VPN_HANDSHAKE, Capability.RELAY_REJECT}
 
         all_granted = set()
         for caps in ROLE_CAPABILITIES.values():

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from styrened.models.rbac import Capability, RBACPolicy, Role, RosterEntry
 from styrened.models.relay import (
     RelayConfig,
     RelaySession,
@@ -16,7 +17,11 @@ from styrened.models.relay import (
     RelayMaxPerIdentity,
     RelayByteLimitExceeded,
     RelayIdleTimeout,
+    RelayPermanentDenied,
     RelayTargetOffline,
+    RelayTargetRejected,
+    RelayPermanentConsentDenied,
+    RelayUnauthorized,
     RelayEvicted,
 )
 from styrened.services.relay import RelayService
@@ -606,3 +611,145 @@ def test_serve_relay_error_propagation():
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=2)
         loop.close()
+
+
+# ---------------------------------------------------------------------------
+# RBAC enforcement in RelayService
+# ---------------------------------------------------------------------------
+
+
+def _make_policy(
+    default_role: Role = Role.PEER,
+    roster: dict | None = None,
+) -> RBACPolicy:
+    """Helper to build an RBACPolicy for relay tests."""
+    entries = {}
+    if roster:
+        for h, entry_data in roster.items():
+            entries[h] = RosterEntry(
+                identity_hash=h,
+                role=entry_data.get("role", default_role),
+                grants=frozenset(entry_data.get("grants", [])),
+            )
+    return RBACPolicy(default_role=default_role, roster=entries)
+
+
+@pytest.mark.asyncio
+async def test_rbac_relay_request_authorized():
+    """PEER role has relay.request — session creation succeeds."""
+    policy = _make_policy(default_role=Role.PEER)
+    svc = RelayService(RelayConfig(enabled=True))
+    svc.set_rbac_policy(policy)
+    session = await svc.create_session("aaa", "bbb")
+    assert session.requester_hash == "aaa"
+
+
+@pytest.mark.asyncio
+async def test_rbac_relay_request_unauthorized_none():
+    """NONE role lacks relay.request — RelayUnauthorized raised."""
+    policy = _make_policy(default_role=Role.NONE)
+    svc = RelayService(RelayConfig(enabled=True))
+    svc.set_rbac_policy(policy)
+    with pytest.raises(RelayUnauthorized):
+        await svc.create_session("aaa", "bbb")
+
+
+@pytest.mark.asyncio
+async def test_rbac_relay_request_unauthorized_blocked():
+    """BLOCKED role — RelayUnauthorized raised."""
+    policy = _make_policy(default_role=Role.PEER, roster={
+        "aaa": {"role": Role.BLOCKED},
+    })
+    svc = RelayService(RelayConfig(enabled=True))
+    svc.set_rbac_policy(policy)
+    with pytest.raises(RelayUnauthorized):
+        await svc.create_session("aaa", "bbb")
+
+
+@pytest.mark.asyncio
+async def test_rbac_permanent_requires_operator():
+    """PEER role requesting permanent relay — RelayPermanentDenied."""
+    policy = _make_policy(default_role=Role.PEER)
+    svc = RelayService(RelayConfig(enabled=True, allow_permanent=True))
+    svc.set_rbac_policy(policy)
+    with pytest.raises(RelayPermanentDenied):
+        await svc.create_session("aaa", "bbb", permanent=True)
+
+
+@pytest.mark.asyncio
+async def test_rbac_permanent_operator_allowed():
+    """OPERATOR role can request permanent relay."""
+    policy = _make_policy(default_role=Role.OPERATOR)
+    svc = RelayService(RelayConfig(enabled=True, allow_permanent=True))
+    svc.set_rbac_policy(policy)
+    # Target also needs OPERATOR for accept_permanent — set target policy
+    svc.set_target_rbac_policy(policy)
+    session = await svc.create_session("aaa", "bbb", permanent=True)
+    assert session.is_permanent is True
+
+
+@pytest.mark.asyncio
+async def test_rbac_target_reject():
+    """Target has relay.reject for requester — RelayTargetRejected."""
+    hub_policy = _make_policy(default_role=Role.PEER)
+    target_policy = _make_policy(default_role=Role.PEER, roster={
+        "aaa": {"role": Role.PEER, "grants": frozenset({Capability.RELAY_REJECT})},
+    })
+    svc = RelayService(RelayConfig(enabled=True))
+    svc.set_rbac_policy(hub_policy)
+    svc.set_target_rbac_policy(target_policy)
+    with pytest.raises(RelayTargetRejected):
+        await svc.create_session("aaa", "bbb")
+
+
+@pytest.mark.asyncio
+async def test_rbac_target_accept_default_peer():
+    """Target at PEER role has relay.accept by default — relay succeeds."""
+    hub_policy = _make_policy(default_role=Role.PEER)
+    target_policy = _make_policy(default_role=Role.PEER)
+    svc = RelayService(RelayConfig(enabled=True))
+    svc.set_rbac_policy(hub_policy)
+    svc.set_target_rbac_policy(target_policy)
+    session = await svc.create_session("aaa", "bbb")
+    assert session is not None
+
+
+@pytest.mark.asyncio
+async def test_rbac_permanent_target_consent_denied():
+    """Target at PEER lacks relay.accept_permanent — RelayPermanentConsentDenied."""
+    hub_policy = _make_policy(default_role=Role.OPERATOR)
+    target_policy = _make_policy(default_role=Role.PEER)  # PEER lacks accept_permanent
+    svc = RelayService(RelayConfig(enabled=True, allow_permanent=True))
+    svc.set_rbac_policy(hub_policy)
+    svc.set_target_rbac_policy(target_policy)
+    with pytest.raises(RelayPermanentConsentDenied):
+        await svc.create_session("aaa", "bbb", permanent=True)
+
+
+@pytest.mark.asyncio
+async def test_rbac_permanent_target_consent_granted():
+    """Target at OPERATOR has relay.accept_permanent — permanent relay succeeds."""
+    hub_policy = _make_policy(default_role=Role.OPERATOR)
+    target_policy = _make_policy(default_role=Role.OPERATOR)
+    svc = RelayService(RelayConfig(enabled=True, allow_permanent=True))
+    svc.set_rbac_policy(hub_policy)
+    svc.set_target_rbac_policy(target_policy)
+    session = await svc.create_session("aaa", "bbb", permanent=True)
+    assert session.is_permanent is True
+
+
+@pytest.mark.asyncio
+async def test_rbac_no_policy_allows_all():
+    """When no RBAC policy is set (None), all requests are allowed (legacy mode)."""
+    svc = RelayService(RelayConfig(enabled=True))
+    # No set_rbac_policy call
+    session = await svc.create_session("aaa", "bbb")
+    assert session.requester_hash == "aaa"
+
+
+@pytest.mark.asyncio
+async def test_rbac_no_policy_permanent_allowed():
+    """When no RBAC policy, permanent requests are allowed (legacy mode)."""
+    svc = RelayService(RelayConfig(enabled=True, allow_permanent=True))
+    session = await svc.create_session("aaa", "bbb", permanent=True)
+    assert session.is_permanent is True

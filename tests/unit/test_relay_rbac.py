@@ -66,13 +66,19 @@ class TestRelayCapabilitiesInALL:
 class TestRelayCapabilityTiers:
     """Relay capabilities appear at the correct role tier."""
 
-    # PEER tier includes relay.request, .list, .teardown, .accept, .reject
+    # PEER tier includes relay.request, .list, .teardown, .accept
+    # relay.reject is orthogonal (explicit grant only, like vpn.handshake)
     @pytest.mark.parametrize("cap", [
         "relay.request", "relay.list", "relay.teardown",
-        "relay.accept", "relay.reject",
+        "relay.accept",
     ])
     def test_peer_tier_has_relay_caps(self, cap):
         assert cap in ROLE_CAPABILITIES[Role.PEER]
+
+    def test_relay_reject_is_orthogonal(self):
+        """relay.reject is NOT in any role tier — must be explicitly granted."""
+        for role in (Role.PEER, Role.MONITOR, Role.OPERATOR, Role.ADMIN):
+            assert "relay.reject" not in ROLE_CAPABILITIES[role]
 
     # OPERATOR tier includes relay.request_permanent, .accept_permanent, .prioritize, .bridge
     @pytest.mark.parametrize("cap", [
@@ -159,7 +165,7 @@ class TestRelayHasCapability:
 class TestCumulativeHierarchy:
     """Higher tiers include lower-tier relay capabilities."""
 
-    PEER_RELAY = ["relay.request", "relay.list", "relay.teardown", "relay.accept", "relay.reject"]
+    PEER_RELAY = ["relay.request", "relay.list", "relay.teardown", "relay.accept"]
 
     @pytest.mark.parametrize("cap", PEER_RELAY)
     def test_operator_inherits_peer_relay(self, cap):

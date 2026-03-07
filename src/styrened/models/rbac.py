@@ -126,7 +126,6 @@ _PEER_CAPS: frozenset[str] = frozenset(
         Capability.RELAY_LIST,
         Capability.RELAY_TEARDOWN,
         Capability.RELAY_ACCEPT,
-        Capability.RELAY_REJECT,
     }
 )
 
