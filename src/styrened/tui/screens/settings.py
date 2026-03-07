@@ -85,30 +85,13 @@ class SettingsScreen(Screen[None]):
     async def _save_identity(
         self, display_name: str, icon: str, short_name: str
     ) -> None:
-        """Persist identity fields to core config and optionally notify daemon.
+        """Notify daemon of identity change so it re-announces.
 
-        Always writes to core-config.yaml directly (identity is a local
-        setting). Additionally notifies the daemon via IPC if connected,
-        so it can re-announce with the new identity.
+        The actual config write is handled by ``_save_settings`` which
+        serializes ``self.config.core`` (including identity fields) and
+        sends the full dict via ``save_core_config``.  This method only
+        triggers a daemon-side re-announce for immediate effect.
         """
-        # Persist identity via IPC — daemon writes core-config.yaml
-        try:
-            bridge = self._ipc_bridge
-            if bridge is not None:
-                config_dict = await bridge.get_core_config()
-                identity = config_dict.get("identity", {})
-                if display_name is not None:
-                    identity["display_name"] = display_name
-                if icon is not None:
-                    identity["icon"] = icon
-                identity["short_name"] = short_name if short_name else None
-                config_dict["identity"] = identity
-                await bridge.save_core_config(config_dict)
-        except Exception as e:
-            self._show_error(f"Failed to save identity: {e}")
-            return
-
-        # If IPC is active, also notify the daemon so it re-announces
         bridge = self._ipc_bridge
         if bridge is not None:
             try:
@@ -758,13 +741,19 @@ class SettingsScreen(Screen[None]):
             if rns_config.exists():
                 shutil.copy2(rns_config, rns_config.with_suffix(".bak"))
 
-            # Reset core config via IPC — daemon writes defaults
+            # Reset core config via IPC — serialize a fresh default CoreConfig
+            from styrened.models.config import CoreConfig
+            from styrened.services.config import _serialize_config
+
+            default_config = CoreConfig()
+            default_dict = _serialize_config(default_config)
+
             bridge = self._ipc_bridge
             if bridge is not None:
-                await bridge.save_core_config({})  # Empty dict = reset to defaults
+                await bridge.save_core_config(default_dict)
 
-            # Regenerate RNS config from TUI config
-            rns_content = generate_rns_config(self.config)
+            # Regenerate RNS config from defaults (not the TUI's stale config)
+            rns_content = generate_rns_config(default_config)
             rns_config.parent.mkdir(parents=True, exist_ok=True)
             rns_config.write_text(rns_content)
 
@@ -936,17 +925,14 @@ class SettingsScreen(Screen[None]):
     def on_clear_nodes_button(self) -> None:
         """Handle clear node history button press.
 
-        Note: Node store clearing is a daemon-side operation.  Until an
-        IPC command is added for this, the button is a no-op with a
-        notification to restart the daemon.
+        TODO: Add a CLEAR_NODES IPC command to the daemon.
+        Until then, inform the user that this requires a daemon restart.
         """
-        try:
-            self._show_success("Node history will be cleared on daemon restart")
-            self.app.log.info("Clear node history requested (daemon-side operation)")
-
-        except Exception as e:
-            self._show_error(f"Failed to clear node history: {e}")
-            self.app.log.error(f"Error clearing node history: {e}")
+        self.notify(
+            "Node history clearing requires daemon restart (IPC command not yet available)",
+            severity="warning",
+        )
+        self.app.log.info("Clear node history requested — not yet implemented via IPC")
 
     @on(Button.Pressed, "#btn-generate-page")
     def on_generate_page_button(self) -> None:
@@ -1207,13 +1193,15 @@ class SettingsScreen(Screen[None]):
             # Save to file
             save_config(self.config)
 
-            # Persist network settings via IPC and regenerate RNS config.
+            # Persist core config changes via IPC.
+            # The TUI form writes into self.config.core (in-memory CoreConfig).
+            # Serialize it and send the full dict to the daemon for disk write.
             try:
                 bridge = self._ipc_bridge
                 if bridge is not None:
-                    config_dict = await bridge.get_core_config()
-                    # Merge TUI config changes into daemon config
-                    # (the bridge.save_core_config handles disk write)
+                    from styrened.services.config import _serialize_config
+
+                    config_dict = _serialize_config(self.config.core)
                     await bridge.save_core_config(config_dict)
 
                 # Regenerate RNS config from TUI config

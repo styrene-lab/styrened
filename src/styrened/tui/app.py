@@ -196,12 +196,14 @@ class StyreneApp(App[None]):
         return self
 
     @property
-    def bridge(self) -> IPCBridge:
+    def bridge(self) -> IPCBridge | None:
         """IPC bridge for daemon communication.
 
         Part of the TUIServices protocol.  Screens should use
         ``self.app.services.bridge`` instead of reaching into
         ``self.app._lifecycle.ipc_bridge``.
+
+        Returns None before IPC connection is established.
         """
         return self._lifecycle.ipc_bridge
 

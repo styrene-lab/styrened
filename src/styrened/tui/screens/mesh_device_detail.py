@@ -200,19 +200,15 @@ class MeshDeviceDetailScreen(Screen[None]):
         return self.device_identity
 
     def _load_device(self) -> None:
-        """Load device from mesh discovery and NodeStore."""
-        # Historical nodes — discovery provides live data
-        stored_nodes: list[MeshDevice] = []
+        """Load device from mesh discovery.
 
-        # Get live discovered devices (populated in legacy/standalone mode)
+        Only has live-discovered devices in sync context.  Stored nodes
+        are fetched asynchronously in ``on_mount`` via IPC if needed.
+        """
         live_nodes = discover_devices()
 
-        # Merge: live takes precedence
-        all_devices = {d.destination_hash: d for d in stored_nodes}
-        all_devices.update({d.destination_hash: d for d in live_nodes})
-
-        # Find by identity
-        for device in all_devices.values():
+        # Find by identity in live data
+        for device in live_nodes:
             if device.identity == self.device_identity:
                 self.device = device
                 return
@@ -352,8 +348,29 @@ class MeshDeviceDetailScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Auto-fetch status when the screen mounts if no initial data."""
-        if self.device and self.initial_status is None:
+        if self.device is None:
+            # Device not found in live discovery — try stored nodes via IPC
+            self.run_worker(self._async_load_device(), name="load-device")
+        elif self.initial_status is None:
             self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
+
+    async def _async_load_device(self) -> None:
+        """Try to find the device in stored nodes via IPC bridge."""
+        try:
+            bridge = getattr(getattr(self.app, "services", None), "bridge", None)
+            if bridge is None:
+                return
+            stored_raw = await bridge.get_nodes(styrene_only=False)
+            from styrened.tui.utils import device_info_to_mesh
+            for info in stored_raw:
+                device = device_info_to_mesh(info)
+                if device.identity == self.device_identity:
+                    self.device = device
+                    # Now trigger status fetch
+                    self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
+                    return
+        except Exception:
+            pass
 
     async def _auto_fetch_status(self) -> None:
         """Silently fetch status on mount — tries datalink first, then RPC.

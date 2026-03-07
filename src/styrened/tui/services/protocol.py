@@ -33,8 +33,11 @@ class TUIServices(Protocol):
     """
 
     @property
-    def bridge(self) -> IPCBridge:
+    def bridge(self) -> IPCBridge | None:
         """IPC bridge for async daemon calls.
+
+        Returns None before IPC connection is established.  Callers
+        must guard against None before making bridge calls.
 
         All daemon interaction (chat, devices, config, relay, etc.)
         flows through the bridge.  Never access the bridge via

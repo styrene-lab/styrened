@@ -549,8 +549,12 @@ class NodeInfoPanel(Static):
     def _get_error_state(self) -> RNSErrorState | None:
         """Get the RNS error state.
 
-        In IPC mode, error state comes from daemon status (pushed by
-        dashboard). Returns None — callers should check self.rns_online.
+        In IPC mode, error state is set externally by the dashboard via
+        the ``error_state`` reactive (from daemon status events).
+        Returns None — the reactive provides the actual value.
+
+        TODO: Add a GET_RNS_ERROR IPC command so the panel can fetch
+        error state directly on refresh, not only when pushed.
         """
         return None
 
