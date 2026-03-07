@@ -459,7 +459,7 @@ class TestSetupDatalinkDestination:
         daemon._setup_datalink_destination()
 
         # Should have registered 5 handlers
-        assert mock_dest.register_request_handler.call_count == 5
+        assert mock_dest.register_request_handler.call_count == 6
 
         # Verify each call used the allow mode from _datalink_allow_mode
         calls = mock_dest.register_request_handler.call_args_list
