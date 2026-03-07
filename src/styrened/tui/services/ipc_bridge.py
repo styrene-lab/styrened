@@ -568,6 +568,36 @@ class IPCBridge:
             peer_hashes=peer_hashes,
         )
 
+    # ── TUI-specific methods (nodes, core config, hub, unread) ───
+
+    async def get_nodes(self, styrene_only: bool = False) -> list[DeviceInfo]:
+        """Get nodes from the persisted node store.
+
+        Unlike get_devices which merges in-memory + persisted data, this
+        returns only persisted nodes from the node store.
+        """
+        return await self._call("get_nodes", styrene_only=styrene_only)
+
+    async def get_core_config(self) -> dict[str, Any]:
+        """Get full serialized CoreConfig (round-trippable).
+
+        Unlike get_config which returns a sanitized subset, this returns
+        the complete config dict suitable for round-tripping.
+        """
+        return await self._call("get_core_config")
+
+    async def save_core_config(self, config_dict: dict[str, Any]) -> bool:
+        """Save a modified CoreConfig dict to disk."""
+        return await self._call("save_core_config", config_dict=config_dict)
+
+    async def get_hub_status(self) -> dict[str, Any]:
+        """Get hub connection status dict."""
+        return await self._call("get_hub_status")
+
+    async def get_unread_counts(self) -> dict[str, int]:
+        """Get per-peer unread message counts."""
+        return await self._call("get_unread_counts")
+
     # ── Direct data link methods ──────────────────────────────────
 
     async def block_peer(self, peer_hash: str) -> dict:

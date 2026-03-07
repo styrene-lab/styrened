@@ -265,6 +265,12 @@ class ControlServer:
             IPCMessageType.CMD_PAGE_LIST_SITES: self._handlers.handle_cmd_page_list_sites,
             IPCMessageType.CMD_PAGE_CRAWL_SITE: self._handlers.handle_cmd_page_crawl_site,
             IPCMessageType.CMD_PAGE_GET_CACHED: self._handlers.handle_cmd_page_get_cached,
+            # TUI-specific (nodes, core config, hub, unread)
+            IPCMessageType.GET_NODES: self._handlers.handle_get_nodes,
+            IPCMessageType.GET_CORE_CONFIG: self._handlers.handle_get_core_config,
+            IPCMessageType.SAVE_CORE_CONFIG: self._handlers.handle_save_core_config,
+            IPCMessageType.GET_HUB_STATUS: self._handlers.handle_get_hub_status,
+            IPCMessageType.GET_UNREAD_COUNTS: self._handlers.handle_get_unread_counts,
             # Blocklist
             IPCMessageType.CMD_BLOCK_PEER: self._handlers.handle_cmd_block_peer,
             IPCMessageType.CMD_UNBLOCK_PEER: self._handlers.handle_cmd_unblock_peer,
