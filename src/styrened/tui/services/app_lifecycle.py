@@ -1,50 +1,32 @@
 """Application lifecycle management (TUI wrapper).
 
-This module provides TUI-specific lifecycle management that wraps the core
-lifecycle with additional features like hub connection and Styrene node
-announcements.
-
-Supports three modes:
-    ipc:    Daemon subprocess managed via DaemonManager + IPCBridge.
-    legacy: In-process CoreLifecycle (existing behavior, no daemon).
-    auto:   Try IPC first, fall back to legacy if daemon unavailable.
+This module provides TUI-specific lifecycle management that wraps the
+daemon via IPC.  The TUI is a pure IPC client — all RNS/LXMF initialization
+is the daemon's responsibility.
 
 Usage:
     from styrened.tui.services.app_lifecycle import StyreneLifecycle
     from styrened.tui.services.config import load_config
 
-    # Initialize Styrene services
     config = load_config()
     lifecycle = StyreneLifecycle(config)
 
-    # Start services (sync for legacy, async for IPC)
-    lifecycle.initialize()
-
-    # Or async initialization (required for IPC mode)
+    # Async initialization (required — IPC mode)
     await lifecycle.initialize_async()
 
-    # Use services...
-    from styrened.services.rns_service import get_rns_service
-    rns = get_rns_service()
-    print(f"RNS initialized: {rns.is_initialized}")
+    # Use services via IPC bridge...
+    bridge = lifecycle.ipc_bridge
 
     # Cleanup
-    lifecycle.shutdown()
-    # Or: await lifecycle.shutdown_async()
+    await lifecycle.shutdown_async()
 """
 
 import logging
 from enum import Enum
-from importlib.metadata import version as get_version
 from typing import Any
 
-from styrened.models.rns_error import RNSErrorState
-from styrened.services.hub_connection import STYRENE_HUB_ADDRESS, get_hub_connection
-from styrened.services.lifecycle import CoreLifecycle
-from styrened.services.rns_service import get_rns_service
-from styrened.tui.models.config import DeploymentMode, StyreneConfig
+from styrened.tui.models.config import StyreneConfig
 from styrened.tui.services.config import get_default_config
-from styrened.tui.services.reticulum import get_operator_identity_object
 
 logger = logging.getLogger(__name__)
 
@@ -53,22 +35,14 @@ class LifecycleMode(Enum):
     """How the TUI initializes services."""
 
     IPC = "ipc"
-    LEGACY = "legacy"
-    AUTO = "auto"
 
 
 class StyreneLifecycle:
     """Manages Styrene TUI application lifecycle.
 
-    This class wraps CoreLifecycle and adds TUI-specific features:
-    - Hub connection
-    - Styrene node announcements with version info
-    - TUI-specific configuration handling
-    - IPC mode for daemon-backed operation
-
-    Core functionality (RNS/LXMF initialization, shutdown) is delegated
-    to CoreLifecycle from styrene-core in legacy mode, or to the daemon
-    via IPC in IPC mode.
+    The TUI is an IPC-only daemon client.  All mesh services (RNS, LXMF,
+    discovery, hub) run inside the daemon process.  This class manages
+    the daemon connection via DaemonManager and IPCBridge.
     """
 
     def __init__(
@@ -80,22 +54,10 @@ class StyreneLifecycle:
 
         Args:
             config: Application configuration. If None, uses default config.
-            mode: Lifecycle mode override. If None, determined from config.
+            mode: Lifecycle mode override (only IPC is supported).
         """
         self.config = config or get_default_config()
-
-        # Determine mode from explicit parameter, config, or default
-        # Default is IPC — the TUI is a pure daemon client.
-        # Legacy mode remains accessible via explicit use_ipc: false.
-        if mode is not None:
-            self._mode = mode
-        elif self.config.tui.use_ipc is False:
-            self._mode = LifecycleMode.LEGACY
-        else:
-            # Both use_ipc=True and use_ipc=None (unset) default to IPC
-            self._mode = LifecycleMode.IPC
-
-        self._core = CoreLifecycle(self.config.core)
+        self._mode = LifecycleMode.IPC
         self._initialized = False
         self._active_mode: LifecycleMode | None = None
 
@@ -112,20 +74,9 @@ class StyreneLifecycle:
     def active_mode(self) -> LifecycleMode | None:
         """Mode that was actually used for initialization.
 
-        None if not yet initialized. In AUTO mode, this reveals
-        whether IPC or legacy was selected.
+        None if not yet initialized.
         """
         return self._active_mode
-
-    @property
-    def rns_error_state(self) -> RNSErrorState:
-        """Get the RNS initialization error state.
-
-        Returns:
-            RNSErrorState with category and recovery guidance.
-            If initialized successfully, returns NONE category.
-        """
-        return self._core.rns_error_state
 
     @property
     def is_initialized(self) -> bool:
@@ -138,41 +89,37 @@ class StyreneLifecycle:
 
     @property
     def ipc_bridge(self):
-        """Access the IPC bridge (only available in IPC mode)."""
+        """Access the IPC bridge (available after initialization)."""
         return self._ipc_bridge
 
     @property
     def daemon_manager(self):
-        """Access the daemon manager (only available in IPC mode)."""
+        """Access the daemon manager (available after initialization)."""
         return self._daemon_manager
 
     def initialize(self) -> bool:
-        """Initialize all Styrene services (synchronous, legacy mode only).
+        """Initialize services (synchronous).
 
-        For IPC mode, use initialize_async() instead.
+        IPC mode requires async initialization — call initialize_async()
+        from on_mount() instead.
 
         Returns:
-            True if initialization succeeded, False otherwise.
+            False — IPC mode requires async initialization.
         """
         if self._initialized:
             logger.warning("Already initialized")
             return True
 
-        if self._mode == LifecycleMode.IPC:
-            logger.warning(
-                "IPC mode requires async initialization — "
-                "call initialize_async() from on_mount()"
-            )
-            return False
-
-        # Legacy or AUTO mode — try legacy path
-        return self._initialize_legacy()
+        logger.warning(
+            "IPC mode requires async initialization — "
+            "call initialize_async() from on_mount()"
+        )
+        return False
 
     async def initialize_async(self) -> bool:
-        """Initialize services asynchronously.
+        """Initialize services asynchronously via IPC.
 
-        Supports all modes: IPC, legacy, and auto.
-        In auto mode, tries IPC first and falls back to legacy.
+        Spawns the daemon and connects the IPC bridge.
 
         Returns:
             True if initialization succeeded, False otherwise.
@@ -181,17 +128,7 @@ class StyreneLifecycle:
             logger.warning("Already initialized")
             return True
 
-        if self._mode == LifecycleMode.IPC:
-            return await self._initialize_ipc()
-
-        if self._mode == LifecycleMode.AUTO:
-            # Try IPC first
-            if await self._initialize_ipc():
-                return True
-            logger.info("IPC initialization failed, falling back to legacy mode")
-
-        # Legacy fallback
-        return self._initialize_legacy()
+        return await self._initialize_ipc()
 
     async def _initialize_ipc(self) -> bool:
         """Initialize via IPC — spawn daemon, connect bridge."""
@@ -231,134 +168,10 @@ class StyreneLifecycle:
                 self._daemon_manager = None
             return False
 
-    def _initialize_legacy(self) -> bool:
-        """Initialize via legacy in-process CoreLifecycle."""
-        try:
-            # Initialize core services (RNS, LXMF)
-            if not self._core.initialize():
-                logger.warning("Core initialization failed - running in offline mode")
-                # Don't fail entirely - allow offline mode
-                self._initialized = True
-                self._active_mode = LifecycleMode.LEGACY
-                return True
-
-            # Announce as Styrene node (TUI-specific)
-            self._announce_styrene_node()
-
-            # Connect to hub if configured (but not if we ARE the hub)
-            if self.config.reticulum.hub_enabled:
-                if self.config.reticulum.mode == DeploymentMode.HUB:
-                    logger.info("Running in hub mode - skipping hub connection (we are the hub)")
-                else:
-                    self._connect_to_hub()
-
-            self._initialized = True
-            self._active_mode = LifecycleMode.LEGACY
-            logger.info("Styrene TUI services initialized (legacy mode)")
-            return True
-
-        except Exception as e:
-            logger.error(f"Initialization failed: {e}")
-            return False
-
-    def _announce_styrene_node(self) -> None:
-        """Announce this node as a Styrene node (TUI-specific).
-
-        Sends announce with Styrene node format including version and capabilities.
-        """
-        try:
-
-
-            # Get operator destination
-            identity = get_operator_identity_object()
-            if not identity:
-                logger.warning("No operator identity for announce")
-                return
-
-            rns_service = get_rns_service()
-            destination = rns_service.get_or_create_destination(
-                identity, app_name="styrene_node", aspect="operator"
-            )
-
-            if not destination:
-                logger.warning("Failed to get destination for announce")
-                return
-
-            # Build announce data using identity config (same format as daemon)
-            display_name = self.config.identity.display_name
-            short_name = self.config.identity.short_name or ""
-
-            try:
-                version = get_version("styrened")
-            except Exception:
-                version = "unknown"
-
-            # Capabilities
-            capabilities = []
-            if self.config.rpc.enabled:
-                capabilities.append("rpc")
-            if self.config.discovery.enabled:
-                capabilities.append("discovery")
-            capabilities_str = ",".join(capabilities) if capabilities else "none"
-
-            # LXMF destination (if available)
-            lxmf_dest = "none"
-            try:
-                from styrened.services.lxmf_service import get_lxmf_service
-
-                lxmf_service = get_lxmf_service()
-                if lxmf_service.is_initialized and lxmf_service.delivery_destination:
-                    lxmf_dest = lxmf_service.delivery_destination.hash.hex()
-            except Exception:
-                pass
-
-            from styrened.services.system_info import get_system_fingerprint
-
-            fingerprint = get_system_fingerprint()
-
-            # Format: styrene:<display_name>:<version>:<caps>:<lxmf_dest>:<short_name>:<fingerprint>
-            announce_data = f"styrene:{display_name}:{version}:{capabilities_str}:{lxmf_dest}:{short_name}:{fingerprint}"
-
-            # Send announce
-            destination.announce(announce_data.encode("utf-8"))
-            logger.info(f"Announced as Styrene node: {display_name} (v{version})")
-
-        except Exception as e:
-            logger.warning(f"Failed to announce Styrene node: {e}")
-
-    def _connect_to_hub(self) -> bool:
-        """Connect to Styrene hub for fleet coordination (TUI-specific).
-
-        Returns:
-            True if connected successfully, False otherwise.
-        """
-        try:
-            hub_connection = get_hub_connection()
-
-            # Determine hub address
-            hub_address = self.config.reticulum.hub_address or STYRENE_HUB_ADDRESS
-
-            if not hub_address:
-                logger.warning("Hub enabled but no address configured")
-                return False
-
-            logger.info(f"Connecting to hub at {hub_address[:16]}...")
-
-            if hub_connection.connect(hub_address=hub_address):
-                logger.info(f"Connected to hub at {hub_address[:16]}...")
-                return True
-            else:
-                logger.warning("Hub connection failed")
-                return False
-
-        except Exception as e:
-            logger.error(f"Hub connection error: {e}")
-            return False
-
     def shutdown(self) -> None:
         """Shutdown all services and clean up resources (synchronous).
 
-        For IPC mode, prefer shutdown_async().
+        Prefer shutdown_async() for proper IPC cleanup.
         """
         if not self._initialized:
             logger.debug("Not initialized, nothing to shutdown")
@@ -367,14 +180,6 @@ class StyreneLifecycle:
         try:
             logger.info("Shutting down Styrene TUI services...")
 
-            if self._active_mode == LifecycleMode.LEGACY:
-                # Disconnect from hub (TUI-specific)
-                get_hub_connection().disconnect()
-
-                # Shutdown core services (RNS, LXMF, discovery)
-                self._core.shutdown()
-
-            # IPC cleanup requires async — log warning if called sync
             if self._active_mode == LifecycleMode.IPC:
                 logger.warning(
                     "IPC mode requires async shutdown — "
@@ -396,17 +201,12 @@ class StyreneLifecycle:
         try:
             logger.info("Shutting down Styrene TUI services...")
 
-            if self._active_mode == LifecycleMode.IPC:
-                if self._ipc_bridge is not None:
-                    await self._ipc_bridge.disconnect()
-                    self._ipc_bridge = None
-                if self._daemon_manager is not None:
-                    await self._daemon_manager.shutdown()
-                    self._daemon_manager = None
-            else:
-                # Legacy path
-                get_hub_connection().disconnect()
-                self._core.shutdown()
+            if self._ipc_bridge is not None:
+                await self._ipc_bridge.disconnect()
+                self._ipc_bridge = None
+            if self._daemon_manager is not None:
+                await self._daemon_manager.shutdown()
+                self._daemon_manager = None
 
             self._initialized = False
             self._active_mode = None
@@ -422,6 +222,7 @@ def get_status() -> dict[str, Any]:
     Returns:
         Dictionary with status information for all services.
     """
+    from styrened.services.hub_connection import get_hub_connection
     from styrened.tui.services.reticulum import get_reticulum_status
 
     hub_connection = get_hub_connection()
@@ -444,11 +245,15 @@ get_service_status = get_status
 def initialize_styrene(config: StyreneConfig | None = None) -> StyreneLifecycle:
     """Initialize Styrene services (backward compatibility wrapper).
 
+    Note: IPC mode requires async initialization. This function creates
+    the lifecycle but cannot fully initialize IPC. Use initialize_async()
+    for proper initialization.
+
     Args:
         config: Application configuration. If None, uses default config.
 
     Returns:
-        Initialized StyreneLifecycle instance.
+        StyreneLifecycle instance (not fully initialized in IPC mode).
     """
     lifecycle = StyreneLifecycle(config)
     lifecycle.initialize()
