@@ -9,7 +9,8 @@
 #### Scenario: PEER tier relay capabilities
 Given the RBAC capability registry
 When PEER tier capabilities are listed
-Then they include relay.request, relay.list, relay.teardown, relay.accept, relay.reject
+Then they include relay.request, relay.list, relay.teardown, relay.accept
+And relay.reject is orthogonal (explicit grant only, not in any tier)
 
 #### Scenario: OPERATOR tier relay capabilities
 Given the RBAC capability registry

@@ -1830,9 +1830,14 @@ class StyreneDaemon:
         if not self._datalink_rl.check(identity_hex):
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
 
+        # RBAC: check relay.request capability (defense-in-depth — service also checks)
+        from styrened.models.rbac import Capability, Role
         role = self._datalink_rbac_role(identity_hex)
-        from styrened.models.rbac import Role
         if role <= int(Role.BLOCKED):
+            return json.dumps({"error": "unauthorized"}).encode("utf-8")
+        if self.config.rbac and not self.config.rbac.has_capability(
+            identity_hex, Capability.RELAY_REQUEST
+        ):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Parse request
