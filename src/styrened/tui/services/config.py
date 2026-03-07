@@ -162,9 +162,7 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
             config.tui.show_hardware_panel = bool(tui_data["show_hardware_panel"])
         if "confirm_destructive" in tui_data:
             config.tui.confirm_destructive = bool(tui_data["confirm_destructive"])
-        if "use_ipc" in tui_data:
-            val = tui_data["use_ipc"]
-            config.tui.use_ipc = None if val is None else bool(val)
+        # use_ipc is silently ignored for backward compatibility with old configs
 
     # Fleet settings
     if "fleet" in data and isinstance(data["fleet"], dict):
@@ -349,7 +347,6 @@ def _config_to_dict(config: StyreneConfig) -> dict[str, Any]:
             "log_level": config.tui.log_level.value,
             "show_hardware_panel": config.tui.show_hardware_panel,
             "confirm_destructive": config.tui.confirm_destructive,
-            "use_ipc": config.tui.use_ipc,
         },
         "fleet": {
             "edge_fleet_path": (

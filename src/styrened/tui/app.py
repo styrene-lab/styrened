@@ -25,7 +25,7 @@ from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
-from styrened.tui.services.app_lifecycle import LifecycleMode, StyreneLifecycle
+from styrened.tui.services.app_lifecycle import StyreneLifecycle
 from styrened.tui.services.config import (
     ensure_directories,
     get_default_config,
@@ -310,112 +310,26 @@ class StyreneApp(App[None]):
             self.log.warning(f"Config validation failed: {e}")
             self.config = get_default_config()
 
-    def _initialize_rpc_client(self) -> None:
-        """Initialize RPC client for fleet communication.
-
-        If Child 1's RPCClient is available, use it. Otherwise use mock for development.
-        """
-        try:
-            # Try to import real RPC client from Child 1
-            # Get LXMF service (from Child 0)
-            from styrened.rpc import RPCClient
-            from styrened.services.lxmf_service import get_lxmf_service
-
-            lxmf_service = get_lxmf_service()
-            if lxmf_service and lxmf_service.is_initialized:
-                self.rpc_client = RPCClient(lxmf_service)
-                self.log.info("RPC client initialized")
-            else:
-                # LXMF not available - use mock
-                from styrened.rpc.offline import OfflineRPCClient
-
-                self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
-                self.log.warning("Using offline RPC client (LXMF not available)")
-        except ImportError:
-            # Child 0/1 not integrated yet - use offline stub
-            from styrened.rpc.offline import OfflineRPCClient
-
-            self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
-            self.log.info("Using offline RPC client (development mode)")
-
-    def _initialize_chat(self) -> None:
-        """Initialize message database and chat protocol.
-
-        Sets up SQLite database for message persistence and creates
-        ChatProtocol instance for LXMF messaging.
-        """
-        # Initialize database
-        from styrened.models.messages import init_db
-
-        try:
-            self.db_engine = init_db()
-            self.log.info("Message database initialized")
-        except Exception as e:
-            self.log.warning(f"Failed to initialize message database: {e}")
-            self.db_engine = None
-
-        # Get local identity hash from LXMF service
-        self.local_identity_hash = ""
-        try:
-            from styrened.services.lxmf_service import get_lxmf_service
-
-            lxmf_service = get_lxmf_service()
-            if lxmf_service and lxmf_service.is_initialized and lxmf_service._identity:
-                self.local_identity_hash = lxmf_service._identity.hexhash
-                self.log.info(f"Local identity: {self.local_identity_hash[:16]}...")
-        except Exception as e:
-            self.log.warning(f"Could not get local identity: {e}")
-
-        # Initialize ChatProtocol if we have database and LXMF
-        self.chat_protocol = None
-        if self.db_engine is not None:
-            try:
-                from styrened.protocols.chat import ChatProtocol
-                from styrened.services.lxmf_service import get_lxmf_service
-
-                lxmf_service = get_lxmf_service()
-                if (
-                    lxmf_service
-                    and lxmf_service.is_initialized
-                    and lxmf_service._identity
-                    and lxmf_service.router
-                ):
-                    self.chat_protocol = ChatProtocol(
-                        router=lxmf_service.router,
-                        identity=lxmf_service._identity,
-                        db_engine=self.db_engine,
-                    )
-                    self.log.info("ChatProtocol initialized")
-            except Exception as e:
-                self.log.warning(f"Could not initialize ChatProtocol: {e}")
-
     async def _initialize_services(self) -> None:
-        """Initialize all services asynchronously.
+        """Initialize all services asynchronously via IPC.
 
-        Supports both IPC and legacy modes via the lifecycle manager.
-        In IPC mode, the daemon is spawned and connected before proceeding.
-        In legacy mode (or fallback), services are initialized in-process.
+        The daemon is spawned and connected before proceeding.
+        RPC and chat go through the IPC bridge.
         """
-        # Try async initialization (supports IPC + legacy + auto)
         success = await self._lifecycle.initialize_async()
 
         if not success:
             self.log.warning("Service initialization failed - running in offline mode")
 
-        # In legacy mode, initialize RPC client and chat in-process
-        if self._lifecycle.active_mode == LifecycleMode.LEGACY:
-            self._initialize_rpc_client()
-            self._initialize_chat()
-        elif self._lifecycle.active_mode == LifecycleMode.IPC:
-            # In IPC mode, RPC and chat go through the bridge
-            # Initialize offline RPC client for backward compat with screens
-            # that still use self.rpc_client directly
-            from styrened.rpc.offline import OfflineRPCClient
+        # In IPC mode, RPC and chat go through the bridge
+        # Initialize offline RPC client for backward compat with screens
+        # that still use self.rpc_client directly
+        from styrened.rpc.offline import OfflineRPCClient
 
-            self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
-            self.log.info(
-                "IPC mode active — screens should migrate to IPCBridge"
-            )
+        self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
+        self.log.info(
+            "IPC mode active — screens should migrate to IPCBridge"
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -596,10 +510,8 @@ class StyreneApp(App[None]):
             result: True if config was created, False if skipped, None if dismissed.
         """
         if result:
-            # User created config - reinitialize services
-            self.log.info("Reticulum config created - reinitializing services")
-            self._lifecycle.shutdown()
-            self._lifecycle._initialize_legacy()
+            # User created config - daemon will pick up changes on restart
+            self.log.info("Reticulum config created - restart daemon to apply")
         else:
             # User skipped - log and continue in offline mode
             self.log.info("Reticulum setup skipped - running in offline mode")

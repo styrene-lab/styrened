@@ -98,15 +98,12 @@ class TUIConfig:
         log_level: Logging verbosity.
         show_hardware_panel: Whether to show hardware info panel on dashboard.
         confirm_destructive: Require confirmation for destructive operations.
-        use_ipc: Whether to use IPC mode (daemon subprocess) instead of in-process.
-            None means auto-detect (try IPC first, fall back to legacy).
     """
 
     theme: ThemeMode = ThemeMode.STYRENE
     log_level: LogLevel = LogLevel.INFO
     show_hardware_panel: bool = True
     confirm_destructive: bool = True
-    use_ipc: bool | None = None
 
 
 @dataclass
