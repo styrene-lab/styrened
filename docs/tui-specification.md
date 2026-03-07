@@ -6,9 +6,9 @@ tags: [tui, ux, specification, textual]
 open_questions:
   - What is the target user persona — solo operator managing their own node, or fleet admin managing many nodes, or both?
   - Should the TUI have a formal screen hierarchy / information architecture, or remain flat with global keybinding navigation?
-  - Where should RBAC management live — its own screen, or embedded in settings, or a context menu on device nodes?
   - What is the relationship between the full TUI (StyreneApp) and the compact dashboard (LocalDashboardScreen) — are these separate products or modes of one?
   - How should relay sessions be surfaced — passive status indicator, dedicated screen, or per-device detail?
+  - Where should RBAC management live — its own screen, or embedded in settings, or a context menu on device nodes?
 ---
 
 # Styrene TUI Specification
@@ -180,10 +180,15 @@ The adversarial review found 6 critical bugs and 6 warnings in the TUI services 
 **Status:** decided
 **Rationale:** Created TUIServices Protocol at tui/services/protocol.py. StyreneApp implements it. All 13 screens + 7 widgets migrated from direct daemon imports to app.services.bridge. Results: 42→4 direct imports (data models only), 19→2 type:ignore[attr-defined], 0 _lifecycle.ipc_bridge references in screens/widgets.
 
+### Decision: IPCBridge relocated to styrened.ipc.bridge
+
+**Status:** decided
+**Rationale:** IPCBridge moved from styrened.tui.services.ipc_bridge to styrened.ipc.bridge. Zero TUI/Textual dependencies confirmed — clean move. Re-export shim at old location for backward compatibility. All 4 direct importers updated. Any consumer (TUI, web API, web bridge) can now import from styrened.ipc without pulling in Textual.
+
 ## Open Questions
 
 - What is the target user persona — solo operator managing their own node, or fleet admin managing many nodes, or both?
 - Should the TUI have a formal screen hierarchy / information architecture, or remain flat with global keybinding navigation?
-- Where should RBAC management live — its own screen, or embedded in settings, or a context menu on device nodes?
 - What is the relationship between the full TUI (StyreneApp) and the compact dashboard (LocalDashboardScreen) — are these separate products or modes of one?
 - How should relay sessions be surfaced — passive status indicator, dedicated screen, or per-device detail?
+- Where should RBAC management live — its own screen, or embedded in settings, or a context menu on device nodes?

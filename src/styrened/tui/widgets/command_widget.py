@@ -9,7 +9,7 @@ Features:
 - Presets: Common operation combos filtered against available_commands
 - Reboot: Double-tap confirmation with 3s auto-cancel
 - Session log: Scrollable output with color-coded exit codes
-- Dual-mode routing: IPCBridge first, falls back to app.rpc_client
+- Routes all commands through IPCBridge (daemon IPC)
 """
 
 import logging
@@ -98,13 +98,13 @@ class CommandWidget(Widget):
         except Exception:
             return None
 
-    @property
-    def _rpc_client(self) -> Any:
-        """Get RPC client from app (legacy mode)."""
-        try:
-            return self.app.rpc_client  # type: ignore[attr-defined]
-        except Exception:
-            return None
+    def _no_bridge_error(self, label: str) -> None:
+        """Show error when IPC bridge is unavailable."""
+        self._append_output(OutputEntry(
+            command=label,
+            stderr="Not connected to daemon (IPC bridge unavailable)",
+            entry_type="system",
+        ))
 
     def compose(self) -> ComposeResult:
         """Compose widget layout."""
@@ -353,24 +353,8 @@ class CommandWidget(Widget):
                     entry_type="exec",
                 )
             else:
-                rpc = self._rpc_client
-                if rpc is None:
-                    self._append_output(OutputEntry(
-                        command=command_string,
-                        stderr="No RPC client available",
-                        entry_type="system",
-                    ))
-                    return
-                result = await rpc.call_exec(
-                    self.device_identity, command, args, timeout=60.0,
-                )
-                entry = OutputEntry(
-                    command=command_string,
-                    exit_code=result.exit_code,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    entry_type="exec",
-                )
+                self._no_bridge_error(command_string)
+                return
 
             self._append_output(entry)
             self._set_status("")
@@ -407,24 +391,8 @@ class CommandWidget(Widget):
                     entry_type="ping",
                 ))
             else:
-                rpc = self._rpc_client
-                if rpc is None:
-                    self._append_output(OutputEntry(
-                        command="ping",
-                        stderr="No RPC client available",
-                        entry_type="ping",
-                    ))
-                    return
-                status = await rpc.call_status(
-                    self.device_identity, timeout=10.0,
-                )
-                rtt_ms = (time.monotonic() - start) * 1000
-                self._available_commands = status.available_commands or []
-                self._append_output(OutputEntry(
-                    command="ping",
-                    rtt_ms=rtt_ms,
-                    entry_type="ping",
-                ))
+                self._no_bridge_error("ping")
+                return
 
             self._refresh_available_display()
             self._refresh_presets()
@@ -465,32 +433,8 @@ class CommandWidget(Widget):
                         entry_type="reboot",
                     ))
             else:
-                rpc = self._rpc_client
-                if rpc is None:
-                    self._append_output(OutputEntry(
-                        command="reboot",
-                        exit_code=1,
-                        stderr="No RPC client available",
-                        entry_type="reboot",
-                    ))
-                    return
-                result = await rpc.call_reboot(
-                    self.device_identity, delay=0, timeout=10.0,
-                )
-                if result.success:
-                    self._append_output(OutputEntry(
-                        command="reboot",
-                        exit_code=0,
-                        stdout=result.message,
-                        entry_type="reboot",
-                    ))
-                else:
-                    self._append_output(OutputEntry(
-                        command="reboot",
-                        exit_code=1,
-                        stderr=result.message,
-                        entry_type="reboot",
-                    ))
+                self._no_bridge_error("reboot")
+                return
 
             self._set_status("")
 
@@ -529,32 +473,8 @@ class CommandWidget(Widget):
                         entry_type="system",
                     ))
             else:
-                rpc = self._rpc_client
-                if rpc is None:
-                    self._append_output(OutputEntry(
-                        command="update",
-                        exit_code=1,
-                        stderr="No RPC client available",
-                        entry_type="system",
-                    ))
-                    return
-                result = await rpc.call_self_update(
-                    self.device_identity, timeout=120.0,
-                )
-                if result.success:
-                    self._append_output(OutputEntry(
-                        command="update",
-                        exit_code=0,
-                        stdout=result.message,
-                        entry_type="system",
-                    ))
-                else:
-                    self._append_output(OutputEntry(
-                        command="update",
-                        exit_code=1,
-                        stderr=result.message,
-                        entry_type="system",
-                    ))
+                self._no_bridge_error("update")
+                return
 
             self._set_status("")
 

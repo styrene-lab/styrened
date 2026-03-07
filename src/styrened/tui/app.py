@@ -26,7 +26,7 @@ from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
 from styrened.tui.services.app_lifecycle import StyreneLifecycle
-from styrened.tui.services.ipc_bridge import IPCBridge
+from styrened.ipc.bridge import IPCBridge
 from styrened.tui.services.config import (
     ensure_directories,
     get_default_config,
@@ -286,6 +286,7 @@ class StyreneApp(App[None]):
         self.db_engine = None
         self.chat_protocol = None
         self.local_identity_hash = ""
+        self._daemon_manager_from_setup: Any = None  # Set by DaemonSetupScreen
 
         # Create lifecycle manager (does not initialize services yet)
         self._lifecycle = StyreneLifecycle(self.config)

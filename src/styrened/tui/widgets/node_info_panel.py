@@ -324,12 +324,14 @@ class NodeInfoPanel(Static):
         self._load_all_data()
 
     def _load_all_data(self) -> None:
-        """Load hardware, Styrene, Reticulum, and comms data."""
+        """Load hardware, Styrene, and Reticulum data.
+
+        Comms data (message counts, conversation counts) is populated
+        externally by the dashboard via IPC, not loaded here.
+        """
         self._load_hardware_data()
         self._load_styrene_data()
         self._load_reticulum_data()
-        if not self.ipc_managed:
-            self._load_comms_data()
 
     def _load_hardware_data(self) -> None:
         """Load system hardware information."""
@@ -459,92 +461,6 @@ class NodeInfoPanel(Static):
         else:
             self.interface_count = 0
             self.interface_status = ""
-
-    def _load_comms_data(self) -> None:
-        """Load local comms data from the message database.
-
-        Only called when ipc_managed is False (which no longer happens
-        since legacy mode was removed).  Kept for backward compatibility
-        but effectively dead code.
-
-        Uses SQL aggregates instead of loading all rows to avoid blocking
-        the main thread on large message databases.
-        """
-        try:
-            app = self.app
-            db_engine = getattr(app, "db_engine", None)
-            if db_engine is None:
-                return
-
-            from sqlalchemy import case, func, literal_column
-            from sqlalchemy.orm import Session as SASession
-
-            from styrened.models.messages import Message
-
-            local_hash = getattr(app, "local_identity_hash", None)
-
-            with SASession(db_engine) as session:
-                base = session.query(Message).filter(Message.protocol_id == "chat")
-
-                # Aggregate counts in one query
-                if local_hash is not None:
-                    row = base.with_entities(
-                        func.count().label("total"),
-                        func.count(case(
-                            (Message.source_hash == local_hash, literal_column("1")),
-                        )).label("sent"),
-                        func.count(case(
-                            (Message.source_hash != local_hash, literal_column("1")),
-                        )).label("received"),
-                        func.count(case(
-                            ((Message.status == "pending") & (Message.destination_hash == local_hash), literal_column("1")),
-                        )).label("unread"),
-                        func.count(case(
-                            (Message.status.in_(["queued", "sending"]), literal_column("1")),
-                        )).label("pending_count"),
-                    ).one()
-
-                    self.messages_sent = row.sent
-                    self.messages_received = row.received
-                    self.unread_count = row.unread
-                    self.pending_deliveries = row.pending_count
-
-                    # Distinct peer hashes (conversation count)
-                    peer_hash_expr = case(
-                        (Message.source_hash != local_hash, Message.source_hash),
-                        else_=Message.destination_hash,
-                    )
-                    conv_count = base.with_entities(
-                        func.count(func.distinct(peer_hash_expr))
-                    ).scalar() or 0
-                    self.conversation_count = conv_count
-                else:
-                    # No local_hash — count distinct hashes from both columns
-                    row = base.with_entities(func.count()).one()
-                    self.messages_received = row[0]
-                    self.messages_sent = 0
-
-                    # Approximate conversation count
-                    src_count = base.with_entities(
-                        func.count(func.distinct(Message.source_hash))
-                    ).scalar() or 0
-                    dst_count = base.with_entities(
-                        func.count(func.distinct(Message.destination_hash))
-                    ).scalar() or 0
-                    self.conversation_count = max(src_count, dst_count)
-        except Exception:
-            pass
-
-        # Contact count — set by dashboard in IPC mode
-        pass
-
-        # Auto-reply status from config
-        try:
-            config = load_config()
-            if hasattr(config, "auto_reply"):
-                self.auto_reply_enabled = getattr(config.auto_reply, "enabled", False)
-        except Exception:
-            pass
 
     def _get_error_state(self) -> RNSErrorState | None:
         """Get the RNS error state.

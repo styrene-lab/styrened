@@ -32,6 +32,7 @@ Usage (CLI side):
             await client.disconnect()
 """
 
+from styrened.ipc.bridge import IPCBridge
 from styrened.ipc.client import (
     ControlClient,
     IPCConnectionError,
@@ -47,10 +48,12 @@ from styrened.ipc.protocol import (
 from styrened.ipc.server import ControlServer, get_default_socket_path
 
 __all__ = [
+    # Bridge (high-level client)
+    "IPCBridge",
     # Server
     "ControlServer",
     "get_default_socket_path",
-    # Client
+    # Client (low-level)
     "ControlClient",
     "get_daemon_client",
     # Protocol
