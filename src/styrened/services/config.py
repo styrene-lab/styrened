@@ -656,10 +656,30 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             endpoint=str(mvpn.get("endpoint", "")),
         )
 
+    # Parse relay section
+    _parse_relay(config, data)
+
     # Parse RBAC policy
     config.rbac = _parse_rbac(data)
 
     return config
+
+
+def _parse_relay(config: CoreConfig, data: dict) -> None:
+    """Parse relay section from config data into config.relay."""
+    if "relay" in data and isinstance(data["relay"], dict):
+        from styrened.models.relay import RelayConfig
+
+        r = data["relay"]
+        config.relay = RelayConfig(
+            enabled=_parse_bool(r.get("enabled", False)),
+            max_sessions=int(r.get("max_sessions", 16)),
+            max_per_identity=int(r.get("max_per_identity", 2)),
+            max_bytes_per_session=int(r.get("max_bytes_per_session", 52_428_800)),
+            idle_timeout=int(r.get("idle_timeout", 900)),
+            allow_permanent=_parse_bool(r.get("allow_permanent", False)),
+            allowed_identities=list(r.get("allowed_identities", [])),
+        )
 
 
 def save_core_config(config: CoreConfig, config_path: Path | None = None) -> None:
@@ -901,6 +921,15 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
             "subnet_prefix": config.mesh_vpn.subnet_prefix,
             "gateway": config.mesh_vpn.gateway,
             "endpoint": config.mesh_vpn.endpoint,
+        },
+        "relay": {
+            "enabled": config.relay.enabled,
+            "max_sessions": config.relay.max_sessions,
+            "max_per_identity": config.relay.max_per_identity,
+            "max_bytes_per_session": config.relay.max_bytes_per_session,
+            "idle_timeout": config.relay.idle_timeout,
+            "allow_permanent": config.relay.allow_permanent,
+            "allowed_identities": config.relay.allowed_identities,
         },
     }
 
