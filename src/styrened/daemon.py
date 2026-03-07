@@ -72,6 +72,7 @@ DATALINK_HANDLER_CAPABILITY: dict[str, str] = {
     "/info": Capability.DATALINK_INFO,
     "/status": Capability.DATALINK_STATUS,
     "/speedtest": Capability.DATALINK_SPEEDTEST,
+    "/relay": Capability.RELAY_REQUEST,
 }
 
 # ---------------------------------------------------------------------------
@@ -191,6 +192,7 @@ class StyreneDaemon:
         self._direct_link_service: Any = None  # Direct data link service
         self._datalink_destination: Any = None  # Incoming datalink RNS.Destination
         self._mesh_vpn_service: Any = None  # WireGuard mesh VPN service
+        self._relay_service: Any = None  # TURN-style relay service
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
 
     async def start(self) -> None:
@@ -1409,6 +1411,9 @@ class StyreneDaemon:
             # Register incoming datalink destination
             self._setup_datalink_destination()
 
+            # Start relay service if enabled
+            self._start_relay_service()
+
             # Start mesh VPN service if enabled
             await self._start_mesh_vpn()
 
@@ -1476,6 +1481,7 @@ class StyreneDaemon:
             "/info": self._serve_datalink_info,
             "/status": self._serve_datalink_status,
             "/speedtest": self._serve_datalink_speedtest,
+            "/relay": self._serve_datalink_relay,
         }
 
         for path, handler in handler_map.items():
@@ -1575,6 +1581,30 @@ class StyreneDaemon:
                 logger.info("Mesh VPN service started")
         except Exception as e:
             logger.error(f"Failed to start mesh VPN: {e}")
+
+    def _start_relay_service(self) -> None:
+        """Instantiate and configure the RelayService if relay is enabled."""
+        try:
+            from styrened.services.relay import RelayService
+
+            relay_config = getattr(self.config, "relay", None)
+            if relay_config is None:
+                return
+
+            self._relay_service = RelayService(relay_config)
+
+            # Inject RBAC policy if available
+            rbac_policy = getattr(self.config, "rbac", None)
+            if rbac_policy is not None and hasattr(self._relay_service, "set_rbac_policy"):
+                self._relay_service.set_rbac_policy(rbac_policy)
+
+            logger.info(
+                "Relay service initialized (enabled=%s, max_sessions=%d)",
+                relay_config.enabled,
+                relay_config.max_sessions,
+            )
+        except Exception as e:
+            logger.error(f"Failed to start relay service: {e}")
 
     def _on_datalink_established(self, link: Any) -> None:
         """Log when a peer establishes a direct data link to us."""
@@ -1779,6 +1809,93 @@ class StyreneDaemon:
             logger.exception("Datalink /info handler error")
             info = {}
         return json.dumps(info).encode("utf-8")
+
+    def _serve_datalink_relay(
+        self,
+        path: str,
+        data: Any,
+        request_id: Any,
+        link_id: Any,
+        remote_identity: Any,
+        requested_at: Any,
+    ) -> bytes:
+        """Serve /relay — accept or reject relay requests.
+
+        Expects JSON body: {"target_hash": "...", "permanent": false}
+        Delegates to RelayService.create_session().
+
+        RBAC: PEER+ required (relay.request capability).
+        """
+        identity_hex = self._datalink_identity_hex(remote_identity)
+        if not self._datalink_rl.check(identity_hex):
+            return json.dumps({"error": "rate_limited"}).encode("utf-8")
+
+        role = self._datalink_rbac_role(identity_hex)
+        from styrened.models.rbac import Role
+        if role <= int(Role.BLOCKED):
+            return json.dumps({"error": "unauthorized"}).encode("utf-8")
+
+        # Parse request
+        try:
+            if isinstance(data, bytes):
+                data = data.decode("utf-8")
+            request = json.loads(data) if isinstance(data, str) else (data or {})
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return json.dumps({"error": "invalid_request"}).encode("utf-8")
+
+        target_hash = request.get("target_hash", "")
+        permanent = request.get("permanent", False)
+
+        if not target_hash:
+            return json.dumps({"error": "missing_target_hash"}).encode("utf-8")
+
+        # Check relay service
+        if self._relay_service is None:
+            return json.dumps({"error": "relay_disabled"}).encode("utf-8")
+
+        # Check target is connected via DirectLink
+        if self._direct_link_service:
+            link_info = self._direct_link_service.get_link(target_hash)
+            if link_info is None or link_info.status != "active":
+                return json.dumps({"error": "target_offline"}).encode("utf-8")
+
+        # Create relay session (synchronous call from sync handler)
+        try:
+            import asyncio
+
+            from styrened.models.relay import (
+                RelayDisabled,
+                RelayError,
+            )
+
+            loop = self._event_loop
+            if loop is None:
+                return json.dumps({"error": "service_unavailable"}).encode("utf-8")
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._relay_service.create_session(
+                    requester_hash=identity_hex,
+                    target_hash=target_hash,
+                    permanent=permanent,
+                ),
+                loop,
+            )
+            session = future.result(timeout=5.0)
+            return json.dumps({
+                "status": "established",
+                "session_id": id(session),
+                "requester_hash": session.requester_hash,
+                "target_hash": session.target_hash,
+                "is_permanent": session.is_permanent,
+            }).encode("utf-8")
+        except RelayError as e:
+            return json.dumps({
+                "error": e.error_code,
+                "message": str(e),
+            }).encode("utf-8")
+        except Exception:
+            logger.exception("Relay request handler error")
+            return json.dumps({"error": "internal_error"}).encode("utf-8")
 
     def _start_terminal_service(self) -> None:
         """Start the terminal session service.
@@ -2224,6 +2341,11 @@ class StyreneDaemon:
             except Exception as e:
                 logger.error(f"Error stopping mesh VPN service: {e}")
             self._mesh_vpn_service = None
+
+        # Stop relay service
+        if self._relay_service:
+            self._relay_service = None
+            logger.info("Relay service stopped")
 
         # Stop direct link service
         if self._direct_link_service:
