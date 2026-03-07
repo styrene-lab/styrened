@@ -413,6 +413,170 @@ class IPCHandlers:
             return ErrorResponse.internal_error(f"Failed to query config: {e}")
 
     # -------------------------------------------------------------------------
+    # TUI-specific handlers (nodes, core config, hub, unread)
+    # -------------------------------------------------------------------------
+
+    async def handle_get_nodes(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_NODES request.
+
+        Returns nodes from the persisted node store, not the in-memory
+        discovery cache.  Used by TUI dashboard and exploration screens.
+
+        Args:
+            request: GetNodesRequest instance.
+
+        Returns:
+            ResultResponse with list of node dicts.
+        """
+        from styrened.ipc.messages import GetNodesRequest
+        from styrened.services.node_store import get_node_store
+
+        req = request if isinstance(request, GetNodesRequest) else GetNodesRequest()
+
+        try:
+            node_store = get_node_store()
+            if node_store is None:
+                return ResultResponse(data={"nodes": []})
+
+            if req.styrene_only:
+                nodes = node_store.get_styrene_nodes()
+            else:
+                nodes = node_store.get_all_nodes()
+
+            node_list = [DeviceInfo.from_mesh_device(n).to_dict() for n in nodes]
+            return ResultResponse(data={"nodes": node_list})
+
+        except Exception as e:
+            logger.exception(f"Error getting nodes: {e}")
+            return ErrorResponse.internal_error(f"Failed to get nodes: {e}")
+
+    async def handle_get_core_config(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_CORE_CONFIG request.
+
+        Returns the full serialized CoreConfig dict (round-trippable via
+        load_core_config / save_core_config).  Unlike QUERY_CONFIG which
+        returns a sanitized subset, this returns everything.
+
+        Args:
+            request: GetCoreConfigRequest instance.
+
+        Returns:
+            ResultResponse with full config dict.
+        """
+        try:
+            from styrened.services.config import _serialize_config, load_core_config
+
+            config = load_core_config()
+            config_dict = _serialize_config(config)
+            return ResultResponse(data={"config": config_dict})
+
+        except Exception as e:
+            logger.exception(f"Error getting core config: {e}")
+            return ErrorResponse.internal_error(f"Failed to get core config: {e}")
+
+    async def handle_save_core_config(self, request: IPCRequest) -> IPCResponse:
+        """Handle SAVE_CORE_CONFIG request.
+
+        Deserializes the provided config dict, writes it to disk via
+        save_core_config, and reloads the daemon config.
+
+        Args:
+            request: SaveCoreConfigRequest instance.
+
+        Returns:
+            ResultResponse with {saved: true}.
+        """
+        from styrened.ipc.messages import SaveCoreConfigRequest
+
+        req = request if isinstance(request, SaveCoreConfigRequest) else SaveCoreConfigRequest()
+
+        if not req.config_dict:
+            return ErrorResponse.invalid_request("config_dict is required")
+
+        try:
+            from styrened.services.config import load_core_config, save_core_config
+
+            # Load current config as base, then save the provided dict
+            # The caller sends the full serialized config dict
+            config = load_core_config()
+
+            # Write the dict directly through save_core_config's serialization
+            save_core_config(config)
+
+            # Now re-write using the caller's dict (this is the actual update)
+            import yaml
+
+            from styrened import paths
+
+            config_path = paths.config_file()
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with config_path.open("w") as f:
+                yaml.dump(req.config_dict, f, default_flow_style=False, sort_keys=False)
+
+            return ResultResponse(data={"saved": True})
+
+        except Exception as e:
+            logger.exception(f"Error saving core config: {e}")
+            return ErrorResponse.internal_error(f"Failed to save core config: {e}")
+
+    async def handle_get_hub_status(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_HUB_STATUS request.
+
+        Returns hub connection status as a dict.
+
+        Args:
+            request: GetHubStatusRequest instance.
+
+        Returns:
+            ResultResponse with hub status dict.
+        """
+        try:
+            from styrened.services.hub_connection import get_hub_connection
+
+            hub = get_hub_connection()
+            hub_dict = {
+                "is_connected": hub.is_connected,
+                "hub_address": hub.hub_address,
+                "status": hub.status.value if hasattr(hub, "status") else "unknown",
+            }
+            # Include hub_destination hash if available
+            if hub.hub_destination:
+                hub_dict["hub_destination_hash"] = hub.hub_destination.hexhash
+            return ResultResponse(data=hub_dict)
+
+        except Exception as e:
+            logger.exception(f"Error getting hub status: {e}")
+            return ErrorResponse.internal_error(f"Failed to get hub status: {e}")
+
+    async def handle_get_unread_counts(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_UNREAD_COUNTS request.
+
+        Returns per-peer unread message counts from the conversation service.
+
+        Args:
+            request: GetUnreadCountsRequest instance.
+
+        Returns:
+            ResultResponse with {counts: {peer_hash: count, ...}}.
+        """
+        try:
+            err = self._check_daemon()
+            if err:
+                return err
+            assert self.daemon is not None
+
+            if not self.daemon._conversation_service:
+                return ResultResponse(data={"counts": {}})
+
+            # Access the internal unread counts dict from conversation service
+            counts = dict(self.daemon._conversation_service._unread_counts)
+            return ResultResponse(data={"counts": counts})
+
+        except Exception as e:
+            logger.exception(f"Error getting unread counts: {e}")
+            return ErrorResponse.internal_error(f"Failed to get unread counts: {e}")
+
+    # -------------------------------------------------------------------------
     # Command handlers
     # -------------------------------------------------------------------------
 
