@@ -494,20 +494,13 @@ class IPCHandlers:
             return ErrorResponse.invalid_request("config_dict is required")
 
         try:
-            from styrened.services.config import load_core_config, save_core_config
-
-            # Load current config as base, then save the provided dict
-            # The caller sends the full serialized config dict
-            config = load_core_config()
-
-            # Write the dict directly through save_core_config's serialization
-            save_core_config(config)
-
-            # Now re-write using the caller's dict (this is the actual update)
             import yaml
 
             from styrened import paths
 
+            # Write the caller's serialized config dict directly to disk.
+            # The caller is responsible for sending a complete, valid config
+            # (e.g. via _serialize_config(CoreConfig)).
             config_path = paths.config_file()
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with config_path.open("w") as f:

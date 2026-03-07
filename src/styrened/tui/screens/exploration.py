@@ -694,10 +694,29 @@ class ExplorationScreen(Screen[None]):
         """Start device discovery and load initial data."""
         start_discovery(callback=self._on_device_discovered)
         self.set_interval(15.0, self._refresh_announce_tables)
-        # Initial load
+        # Fetch stored nodes via IPC (async), then refresh tables
+        self.run_worker(self._async_load_stored_nodes(), group="stored-nodes")
+        # Initial load with live-only (stored nodes arrive async)
         self._refresh_announce_tables()
         # Focus active table after TabbedContent is ready
         self.call_later(self._focus_active_table)
+
+    async def _async_load_stored_nodes(self) -> None:
+        """Fetch stored nodes from the daemon via IPC and cache locally."""
+        try:
+            app = self.app
+            bridge = getattr(getattr(app, "services", None), "bridge", None)
+            if bridge is None:
+                return
+            stored_raw = await bridge.get_nodes(styrene_only=False)
+            from styrened.tui.utils import device_info_to_mesh
+            self._stored_nodes_cache = [
+                device_info_to_mesh(d) for d in stored_raw
+            ]
+            # Refresh tables now that stored nodes are available
+            self._refresh_announce_tables()
+        except Exception:
+            pass
 
     def _focus_active_table(self) -> None:
         """Focus the table in the currently active tab."""
@@ -816,10 +835,14 @@ class ExplorationScreen(Screen[None]):
     def _load_all_devices(self) -> tuple[list[MeshDevice], list[MeshDevice]]:
         """Load and deduplicate all devices, returning (exploration, all_merged).
 
+        Uses cached stored nodes from the last async IPC fetch (populated
+        by ``_async_load_stored_nodes``).  Falls back to live-only when
+        the cache is empty.
+
         Returns:
             Tuple of (exploration devices with LXMF shadows filtered, all merged devices).
         """
-        stored_nodes: list[MeshDevice] = []
+        stored_nodes: list[MeshDevice] = getattr(self, "_stored_nodes_cache", [])
 
         live_nodes = discover_devices()
 

@@ -118,6 +118,36 @@ Screens don't follow a consistent pattern for:
 
 Settings is 1264 LOC — the largest screen — doing config loading, saving, validation, RNS config generation, page regeneration, and core config mutation all in one screen with no sub-screens or delegation. It directly imports and calls `save_core_config()`.
 
+### IPC Boundary Gap Analysis (post-adversarial)
+
+The adversarial review found 6 critical bugs and 6 warnings in the TUI services migration. Root cause analysis:
+
+**Category 1: Type mismatches (bugs #1, #2)**
+- `_device_info_to_mesh` treats `DeviceInfo` (dataclass) as dict — calls `.get()` which doesn't exist
+- `RBACPolicy.from_dict()` doesn't exist — the model has no deserialization from serialized config dict
+- Fix: `DeviceInfo` already has all fields as attributes — use attribute access. Add `RBACPolicy.from_dict()` using the same logic as `_parse_rbac` in services/config.py.
+
+**Category 2: Variable ordering (bug #3)**
+- `_format_my_mesh_line` early return references `last_seen`/`unread_text` before assignment
+- Fix: Move variable declarations before the rbac guard, or restructure the guard.
+
+**Category 3: Nullability contract (bug #4)**
+- `bridge` property typed as `IPCBridge` but `_lifecycle.ipc_bridge` can be `None`
+- Fix: Return type should be `IPCBridge | None`, or raise a clear error. Callers must handle None.
+
+**Category 4: Missing merge logic (bug #5, #6)**
+- Settings save reads config from daemon and writes it back unchanged — no TUI→CoreConfig merge
+- Config reset sends empty dict which the handler rejects
+- Fix: The save handler needs to convert TUI config changes to core config dict mutations. Reset needs a dedicated IPC command or a `get_default_core_config` IPC call.
+
+**Category 5: Data loss from removed lookups (warnings #7, #8, #9)**
+- `stored_nodes = []` everywhere — historical device data dropped
+- `clear_nodes` button became a no-op lie
+- Identity save silent failure when IPC disconnected
+- Fix: Use `bridge.get_nodes()` for stored data (IPC exists, just type conversion was wrong). Add `clear_nodes` IPC or disable the button. Add disk-write fallback for identity save or show clear error.
+
+**Summary**: The IPC commands exist for most operations. The problems are: (a) wrong type handling at the TUI↔IPC boundary, (b) missing deserialization helpers on model classes, (c) incomplete or no-op replacements where the old logic was complex.
+
 ## Decisions
 
 ### Decision: Introduce typed TUIServices protocol as the screen/widget API contract
@@ -144,6 +174,11 @@ Settings is 1264 LOC — the largest screen — doing config loading, saving, va
 
 **Status:** decided
 **Rationale:** Three consumers need daemon data: TUI (Textual), embedded web API, and planned web bridge. The IPC command set is the canonical shared API. IPCBridge is the Python async client. TUIServices is a Textual-specific typed accessor. IPCBridge will move from styrened.tui.services to styrened.ipc as a follow-up so web bridge and embedded API can import it without depending on the TUI package. Current migration proceeds with IPCBridge in place; screens import through TUIServices protocol which abstracts the location.
+
+### Decision: TUIServices Protocol — typed interface boundary
+
+**Status:** decided
+**Rationale:** Created TUIServices Protocol at tui/services/protocol.py. StyreneApp implements it. All 13 screens + 7 widgets migrated from direct daemon imports to app.services.bridge. Results: 42→4 direct imports (data models only), 19→2 type:ignore[attr-defined], 0 _lifecycle.ipc_bridge references in screens/widgets.
 
 ## Open Questions
 

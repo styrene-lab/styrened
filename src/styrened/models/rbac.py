@@ -368,3 +368,63 @@ class RBACPolicy:
             self.invalidate_cache()
             return True
         return False
+
+    @classmethod
+    def from_dict(cls, data: dict) -> RBACPolicy:
+        """Deserialize an RBACPolicy from a serialized config dict.
+
+        Accepts the format produced by ``_serialize_config`` in
+        ``services/config.py``::
+
+            {
+                "default_role": "peer",
+                "roster": [
+                    {"identity": "abc123...", "role": "admin", "label": "...", "grants": [...]},
+                ],
+                "blocked": ["deadbeef"],
+            }
+
+        Args:
+            data: Serialized RBAC dict (the ``rbac`` section of a config).
+
+        Returns:
+            Reconstructed RBACPolicy.
+        """
+        if not data:
+            return cls()
+
+        # Parse default_role
+        default_role_str = str(data.get("default_role", "peer")).upper()
+        try:
+            default_role = Role[default_role_str]
+        except KeyError:
+            logger.warning("Unknown RBAC default_role '%s', using PEER", default_role_str)
+            default_role = Role.PEER
+
+        # Parse roster
+        roster: dict[str, RosterEntry] = {}
+        for entry_data in data.get("roster", []):
+            identity = str(entry_data.get("identity", "")).lower().strip()
+            if not identity:
+                continue
+            role_str = str(entry_data.get("role", "peer")).upper()
+            try:
+                role = Role[role_str]
+            except KeyError:
+                logger.warning("Unknown role '%s' for %s, skipping", role_str, identity[:16])
+                continue
+            label = str(entry_data.get("label", ""))
+            grants_raw = entry_data.get("grants", [])
+            grants = frozenset(
+                str(g).strip() for g in grants_raw if str(g).strip() in Capability.ALL
+            )
+            roster[identity] = RosterEntry(
+                identity_hash=identity, role=role, label=label, grants=grants,
+            )
+
+        # Parse blocked list
+        blocked = [
+            str(h).lower().strip() for h in data.get("blocked", []) if h
+        ]
+
+        return cls(default_role=default_role, roster=roster, blocked=blocked)

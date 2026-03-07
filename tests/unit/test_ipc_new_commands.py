@@ -289,7 +289,7 @@ class TestHandleSaveCoreConfig:
     async def test_handles_write_error(self, handlers):
         config_dict = {"reticulum": {"mode": "standalone"}}
         with patch(
-            "styrened.services.config.load_core_config",
+            "styrened.paths.config_file",
             side_effect=RuntimeError("disk full"),
         ):
             resp = await handlers.handle_save_core_config(
