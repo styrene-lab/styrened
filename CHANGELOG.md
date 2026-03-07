@@ -5,6 +5,32 @@ All notable changes to styrened will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-03-07
+
+### Fixed
+- **TUI: DeviceInfo→MeshDevice conversion** — `_device_info_to_mesh` used dict `.get()` on dataclass; now uses `getattr()` with safe DeviceType enum conversion
+- **TUI: RBACPolicy deserialization** — added `RBACPolicy.from_dict()` classmethod for reconstructing RBAC from serialized config dicts
+- **TUI: _format_my_mesh_line NameError** — `last_seen`/`unread_text` referenced before assignment when rbac=None
+- **TUI: bridge nullability** — `bridge` property now correctly typed as `IPCBridge | None`; all callers guard against None
+- **TUI: settings save no-op** — was reading daemon config and writing it back unchanged; now serializes TUI's in-memory CoreConfig via `_serialize_config()`
+- **TUI: config reset** — was sending empty dict (rejected by handler); now sends serialized default CoreConfig
+- **TUI: stored node data lost** — exploration and device detail screens now fetch historical nodes from daemon via async IPC instead of hardcoded `[]`
+- **TUI: clear nodes button** — honest warning notification instead of fake success message
+- **TUI: _is_my_mesh without rbac** — all callers now pass cached rbac
+- **TUI: hub status no-op timer** — `_retry_hub_connection` replaced with actual IPC status poll via `get_hub_status()`
+- **IPC: SAVE_CORE_CONFIG double-write** — handler removed useless load→save round-trip; writes caller's dict directly
+
+### Changed
+- **IPCBridge relocated to `styrened.ipc.bridge`** — shared contract for TUI, embedded web API, and planned web bridge. Zero Textual dependencies. Re-export shim at old path for backward compatibility.
+- **Dead code removed** (-878 lines): `_load_comms_data()` (80 lines unreachable SQLAlchemy), `_rpc_client` + 4 fallback blocks in command_widget (legacy mode removed), replaced with `_no_bridge_error()` helper
+- **`device_info_to_mesh()`** extracted to `tui/utils.py` — shared converter used by dashboard, exploration, and device detail screens
+- **`_daemon_manager_from_setup`** declared in `StyreneApp.__init__` (removes last `type: ignore[attr-defined]` in daemon_setup.py)
+
+### Added
+- `RBACPolicy.from_dict()` classmethod — deserializes RBAC policy from `_serialize_config` format
+- `device_info_to_mesh()` in `tui/utils.py` — safe DeviceInfo dataclass → MeshDevice conversion
+- 14 new unit tests: `test_rbac_from_dict.py` (10), `test_tui_utils.py` (4)
+
 ## [0.4.0] - 2026-02-03
 
 ### Added
