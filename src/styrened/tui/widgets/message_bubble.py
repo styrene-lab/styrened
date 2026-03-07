@@ -143,7 +143,7 @@ class MessageBubble(Widget):
         don't reach through ``app._lifecycle`` directly.
         """
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge
         except Exception:
             return None
 

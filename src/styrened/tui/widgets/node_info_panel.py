@@ -15,7 +15,7 @@ from textual.widgets import Static
 
 from styrened.models.mesh_device import DeviceType
 from styrened.models.rns_error import RNSErrorState
-from styrened.services.hub_connection import HubStatus, get_hub_connection
+from styrened.services.hub_connection import HubStatus  # Data enum only
 from styrened.tui.models.hardware import NetworkInterface, SystemInfo
 from styrened.tui.services.config import load_config
 from styrened.tui.services.hardware import (
@@ -373,7 +373,7 @@ class NodeInfoPanel(Static):
         # Load operator identity hash and security tier (works in both modes)
         if not self.identity_hash:
             try:
-                from styrened.services.reticulum import get_operator_identity
+                from styrened.tui.services.reticulum import get_operator_identity
                 op_hash = get_operator_identity()
                 if op_hash:
                     self.identity_hash = op_hash
@@ -392,35 +392,16 @@ class NodeInfoPanel(Static):
         if self.ipc_managed:
             return
 
-        # Get hub connection status
-        hub_connection = get_hub_connection()
-        try:
-            config = load_config()
-            hub_connection.set_announce_interval(config.reticulum.hub_announce_interval)
+        # Hub connection managed by daemon — status pushed via IPC in managed mode
+        # In non-managed mode, just report unknown
+        self.hub_status = HubStatus.UNKNOWN
 
-            # Try to connect/reconnect if hub is configured but not connected
-            if (
-                config.reticulum.hub_enabled
-                and config.reticulum.hub_address
-                and not hub_connection.is_connected
-            ):
-                hub_connection.retry_connection()
-        except Exception:
-            pass
+        # Get Styrene mesh device count from discovery
+        from styrened.tui.utils import _deduplicate_by_identity
 
-        self.hub_status = hub_connection.status
-
-        # Get Styrene mesh device count from discovery + persistent store
         live_nodes = discover_devices()
-        try:
-            from styrened.services.node_store import get_node_store
-            stored_nodes = get_node_store().get_styrene_nodes()
-        except Exception:
-            stored_nodes = []
-        all_devices = {n.destination_hash: n for n in stored_nodes}
-        all_devices.update({n.destination_hash: n for n in live_nodes})
+        all_devices = {n.destination_hash: n for n in live_nodes}
 
-        from styrened.services.reticulum import _deduplicate_by_identity
         styrene_nodes = _deduplicate_by_identity(
             [d for d in all_devices.values() if d.device_type == DeviceType.STYRENE_NODE]
         )
@@ -480,14 +461,19 @@ class NodeInfoPanel(Static):
             self.interface_status = ""
 
     def _load_comms_data(self) -> None:
-        """Load local comms data from the message database (non-IPC mode).
+        """Load local comms data from the message database.
+
+        Only called when ipc_managed is False (which no longer happens
+        since legacy mode was removed).  Kept for backward compatibility
+        but effectively dead code.
 
         Uses SQL aggregates instead of loading all rows to avoid blocking
         the main thread on large message databases.
         """
         try:
             app = self.app
-            if not hasattr(app, "db_engine") or app.db_engine is None:
+            db_engine = getattr(app, "db_engine", None)
+            if db_engine is None:
                 return
 
             from sqlalchemy import case, func, literal_column
@@ -497,7 +483,7 @@ class NodeInfoPanel(Static):
 
             local_hash = getattr(app, "local_identity_hash", None)
 
-            with SASession(app.db_engine) as session:
+            with SASession(db_engine) as session:
                 base = session.query(Message).filter(Message.protocol_id == "chat")
 
                 # Aggregate counts in one query
@@ -549,13 +535,8 @@ class NodeInfoPanel(Static):
         except Exception:
             pass
 
-        # Contact count from node store
-        try:
-            from styrened.services.node_store import get_node_store
-            nodes = get_node_store().get_all_nodes()
-            self.contact_count = len(nodes) if nodes else 0
-        except Exception:
-            pass
+        # Contact count — set by dashboard in IPC mode
+        pass
 
         # Auto-reply status from config
         try:
@@ -566,18 +547,11 @@ class NodeInfoPanel(Static):
             pass
 
     def _get_error_state(self) -> RNSErrorState | None:
-        """Get the RNS error state from the app's lifecycle.
+        """Get the RNS error state.
 
-        Returns:
-            RNSErrorState if available, None otherwise.
+        In IPC mode, error state comes from daemon status (pushed by
+        dashboard). Returns None — callers should check self.rns_online.
         """
-        try:
-            app = self.app
-            if hasattr(app, "_lifecycle"):
-                error_state: RNSErrorState = app._lifecycle.rns_error_state
-                return error_state
-        except Exception:
-            pass
         return None
 
     def refresh_data(self) -> None:

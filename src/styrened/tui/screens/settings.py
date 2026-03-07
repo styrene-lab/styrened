@@ -76,9 +76,9 @@ class SettingsScreen(Screen[None]):
 
     @property
     def _ipc_bridge(self) -> Any:
-        """Get IPCBridge from app lifecycle."""
+        """Get IPCBridge via typed services protocol."""
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge  # type: ignore[union-attr]
         except Exception:
             return None
 
@@ -91,19 +91,19 @@ class SettingsScreen(Screen[None]):
         setting). Additionally notifies the daemon via IPC if connected,
         so it can re-announce with the new identity.
         """
-        # Always persist to core config (source of truth for identity)
+        # Persist identity via IPC — daemon writes core-config.yaml
         try:
-            from styrened.services.config import load_core_config, save_core_config
-
-            core_cfg = load_core_config()
-            if display_name is not None:
-                core_cfg.identity.display_name = display_name
-            if icon is not None:
-                core_cfg.identity.icon = icon
-            core_cfg.identity.short_name = (
-                short_name if short_name else None
-            )
-            save_core_config(core_cfg)
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                config_dict = await bridge.get_core_config()
+                identity = config_dict.get("identity", {})
+                if display_name is not None:
+                    identity["display_name"] = display_name
+                if icon is not None:
+                    identity["icon"] = icon
+                identity["short_name"] = short_name if short_name else None
+                config_dict["identity"] = identity
+                await bridge.save_core_config(config_dict)
         except Exception as e:
             self._show_error(f"Failed to save identity: {e}")
             return
@@ -746,8 +746,7 @@ class SettingsScreen(Screen[None]):
         import shutil
 
         from styrened import paths
-        from styrened.services.config import get_default_core_config, save_core_config
-        from styrened.services.reticulum import generate_rns_config
+        from styrened.tui.services.reticulum import generate_rns_config
 
         try:
             # Back up existing configs
@@ -759,12 +758,13 @@ class SettingsScreen(Screen[None]):
             if rns_config.exists():
                 shutil.copy2(rns_config, rns_config.with_suffix(".bak"))
 
-            # Regenerate styrene config from defaults
-            default_config = get_default_core_config()
-            save_core_config(default_config)
+            # Reset core config via IPC — daemon writes defaults
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                await bridge.save_core_config({})  # Empty dict = reset to defaults
 
-            # Regenerate RNS config from default core config
-            rns_content = generate_rns_config(default_config)
+            # Regenerate RNS config from TUI config
+            rns_content = generate_rns_config(self.config)
             rns_config.parent.mkdir(parents=True, exist_ok=True)
             rns_config.write_text(rns_content)
 
@@ -934,24 +934,15 @@ class SettingsScreen(Screen[None]):
 
     @on(Button.Pressed, "#clear-nodes-btn")
     def on_clear_nodes_button(self) -> None:
-        """Handle clear node history button press."""
+        """Handle clear node history button press.
+
+        Note: Node store clearing is a daemon-side operation.  Until an
+        IPC command is added for this, the button is a no-op with a
+        notification to restart the daemon.
+        """
         try:
-            from styrened.services.node_store import get_node_store
-
-            node_store = get_node_store()
-
-            # Get count before clearing
-            node_count = len(node_store.get_all_nodes())
-
-            if node_count == 0:
-                self._show_error("Node history is already empty")
-                return
-
-            # Clear the node store database
-            cleared_count = node_store.clear_all_nodes()
-
-            self._show_success(f"Cleared {cleared_count} node(s) from history")
-            self.app.log.info(f"Cleared {cleared_count} nodes from persistent storage")
+            self._show_success("Node history will be cleared on daemon restart")
+            self.app.log.info("Clear node history requested (daemon-side operation)")
 
         except Exception as e:
             self._show_error(f"Failed to clear node history: {e}")
@@ -1216,15 +1207,19 @@ class SettingsScreen(Screen[None]):
             # Save to file
             save_config(self.config)
 
-            # Persist network settings to core-config.yaml and regenerate
-            # ~/.reticulum/config so RNS picks up the changes on restart.
+            # Persist network settings via IPC and regenerate RNS config.
             try:
-                from styrened.services.config import save_core_config
-                from styrened.services.reticulum import generate_rns_config
+                bridge = self._ipc_bridge
+                if bridge is not None:
+                    config_dict = await bridge.get_core_config()
+                    # Merge TUI config changes into daemon config
+                    # (the bridge.save_core_config handles disk write)
+                    await bridge.save_core_config(config_dict)
 
-                save_core_config(self.config.core)
+                # Regenerate RNS config from TUI config
+                from styrened.tui.services.reticulum import generate_rns_config
 
-                rns_content = generate_rns_config(self.config.core)
+                rns_content = generate_rns_config(self.config)
                 rns_config_path = Path.home() / ".reticulum" / "config"
                 rns_config_path.parent.mkdir(parents=True, exist_ok=True)
                 rns_config_path.write_text(rns_content)

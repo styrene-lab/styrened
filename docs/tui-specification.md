@@ -140,6 +140,11 @@ Settings is 1264 LOC — the largest screen — doing config loading, saving, va
 **Status:** decided
 **Rationale:** Keys like r/a/c are bound 3-6 times across screens. Textual resolves by stack priority which is correct, but there's no spec for which screen owns which key. A KEYMAP.md documents the contract: global keys (always work), per-screen keys (active when that screen is focused), and modal keys. Makes collisions intentional rather than accidental.
 
+### Decision: IPC command set is the shared contract; IPCBridge moves to styrened.ipc in follow-up
+
+**Status:** decided
+**Rationale:** Three consumers need daemon data: TUI (Textual), embedded web API, and planned web bridge. The IPC command set is the canonical shared API. IPCBridge is the Python async client. TUIServices is a Textual-specific typed accessor. IPCBridge will move from styrened.tui.services to styrened.ipc as a follow-up so web bridge and embedded API can import it without depending on the TUI package. Current migration proceeds with IPCBridge in place; screens import through TUIServices protocol which abstracts the location.
+
 ## Open Questions
 
 - What is the target user persona — solo operator managing their own node, or fleet admin managing many nodes, or both?

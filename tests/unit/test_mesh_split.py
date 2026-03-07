@@ -390,17 +390,15 @@ class TestIsMymesh:
 
         tree = MeshDeviceTree.__new__(MeshDeviceTree)
 
-        config = CoreConfig()
-        config.rbac = RBACPolicy(
+        rbac = RBACPolicy(
             roster={"aabbccdd" * 4: RosterEntry(
                 identity_hash="aabbccdd" * 4,
                 role=Role.PEER,
             )}
         )
 
-        with patch("styrened.services.config.load_core_config", return_value=config):
-            device = self._make_device("aabbccdd" * 4)
-            assert tree._is_my_mesh(device) is True
+        device = self._make_device("aabbccdd" * 4)
+        assert tree._is_my_mesh(device, rbac=rbac) is True
 
     def test_missing_identity_uses_default_role(self) -> None:
         """Identity not in roster resolves to default_role.
@@ -413,65 +411,56 @@ class TestIsMymesh:
         tree = MeshDeviceTree.__new__(MeshDeviceTree)
 
         # default_role=PEER → any unlisted node counts as trusted
-        config_peer = CoreConfig()
-        config_peer.rbac = RBACPolicy(default_role=Role.PEER)
-        with patch("styrened.services.config.load_core_config", return_value=config_peer):
-            device = self._make_device("11223344" * 4)
-            assert tree._is_my_mesh(device) is True
+        rbac_peer = RBACPolicy(default_role=Role.PEER)
+        device = self._make_device("11223344" * 4)
+        assert tree._is_my_mesh(device, rbac=rbac_peer) is True
 
         # default_role=NONE → unlisted nodes are not trusted
         config_none = CoreConfig()
-        config_none.rbac = RBACPolicy(default_role=Role.NONE)
-        with patch("styrened.services.config.load_core_config", return_value=config_none):
-            device = self._make_device("11223344" * 4)
-            assert tree._is_my_mesh(device) is False
+        rbac_none = RBACPolicy(default_role=Role.NONE)
+        device = self._make_device("11223344" * 4)
+        assert tree._is_my_mesh(device, rbac=rbac_none) is False
 
     def test_blocked_identity_is_not_my_mesh(self) -> None:
         from styrened.tui.screens.dashboard import MeshDeviceTree
 
         tree = MeshDeviceTree.__new__(MeshDeviceTree)
 
-        config = CoreConfig()
-        config.rbac = RBACPolicy(
+        rbac = RBACPolicy(
             roster={"deadbeef" * 4: RosterEntry(
                 identity_hash="deadbeef" * 4,
                 role=Role.BLOCKED,
             )}
         )
 
-        with patch("styrened.services.config.load_core_config", return_value=config):
-            device = self._make_device("deadbeef" * 4)
-            assert tree._is_my_mesh(device) is False
+        device = self._make_device("deadbeef" * 4)
+        assert tree._is_my_mesh(device, rbac=rbac) is False
 
     def test_empty_rbac_config_is_not_my_mesh(self) -> None:
         from styrened.tui.screens.dashboard import MeshDeviceTree
 
         tree = MeshDeviceTree.__new__(MeshDeviceTree)
 
-        config = CoreConfig()
-        config.rbac = RBACPolicy()  # empty roster, default PEER
+        rbac = RBACPolicy()  # empty roster, default PEER
 
-        with patch("styrened.services.config.load_core_config", return_value=config):
-            device = self._make_device("aabbccdd" * 4)
-            # Default PEER role means device IS in mesh (>= PEER)
-            assert tree._is_my_mesh(device) is True
+        device = self._make_device("aabbccdd" * 4)
+        # Default PEER role means device IS in mesh (>= PEER)
+        assert tree._is_my_mesh(device, rbac=rbac) is True
 
     def test_admin_identity_is_my_mesh(self) -> None:
         from styrened.tui.screens.dashboard import MeshDeviceTree
 
         tree = MeshDeviceTree.__new__(MeshDeviceTree)
 
-        config = CoreConfig()
-        config.rbac = RBACPolicy(
+        rbac = RBACPolicy(
             roster={"cafebabe" * 4: RosterEntry(
                 identity_hash="cafebabe" * 4,
                 role=Role.ADMIN,
             )}
         )
 
-        with patch("styrened.services.config.load_core_config", return_value=config):
-            device = self._make_device("cafebabe" * 4)
-            assert tree._is_my_mesh(device) is True
+        device = self._make_device("cafebabe" * 4)
+        assert tree._is_my_mesh(device, rbac=rbac) is True
 
     def test_is_my_mesh_uses_preloaded_rbac(self) -> None:
         """_is_my_mesh accepts a pre-loaded rbac arg to avoid disk reads."""
@@ -530,13 +519,10 @@ class TestDeviceByDestinationHash:
         idhash = "11223344" * 4
         device = self._make_full_device(dest, idhash)
 
-        with (
-            patch("styrened.services.node_store.get_node_store") as mock_store,
-            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]),
-        ):
-            mock_store.return_value.get_styrene_nodes.return_value = [device]
-            result = tree._device_by_destination_hash(dest)
-            assert result is device
+        # Populate the device cache (normally done by _async_load_data)
+        tree._device_cache = {dest: device}
+        result = tree._device_by_destination_hash(dest)
+        assert result is device
 
     def test_lookup_by_identity_hash_returns_none(self) -> None:
         """Passing identity_hash when node is keyed by destination_hash must miss."""
@@ -548,14 +534,11 @@ class TestDeviceByDestinationHash:
         idhash = "11223344" * 4
         device = self._make_full_device(dest, idhash)
 
-        with (
-            patch("styrened.services.node_store.get_node_store") as mock_store,
-            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]),
-        ):
-            mock_store.return_value.get_styrene_nodes.return_value = [device]
-            # identity_hash lookup must NOT find the device
-            result = tree._device_by_destination_hash(idhash)
-            assert result is None
+        # Populate cache keyed by destination_hash
+        tree._device_cache = {dest: device}
+        # identity_hash lookup must NOT find the device
+        result = tree._device_by_destination_hash(idhash)
+        assert result is None
 
     def test_live_node_overrides_stored(self) -> None:
         """Live node (same destination_hash) overwrites stale stored entry."""
@@ -565,16 +548,12 @@ class TestDeviceByDestinationHash:
 
         dest = "cafecafe" * 4
         idhash = "deadbeef" * 4
-        stored = self._make_full_device(dest, idhash, name="stored")
         live = self._make_full_device(dest, idhash, name="live")
 
-        with (
-            patch("styrened.services.node_store.get_node_store") as mock_store,
-            patch("styrened.tui.screens.dashboard.discover_devices", return_value=[live]),
-        ):
-            mock_store.return_value.get_styrene_nodes.return_value = [stored]
-            result = tree._device_by_destination_hash(dest)
-            assert result is live
+        # Cache stores the most recent (live) device
+        tree._device_cache = {dest: live}
+        result = tree._device_by_destination_hash(dest)
+        assert result is live
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
 from styrened.tui.services.app_lifecycle import StyreneLifecycle
+from styrened.tui.services.ipc_bridge import IPCBridge
 from styrened.tui.services.config import (
     ensure_directories,
     get_default_config,
@@ -181,6 +182,28 @@ class StyreneApp(App[None]):
 
     # Local identity hash for message attribution
     local_identity_hash: str
+
+    # ── TUIServices protocol implementation ──────────────────────────
+    # Screens and widgets access daemon functionality via self.app.services
+    # See styrened.tui.services.protocol.TUIServices for the contract.
+
+    @property
+    def services(self) -> "StyreneApp":
+        """Typed service accessor for screens/widgets.
+
+        Returns self (StyreneApp implements TUIServices protocol).
+        """
+        return self
+
+    @property
+    def bridge(self) -> IPCBridge:
+        """IPC bridge for daemon communication.
+
+        Part of the TUIServices protocol.  Screens should use
+        ``self.app.services.bridge`` instead of reaching into
+        ``self.app._lifecycle.ipc_bridge``.
+        """
+        return self._lifecycle.ipc_bridge
 
     def __init__(
         self,

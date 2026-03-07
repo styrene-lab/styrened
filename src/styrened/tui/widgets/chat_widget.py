@@ -274,7 +274,7 @@ class ChatWidget(Widget, can_focus=True):
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge
         except Exception:
             return None
 
@@ -1468,7 +1468,7 @@ class ChatWidget(Widget, can_focus=True):
         import mimetypes
         from pathlib import Path
 
-        from styrened.services.attachment_store import DEFAULT_MAX_FILE_SIZE
+        DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
         path = Path(path_str.strip()).expanduser()
         if not path.is_file():

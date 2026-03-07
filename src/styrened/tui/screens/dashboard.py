@@ -2,7 +2,6 @@
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from sqlalchemy.orm import Session
 from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -12,8 +11,8 @@ from textual.widgets import Footer, Header, Tree
 from textual.widgets.tree import TreeNode
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
-from styrened.models.messages import Message
 from styrened.tui.services.reticulum import discover_devices, start_discovery
+from styrened.tui.utils import _deduplicate_by_identity
 from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
@@ -60,6 +59,8 @@ class MeshDeviceTree(Tree[str]):
         self._meta_pending: set[str] = set()
         # Failure counter per identity_hash — give up after META_MAX_RETRIES failures
         self._meta_fail_count: dict[str, int] = {}
+        # Device cache: destination_hash → MeshDevice, populated by _async_load_data.
+        self._device_cache: dict[str, MeshDevice] = {}
 
     # Maximum number of entries in each identity-keyed cache.  In a large
     # observable mesh (public hub scenario), the OTHER section could grow
@@ -85,69 +86,46 @@ class MeshDeviceTree(Tree[str]):
             del self._meta_fail_count[next(iter(self._meta_fail_count))]
 
     def on_mount(self) -> None:
-        self._load_data()
+        self.run_worker(self._async_load_data(), group="tree-load")
 
-    def _get_unread_counts(self) -> dict[str, int]:
-        """Get unread message counts per device identity."""
-        unread_counts: dict[str, int] = {}
+    async def _async_get_unread_counts(self) -> dict[str, int]:
+        """Get unread message counts per device identity via IPC."""
         try:
             app: StyreneApp = self.app  # type: ignore[assignment]
-            if app.db_engine is None or not app.local_identity_hash:
-                return unread_counts
+            return await app.services.bridge.get_unread_counts()
         except Exception:
-            return unread_counts
-
-        with Session(app.db_engine) as session:
-            messages = (
-                session.query(Message)
-                .filter(
-                    Message.protocol_id == "chat",
-                    Message.status == "pending",
-                    Message.destination_hash == app.local_identity_hash,
-                )
-                .all()
-            )
-            for msg in messages:
-                source = msg.source_hash
-                unread_counts[source] = unread_counts.get(source, 0) + 1
-
-        return unread_counts
+            return {}
 
     def _is_my_mesh(self, device: MeshDevice, rbac: Any = None) -> bool:
         """Return True if this device is in the local RBAC roster with role ≥ PEER.
 
         Args:
             device: The MeshDevice to check.
-            rbac: Pre-loaded RBACPolicy to avoid repeated disk reads.  When
-                  None, loads config from disk (use only for one-off checks).
+            rbac: Pre-loaded RBACPolicy.  Must be provided — no fallback to
+                  disk reads.  Returns False if rbac is None.
         """
+        if rbac is None:
+            return False
         try:
             from styrened.models.rbac import Role
-            if rbac is None:
-                from styrened.services.config import load_core_config
-                config = load_core_config()
-                rbac = config.rbac
             return rbac.resolve_role(device.identity_hash) >= Role.PEER
         except Exception:
             return False
 
-    def _load_data(self) -> None:
-        """Load device data and rebuild tree into MY MESH / OTHER sections.
+    async def _async_load_data(self) -> None:
+        """Load device data via IPC and rebuild tree into MY MESH / OTHER."""
+        app: StyreneApp = self.app  # type: ignore[assignment]
+        bridge = app.services.bridge
 
-        Config is loaded once per call and passed to helpers to avoid
-        repeated disk reads for every device in the list.
-        """
+        # Fetch stored nodes via IPC + live discovery nodes
         try:
-            from styrened.services.node_store import get_node_store
-            stored_nodes = get_node_store().get_styrene_nodes()
+            stored_raw = await bridge.get_nodes(styrene_only=True)
+            stored_nodes = [self._device_info_to_mesh(d) for d in stored_raw]
         except Exception:
             stored_nodes = []
 
         live_nodes = discover_devices()
 
-        # Build by destination_hash — this is what node.data will store.
-        # destination_hash is the routing identifier; identity_hash is the
-        # public-key hash used for RBAC lookups.  Both fields live on MeshDevice.
         all_devices_dict = {n.destination_hash: n for n in stored_nodes}
         all_devices_dict.update({n.destination_hash: n for n in live_nodes})
 
@@ -155,20 +133,49 @@ class MeshDeviceTree(Tree[str]):
             d for d in all_devices_dict.values()
             if d.device_type == DeviceType.STYRENE_NODE
         ]
-
-        from styrened.services.reticulum import _deduplicate_by_identity
         devices = _deduplicate_by_identity(devices)
 
-        unread_counts = self._get_unread_counts()
+        unread_counts = await self._async_get_unread_counts()
         cascade = get_color_cascade()
 
-        # Load RBAC policy once — passed to _is_my_mesh to avoid N disk reads.
+        # Load RBAC policy once via IPC
         rbac = None
         try:
-            from styrened.services.config import load_core_config
-            rbac = load_core_config().rbac
+            config_dict = await bridge.get_core_config()
+            rbac_dict = config_dict.get("rbac", {})
+            from styrened.models.rbac import RBACPolicy
+            rbac = RBACPolicy.from_dict(rbac_dict)
         except Exception:
             pass
+
+        # Cache for sync lookups (_device_by_destination_hash, _refresh_other_labels)
+        self._device_cache = {d.destination_hash: d for d in devices}
+        self._last_rbac = rbac
+
+        self._render_tree(devices, unread_counts, cascade, rbac)
+
+    def _device_info_to_mesh(self, info: Any) -> MeshDevice:
+        """Convert a DeviceInfo dict from IPC to a MeshDevice."""
+        return MeshDevice(
+            destination_hash=info.get("destination_hash", ""),
+            identity_hash=info.get("identity_hash", ""),
+            name=info.get("name", ""),
+            device_type=DeviceType(info.get("device_type", "unknown")),
+            status=NodeStatus(info.get("status", "unknown")),
+            last_announce=info.get("last_announce", 0.0),
+            announce_count=info.get("announce_count", 0),
+            discovered_via=info.get("discovered_via"),
+            lxmf_destination_hash=info.get("lxmf_destination_hash"),
+        )
+
+    def _render_tree(
+        self,
+        devices: list[MeshDevice],
+        unread_counts: dict[str, int],
+        cascade: Any,
+        rbac: Any,
+    ) -> None:
+        """Rebuild the tree widget with device data. Called after async fetch."""
 
         # Restore cursor position
         selected_identity: str | None = None
@@ -261,12 +268,11 @@ class MeshDeviceTree(Tree[str]):
         status = status_syms.get(device.status, f"[{cascade.dim}]?[/]")
         name = f"[{cascade.bright} bold]{device.name}[/]"
 
-        # Role badge — use pre-loaded rbac if available, no extra disk read
+        # Role badge — use pre-loaded rbac (no disk fallback)
         role_badge = ""
         try:
             if rbac is None:
-                from styrened.services.config import load_core_config
-                rbac = load_core_config().rbac
+                return f"{status} {name}  {last_seen}{unread_text}"
             role = rbac.resolve_role(device.identity_hash)
             if role >= Role.ADMIN:
                 role_badge = f" [{cascade.bright}][ADMIN][/]"
@@ -337,7 +343,7 @@ class MeshDeviceTree(Tree[str]):
         likely running an older version without /meta support, or are
         unreachable over direct link.
         """
-        from styrened.services.direct_link import META_MAX_RETRIES
+        _META_MAX_RETRIES = 3
         for device in devices:
             if not device.identity_hash or not device.destination_hash:
                 continue
@@ -346,7 +352,7 @@ class MeshDeviceTree(Tree[str]):
                 continue  # already have it
             if ih in self._meta_pending:
                 continue  # in-flight
-            if self._meta_fail_count.get(ih, 0) >= META_MAX_RETRIES:
+            if self._meta_fail_count.get(ih, 0) >= _META_MAX_RETRIES:
                 continue  # gave up
             self._meta_pending.add(ih)
             self._fetch_meta(device.destination_hash, ih)
@@ -363,9 +369,7 @@ class MeshDeviceTree(Tree[str]):
         logger = logging.getLogger(__name__)
         try:
             app: StyreneApp = self.app  # type: ignore[assignment]
-            bridge = app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
-            if bridge is None:
-                return
+            bridge = app.services.bridge
             meta = await bridge.datalink_meta(destination_hash)
             if meta:
                 self._cache_put(self._meta_cache, identity_hash, meta)
@@ -401,13 +405,8 @@ class MeshDeviceTree(Tree[str]):
         Only OTHER nodes are updated — MY MESH node labels are left intact.
         """
         try:
-            # Load RBAC once for the walk
-            rbac = None
-            try:
-                from styrened.services.config import load_core_config
-                rbac = load_core_config().rbac
-            except Exception:
-                pass
+            # Use cached RBAC from last _async_load_data (avoid sync IPC call)
+            rbac = getattr(self, "_last_rbac", None)
 
             cascade = get_color_cascade()
             for node in self._tree_walk(self.root):
@@ -427,21 +426,14 @@ class MeshDeviceTree(Tree[str]):
             pass
 
     def _device_by_destination_hash(self, destination_hash: str) -> MeshDevice | None:
-        """Look up a MeshDevice by destination_hash from live + stored nodes.
+        """Look up a MeshDevice by destination_hash from the device cache.
 
         Note: node.data stores destination_hash.  Do NOT pass identity_hash
         here — use _is_my_mesh(device) to check RBAC membership instead.
+
+        Uses the last-loaded device list rather than hitting IPC synchronously.
         """
-        try:
-            from styrened.services.node_store import get_node_store
-            nodes = get_node_store().get_styrene_nodes()
-            live = discover_devices()
-            # Key by destination_hash to match what node.data stores
-            all_devices = {n.destination_hash: n for n in nodes}
-            all_devices.update({n.destination_hash: n for n in live})
-            return all_devices.get(destination_hash)
-        except Exception:
-            return None
+        return self._device_cache.get(destination_hash)
 
     def request_info_for_selected(self) -> str | None:
         """Fire an /info request for the currently selected OTHER node.
@@ -475,9 +467,7 @@ class MeshDeviceTree(Tree[str]):
         logger = logging.getLogger(__name__)
         try:
             app: StyreneApp = self.app  # type: ignore[assignment]
-            bridge = app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
-            if bridge is None:
-                return
+            bridge = app.services.bridge
             info = await bridge.datalink_info(destination_hash)
             # Store result under identity_hash — None = declined (not an error)
             self._cache_put(self._info_cache, identity_hash, info)
@@ -512,7 +502,7 @@ class MeshDeviceTree(Tree[str]):
 
     def refresh_data(self) -> None:
         """Refresh device data (preserves meta/info caches)."""
-        self._load_data()
+        self.run_worker(self._async_load_data(), group="tree-load")
         self.refresh(layout=True)
 
 
@@ -532,9 +522,9 @@ class DashboardScreen(Screen[None]):
 
     @property
     def _ipc_bridge(self) -> Any:
-        """Get IPCBridge from app lifecycle."""
+        """Get IPCBridge via typed services protocol."""
         try:
-            return self.app._lifecycle.ipc_bridge  # type: ignore[attr-defined]
+            return self.app.services.bridge  # type: ignore[union-attr]
         except Exception:
             return None
 
@@ -569,20 +559,13 @@ class DashboardScreen(Screen[None]):
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
 
     def _retry_hub_connection(self) -> None:
-        """Periodically retry hub connection if not connected."""
-        try:
-            from styrened.services.hub_connection import get_hub_connection
-            from styrened.tui.services.config import load_config
+        """Periodically retry hub connection if not connected.
 
-            config = load_config()
-            if config.reticulum.hub_enabled and config.reticulum.hub_address:
-                hub_connection = get_hub_connection()
-                hub_connection.set_announce_interval(config.reticulum.hub_announce_interval)
-
-                if not hub_connection.is_connected:
-                    hub_connection.connect(config.reticulum.hub_address)
-        except Exception:
-            pass
+        Hub connection is managed by the daemon — we just check status via IPC.
+        The daemon handles reconnection automatically.
+        """
+        # Hub reconnection is daemon-side; the TUI just refreshes status.
+        pass
 
     def _on_device_discovered(self, device: MeshDevice) -> None:
         """Handle newly discovered device - refresh table with debounce."""
