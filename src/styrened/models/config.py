@@ -734,4 +734,10 @@ class CoreConfig:
     page_server: PageServerConfig = field(default_factory=PageServerConfig)
     pqc: PQCConfig = field(default_factory=PQCConfig)
     mesh_vpn: MeshVPNConfig = field(default_factory=MeshVPNConfig)
+    relay: "RelayConfig" = field(default_factory=lambda: _default_relay_config())
     rbac: RBACPolicy = field(default_factory=RBACPolicy)
+
+
+def _default_relay_config():
+    from styrened.models.relay import RelayConfig
+    return RelayConfig()
