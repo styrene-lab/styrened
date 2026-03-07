@@ -1,8 +1,7 @@
 """Tests for RBAC-based authorization in RPCServer.
 
-Verifies that when an RBACPolicy is provided, RPCServer uses capability
-checks (has_capability) instead of legacy authorized_identities / dangerous
-commands gating.  Also verifies legacy fallback when rbac_policy=None.
+Verifies that RPCServer uses capability checks (has_capability) for
+authorization.  RBAC policy is always present (no legacy fallback).
 """
 
 from __future__ import annotations
@@ -319,9 +318,9 @@ class TestServerNotRunning:
         srv._handlers[StyreneMessageType.PING].assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_legacy_mode_not_running(self):
+    async def test_default_policy_not_running(self):
         proto = _make_protocol()
-        srv = RPCServer(proto, rbac_policy=None)
+        srv = RPCServer(proto)  # default RBACPolicy()
         srv._running = False
         srv._handlers[StyreneMessageType.PING] = MagicMock()
 

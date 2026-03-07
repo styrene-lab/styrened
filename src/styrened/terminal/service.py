@@ -255,7 +255,7 @@ class TerminalService:
         allowed_shells: set[str] | None = None,
         allowed_commands: set[str] | None = None,
         disable_command_validation: bool = False,
-        rbac_policy: "RBACPolicy | None" = None,
+        rbac_policy: "RBACPolicy | None" = None,  # None → default RBACPolicy()
     ):
         """Initialize terminal service.
 

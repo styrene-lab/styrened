@@ -1593,10 +1593,8 @@ class StyreneDaemon:
 
             self._relay_service = RelayService(relay_config)
 
-            # Inject RBAC policy if available
-            rbac_policy = getattr(self.config, "rbac", None)
-            if rbac_policy is not None and hasattr(self._relay_service, "set_rbac_policy"):
-                self._relay_service.set_rbac_policy(rbac_policy)
+            # Inject RBAC policy
+            self._relay_service.set_rbac_policy(self.config.rbac)
 
             logger.info(
                 "Relay service initialized (enabled=%s, max_sessions=%d)",

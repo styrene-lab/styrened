@@ -120,26 +120,8 @@ class TestLXMFServiceBlocklist:
                 assert row[0] == 0
                 assert row[1] is None
 
-    def test_is_blocked_true(self, db_engine):
-        engine, db_path = db_engine
-        from styrened.services.lxmf_service import LXMFService
-
-        svc = LXMFService()
-        with patch("styrened.paths") as mock_paths:
-            mock_paths.messages_db.return_value = db_path
-            svc.block_peer("deadbeef12345678")
-            assert svc._is_blocked("deadbeef12345678") is True
-
-    def test_is_blocked_false(self, db_engine):
-        _, db_path = db_engine
-        from styrened.services.lxmf_service import LXMFService
-
-        svc = LXMFService()
-        with patch("styrened.paths") as mock_paths:
-            mock_paths.messages_db.return_value = db_path
-            assert svc._is_blocked("deadbeef12345678") is False
-
-    def test_is_blocked_uses_cache(self, db_engine):
+    def test_block_peer_syncs_to_rbac(self, db_engine):
+        """block_peer adds identity to RBAC blocked set."""
         _, db_path = db_engine
         from styrened.services.lxmf_service import LXMFService
 
@@ -147,14 +129,19 @@ class TestLXMFServiceBlocklist:
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
             svc.block_peer("deadbeef12345678")
-            # Cache loaded
-            assert svc._is_blocked("deadbeef12345678") is True
-            # Mutate cache directly to prove it's cached
-            svc._blocked_peers.discard("deadbeef12345678")
-            assert svc._is_blocked("deadbeef12345678") is False
-            # Invalidate reloads
-            svc.invalidate_blocklist()
-            assert svc._is_blocked("deadbeef12345678") is True
+            assert "deadbeef12345678" in svc._rbac_policy.blocked
+
+    def test_unblock_peer_removes_from_rbac(self, db_engine):
+        """unblock_peer removes identity from RBAC blocked set."""
+        _, db_path = db_engine
+        from styrened.services.lxmf_service import LXMFService
+
+        svc = LXMFService()
+        with patch("styrened.paths") as mock_paths:
+            mock_paths.messages_db.return_value = db_path
+            svc.block_peer("deadbeef12345678")
+            svc.unblock_peer("deadbeef12345678")
+            assert "deadbeef12345678" not in svc._rbac_policy.blocked
 
     def test_get_blocked_peers(self, db_engine):
         _, db_path = db_engine
@@ -231,44 +218,11 @@ class TestLXMFMessageDropped:
             callback.assert_called_once_with(msg)
 
 
-class TestBlocklistPrefixMatching:
-    """_is_blocked supports prefix matching for short hashes in config."""
+class TestRBACPrefixBlocking:
+    """RBAC blocked list supports prefix matching for short hashes."""
 
-    def test_short_hash_blocks_full_hash(self, db_engine):
-        """Config entry 'ca3e9813' blocks source 'ca3e981348d3bb48...'."""
-        _, db_path = db_engine
-        from styrened.services.lxmf_service import LXMFService
-
-        svc = LXMFService()
-        with patch("styrened.paths") as mock_paths:
-            mock_paths.messages_db.return_value = db_path
-            svc.block_peer("ca3e9813")
-            assert svc._is_blocked("ca3e981348d3bb48aabbccdd") is True
-
-    def test_full_hash_blocks_full_hash(self, db_engine):
-        """Exact match still works."""
-        _, db_path = db_engine
-        from styrened.services.lxmf_service import LXMFService
-
-        svc = LXMFService()
-        with patch("styrened.paths") as mock_paths:
-            mock_paths.messages_db.return_value = db_path
-            svc.block_peer("ca3e981348d3bb48aabbccdd")
-            assert svc._is_blocked("ca3e981348d3bb48aabbccdd") is True
-
-    def test_short_hash_does_not_block_different_prefix(self, db_engine):
-        """'ca3e9813' does NOT block 'deadbeef...'."""
-        _, db_path = db_engine
-        from styrened.services.lxmf_service import LXMFService
-
-        svc = LXMFService()
-        with patch("styrened.paths") as mock_paths:
-            mock_paths.messages_db.return_value = db_path
-            svc.block_peer("ca3e9813")
-            assert svc._is_blocked("deadbeef12345678") is False
-
-    def test_message_dropped_with_prefix_block(self, db_engine):
-        """LXMF message from full hash is dropped when short hash is blocked."""
+    def test_short_hash_blocks_full_hash_via_rbac(self, db_engine):
+        """Blocking 'ca3e9813' drops messages from 'ca3e981348d3bb48...' via RBAC."""
         _, db_path = db_engine
         from styrened.services.lxmf_service import LXMFService
 
@@ -278,26 +232,47 @@ class TestBlocklistPrefixMatching:
             svc.block_peer("ca3e9813")
 
             msg = MagicMock()
-            # Full hash as bytes — .hex() returns full string
             msg.source_hash = bytes.fromhex("ca3e981348d3bb48")
-
             callback = MagicMock()
             svc._message_callbacks = [(callback, False)]
             svc._handle_lxmf_message(msg)
             callback.assert_not_called()
 
-    def test_very_short_prefix_requires_minimum_length(self, db_engine):
-        """Single-char prefix shouldn't block half the network."""
+    def test_exact_hash_blocks_via_rbac(self, db_engine):
+        """Exact hash match blocks via RBAC."""
+        from styrened.services.lxmf_service import LXMFService
+        from styrened.models.rbac import RBACPolicy, Role
+
+        svc = LXMFService()
+        source = "ca3e981348d3bb48"
+        policy = RBACPolicy(default_role=Role.PEER, blocked=[source])
+        svc.set_rbac_policy(policy)
+
+        msg = MagicMock()
+        msg.source_hash = bytes.fromhex(source)
+        callback = MagicMock()
+        svc._message_callbacks = [(callback, False)]
+        svc._handle_lxmf_message(msg)
+        callback.assert_not_called()
+
+    def test_short_hash_does_not_block_different_prefix(self, db_engine):
+        """'ca3e9813' does NOT block 'deadbeef...' via RBAC."""
         _, db_path = db_engine
         from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            # 2-char prefix — this is technically valid but aggressive
-            svc.block_peer("ca")
-            # Still matches because startswith works
-            assert svc._is_blocked("ca3e981348d3bb48") is True
+            svc.block_peer("ca3e9813")
+
+            msg = MagicMock()
+            msg.source_hash = bytes.fromhex("deadbeef12345678")
+            msg.content = b'{"type": "chat", "message": "hello"}'
+            msg.fields = {}
+            callback = MagicMock()
+            svc._message_callbacks = [(callback, True)]
+            svc._handle_lxmf_message(msg)
+            callback.assert_called_once_with(msg)
 
 
 class TestRBACBlockedConfig:

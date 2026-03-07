@@ -104,12 +104,9 @@ class LXMFService:
         # raw_mode=False means callback receives (source_hash, payload_dict)
         self._message_callbacks: list[tuple[Callable, bool]] = []
 
-        # In-memory blocklist cache (set of peer_hash strings).
-        # Loaded from DB on first check, invalidated by block/unblock IPC.
-        self._blocked_peers: set[str] | None = None
-
-        # RBAC policy reference (injected by daemon after init)
-        self._rbac_policy: "RBACPolicy | None" = None
+        # RBAC policy reference (injected by daemon after init, always present)
+        from styrened.models.rbac import RBACPolicy as _RBACPolicy
+        self._rbac_policy: "RBACPolicy" = _RBACPolicy()
 
     def set_rbac_policy(self, policy: "RBACPolicy") -> None:
         """Inject RBAC policy for unified authorization checks.
@@ -990,27 +987,9 @@ class LXMFService:
             logger.warning(f"Failed to load blocklist: {e}")
             return set()
 
-    def _is_blocked(self, source_hash: str) -> bool:
-        """Check if a peer is blocked. Uses in-memory cache.
-
-        Supports both exact and prefix matching — config files may use
-        short hashes (e.g. 'ca3e9813') while LXMF delivers full hashes.
-        """
-        if self._blocked_peers is None:
-            self._blocked_peers = self._load_blocklist()
-        if source_hash in self._blocked_peers:
-            return True
-        # Prefix match: blocked entry 'ca3e9813' matches source 'ca3e981348d3bb48...'
-        for blocked in self._blocked_peers:
-            if len(blocked) < len(source_hash) and source_hash.startswith(blocked):
-                return True
-            if len(source_hash) < len(blocked) and blocked.startswith(source_hash):
-                return True
-        return False
-
     def invalidate_blocklist(self) -> None:
-        """Clear the in-memory blocklist cache (call after block/unblock)."""
-        self._blocked_peers = None
+        """No-op — retained for API compatibility. Blocking is via RBAC."""
+        pass
 
     def block_peer(self, peer_hash: str) -> bool:
         """Block a peer — all future messages silently dropped.
@@ -1051,9 +1030,7 @@ class LXMFService:
                     )
                 conn.commit()
             self.invalidate_blocklist()
-            # Sync to RBAC policy if available
-            if self._rbac_policy is not None:
-                self._rbac_policy.block(peer_hash)
+            self._rbac_policy.block(peer_hash)
             logger.info(f"Blocked peer {peer_hash[:16]}...")
             return True
         except Exception as e:
@@ -1081,9 +1058,7 @@ class LXMFService:
                 )
                 conn.commit()
             self.invalidate_blocklist()
-            # Sync to RBAC policy if available
-            if self._rbac_policy is not None:
-                self._rbac_policy.unblock(peer_hash)
+            self._rbac_policy.unblock(peer_hash)
             logger.info(f"Unblocked peer {peer_hash[:16]}...")
             return True
         except Exception as e:
@@ -1130,13 +1105,9 @@ class LXMFService:
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
 
-        # Check if sender is blocked — RBAC policy or legacy contacts DB
-        if self._rbac_policy is not None:
-            if self._rbac_policy.resolve_role(source_hash) == Role.BLOCKED:
-                logger.info(f"Dropped message from blocked peer {source_hash[:16]}... (RBAC)")
-                return
-        elif self._is_blocked(source_hash):
-            logger.info(f"Dropped message from blocked peer {source_hash[:16]}...")
+        # Check if sender is blocked via RBAC policy
+        if self._rbac_policy.resolve_role(source_hash) == Role.BLOCKED:
+            logger.info(f"Dropped message from blocked peer {source_hash[:16]}... (RBAC)")
             return
 
         # Normalize message content for non-raw callbacks

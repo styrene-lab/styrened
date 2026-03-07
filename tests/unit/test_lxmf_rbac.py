@@ -87,29 +87,28 @@ class TestLXMFRBACPeerAllowsMessages:
         callback.assert_called_once_with(mock_message)
 
 
-class TestLXMFLegacyFallback:
-    """When _rbac_policy is None, legacy _is_blocked is used."""
+class TestLXMFDefaultRBACPolicy:
+    """Default RBACPolicy (PEER default role) allows all non-blocked traffic."""
 
-    def test_legacy_blocked_drops_message(self, lxmf_service, mock_message):
-        """Legacy blocklist still works when no RBAC policy is set."""
-        assert lxmf_service._rbac_policy is None
-        source_hex = mock_message.source_hash.hex()
-        lxmf_service._blocked_peers = {source_hex}
-
-        lxmf_service._handle_lxmf_message(mock_message)
-
-        callback = lxmf_service._message_callbacks[0][0]
-        callback.assert_not_called()
-
-    def test_legacy_unblocked_allows_message(self, lxmf_service, mock_message):
-        """Legacy unblocked peer passes through when no RBAC policy."""
-        assert lxmf_service._rbac_policy is None
-        lxmf_service._blocked_peers = set()
+    def test_default_policy_allows_messages(self, lxmf_service, mock_message):
+        """Default RBACPolicy with PEER default role allows messages through."""
+        # lxmf_service starts with a default RBACPolicy()
+        assert lxmf_service._rbac_policy is not None
 
         lxmf_service._handle_lxmf_message(mock_message)
 
         callback = lxmf_service._message_callbacks[0][0]
         callback.assert_called_once_with(mock_message)
+
+    def test_blocked_on_default_policy_drops(self, lxmf_service, mock_message):
+        """Blocking a peer on the default policy drops messages."""
+        source_hex = mock_message.source_hash.hex()
+        lxmf_service._rbac_policy.block(source_hex)
+
+        lxmf_service._handle_lxmf_message(mock_message)
+
+        callback = lxmf_service._message_callbacks[0][0]
+        callback.assert_not_called()
 
 
 class TestBlockUnblockSyncsRBAC:
@@ -149,9 +148,8 @@ class TestBlockUnblockSyncsRBAC:
 
         assert peer not in rbac_policy.blocked
 
-    def test_block_peer_without_rbac_no_error(self, lxmf_service):
-        """block_peer with no RBAC policy doesn't crash."""
-        assert lxmf_service._rbac_policy is None
+    def test_block_peer_always_syncs_to_rbac(self, lxmf_service):
+        """block_peer always syncs to the default RBAC policy."""
         peer = "ca3e981348d3bb48abcdef1234567890"
 
         with patch("styrened.paths.messages_db", return_value="/tmp/fake.db"), \
@@ -164,6 +162,7 @@ class TestBlockUnblockSyncsRBAC:
             result = lxmf_service.block_peer(peer)
 
         assert result is True
+        assert peer in lxmf_service._rbac_policy.blocked
 
 
 class TestSetRBACPolicy:
@@ -171,7 +170,6 @@ class TestSetRBACPolicy:
 
     def test_sets_policy(self, lxmf_service, rbac_policy):
         """Policy is stored on the service."""
-        assert lxmf_service._rbac_policy is None
         lxmf_service.set_rbac_policy(rbac_policy)
         assert lxmf_service._rbac_policy is rbac_policy
 
