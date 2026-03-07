@@ -454,141 +454,7 @@ class TestPingHandler:
         assert call_args.kwargs["request_id"] == request_id
 
 
-class TestAuthorization:
-    """Tests for RPC authorization security."""
 
-    @pytest.fixture
-    def mock_protocol(self) -> MagicMock:
-        """Create a mock StyreneProtocol."""
-        mock = MagicMock()
-        mock.register_handler = MagicMock()
-        mock.send_typed_message = AsyncMock()
-        return mock
-
-    def test_is_authorized_allows_known_identity(self, mock_protocol: MagicMock) -> None:
-        """Known identity in authorized set should be allowed."""
-        server = RPCServer(
-            mock_protocol,
-            authorized_identities={"abc123", "def456"},
-        )
-
-        assert server._is_authorized("abc123") is True
-        assert server._is_authorized("def456") is True
-
-    def test_is_authorized_rejects_unknown_identity(self, mock_protocol: MagicMock) -> None:
-        """Unknown identity should be rejected when authorized set is non-empty."""
-        server = RPCServer(
-            mock_protocol,
-            authorized_identities={"abc123"},
-        )
-
-        assert server._is_authorized("unknown_hash") is False
-        assert server._is_authorized("def456") is False
-
-    def test_empty_authorized_identities_allows_all(self, mock_protocol: MagicMock) -> None:
-        """Empty authorized set allows all identities (with warning logged at init)."""
-        server = RPCServer(mock_protocol, authorized_identities=set())
-
-        # Any identity should be allowed when no authorization configured
-        assert server._is_authorized("any_hash") is True
-        assert server._is_authorized("another_hash") is True
-
-    def test_none_authorized_identities_allows_all(self, mock_protocol: MagicMock) -> None:
-        """None authorized_identities (default) allows all identities."""
-        server = RPCServer(mock_protocol)
-
-        assert server._is_authorized("any_hash") is True
-
-    def test_authorization_file_loading_valid_format(self, mock_protocol: MagicMock) -> None:
-        """Authorized identities should be loaded from file."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("abc123\n")
-            f.write("def456\n")
-            f.write("ghi789\n")
-            f.flush()
-
-            server = RPCServer(
-                mock_protocol,
-                authorized_identities_file=Path(f.name),
-            )
-
-            assert "abc123" in server._authorized_identities
-            assert "def456" in server._authorized_identities
-            assert "ghi789" in server._authorized_identities
-            assert len(server._authorized_identities) == 3
-
-    def test_authorization_file_loading_with_comments(self, mock_protocol: MagicMock) -> None:
-        """Comments and empty lines should be ignored in auth file."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("# This is a comment\n")
-            f.write("abc123\n")
-            f.write("\n")
-            f.write("# Another comment\n")
-            f.write("def456  # inline comment ignored (takes first token)\n")
-            f.write("   \n")
-            f.flush()
-
-            server = RPCServer(
-                mock_protocol,
-                authorized_identities_file=Path(f.name),
-            )
-
-            assert "abc123" in server._authorized_identities
-            assert "def456" in server._authorized_identities
-            assert len(server._authorized_identities) == 2
-
-    def test_authorization_file_missing_handled_gracefully(self, mock_protocol: MagicMock) -> None:
-        """Missing authorization file should not crash, just log warning."""
-        server = RPCServer(
-            mock_protocol,
-            authorized_identities_file=Path("/nonexistent/path/identities.txt"),
-        )
-
-        # Server should be created, just with empty authorized set
-        assert len(server._authorized_identities) == 0
-
-    def test_authorization_combined_file_and_set(self, mock_protocol: MagicMock) -> None:
-        """File identities should be added to existing authorized set."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("file_identity\n")
-            f.flush()
-
-            server = RPCServer(
-                mock_protocol,
-                authorized_identities={"preset_identity"},
-                authorized_identities_file=Path(f.name),
-            )
-
-            assert "preset_identity" in server._authorized_identities
-            assert "file_identity" in server._authorized_identities
-
-    def test_public_commands_constant(self) -> None:
-        """PUBLIC_RPC_COMMANDS should contain only safe read-only commands."""
-        assert StyreneMessageType.PING in PUBLIC_RPC_COMMANDS
-        assert StyreneMessageType.STATUS_REQUEST in PUBLIC_RPC_COMMANDS
-        # Dangerous commands should NOT be public
-        assert StyreneMessageType.EXEC not in PUBLIC_RPC_COMMANDS
-        assert StyreneMessageType.REBOOT not in PUBLIC_RPC_COMMANDS
-        assert StyreneMessageType.CONFIG_UPDATE not in PUBLIC_RPC_COMMANDS
-
-    def test_dangerous_commands_constant(self) -> None:
-        """DANGEROUS_RPC_COMMANDS should contain commands requiring explicit enable."""
-        assert StyreneMessageType.EXEC in DANGEROUS_RPC_COMMANDS
-        assert StyreneMessageType.REBOOT in DANGEROUS_RPC_COMMANDS
-        assert StyreneMessageType.CONFIG_UPDATE in DANGEROUS_RPC_COMMANDS
-        # Safe commands should NOT be dangerous
-        assert StyreneMessageType.PING not in DANGEROUS_RPC_COMMANDS
-        assert StyreneMessageType.STATUS_REQUEST not in DANGEROUS_RPC_COMMANDS
-
-    def test_dangerous_commands_disabled_by_default(self, mock_protocol: MagicMock) -> None:
-        """Dangerous commands should be disabled by default."""
-        server = RPCServer(mock_protocol)
-        assert server._enable_dangerous_commands is False
-
-    def test_dangerous_commands_can_be_enabled(self, mock_protocol: MagicMock) -> None:
-        """Dangerous commands can be explicitly enabled."""
-        server = RPCServer(mock_protocol, enable_dangerous_commands=True)
-        assert server._enable_dangerous_commands is True
 
 
 class TestRateLimiting:
@@ -809,8 +675,6 @@ class TestSecurityIntegration:
         """Dangerous commands should be rejected when not enabled."""
         server = RPCServer(
             mock_protocol,
-            enable_dangerous_commands=False,  # Default
-            authorized_identities={"abc123"},
         )
         server.start()
 
@@ -837,8 +701,6 @@ class TestSecurityIntegration:
         """Non-public commands should be rejected for unauthorized identities."""
         server = RPCServer(
             mock_protocol,
-            authorized_identities={"authorized_id"},
-            enable_dangerous_commands=True,
         )
         server.start()
 
@@ -865,7 +727,6 @@ class TestSecurityIntegration:
         """Public commands should be allowed without authorization."""
         server = RPCServer(
             mock_protocol,
-            authorized_identities={"some_other_id"},  # Not the requester
         )
         server.start()
 
@@ -932,10 +793,11 @@ class TestSecurityIntegration:
     @pytest.mark.asyncio
     async def test_replay_request_silently_dropped(self, mock_protocol: MagicMock) -> None:
         """Replay requests should be silently dropped (no error response)."""
+        from styrened.models.rbac import RBACPolicy, Role, RosterEntry
+        policy = RBACPolicy(roster={"abc123": RosterEntry(identity_hash="abc123", role=Role.ADMIN)})
         server = RPCServer(
             mock_protocol,
-            authorized_identities={"abc123"},
-            enable_dangerous_commands=True,
+            rbac_policy=policy,
         )
         server.start()
 

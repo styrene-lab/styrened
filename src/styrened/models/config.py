@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from styrened.models.rbac import RBACPolicy
+
 # -----------------------------------------------------------------------------
 # Enums
 # -----------------------------------------------------------------------------
@@ -325,19 +327,16 @@ class WebAuthConfig:
     remote client proves possession of an authorized RNS identity by
     signing a server-issued nonce, then receives a session token.
 
+    Authorization is handled by the RBAC policy on CoreConfig — identities
+    need WEB_READ capability to authenticate and WEB_WRITE for mutations.
+
     Attributes:
         enabled: Whether to require authentication for API access.
-        authorized_identities: Set of 32-char hex identity hashes allowed to authenticate.
-            If empty and allow_unauthenticated is False, only localhost is allowed.
-        allow_unauthenticated: Skip whitelist check — any identity that completes
-            the challenge-response is granted a session.
         exempt_localhost: Requests from loopback addresses bypass auth entirely.
         session_ttl: Session token lifetime in seconds (default 24 hours).
     """
 
     enabled: bool = False
-    authorized_identities: set[str] = field(default_factory=set)
-    allow_unauthenticated: bool = False
     exempt_localhost: bool = True
     session_ttl: int = 86400
 
@@ -611,12 +610,11 @@ class TerminalConfig:
     - LXMF control plane for session establishment/teardown
     - RNS Link data plane for I/O streaming
 
+    Authorization is handled by the RBAC policy on CoreConfig — identities
+    need TERMINAL_RESTRICTED or TERMINAL_FULL capability.
+
     Attributes:
         enabled: Whether to enable terminal service.
-        authorized_identities: Set of identity hashes allowed to connect.
-            If empty and allow_unauthenticated=False, all connections rejected.
-        allow_unauthenticated: Allow connections from any identity.
-            WARNING: This grants remote shell access - use with caution.
         default_shell: Shell to spawn for sessions (default: user's shell).
         session_idle_timeout: Seconds of inactivity before session close (0=disabled).
         max_sessions_per_identity: Maximum concurrent sessions per identity.
@@ -625,8 +623,6 @@ class TerminalConfig:
     """
 
     enabled: bool = False
-    authorized_identities: set[str] = field(default_factory=set)
-    allow_unauthenticated: bool = False
     default_shell: str | None = None
     allowed_shells: set[str] = field(default_factory=set)  # Empty = use defaults
     session_idle_timeout: int = 3600  # 1 hour default
@@ -738,5 +734,4 @@ class CoreConfig:
     page_server: PageServerConfig = field(default_factory=PageServerConfig)
     pqc: PQCConfig = field(default_factory=PQCConfig)
     mesh_vpn: MeshVPNConfig = field(default_factory=MeshVPNConfig)
-    banned_peers: list[str] = field(default_factory=list)
-    rbac: "RBACPolicy | None" = None  # Lazy import to avoid circular deps
+    rbac: RBACPolicy = field(default_factory=RBACPolicy)

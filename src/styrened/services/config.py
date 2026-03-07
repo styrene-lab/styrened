@@ -181,12 +181,11 @@ def get_default_core_config() -> CoreConfig:
     return get_profile_defaults(Profile.OPERATOR)
 
 
-def _parse_rbac(data: dict, config: CoreConfig):  # -> RBACPolicy
-    """Parse RBAC policy from config data, with legacy field migration.
+def _parse_rbac(data: dict):  # -> RBACPolicy
+    """Parse RBAC policy from config data.
 
     Args:
         data: Raw YAML config dict.
-        config: Partially-loaded CoreConfig (for legacy field migration).
 
     Returns:
         RBACPolicy instance.
@@ -237,39 +236,6 @@ def _parse_rbac(data: dict, config: CoreConfig):  # -> RBACPolicy
         for h in rbac_data.get("blocked", [])
         if h
     ]
-
-    # --- Legacy field migration ---
-    # Migrate terminal.authorized_identities → admin
-    for hash_hex in config.terminal.authorized_identities:
-        h = hash_hex.lower()
-        if h not in roster:
-            roster[h] = RosterEntry(
-                identity_hash=h,
-                role=Role.ADMIN,
-                label="(migrated: terminal.authorized_identities)",
-            )
-            logger.info(
-                f"[RBAC] Migrated terminal identity {h[:16]}... to admin role"
-            )
-
-    # Migrate api.auth.authorized_identities → monitor
-    for hash_hex in config.api.auth.authorized_identities:
-        h = hash_hex.lower()
-        if h not in roster:
-            roster[h] = RosterEntry(
-                identity_hash=h,
-                role=Role.MONITOR,
-                label="(migrated: api.auth.authorized_identities)",
-            )
-            logger.info(
-                f"[RBAC] Migrated web API identity {h[:16]}... to monitor role"
-            )
-
-    # Migrate banned_peers → blocked
-    for prefix in config.banned_peers:
-        p = prefix.lower()
-        if p not in blocked:
-            blocked.append(p)
 
     return RBACPolicy(default_role=default_role, roster=roster, blocked=blocked)
 
@@ -498,18 +464,9 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             auth = api["auth"]
             config.api.auth = WebAuthConfig(
                 enabled=_parse_bool(auth.get("enabled", False)),
-                allow_unauthenticated=_parse_bool(auth.get("allow_unauthenticated", False)),
                 exempt_localhost=_parse_bool(auth.get("exempt_localhost", True)),
                 session_ttl=int(auth.get("session_ttl", 86400)),
             )
-            if "authorized_identities" in auth and isinstance(auth["authorized_identities"], list):
-                authorized = set()
-                for ident in auth["authorized_identities"]:
-                    if isinstance(ident, str) and len(ident) == 32 and all(
-                        c in "0123456789abcdef" for c in ident.lower()
-                    ):
-                        authorized.add(ident)
-                config.api.auth.authorized_identities = authorized
 
     # Parse identity section (ecosystem appearance + provider)
     if "identity" in data and isinstance(data["identity"], dict):
@@ -634,8 +591,6 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
         term = data["terminal"]
         if "enabled" in term:
             config.terminal.enabled = _parse_bool(term["enabled"])
-        if "allow_unauthenticated" in term:
-            config.terminal.allow_unauthenticated = _parse_bool(term["allow_unauthenticated"])
         if "default_shell" in term and term["default_shell"]:
             config.terminal.default_shell = str(term["default_shell"])
         # Parse allowed_shells as a set of paths
@@ -653,14 +608,6 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             config.terminal.max_total_sessions = int(term["max_total_sessions"])
         if "rate_limit_requests" in term:
             config.terminal.rate_limit_requests = int(term["rate_limit_requests"])
-        # Parse authorized_identities as a set of hex strings
-        if "authorized_identities" in term and isinstance(term["authorized_identities"], list):
-            authorized = set()
-            for ident in term["authorized_identities"]:
-                if isinstance(ident, str) and len(ident) == 32:
-                    authorized.add(ident)
-            config.terminal.authorized_identities = authorized
-
     # Parse page_server section
     if "page_server" in data and isinstance(data["page_server"], dict):
         ps = data["page_server"]
@@ -709,12 +656,8 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
             endpoint=str(mvpn.get("endpoint", "")),
         )
 
-    # Parse banned_peers list
-    if "banned_peers" in data and isinstance(data["banned_peers"], list):
-        config.banned_peers = [str(h) for h in data["banned_peers"] if h]
-
     # Parse RBAC policy
-    config.rbac = _parse_rbac(data, config)
+    config.rbac = _parse_rbac(data)
 
     return config
 
@@ -851,12 +794,9 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     # API section
     auth_dict: dict[str, Any] = {
         "enabled": config.api.auth.enabled,
-        "allow_unauthenticated": config.api.auth.allow_unauthenticated,
         "exempt_localhost": config.api.auth.exempt_localhost,
         "session_ttl": config.api.auth.session_ttl,
     }
-    if config.api.auth.authorized_identities:
-        auth_dict["authorized_identities"] = sorted(config.api.auth.authorized_identities)
 
     api_dict: dict[str, Any] = {
         "enabled": config.api.enabled,
@@ -913,7 +853,6 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
     # Terminal section
     terminal_dict: dict[str, Any] = {
         "enabled": config.terminal.enabled,
-        "allow_unauthenticated": config.terminal.allow_unauthenticated,
         "session_idle_timeout": config.terminal.session_idle_timeout,
         "max_sessions_per_identity": config.terminal.max_sessions_per_identity,
         "max_total_sessions": config.terminal.max_total_sessions,
@@ -923,9 +862,6 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
         terminal_dict["default_shell"] = config.terminal.default_shell
     if config.terminal.allowed_shells:
         terminal_dict["allowed_shells"] = sorted(config.terminal.allowed_shells)
-    if config.terminal.authorized_identities:
-        terminal_dict["authorized_identities"] = sorted(config.terminal.authorized_identities)
-
     # Page server section
     page_server_dict: dict[str, Any] = {
         "enabled": config.page_server.enabled,
@@ -966,28 +902,26 @@ def _serialize_config(config: CoreConfig) -> dict[str, Any]:
             "gateway": config.mesh_vpn.gateway,
             "endpoint": config.mesh_vpn.endpoint,
         },
-        "banned_peers": config.banned_peers,
     }
 
-    # Serialize RBAC policy if present
-    if config.rbac is not None:
-        rbac_roster = []
-        for entry in sorted(config.rbac.roster.values(), key=lambda e: e.identity_hash):
-            d: dict[str, Any] = {
-                "identity": entry.identity_hash,
-                "role": entry.role.name.lower(),
-            }
-            if entry.label and not entry.label.startswith("(migrated"):
-                d["label"] = entry.label
-            if entry.grants:
-                d["grants"] = sorted(entry.grants)
-            rbac_roster.append(d)
-
-        result["rbac"] = {
-            "default_role": config.rbac.default_role.name.lower(),
-            "roster": rbac_roster,
-            "blocked": config.rbac.blocked,
+    # Serialize RBAC policy
+    rbac_roster = []
+    for entry in sorted(config.rbac.roster.values(), key=lambda e: e.identity_hash):
+        d: dict[str, Any] = {
+            "identity": entry.identity_hash,
+            "role": entry.role.name.lower(),
         }
+        if entry.label:
+            d["label"] = entry.label
+        if entry.grants:
+            d["grants"] = sorted(entry.grants)
+        rbac_roster.append(d)
+
+    result["rbac"] = {
+        "default_role": config.rbac.default_role.name.lower(),
+        "roster": rbac_roster,
+        "blocked": config.rbac.blocked,
+    }
 
     return result
 
@@ -1123,16 +1057,6 @@ def validate_core_config(
                 str(config.api.auth.session_ttl),
             )
         )
-    for ident in config.api.auth.authorized_identities:
-        if len(ident) != 32:
-            errors.append(
-                ConfigFieldError(
-                    "api.auth.authorized_identities",
-                    "Each identity must be a 32-character hex hash",
-                    ident,
-                )
-            )
-
     # --- IPC ---
     if not 0 <= config.ipc.socket_mode <= 0o777:
         errors.append(
@@ -1218,37 +1142,25 @@ def validate_core_config(
                 )
             )
 
-    # --- Terminal ---
-    for ident in config.terminal.authorized_identities:
-        if len(ident) != 32:
+    # --- RBAC ---
+    for identity_hash, _entry in config.rbac.roster.items():
+        if len(identity_hash) != 32:
             errors.append(
                 ConfigFieldError(
-                    "terminal.authorized_identities",
-                    "Each identity must be a 32-character hex hash",
-                    ident,
+                    "rbac.roster",
+                    "Identity hash must be 32 hex characters",
+                    identity_hash,
                 )
             )
-
-    # --- RBAC ---
-    if config.rbac is not None:
-        for identity_hash, _entry in config.rbac.roster.items():
-            if len(identity_hash) != 32:
-                errors.append(
-                    ConfigFieldError(
-                        "rbac.roster",
-                        "Identity hash must be 32 hex characters",
-                        identity_hash,
-                    )
+    for prefix in config.rbac.blocked:
+        if len(prefix) < 4:
+            errors.append(
+                ConfigFieldError(
+                    "rbac.blocked",
+                    "Blocked prefix should be at least 4 chars to avoid collisions",
+                    prefix,
                 )
-        for prefix in config.rbac.blocked:
-            if len(prefix) < 4:
-                errors.append(
-                    ConfigFieldError(
-                        "rbac.blocked",
-                        "Blocked prefix should be at least 4 chars to avoid collisions",
-                        prefix,
-                    )
-                )
+            )
 
     # --- PQC ---
     if config.pqc.rekey_interval_hours < 1:

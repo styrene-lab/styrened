@@ -22,7 +22,7 @@ Usage (server/styrened):
 
     service = TerminalService(
         rns_service=rns_service,
-        authorized_identities={"abc123...", "def456..."},
+        rbac_policy=RBACPolicy(...),
     )
     service.start()
 

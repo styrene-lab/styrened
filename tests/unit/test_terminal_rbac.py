@@ -45,15 +45,15 @@ class TestTerminalServiceRBACParam:
         )
         assert svc._rbac_policy is policy
 
-    def test_rbac_policy_defaults_to_none(self):
-        """TerminalService without rbac_policy has _rbac_policy=None."""
+    def test_rbac_policy_defaults_to_empty(self):
+        """TerminalService without rbac_policy gets default RBACPolicy."""
         from styrened.terminal.service import TerminalService
 
         svc = TerminalService(
             rns_service=MagicMock(),
             styrene_protocol=MagicMock(),
         )
-        assert svc._rbac_policy is None
+        assert isinstance(svc._rbac_policy, RBACPolicy)
 
     def test_set_rbac_policy_method(self):
         """TerminalService has set_rbac_policy() for runtime injection."""
@@ -145,7 +145,6 @@ class TestTerminalIsAuthorizedRBAC:
         policy = RBACPolicy(default_role=Role.PEER)
         svc = self._make_service(
             rbac_policy=policy,
-            authorized_identities={"dd" * 16},  # legacy whitelist
         )
         # PEER has no terminal cap, so RBAC denies even though legacy would allow
         assert svc.is_authorized("dd" * 16) is False
@@ -177,17 +176,7 @@ class TestTerminalIsAuthorizedRBAC:
         level = svc.authorization_level("cc" * 16)
         assert level is None
 
-    def test_authorization_level_legacy_returns_restricted(self):
-        """Legacy mode returns 'restricted' for authorized identities (backward compat)."""
-        svc = self._make_service(authorized_identities={"aa" * 16})
-        level = svc.authorization_level("aa" * 16)
-        assert level == "restricted"
 
-    def test_authorization_level_legacy_returns_none_for_unauthorized(self):
-        """Legacy mode returns None for unauthorized identities."""
-        svc = self._make_service(authorized_identities={"aa" * 16})
-        level = svc.authorization_level("bb" * 16)
-        assert level is None
 
 
 # ---------------------------------------------------------------------------
@@ -243,33 +232,7 @@ class TestTerminalRBACMutationPropagation:
 # ---------------------------------------------------------------------------
 
 
-class TestTerminalIsAuthorizedLegacy:
-    """Legacy behavior preserved when rbac_policy=None."""
 
-    def _make_service(self, **kwargs):
-        from styrened.terminal.service import TerminalService
-
-        return TerminalService(
-            rns_service=MagicMock(),
-            styrene_protocol=MagicMock(),
-            **kwargs,
-        )
-
-    def test_legacy_authorized_identity(self):
-        svc = self._make_service(authorized_identities={"aa" * 16})
-        assert svc.is_authorized("aa" * 16) is True
-
-    def test_legacy_unauthorized_identity(self):
-        svc = self._make_service(authorized_identities={"aa" * 16})
-        assert svc.is_authorized("bb" * 16) is False
-
-    def test_legacy_allow_unauthenticated(self):
-        svc = self._make_service(allow_unauthenticated=True)
-        assert svc.is_authorized("cc" * 16) is True
-
-    def test_legacy_fail_closed_no_identities(self):
-        svc = self._make_service()
-        assert svc.is_authorized("dd" * 16) is False
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +258,6 @@ class TestDaemonTerminalRBACWiring:
         daemon.config = MagicMock()
         daemon.config.rbac = policy
         daemon.config.terminal = MagicMock()
-        daemon.config.terminal.authorized_identities = set()
-        daemon.config.terminal.allow_unauthenticated = False
         daemon.config.terminal.session_idle_timeout = 3600
         daemon.config.terminal.max_sessions_per_identity = 3
         daemon.config.terminal.max_total_sessions = 10
@@ -310,34 +271,3 @@ class TestDaemonTerminalRBACWiring:
         mock_ts_cls.assert_called_once()
         call_kwargs = mock_ts_cls.call_args[1]
         assert call_kwargs.get("rbac_policy") is policy
-
-    @patch("styrened.terminal.service.TerminalService")
-    @patch("styrened.services.rns_service.get_rns_service")
-    def test_no_rbac_policy_not_passed(self, mock_rns, mock_ts_cls):
-        """When config.rbac is None, rbac_policy not in kwargs (or is None)."""
-        from styrened.daemon import StyreneDaemon
-
-        mock_rns_svc = MagicMock()
-        mock_rns_svc.is_initialized = True
-        mock_rns.return_value = mock_rns_svc
-
-        daemon = MagicMock()
-        daemon.config = MagicMock()
-        daemon.config.rbac = None
-        daemon.config.terminal = MagicMock()
-        daemon.config.terminal.authorized_identities = set()
-        daemon.config.terminal.allow_unauthenticated = False
-        daemon.config.terminal.session_idle_timeout = 3600
-        daemon.config.terminal.max_sessions_per_identity = 3
-        daemon.config.terminal.max_total_sessions = 10
-        daemon.config.terminal.default_shell = None
-        daemon.config.terminal.allowed_shells = set()
-        daemon._styrene_protocol = MagicMock()
-        daemon._start_terminal_service = StyreneDaemon._start_terminal_service.__get__(daemon)
-
-        daemon._start_terminal_service()
-
-        mock_ts_cls.assert_called_once()
-        call_kwargs = mock_ts_cls.call_args[1]
-        # Either not present or explicitly None
-        assert call_kwargs.get("rbac_policy") is None

@@ -82,18 +82,6 @@ class TestGetConfig:
 
         assert config["identity"]["yubikey"]["credential_id"] == "***"
 
-    def test_sanitizes_authorized_identities(self, client) -> None:
-        """GET /api/config shows count instead of actual identities."""
-        test_client, daemon, _ = client
-        daemon.config.terminal.authorized_identities = {"a" * 32, "b" * 32}
-
-        response = test_client.get("/api/config")
-        config = response.json()["config"]
-
-        assert "authorized_identities" not in config["terminal"]
-        assert config["terminal"]["authorized_identities_count"] == 2
-
-
 class TestPutConfig:
     """Tests for PUT /api/config."""
 
@@ -143,7 +131,7 @@ class TestPutConfig:
 
         response = test_client.put(
             "/api/config",
-            json={"terminal": {"authorized_identities": ["a" * 32]}},
+            json={"rbac": {"default_role": "admin"}},
         )
         assert response.status_code == 403
 

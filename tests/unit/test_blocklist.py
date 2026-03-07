@@ -300,51 +300,27 @@ class TestBlocklistPrefixMatching:
             assert svc._is_blocked("ca3e981348d3bb48") is True
 
 
-class TestSeedConfigBansOrdering:
-    """_seed_config_bans works regardless of chat.enabled state."""
+class TestRBACBlockedConfig:
+    """Blocked peers configured via RBAC are enforced on LXMF."""
 
-    def test_seed_bans_with_chat_disabled(self, tmp_path):
-        """banned_peers should work even when chat.enabled=False."""
-        from unittest.mock import patch as _patch
+    def test_rbac_blocked_identity_drops_message(self, db_engine):
+        """Identity in rbac.blocked has messages dropped."""
+        _, db_path = db_engine
+        from styrened.models.rbac import RBACPolicy
+        from styrened.services.lxmf_service import LXMFService
 
-        from styrened.models.config import CoreConfig
+        policy = RBACPolicy(blocked=["deadbeef12345678"])
+        svc = LXMFService()
+        svc.set_rbac_policy(policy)
 
-        config = CoreConfig()
-        config.chat.enabled = False
-        config.banned_peers = ["deadbeef12345678"]
+        msg = MagicMock()
+        msg.source_hash = bytes.fromhex("deadbeef12345678")
 
-        # Create a minimal DB so block_peer has a table
-        db_path = tmp_path / "messages.db"
-        engine = create_engine(f"sqlite:///{db_path}")
-        with engine.connect() as conn:
-            conn.execute(text(
-                "CREATE TABLE contacts ("
-                "peer_hash VARCHAR(32) PRIMARY KEY, "
-                "alias VARCHAR(100) NOT NULL, "
-                "notes VARCHAR(500), "
-                "blocked BOOLEAN NOT NULL DEFAULT 0, "
-                "blocked_at REAL, "
-                "created_at REAL NOT NULL, "
-                "updated_at REAL NOT NULL"
-                ")"
-            ))
-            conn.commit()
+        callback = MagicMock()
+        svc._message_callbacks = [(callback, False)]
 
-        with _patch("styrened.paths.messages_db", return_value=db_path), \
-             _patch("styrened.models.messages.init_db", return_value=engine):
-            from styrened.daemon import StyreneDaemon
-
-            daemon = StyreneDaemon.__new__(StyreneDaemon)
-            daemon.config = config
-            daemon._seed_config_bans()
-
-        # Verify ban was written
-        with engine.connect() as conn:
-            row = conn.execute(
-                text("SELECT blocked FROM contacts WHERE peer_hash = 'deadbeef12345678'")
-            ).fetchone()
-            assert row is not None
-            assert row[0] == 1
+        svc._handle_lxmf_message(msg)
+        callback.assert_not_called()
 
 
 class TestIPCMessages:

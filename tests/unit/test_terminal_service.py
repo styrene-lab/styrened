@@ -77,7 +77,6 @@ def terminal_service(
     service = TerminalService(
         rns_service=mock_rns_service,
         styrene_protocol=mock_styrene_protocol,
-        authorized_identities={"authorized_identity_hash"},
     )
     return service
 
@@ -388,41 +387,7 @@ class TestIdentityVerification:
         pass
 
 
-class TestAuthorizationEdgeCases:
-    """Tests for authorization edge cases."""
 
-    def test_empty_authorized_identities_with_allow_unauthenticated(
-        self,
-        mock_rns_service: MagicMock,
-        mock_styrene_protocol: MagicMock,
-    ) -> None:
-        """allow_unauthenticated=True should permit connections when no identities configured."""
-        service = TerminalService(
-            rns_service=mock_rns_service,
-            styrene_protocol=mock_styrene_protocol,
-            authorized_identities=set(),  # No identities
-            allow_unauthenticated=True,
-        )
-
-        # Should not raise during initialization
-        assert service._allow_unauthenticated is True
-        assert len(service._authorized_identities) == 0
-
-    def test_empty_authorized_identities_without_allow_unauthenticated(
-        self,
-        mock_rns_service: MagicMock,
-        mock_styrene_protocol: MagicMock,
-    ) -> None:
-        """Empty authorized_identities with allow_unauthenticated=False should reject all."""
-        service = TerminalService(
-            rns_service=mock_rns_service,
-            styrene_protocol=mock_styrene_protocol,
-            authorized_identities=set(),  # No identities
-            allow_unauthenticated=False,
-        )
-
-        # Authorization check should fail for any identity
-        assert not service.is_authorized("any_identity")
 
 
 class TestSignalValidation:

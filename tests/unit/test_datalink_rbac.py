@@ -142,14 +142,6 @@ class TestDatalinkAllowMode:
         daemon._datalink_allow_mode = StyreneDaemon._datalink_allow_mode.__get__(daemon)
         return daemon
 
-    def test_no_rbac_returns_allow_all(self):
-        """Without RBAC policy, all handlers use ALLOW_ALL."""
-        daemon = self._make_daemon(rbac_policy=None)
-        allow, allowed_list = daemon._datalink_allow_mode(Capability.DATALINK_PING)
-        # ALLOW_ALL = 0x00 in RNS
-        assert allow == 0x00
-        assert allowed_list is None
-
     def test_default_peer_returns_allow_all_for_peer_cap(self):
         """default_role=PEER grants datalink.ping → ALLOW_ALL."""
         policy = RBACPolicy(default_role=Role.PEER)
@@ -372,14 +364,14 @@ class TestHandlerAppLayerRBAC:
 # ---------------------------------------------------------------------------
 
 
-class TestLegacyNoRBAC:
-    """When rbac_policy=None, handlers work without RBAC gating."""
+class TestDefaultRBACPolicy:
+    """With default RBAC policy (PEER default_role), handlers work for all callers."""
 
     def _make_daemon(self):
         from styrened.daemon import StyreneDaemon
         daemon = MagicMock()
         daemon.config = MagicMock()
-        daemon.config.rbac = None
+        daemon.config.rbac = RBACPolicy(default_role=Role.PEER)
         daemon.config.discovery = MagicMock()
         daemon.config.discovery.info_respond = True
 
@@ -403,25 +395,38 @@ class TestLegacyNoRBAC:
         ident.hash = bytes.fromhex(hex_hash)
         return ident
 
-    def test_ping_works_without_rbac(self):
+    def test_ping_works_with_default_rbac(self):
         daemon = self._make_daemon()
         result = json.loads(daemon._serve_datalink_ping(
             "/ping", None, None, None, self._identity("abcd" * 8), None
         ))
         assert result.get("pong") is True
 
-    def test_meta_works_without_rbac(self):
+    def test_meta_works_with_default_rbac(self):
         daemon = self._make_daemon()
         result = json.loads(daemon._serve_datalink_meta(
             "/meta", None, None, None, self._identity("abcd" * 8), None
         ))
         assert "styrene_version" in result
 
-    def test_speedtest_works_without_rbac(self):
-        """Legacy mode: speedtest open to anyone (no RBAC gate)."""
+    def test_speedtest_denied_for_peer(self):
+        """Default PEER role is below MONITOR — speedtest denied."""
         daemon = self._make_daemon()
         result = json.loads(daemon._serve_datalink_speedtest(
             "/speedtest", b"x" * 50, None, None, self._identity("abcd" * 8), None
+        ))
+        assert result.get("error") == "forbidden"
+
+    def test_speedtest_works_for_monitor(self):
+        """MONITOR role grants speedtest access."""
+        from styrened.daemon import StyreneDaemon
+        daemon = self._make_daemon()
+        identity_hash = "abcd" * 8
+        daemon.config.rbac = RBACPolicy(
+            default_role=Role.MONITOR,
+        )
+        result = json.loads(daemon._serve_datalink_speedtest(
+            "/speedtest", b"x" * 50, None, None, self._identity(identity_hash), None
         ))
         assert result.get("bytes_received") == 50
 

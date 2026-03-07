@@ -93,11 +93,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.identity_hash = session.identity_hash
 
             # RBAC write gate: mutating methods require WEB_WRITE capability
-            rbac = daemon.config.rbac
-            if rbac is not None and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
                 from styrened.models.rbac import Capability
 
-                if not rbac.has_capability(session.identity_hash, Capability.WEB_WRITE):
+                if not daemon.config.rbac.has_capability(session.identity_hash, Capability.WEB_WRITE):
                     return JSONResponse(
                         status_code=403,
                         content={"detail": "Write access denied (RBAC)"},

@@ -78,7 +78,6 @@ class TestSaveCoreConfigRoundTrip:
         assert loaded.api.auth.enabled == config.api.auth.enabled
         assert loaded.api.auth.exempt_localhost == config.api.auth.exempt_localhost
         assert loaded.api.auth.session_ttl == config.api.auth.session_ttl
-        assert loaded.api.auth.allow_unauthenticated == config.api.auth.allow_unauthenticated
 
         # IPC
         assert loaded.ipc.enabled == config.ipc.enabled
@@ -97,7 +96,6 @@ class TestSaveCoreConfigRoundTrip:
 
         # Terminal
         assert loaded.terminal.enabled == config.terminal.enabled
-        assert loaded.terminal.allow_unauthenticated == config.terminal.allow_unauthenticated
 
     def test_fully_customized_config_round_trip(self, tmp_path: Path) -> None:
         """Config with ALL fields customized survives round-trip."""
@@ -142,8 +140,6 @@ class TestSaveCoreConfigRoundTrip:
                 metrics=MetricsConfig(enabled=True),
                 auth=WebAuthConfig(
                     enabled=True,
-                    authorized_identities={"aa" * 16, "bb" * 16},
-                    allow_unauthenticated=False,
                     exempt_localhost=False,
                     session_ttl=3600,
                 ),
@@ -176,8 +172,6 @@ class TestSaveCoreConfigRoundTrip:
             ),
             terminal=TerminalConfig(
                 enabled=True,
-                authorized_identities={"e" * 32, "f" * 32},
-                allow_unauthenticated=False,
                 default_shell="/bin/zsh",
                 allowed_shells={"/bin/bash", "/bin/zsh"},
                 session_idle_timeout=1800,
@@ -225,8 +219,6 @@ class TestSaveCoreConfigRoundTrip:
         assert loaded.api.port == 9000
         assert loaded.api.metrics.enabled is True
         assert loaded.api.auth.enabled is True
-        assert loaded.api.auth.authorized_identities == {"aa" * 16, "bb" * 16}
-        assert loaded.api.auth.allow_unauthenticated is False
         assert loaded.api.auth.exempt_localhost is False
         assert loaded.api.auth.session_ttl == 3600
 
@@ -258,8 +250,6 @@ class TestSaveCoreConfigRoundTrip:
 
         # Terminal
         assert loaded.terminal.enabled is True
-        assert loaded.terminal.authorized_identities == {"e" * 32, "f" * 32}
-        assert loaded.terminal.allow_unauthenticated is False
         assert loaded.terminal.default_shell == "/bin/zsh"
         assert loaded.terminal.allowed_shells == {"/bin/bash", "/bin/zsh"}
         assert loaded.terminal.session_idle_timeout == 1800

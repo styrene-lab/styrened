@@ -1130,15 +1130,14 @@ class LXMFService:
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
 
-        # Check if sender is blocked — RBAC policy takes precedence, legacy fallback
+        # Check if sender is blocked — RBAC policy or legacy contacts DB
         if self._rbac_policy is not None:
             if self._rbac_policy.resolve_role(source_hash) == Role.BLOCKED:
                 logger.info(f"Dropped message from blocked peer {source_hash[:16]}... (RBAC)")
                 return
-        else:
-            if self._is_blocked(source_hash):
-                logger.info(f"Dropped message from blocked peer {source_hash[:16]}...")
-                return
+        elif self._is_blocked(source_hash):
+            logger.info(f"Dropped message from blocked peer {source_hash[:16]}...")
+            return
 
         # Normalize message content for non-raw callbacks
         # Handles both JSON payloads (styrened) and plain text (Sideband/NomadNet)

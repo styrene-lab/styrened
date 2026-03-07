@@ -127,8 +127,6 @@ class MeshDeviceTree(Tree[str]):
                 from styrened.services.config import load_core_config
                 config = load_core_config()
                 rbac = config.rbac
-            if rbac is None:
-                return False
             return rbac.resolve_role(device.identity_hash) >= Role.PEER
         except Exception:
             return False
@@ -269,14 +267,13 @@ class MeshDeviceTree(Tree[str]):
             if rbac is None:
                 from styrened.services.config import load_core_config
                 rbac = load_core_config().rbac
-            if rbac:
-                role = rbac.resolve_role(device.identity_hash)
-                if role >= Role.ADMIN:
-                    role_badge = f" [{cascade.bright}][ADMIN][/]"
-                elif role >= Role.OPERATOR:
-                    role_badge = f" [{cascade.medium}][OP][/]"
-                elif role >= Role.MONITOR:
-                    role_badge = f" [{cascade.dim}][MON][/]"
+            role = rbac.resolve_role(device.identity_hash)
+            if role >= Role.ADMIN:
+                role_badge = f" [{cascade.bright}][ADMIN][/]"
+            elif role >= Role.OPERATOR:
+                role_badge = f" [{cascade.medium}][OP][/]"
+            elif role >= Role.MONITOR:
+                role_badge = f" [{cascade.dim}][MON][/]"
         except Exception:
             pass
 

@@ -16,30 +16,17 @@ The RPC server handles:
 - CONFIG_UPDATE (0x42): Updates local configuration
 
 Security:
-    When an ``RBACPolicy`` is provided (recommended), every RPC message type
-    is mapped to a capability via ``MESSAGE_TYPE_CAPABILITY``. The policy's
-    ``has_capability()`` method is checked for every request — there are no
-    "public" bypasses. Unmapped message types are rejected (fail-closed).
-
-    Legacy mode (``rbac_policy=None``): PING and STATUS_REQUEST bypass auth.
-    Other commands require ``authorized_identities``. Dangerous commands
-    (EXEC, REBOOT, CONFIG_UPDATE) need ``enable_dangerous_commands=True``.
+    Every RPC message type is mapped to a capability via ``MESSAGE_TYPE_CAPABILITY``.
+    The RBAC policy's ``has_capability()`` method is checked for every request —
+    there are no "public" bypasses. Unmapped message types are rejected (fail-closed).
 
 Usage:
     from styrened.rpc import RPCServer
     from styrened.protocols.styrene import StyreneProtocol
     from styrened.models.rbac import RBACPolicy, Role
 
-    # RBAC mode (recommended)
     policy = RBACPolicy(default_role=Role.PEER)
     server = RPCServer(styrene_protocol, rbac_policy=policy)
-
-    # Legacy mode (deprecated — will be removed in v0.15.0)
-    server = RPCServer(
-        styrene_protocol,
-        authorized_identities={"abc123...", "def456..."},
-        enable_dangerous_commands=True,
-    )
 
     # Start server
     server.start()
@@ -57,7 +44,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from pathlib import Path
+
 from typing import TYPE_CHECKING, Any
 
 from styrened import __version__ as _styrened_version
@@ -177,16 +164,13 @@ class RPCServer:
     appropriate handlers. Responses are sent back using the Styrene wire format.
 
     Security:
-        - `authorized_identities`: Set of identity hashes allowed to execute RPC commands.
-          If empty/None, authorization is disabled (DANGEROUS - only for development).
-        - `enable_dangerous_commands`: Must be True to enable EXEC, REBOOT, CONFIG_UPDATE.
-          Defaults to False for security.
-        - `rate_limit`: Maximum requests per minute per identity.
+        Every message type is mapped to a capability via MESSAGE_TYPE_CAPABILITY.
+        The RBAC policy's has_capability() is checked for every request.
+        Unmapped message types are rejected (fail-closed).
 
     Attributes:
         styrene_protocol: StyreneProtocol instance for sending responses.
         allowed_commands: Set of commands allowed for exec (security).
-        authorized_identities: Set of identity hashes allowed to execute RPC.
         _running: Whether the server is running.
     """
 
@@ -194,9 +178,6 @@ class RPCServer:
         self,
         styrene_protocol: "StyreneProtocol",
         allowed_commands: set[str] | None = None,
-        authorized_identities: set[str] | None = None,
-        authorized_identities_file: Path | None = None,
-        enable_dangerous_commands: bool = False,
         rate_limit: int = DEFAULT_RPC_RATE_LIMIT,
         rbac_policy: RBACPolicy | None = None,
     ) -> None:
@@ -206,31 +187,15 @@ class RPCServer:
             styrene_protocol: StyreneProtocol instance for transport.
             allowed_commands: Set of allowed commands for exec.
                             Defaults to DEFAULT_ALLOWED_COMMANDS.
-            authorized_identities: Set of identity hashes allowed to execute
-                            non-public RPC commands. If None/empty, authorization
-                            is disabled (DANGEROUS).
-            authorized_identities_file: Path to file containing authorized identities
-                            (one per line, # comments allowed).
-            enable_dangerous_commands: If True, enable EXEC, REBOOT, CONFIG_UPDATE.
-                            Defaults to False for security.
             rate_limit: Maximum requests per minute per identity.
-            rbac_policy: Optional RBACPolicy for capability-based authorization.
-                        When set, replaces legacy authorized_identities and
-                        enable_dangerous_commands checks entirely.
+            rbac_policy: RBACPolicy for capability-based authorization.
+                        If None, a default PEER policy is used.
         """
         self._protocol = styrene_protocol
-        self._rbac_policy = rbac_policy
+        self._rbac_policy = rbac_policy or RBACPolicy()
         self.allowed_commands = allowed_commands or set(DEFAULT_ALLOWED_COMMANDS)
         self._running = False
         self._handlers: dict[StyreneMessageType, Callable[[str, StyreneEnvelope], None]] = {}
-
-        # Authorization
-        self._authorized_identities: set[str] = authorized_identities or set()
-        self._authorized_identities_file = authorized_identities_file
-        if authorized_identities_file:
-            self._load_authorized_identities()
-
-        self._enable_dangerous_commands = enable_dangerous_commands
 
         # Conversation service for inbox queries (injected after init)
         self._conversation_service: Any = None
@@ -246,34 +211,12 @@ class RPCServer:
         self._daemon: Any = None
 
         # Log security configuration
-        if self._rbac_policy is not None:
-            logger.info(
-                f"[SECURITY] RPC server initialized with RBAC policy "
-                f"(default_role={self._rbac_policy.default_role.name}, "
-                f"roster={len(self._rbac_policy.roster)}, "
-                f"blocked={len(self._rbac_policy.blocked)})"
-            )
-        elif not self._authorized_identities:
-            logger.warning(
-                "[SECURITY] RPC server initialized WITHOUT authorization - "
-                "all identities can execute non-public RPC commands"
-            )
-        else:
-            logger.info(
-                f"[SECURITY] RPC server initialized with {len(self._authorized_identities)} "
-                f"authorized identities"
-            )
-
-        if self._rbac_policy is None:
-            # Legacy mode — log dangerous commands state
-            if enable_dangerous_commands:
-                logger.warning(
-                    "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are ENABLED"
-                )
-            else:
-                logger.info(
-                    "[SECURITY] Dangerous RPC commands (EXEC, REBOOT, CONFIG_UPDATE, SELF_UPDATE) are DISABLED"
-                )
+        logger.info(
+            f"[SECURITY] RPC server initialized with RBAC policy "
+            f"(default_role={self._rbac_policy.default_role.name}, "
+            f"roster={len(self._rbac_policy.roster)}, "
+            f"blocked={len(self._rbac_policy.blocked)})"
+        )
 
         # Register default handlers
         self._register_default_handlers()
@@ -282,36 +225,6 @@ class RPCServer:
         self._register_with_protocol()
 
         logger.debug("RPCServer initialized with StyreneProtocol")
-
-    def _load_authorized_identities(self) -> None:
-        """Load authorized identities from file.
-
-        File format: one identity hash per line, # comments allowed.
-        """
-        if not self._authorized_identities_file:
-            return
-
-        if not self._authorized_identities_file.exists():
-            logger.warning(
-                f"Authorized identities file not found: {self._authorized_identities_file}"
-            )
-            return
-
-        try:
-            with open(self._authorized_identities_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        # Take first whitespace-separated token
-                        identity = line.split()[0]
-                        self._authorized_identities.add(identity)
-
-            logger.info(
-                f"Loaded {len(self._authorized_identities)} authorized RPC identities "
-                f"from {self._authorized_identities_file}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to load authorized identities: {e}")
 
     def set_conversation_service(self, service: Any) -> None:
         """Inject conversation service for inbox query handling.
@@ -371,81 +284,41 @@ class RPCServer:
             logger.debug(f"No RPC handler for message type: {msg_type.name}")
             return
 
-        # Security checks — RBAC path or legacy path
-        if self._rbac_policy is not None:
-            # RBAC mode: every message type requires a capability check
-            required_cap = MESSAGE_TYPE_CAPABILITY.get(msg_type)
-            if required_cap is None:
-                logger.warning(
-                    f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
-                    f"no capability mapping (fail-closed)"
+        # Security: capability check via RBAC policy
+        required_cap = MESSAGE_TYPE_CAPABILITY.get(msg_type)
+        if required_cap is None:
+            logger.warning(
+                f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                f"no capability mapping (fail-closed)"
+            )
+            if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                await self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_NOT_ALLOWED,
+                    "Not authorized",
                 )
-                if envelope.request_id and envelope.request_id != NO_CORRELATION:
-                    await self._send_error(
-                        source_hash,
-                        envelope.request_id,
-                        RPCErrorCode.COMMAND_NOT_ALLOWED,
-                        "Not authorized",
-                    )
-                return
+            return
 
-            if not self._rbac_policy.has_capability(source_hash, required_cap):
-                logger.warning(
-                    f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
-                    f"missing capability {required_cap}"
+        if not self._rbac_policy.has_capability(source_hash, required_cap):
+            logger.warning(
+                f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
+                f"missing capability {required_cap}"
+            )
+            try:
+                from styrened.web.metrics import security_events_total
+
+                security_events_total.labels(type="auth_rejected").inc()
+            except ImportError:
+                pass
+            if envelope.request_id and envelope.request_id != NO_CORRELATION:
+                await self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_NOT_ALLOWED,
+                    "Not authorized",
                 )
-                try:
-                    from styrened.web.metrics import security_events_total
-
-                    security_events_total.labels(type="auth_rejected").inc()
-                except ImportError:
-                    pass
-                if envelope.request_id and envelope.request_id != NO_CORRELATION:
-                    await self._send_error(
-                        source_hash,
-                        envelope.request_id,
-                        RPCErrorCode.COMMAND_NOT_ALLOWED,
-                        "Not authorized",
-                    )
-                return
-        else:
-            # Legacy mode: dangerous commands gate + authorized_identities
-            # 1. Check if dangerous commands are enabled
-            if msg_type in DANGEROUS_RPC_COMMANDS and not self._enable_dangerous_commands:
-                logger.warning(
-                    f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
-                    f"dangerous commands disabled"
-                )
-                if envelope.request_id and envelope.request_id != NO_CORRELATION:
-                    await self._send_error(
-                        source_hash,
-                        envelope.request_id,
-                        RPCErrorCode.COMMAND_NOT_ALLOWED,
-                        "Command not enabled on this node",
-                    )
-                return
-
-            # 2. Check authorization for non-public commands
-            if msg_type not in PUBLIC_RPC_COMMANDS:
-                if not self._is_authorized(source_hash):
-                    logger.warning(
-                        f"[SECURITY] Rejected {msg_type.name} from {source_hash[:16]}... - "
-                        f"not authorized"
-                    )
-                    try:
-                        from styrened.web.metrics import security_events_total
-
-                        security_events_total.labels(type="auth_rejected").inc()
-                    except ImportError:
-                        pass
-                    if envelope.request_id and envelope.request_id != NO_CORRELATION:
-                        await self._send_error(
-                            source_hash,
-                            envelope.request_id,
-                            RPCErrorCode.COMMAND_NOT_ALLOWED,
-                            "Not authorized",
-                        )
-                    return
+            return
 
         # 3. Check rate limit
         rate_limit_result = self._check_rate_limit(source_hash)
@@ -470,13 +343,9 @@ class RPCServer:
             return
 
         # 4. Check replay protection (skip for cheap idempotent commands)
-        # In RBAC mode, all commands are capability-gated so replay of PING/STATUS
-        # is low-risk but we still skip replay tracking to avoid dict bloat.
-        _skip_replay = (
-            msg_type in PUBLIC_RPC_COMMANDS
-            if self._rbac_policy is None
-            else msg_type in {StyreneMessageType.PING, StyreneMessageType.STATUS_REQUEST}
-        )
+        # PING/STATUS are capability-gated but low-risk for replay — skip to
+        # avoid dict bloat.
+        _skip_replay = msg_type in {StyreneMessageType.PING, StyreneMessageType.STATUS_REQUEST}
         if not _skip_replay and envelope.request_id:
             if self._is_replay(envelope.request_id):
                 logger.warning(
@@ -527,21 +396,6 @@ class RPCServer:
                     RPCErrorCode.UNKNOWN,
                     "Internal server error",  # Sanitized message
                 )
-
-    def _is_authorized(self, source_hash: str) -> bool:
-        """Check if an identity is authorized for RPC commands.
-
-        Args:
-            source_hash: Source identity hash to check.
-
-        Returns:
-            True if authorized, False otherwise.
-        """
-        # If no authorized identities configured, allow all (with warning logged at init)
-        if not self._authorized_identities:
-            return True
-
-        return source_hash in self._authorized_identities
 
     def _check_rate_limit(self, source_hash: str) -> str | None:
         """Check rate limit for an identity.

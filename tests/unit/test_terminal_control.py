@@ -331,8 +331,6 @@ class TestSignalWhitelist:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
-            allow_unauthenticated=False,
         )
 
     def test_default_allowed_signals(self, terminal_service) -> None:
@@ -393,7 +391,6 @@ class TestSignalWhitelist:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_signals=custom_signals,
         )
 
@@ -415,7 +412,6 @@ class TestSignalWhitelist:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_signals=custom_signals,
         )
 
@@ -441,7 +437,6 @@ class TestSignalWhitelist:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_signals=frozenset(),  # Empty set
         )
 
@@ -478,8 +473,6 @@ class TestIdentityVerification:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"abc123def456abc123def456abc123de"},
-            allow_unauthenticated=False,
         )
 
     def test_identity_verification_constants_exist(self) -> None:
@@ -727,8 +720,6 @@ class TestRateLimiting:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
-            allow_unauthenticated=False,
         )
 
     @pytest.fixture
@@ -739,8 +730,6 @@ class TestRateLimiting:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
-            allow_unauthenticated=False,
             max_sessions_per_identity=2,
             max_total_sessions=3,
             session_request_rate_limit=5,
@@ -769,7 +758,6 @@ class TestRateLimiting:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             max_sessions_per_identity=10,
             max_total_sessions=50,
             session_request_rate_limit=20,
@@ -1007,8 +995,6 @@ class TestCommandValidation:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
-            allow_unauthenticated=False,
         )
 
     def test_default_allowed_shells_constant_exists(self) -> None:
@@ -1054,7 +1040,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_shells=custom_shells,
         )
 
@@ -1071,7 +1056,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_commands=custom_commands,
         )
 
@@ -1086,7 +1070,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_commands=set(),  # Empty set - no commands allowed
         )
 
@@ -1099,7 +1082,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             disable_command_validation=True,
         )
 
@@ -1138,7 +1120,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_commands={"/usr/bin/python3"},
         )
 
@@ -1154,7 +1135,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_commands={"/usr/bin/python3"},
         )
 
@@ -1168,7 +1148,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             disable_command_validation=True,
         )
 
@@ -1185,7 +1164,6 @@ class TestCommandValidation:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             allowed_shells={"/bin/bash"},
         )
 
@@ -1235,8 +1213,6 @@ class TestIdleTimeout:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
-            allow_unauthenticated=False,
         )
 
     @pytest.fixture
@@ -1247,8 +1223,6 @@ class TestIdleTimeout:
         return TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
-            allow_unauthenticated=False,
             session_idle_timeout=60.0,  # 1 minute for testing
         )
 
@@ -1273,7 +1247,6 @@ class TestIdleTimeout:
         service = TerminalService(
             rns_service=mock_rns_service,
             styrene_protocol=mock_styrene_protocol,
-            authorized_identities={"test_identity"},
             session_idle_timeout=1800.0,  # 30 minutes
         )
 

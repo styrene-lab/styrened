@@ -201,14 +201,6 @@ class TestValidateCoreConfig:
         field_names = [e.field for e in errors]
         assert "lxmf.static_peers" in field_names
 
-    def test_invalid_authorized_identity(self) -> None:
-        """Authorized identities must be 32-char hex hashes."""
-        config = CoreConfig()
-        config.terminal.authorized_identities = {"not32chars"}
-        errors = validate_core_config(config)
-        field_names = [e.field for e in errors]
-        assert "terminal.authorized_identities" in field_names
-
     def test_multiple_errors_all_reported(self) -> None:
         """Multiple errors in one config are all reported."""
         config = CoreConfig()
@@ -244,21 +236,6 @@ class TestValidateCoreConfig:
         config.api.auth.session_ttl = 60
         errors = validate_core_config(config)
         assert not any(e.field == "api.auth.session_ttl" for e in errors)
-
-    def test_auth_invalid_authorized_identity(self) -> None:
-        """Auth authorized identities must be 32-char hex hashes."""
-        config = CoreConfig()
-        config.api.auth.authorized_identities = {"short"}
-        errors = validate_core_config(config)
-        field_names = [e.field for e in errors]
-        assert "api.auth.authorized_identities" in field_names
-
-    def test_auth_valid_authorized_identity(self) -> None:
-        """Valid 32-char hex hash passes."""
-        config = CoreConfig()
-        config.api.auth.authorized_identities = {"a" * 32}
-        errors = validate_core_config(config)
-        assert not any(e.field == "api.auth.authorized_identities" for e in errors)
 
     def test_raise_on_error_no_error_succeeds(self) -> None:
         """raise_on_error=True with valid config does not raise."""

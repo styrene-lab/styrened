@@ -225,11 +225,6 @@ class StyreneDaemon:
         # Initialize conversation service for chat backend (creates DB tables)
         self._init_conversation_service()
 
-        # Seed blocklist from config (for hub operators)
-        # Must run AFTER _init_conversation_service() which calls init_db()
-        if self.config.banned_peers:
-            self._seed_config_bans()
-
         # Wire conversation service into RPC server for remote inbox queries
         if self._rpc_server and self._conversation_service:
             self._rpc_server.set_conversation_service(self._conversation_service)
@@ -292,9 +287,6 @@ class StyreneDaemon:
         receives both chat AND Styrene RPC messages. Without this, BLOCKED
         identities could still deliver LXMF messages even when the RPC
         server has RBAC active.
-
-        Also seeds contacts-DB blocks into the RBAC blocked list so that
-        runtime blocks (via IPC block_peer) survive daemon restart.
         """
         try:
             from styrened.services.lxmf_service import get_lxmf_service
@@ -304,67 +296,7 @@ class StyreneDaemon:
                 logger.debug("LXMF not initialized, skipping RBAC injection")
                 return
 
-            if self.config.rbac is not None:
-                lxmf_service.set_rbac_policy(self.config.rbac)
-                self._seed_contacts_blocks_to_rbac(lxmf_service)
-            else:
-                logger.info(
-                    "No RBAC policy configured — LXMF using legacy blocklist"
-                )
-        except Exception as e:
-            logger.error(f"Failed to inject RBAC into LXMF service: {e}")
-
-    def _seed_config_bans(self) -> None:
-        """Block peers listed in config.banned_peers (hub operator banlist).
-
-        Ensures the contacts table exists even if chat is disabled,
-        because block_peer() writes directly to the contacts table.
-        """
-        try:
-            from styrened.models.messages import init_db
-
-            # Guarantee contacts table exists — _init_conversation_service
-            # skips init_db() when chat.enabled=False
-            init_db()
-
-            from styrened.services.lxmf_service import get_lxmf_service
-
-            svc = get_lxmf_service()
-            for peer_hash in self.config.banned_peers:
-                svc.block_peer(peer_hash)
-            logger.info(
-                f"Seeded {len(self.config.banned_peers)} banned peers from config"
-            )
-        except Exception as e:
-            logger.error(f"Failed to seed config bans: {e}")
-
-    def _seed_contacts_blocks_to_rbac(self, lxmf_service: Any) -> None:
-        """Load blocked peers from contacts DB into the RBAC blocked list.
-
-        On startup, the RBAC policy is rebuilt from core-config.yaml which
-        only contains config-file blocks. Runtime blocks created via IPC
-        block_peer() live in the contacts DB. This method loads them into
-        the in-memory RBAC policy so they survive daemon restart.
-
-        Calls init_db() first to ensure the contacts table exists — this
-        is idempotent and safe to call multiple times.
-        """
-        try:
-            from styrened.models.messages import init_db
-
-            init_db()  # Ensure contacts table exists before querying
-            blocked_set = lxmf_service._load_blocklist()
-            if not blocked_set or self.config.rbac is None:
-                return
-            seeded = 0
-            for peer_hash in blocked_set:
-                if peer_hash not in self.config.rbac.blocked:
-                    self.config.rbac.block(peer_hash)
-                    seeded += 1
-            if seeded:
-                logger.info(
-                    f"Seeded {seeded} contacts-DB blocks into RBAC policy"
-                )
+            lxmf_service.set_rbac_policy(self.config.rbac)
         except Exception as e:
             logger.error(f"Failed to seed contacts blocks to RBAC: {e}")
 
@@ -1257,7 +1189,6 @@ class StyreneDaemon:
 
             self._rpc_server = RPCServer(
                 self._styrene_protocol,
-                enable_dangerous_commands=self.config.rpc.allow_command_execution,
                 rbac_policy=self.config.rbac,
             )
             self._rpc_server._daemon = self
@@ -1512,17 +1443,10 @@ class StyreneDaemon:
         reflect the latest roster without a restart.
         """
         try:
-            from styrened.models.rbac import Role
-            rbac = self.config.rbac
-            if rbac is None:
-                # No RBAC configured — fall back to configured default_role.
-                # With default_role=PEER (built-in default), all callers are
-                # considered peers.  Operators must set default_role=NONE to
-                # make this restrictive.
-                return int(Role.PEER)
-            return int(rbac.resolve_role(remote_identity_hex))
+            return int(self.config.rbac.resolve_role(remote_identity_hex))
         except Exception:
-            return 1  # Role.NONE
+            from styrened.models.rbac import Role
+            return int(Role.NONE)
 
     def _datalink_allow_mode(self, capability: str) -> tuple[int, list[bytes] | None]:
         """Compute RNS allow mode for a datalink capability.
@@ -1531,15 +1455,10 @@ class StyreneDaemon:
             (allow_flag, allowed_list) where allow_flag is
             0x00 (ALLOW_ALL) or 0x01 (ALLOW_LIST).
         """
-        rbac = self.config.rbac
-        if rbac is None:
-            # Legacy: no RBAC → ALLOW_ALL
+        if self.config.rbac.should_use_allow_all(capability):
             return (0x00, None)
 
-        if rbac.should_use_allow_all(capability):
-            return (0x00, None)
-
-        return (0x01, rbac.get_allow_list(capability))
+        return (0x01, self.config.rbac.get_allow_list(capability))
 
     def _reregister_datalink_handlers(self) -> None:
         """Re-register all datalink request handlers with updated allow lists.
@@ -1733,16 +1652,15 @@ class StyreneDaemon:
             )
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
 
-        if self.config.rbac is not None:
-            role = self._datalink_rbac_role(identity_hex)
-            try:
-                from styrened.models.rbac import Role
-                if role < int(Role.MONITOR):
-                    logger.info("Datalink /speedtest denied for %s (role=%d)", identity_hex[:16] or "unknown", role)
-                    return json.dumps({"error": "forbidden"}).encode("utf-8")
-            except Exception:
-                logger.exception("Datalink /speedtest RBAC check error")
-                return json.dumps({"error": "internal_error"}).encode("utf-8")
+        role = self._datalink_rbac_role(identity_hex)
+        try:
+            from styrened.models.rbac import Role
+            if role < int(Role.MONITOR):
+                logger.info("Datalink /speedtest denied for %s (role=%d)", identity_hex[:16] or "unknown", role)
+                return json.dumps({"error": "forbidden"}).encode("utf-8")
+        except Exception:
+            logger.exception("Datalink /speedtest RBAC check error")
+            return json.dumps({"error": "internal_error"}).encode("utf-8")
 
         t0 = time.time()
         raw_bytes = data if data else b""
@@ -1887,8 +1805,6 @@ class StyreneDaemon:
             terminal_kwargs: dict[str, Any] = {
                 "rns_service": rns_service,
                 "styrene_protocol": self._styrene_protocol,
-                "authorized_identities": self.config.terminal.authorized_identities,
-                "allow_unauthenticated": self.config.terminal.allow_unauthenticated,
                 "session_idle_timeout": self.config.terminal.session_idle_timeout,
                 "max_sessions_per_identity": self.config.terminal.max_sessions_per_identity,
                 "max_total_sessions": self.config.terminal.max_total_sessions,
@@ -1911,8 +1827,6 @@ class StyreneDaemon:
 
             logger.info(
                 f"[METRICS] terminal_service_started "
-                f"authorized_identities={len(self.config.terminal.authorized_identities)} "
-                f"allow_unauthenticated={self.config.terminal.allow_unauthenticated} "
                 f"max_sessions={self.config.terminal.max_total_sessions}"
             )
 

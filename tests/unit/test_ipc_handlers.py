@@ -1226,9 +1226,13 @@ class TestRPCActivityRedaction:
         mock_protocol = MagicMock()
         mock_protocol.register_handler = MagicMock()
 
+        from styrened.models.rbac import RBACPolicy, Role, RosterEntry
+        policy = RBACPolicy(
+            roster={"a" * 32: RosterEntry(identity_hash="a" * 32, role=Role.ADMIN)},
+        )
         server = RPCServer(
             mock_protocol,
-            enable_dangerous_commands=True,
+            rbac_policy=policy,
         )
         server._running = True
 

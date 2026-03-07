@@ -20,13 +20,14 @@ from styrened.web.auth_middleware import AuthMiddleware
 # ---------------------------------------------------------------------------
 
 
+from styrened.models.rbac import RBACPolicy, Role, RosterEntry
+
+
 @dataclass
 class FakeAuthConfig:
     """Minimal auth config for testing."""
 
     enabled: bool = False
-    authorized_identities: set[str] = field(default_factory=set)
-    allow_unauthenticated: bool = False
     exempt_localhost: bool = True
     session_ttl: int = 86400
 
@@ -44,7 +45,7 @@ class FakeDaemonConfig:
     """Minimal daemon config for testing."""
 
     api: FakeAPIConfig = field(default_factory=FakeAPIConfig)
-    rbac: None = None
+    rbac: RBACPolicy = field(default_factory=RBACPolicy)
 
 
 def _create_app(

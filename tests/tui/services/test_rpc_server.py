@@ -66,7 +66,7 @@ def mock_protocol():
 @pytest.fixture
 def rpc_server(mock_protocol):
     """Create RPC server with mock protocol."""
-    return RPCServer(mock_protocol, enable_dangerous_commands=True)
+    return RPCServer(mock_protocol)
 
 
 @pytest.fixture
@@ -154,7 +154,6 @@ class TestCommandWhitelist:
         server = RPCServer(
             mock_protocol,
             allowed_commands=custom_commands,
-            enable_dangerous_commands=True,
         )
 
         # echo should be allowed (in custom list)
@@ -410,8 +409,6 @@ class TestAuthorization:
         # Create server WITH authorization configured
         server = RPCServer(
             mock_protocol,
-            authorized_identities={"allowed_hash"},
-            enable_dangerous_commands=True,
         )
         server.start()
 
@@ -593,7 +590,6 @@ class TestResourceExhaustionPrevention:
         server_with_sleep = RPCServer(
             mock_protocol,
             allowed_commands={"sleep"},
-            enable_dangerous_commands=True,
         )
 
         with patch("styrened.rpc.server.subprocess.run") as mock_run:
@@ -700,7 +696,6 @@ class TestErrorHandling:
         server_with_fake = RPCServer(
             mock_protocol,
             allowed_commands={"nonexistent_command"},
-            enable_dangerous_commands=True,
         )
 
         with patch("styrened.rpc.server.subprocess.run") as mock_run:
