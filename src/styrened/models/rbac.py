@@ -79,6 +79,22 @@ class Capability:
     SELF_UPDATE: ClassVar[str] = "rpc.self_update"
     TERMINAL_FULL: ClassVar[str] = "terminal.full"
 
+    # --- PEER tier (10) --- relay
+    RELAY_REQUEST: ClassVar[str] = "relay.request"
+    RELAY_LIST: ClassVar[str] = "relay.list"
+    RELAY_TEARDOWN: ClassVar[str] = "relay.teardown"
+    RELAY_ACCEPT: ClassVar[str] = "relay.accept"
+    RELAY_REJECT: ClassVar[str] = "relay.reject"
+
+    # --- OPERATOR tier (30) --- relay
+    RELAY_REQUEST_PERMANENT: ClassVar[str] = "relay.request_permanent"
+    RELAY_ACCEPT_PERMANENT: ClassVar[str] = "relay.accept_permanent"
+    RELAY_PRIORITIZE: ClassVar[str] = "relay.prioritize"
+    RELAY_BRIDGE: ClassVar[str] = "relay.bridge"
+
+    # --- ADMIN tier (40) --- relay
+    RELAY_ADMIN: ClassVar[str] = "relay.admin"
+
     # --- Orthogonal grants (not part of role hierarchy) ---
     VPN_HANDSHAKE: ClassVar[str] = "vpn.handshake"
 
@@ -106,6 +122,11 @@ _PEER_CAPS: frozenset[str] = frozenset(
         Capability.DATALINK_META,
         Capability.DATALINK_INFO,
         Capability.DATALINK_STATUS,
+        Capability.RELAY_REQUEST,
+        Capability.RELAY_LIST,
+        Capability.RELAY_TEARDOWN,
+        Capability.RELAY_ACCEPT,
+        Capability.RELAY_REJECT,
     }
 )
 
@@ -123,6 +144,10 @@ _OPERATOR_CAPS: frozenset[str] = _MONITOR_CAPS | frozenset(
         Capability.CONFIG_UPDATE,
         Capability.TERMINAL_RESTRICTED,
         Capability.WEB_WRITE,
+        Capability.RELAY_REQUEST_PERMANENT,
+        Capability.RELAY_ACCEPT_PERMANENT,
+        Capability.RELAY_PRIORITIZE,
+        Capability.RELAY_BRIDGE,
     }
 )
 
@@ -132,6 +157,7 @@ _ADMIN_CAPS: frozenset[str] = _OPERATOR_CAPS | frozenset(
         Capability.REBOOT,
         Capability.SELF_UPDATE,
         Capability.TERMINAL_FULL,
+        Capability.RELAY_ADMIN,
         # NOTE: VPN_HANDSHAKE is intentionally NOT in _ADMIN_CAPS.
         # It is a pure orthogonal grant — an identity must be given explicit
         # ``grants: [vpn.handshake]`` in the roster regardless of role tier.
