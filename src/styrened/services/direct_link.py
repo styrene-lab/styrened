@@ -163,6 +163,7 @@ class LinkInfo:
     rtt: float | None = None  # seconds (from RNS)
     established_at: float | None = None
     last_activity: float | None = None
+    link_type: str = "direct"  # "direct" or "relayed"
 
 
 @dataclass
@@ -175,6 +176,7 @@ class _LinkEntry:
     established: bool = False
     established_at: float | None = None
     last_used: float = field(default_factory=time.time)
+    link_type: str = "direct"  # "direct" or "relayed" — see LinkType enum
 
 
 class DirectLinkService:
@@ -715,6 +717,7 @@ class DirectLinkService:
             rtt=rtt,
             established_at=entry.established_at,
             last_activity=entry.last_used,
+            link_type=entry.link_type,
         )
 
     async def _create_link(
