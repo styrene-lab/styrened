@@ -562,6 +562,63 @@ class CmdPageGetCachedRequest(IPCRequest):
         }
 
 
+# -----------------------------------------------------------------------------
+# TUI-specific requests (node store, core config, hub, unread)
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class GetNodesRequest(IPCRequest):
+    """Request nodes from the persisted node store (for TUI dashboard/exploration)."""
+
+    MSG_TYPE = IPCMessageType.GET_NODES
+    styrene_only: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"styrene_only": self.styrene_only}
+
+
+@dataclass
+class GetCoreConfigRequest(IPCRequest):
+    """Request full serialized CoreConfig (round-trippable)."""
+
+    MSG_TYPE = IPCMessageType.GET_CORE_CONFIG
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
+@dataclass
+class SaveCoreConfigRequest(IPCRequest):
+    """Save a modified CoreConfig dict to disk."""
+
+    MSG_TYPE = IPCMessageType.SAVE_CORE_CONFIG
+    config_dict: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"config_dict": self.config_dict}
+
+
+@dataclass
+class GetHubStatusRequest(IPCRequest):
+    """Request hub connection status."""
+
+    MSG_TYPE = IPCMessageType.GET_HUB_STATUS
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
+@dataclass
+class GetUnreadCountsRequest(IPCRequest):
+    """Request per-peer unread message counts."""
+
+    MSG_TYPE = IPCMessageType.GET_UNREAD_COUNTS
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
 @dataclass
 class CmdBlockPeerRequest(IPCRequest):
     """Block a peer — silently drop all future messages from them."""
@@ -1541,6 +1598,16 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdTerminalCloseRequest(
             session_id=payload.get("session_id", ""),
         )
+    elif msg_type == IPCMessageType.GET_NODES:
+        return GetNodesRequest(styrene_only=payload.get("styrene_only", False))
+    elif msg_type == IPCMessageType.GET_CORE_CONFIG:
+        return GetCoreConfigRequest()
+    elif msg_type == IPCMessageType.SAVE_CORE_CONFIG:
+        return SaveCoreConfigRequest(config_dict=payload.get("config_dict", {}))
+    elif msg_type == IPCMessageType.GET_HUB_STATUS:
+        return GetHubStatusRequest()
+    elif msg_type == IPCMessageType.GET_UNREAD_COUNTS:
+        return GetUnreadCountsRequest()
     elif msg_type == IPCMessageType.CMD_BLOCK_PEER:
         return CmdBlockPeerRequest.from_payload(payload)
     elif msg_type == IPCMessageType.CMD_UNBLOCK_PEER:

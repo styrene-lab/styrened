@@ -102,6 +102,15 @@ class IPCMessageType(IntEnum):
     CMD_TERMINAL_RESIZE = 0x52
     CMD_TERMINAL_CLOSE = 0x53
 
+    # TUI-specific queries (0x1E-0x1F)
+    GET_NODES = 0x1E  # Nodes from node_store (persisted, for TUI)
+    GET_CORE_CONFIG = 0x1F  # Full serialized CoreConfig (round-trippable)
+
+    # TUI-specific commands (0x4D-0x4F)
+    SAVE_CORE_CONFIG = 0x4D  # Write CoreConfig to disk
+    GET_HUB_STATUS = 0x4E  # Hub connection status dict
+    GET_UNREAD_COUNTS = 0x4F  # Per-peer unread message counts
+
     # Direct data link commands (0x60-0x6F)
     CMD_BLOCK_PEER = 0x4A
     CMD_UNBLOCK_PEER = 0x4B
