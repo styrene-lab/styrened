@@ -293,3 +293,316 @@ def test_relay_config_default_when_no_section():
     _parse_relay(config, {})
     assert config.relay.enabled is False
     assert config.relay.max_sessions == 16
+
+
+# ---------------------------------------------------------------------------
+# DirectLink — link_type field
+# ---------------------------------------------------------------------------
+
+
+def test_link_info_default_link_type():
+    """LinkInfo defaults to 'direct' link_type."""
+    from styrened.services.direct_link import LinkInfo
+
+    info = LinkInfo(destination_hash="abc123", status="active")
+    assert info.link_type == "direct"
+
+
+def test_link_info_relayed_link_type():
+    """LinkInfo can be set to 'relayed'."""
+    from styrened.services.direct_link import LinkInfo
+
+    info = LinkInfo(destination_hash="abc123", status="active", link_type="relayed")
+    assert info.link_type == "relayed"
+
+
+def test_link_entry_default_link_type():
+    """_LinkEntry defaults to 'direct' link_type."""
+    from unittest.mock import MagicMock
+    from styrened.services.direct_link import _LinkEntry
+
+    entry = _LinkEntry(
+        link=MagicMock(),
+        destination_hash="abc123",
+        datalink_hash="def456",
+    )
+    assert entry.link_type == "direct"
+
+
+def test_link_entry_relayed_link_type():
+    """_LinkEntry can be set to 'relayed'."""
+    from unittest.mock import MagicMock
+    from styrened.services.direct_link import _LinkEntry
+
+    entry = _LinkEntry(
+        link=MagicMock(),
+        destination_hash="abc123",
+        datalink_hash="def456",
+        link_type="relayed",
+    )
+    assert entry.link_type == "relayed"
+
+
+# ---------------------------------------------------------------------------
+# RelayService — set_rbac_policy
+# ---------------------------------------------------------------------------
+
+
+def test_relay_service_set_rbac_policy():
+    """RelayService accepts RBAC policy injection."""
+    from unittest.mock import MagicMock
+
+    svc = RelayService(RelayConfig(enabled=True))
+    policy = MagicMock()
+    svc.set_rbac_policy(policy)
+    assert svc._rbac_policy is policy
+
+
+# ---------------------------------------------------------------------------
+# Daemon — relay service lifecycle (unit-testable without RNS)
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_has_relay_service_attr():
+    """StyreneDaemon has _relay_service attribute initialized to None."""
+    from unittest.mock import MagicMock, patch
+
+    with patch("styrened.daemon.load_core_config") as mock_load:
+        mock_load.return_value = MagicMock()
+        from styrened.daemon import StyreneDaemon
+
+        daemon = StyreneDaemon.__new__(StyreneDaemon)
+        daemon.config = MagicMock()
+        daemon._direct_link_service = None
+        daemon._datalink_destination = None
+        daemon._mesh_vpn_service = None
+        daemon._relay_service = None
+        assert daemon._relay_service is None
+
+
+def test_start_relay_service_creates_service():
+    """_start_relay_service instantiates RelayService from config."""
+    from unittest.mock import MagicMock, patch
+
+    daemon = MagicMock()
+    daemon.config = MagicMock()
+    daemon.config.relay = RelayConfig(enabled=True, max_sessions=4)
+    daemon.config.rbac = None
+    daemon._relay_service = None
+
+    from styrened.daemon import StyreneDaemon
+    StyreneDaemon._start_relay_service(daemon)
+
+    assert daemon._relay_service is not None
+    assert daemon._relay_service._config.enabled is True
+    assert daemon._relay_service._config.max_sessions == 4
+
+
+def test_start_relay_service_injects_rbac():
+    """_start_relay_service injects RBAC policy when available."""
+    from unittest.mock import MagicMock
+
+    daemon = MagicMock()
+    daemon.config = MagicMock()
+    daemon.config.relay = RelayConfig(enabled=True)
+    rbac_policy = MagicMock()
+    daemon.config.rbac = rbac_policy
+    daemon._relay_service = None
+
+    from styrened.daemon import StyreneDaemon
+    StyreneDaemon._start_relay_service(daemon)
+
+    assert daemon._relay_service is not None
+    assert daemon._relay_service._rbac_policy is rbac_policy
+
+
+# ---------------------------------------------------------------------------
+# /relay endpoint handler
+# ---------------------------------------------------------------------------
+
+
+def test_serve_relay_no_service():
+    """/relay returns error when relay service is None."""
+    import json as _json
+    from unittest.mock import MagicMock
+
+    from styrened.daemon import StyreneDaemon
+
+    daemon = MagicMock()
+    daemon._relay_service = None
+    daemon._datalink_identity_hex = StyreneDaemon._datalink_identity_hex.__get__(daemon)
+    daemon._datalink_rl = MagicMock()
+    daemon._datalink_rl.check.return_value = True
+    daemon._datalink_rbac_role = MagicMock(return_value=10)  # PEER
+
+    result = StyreneDaemon._serve_datalink_relay(
+        daemon, "/relay",
+        _json.dumps({"target_hash": "bbb"}).encode(),
+        None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
+    )
+    resp = _json.loads(result)
+    assert resp["error"] == "relay_disabled"
+
+
+def test_serve_relay_blocked_identity():
+    """/relay rejects blocked identities."""
+    import json as _json
+    from unittest.mock import MagicMock
+
+    from styrened.daemon import StyreneDaemon
+
+    daemon = MagicMock()
+    daemon._relay_service = MagicMock()
+    daemon._datalink_identity_hex = StyreneDaemon._datalink_identity_hex.__get__(daemon)
+    daemon._datalink_rl = MagicMock()
+    daemon._datalink_rl.check.return_value = True
+    daemon._datalink_rbac_role = MagicMock(return_value=0)  # BLOCKED
+
+    result = StyreneDaemon._serve_datalink_relay(
+        daemon, "/relay",
+        _json.dumps({"target_hash": "bbb"}).encode(),
+        None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
+    )
+    resp = _json.loads(result)
+    assert resp["error"] == "unauthorized"
+
+
+def test_serve_relay_missing_target():
+    """/relay rejects requests without target_hash."""
+    import json as _json
+    from unittest.mock import MagicMock
+
+    from styrened.daemon import StyreneDaemon
+
+    daemon = MagicMock()
+    daemon._relay_service = MagicMock()
+    daemon._datalink_identity_hex = StyreneDaemon._datalink_identity_hex.__get__(daemon)
+    daemon._datalink_rl = MagicMock()
+    daemon._datalink_rl.check.return_value = True
+    daemon._datalink_rbac_role = MagicMock(return_value=10)  # PEER
+
+    result = StyreneDaemon._serve_datalink_relay(
+        daemon, "/relay",
+        _json.dumps({}).encode(),
+        None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
+    )
+    resp = _json.loads(result)
+    assert resp["error"] == "missing_target_hash"
+
+
+def test_serve_relay_target_offline():
+    """/relay rejects when target has no active DirectLink."""
+    import json as _json
+    from unittest.mock import MagicMock
+
+    from styrened.daemon import StyreneDaemon
+
+    daemon = MagicMock()
+    daemon._relay_service = MagicMock()
+    daemon._direct_link_service = MagicMock()
+    daemon._direct_link_service.get_link.return_value = None
+    daemon._datalink_identity_hex = StyreneDaemon._datalink_identity_hex.__get__(daemon)
+    daemon._datalink_rl = MagicMock()
+    daemon._datalink_rl.check.return_value = True
+    daemon._datalink_rbac_role = MagicMock(return_value=10)  # PEER
+
+    result = StyreneDaemon._serve_datalink_relay(
+        daemon, "/relay",
+        _json.dumps({"target_hash": "bbb"}).encode(),
+        None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
+    )
+    resp = _json.loads(result)
+    assert resp["error"] == "target_offline"
+
+
+def test_serve_relay_success():
+    """/relay creates session and returns established status."""
+    import json as _json
+    import asyncio
+    import threading
+    from unittest.mock import MagicMock
+
+    from styrened.daemon import StyreneDaemon
+
+    session = RelaySession(requester_hash="aaa", target_hash="bbb")
+
+    daemon = MagicMock()
+    daemon._relay_service = MagicMock()
+
+    # Run event loop in background thread so run_coroutine_threadsafe works
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    daemon._event_loop = loop
+
+    async def mock_create(requester_hash, target_hash, permanent):
+        return session
+
+    daemon._relay_service.create_session = mock_create
+    daemon._direct_link_service = MagicMock()
+    link_info = MagicMock()
+    link_info.status = "active"
+    daemon._direct_link_service.get_link.return_value = link_info
+    daemon._datalink_identity_hex = StyreneDaemon._datalink_identity_hex.__get__(daemon)
+    daemon._datalink_rl = MagicMock()
+    daemon._datalink_rl.check.return_value = True
+    daemon._datalink_rbac_role = MagicMock(return_value=10)  # PEER
+
+    try:
+        result = StyreneDaemon._serve_datalink_relay(
+            daemon, "/relay",
+            _json.dumps({"target_hash": "bbb"}).encode(),
+            None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
+        )
+        resp = _json.loads(result)
+        assert resp["status"] == "established"
+        assert resp["target_hash"] == "bbb"
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=2)
+        loop.close()
+
+
+def test_serve_relay_error_propagation():
+    """/relay returns relay error codes."""
+    import json as _json
+    import asyncio
+    import threading
+    from unittest.mock import MagicMock
+
+    from styrened.daemon import StyreneDaemon
+    from styrened.models.relay import RelayDisabled
+
+    daemon = MagicMock()
+    daemon._relay_service = MagicMock()
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    daemon._event_loop = loop
+
+    async def mock_create(requester_hash, target_hash, permanent):
+        raise RelayDisabled("Relay is disabled")
+
+    daemon._relay_service.create_session = mock_create
+    daemon._direct_link_service = MagicMock()
+    link_info = MagicMock()
+    link_info.status = "active"
+    daemon._direct_link_service.get_link.return_value = link_info
+    daemon._datalink_identity_hex = StyreneDaemon._datalink_identity_hex.__get__(daemon)
+    daemon._datalink_rl = MagicMock()
+    daemon._datalink_rl.check.return_value = True
+    daemon._datalink_rbac_role = MagicMock(return_value=10)  # PEER
+
+    try:
+        result = StyreneDaemon._serve_datalink_relay(
+            daemon, "/relay",
+            _json.dumps({"target_hash": "bbb"}).encode(),
+            None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
+        )
+        resp = _json.loads(result)
+        assert resp["error"] == "relay_disabled"
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=2)
+        loop.close()

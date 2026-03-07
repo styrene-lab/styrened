@@ -32,6 +32,11 @@ class RelayService:
         self._config = config
         self._sessions: dict[int, RelaySession] = {}
         self._lock = asyncio.Lock()
+        self._rbac_policy: Any = None
+
+    def set_rbac_policy(self, policy: Any) -> None:
+        """Inject the RBAC policy for authorization checks."""
+        self._rbac_policy = policy
 
     def _is_target_online(self, target_hash: str) -> bool:
         """Check if target peer is connected. Stub — always True."""
