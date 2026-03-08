@@ -1,7 +1,7 @@
 ---
 id: optional-daemon-adoption-model
 title: Optional Daemon Adoption Model — three-tier pattern
-status: implementing
+status: implemented
 parent: overlay-network-integration
 tags: [architecture, pattern, yggdrasil, i2p, nix, packaging]
 open_questions: []
