@@ -191,6 +191,13 @@ def init_db(db_path: Path | None = None) -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass
 
+    # Schema migration: Add ygg_address column
+    try:
+        conn.execute("ALTER TABLE nodes ADD COLUMN ygg_address TEXT")
+        logger.debug("Added ygg_address column to nodes table")
+    except sqlite3.OperationalError:
+        pass
+
     # Index on identity_hash for lookups
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_identity_hash ON nodes(identity_hash)
@@ -332,8 +339,8 @@ class NodeStore:
                         destination_hash, identity_hash, name, device_type,
                         last_announce, announce_count, capabilities, version,
                         lxmf_destination_hash, short_name, system_fingerprint,
-                        discovered_via, hops, nomadnet_destination_hash, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+                        discovered_via, hops, nomadnet_destination_hash, ygg_address, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
                     ON CONFLICT(destination_hash) DO UPDATE SET
                         identity_hash = excluded.identity_hash,
                         name = excluded.name,
@@ -348,6 +355,7 @@ class NodeStore:
                         discovered_via = COALESCE(excluded.discovered_via, nodes.discovered_via),
                         hops = excluded.hops,
                         nomadnet_destination_hash = COALESCE(excluded.nomadnet_destination_hash, nodes.nomadnet_destination_hash),
+                        ygg_address = COALESCE(excluded.ygg_address, nodes.ygg_address),
                         updated_at = strftime('%s', 'now')
                     """,
                     (
@@ -365,6 +373,7 @@ class NodeStore:
                         device.discovered_via,
                         device.hops,
                         device.nomadnet_destination_hash,
+                        device.ygg_address,
                     ),
                 )
                 conn.commit()
@@ -863,6 +872,12 @@ class NodeStore:
         except (KeyError, IndexError):
             pass
 
+        ygg_address = None
+        try:
+            ygg_address = row["ygg_address"]
+        except (KeyError, IndexError):
+            pass
+
         try:
             raw_type = row["device_type"]
             # Handle legacy "styrene_node" values from pre-0.10 databases
@@ -887,6 +902,7 @@ class NodeStore:
             nomadnet_destination_hash=nomadnet_dest,
             discovered_via=discovered_via,
             hops=hops,
+            ygg_address=ygg_address,
         )
 
     def get_connection_count(self) -> int:
