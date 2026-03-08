@@ -2776,6 +2776,24 @@ def create_parser() -> argparse.ArgumentParser:
     )
     blocked_parser.set_defaults(func=cmd_blocked)
 
+    # setup — provision optional daemon integrations
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Provision optional daemon integrations (yggdrasil, i2p)",
+    )
+    setup_parser.add_argument(
+        "--enable",
+        choices=["yggdrasil", "i2p"],
+        required=True,
+        help="Optional daemon to enable",
+    )
+    setup_parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Path to config file (default: ~/.styrene/config.yaml)",
+    )
+    setup_parser.set_defaults(func=cmd_setup)
+
     return parser
 
 
@@ -2857,6 +2875,65 @@ def cmd_menubar(args: argparse.Namespace) -> int:
     from styrened.tui.menubar.agent import run
 
     run()
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Provision an optional daemon integration.
+
+    Runs provision() for the requested daemon, then sets mode=MANAGED in
+    the config if the binary was found, and saves the updated config.
+
+    Args:
+        args: Parsed arguments.  args.enable is one of ['yggdrasil', 'i2p'].
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+    """
+    import shutil
+    from pathlib import Path
+
+    from styrened.models.daemon_mode import DaemonMode
+    from styrened.services.config import load_core_config, save_core_config
+
+    config_path = Path(args.config) if getattr(args, "config", None) else None
+    config = load_core_config(config_path)
+
+    if args.enable == "yggdrasil":
+        from styrened.services.yggdrasil import YggdrasilAdapter
+
+        ygg_adapter = YggdrasilAdapter(config.yggdrasil)  # type: ignore[arg-type]
+        asyncio.run(ygg_adapter.provision())
+
+        # Detect binary to decide mode
+        binary = shutil.which(config.yggdrasil.binary_path)
+        if binary:
+            config.yggdrasil.mode = DaemonMode.MANAGED
+            save_core_config(config, config_path)
+            print("✓ Yggdrasil mode set to MANAGED and config saved.")
+        else:
+            print("Yggdrasil binary not found — config not modified.")
+            return 1
+
+    elif args.enable == "i2p":
+        from styrened.services.i2p import I2PAdapter
+
+        i2p_adapter = I2PAdapter(config.i2p)
+        asyncio.run(i2p_adapter.provision())
+
+        # Cold-start warning (always shown)
+        print("i2pd requires 5-10 minutes to warm up after first start.")
+
+        # Detect binary to decide mode
+        binary = shutil.which("i2pd")
+        if binary:
+            config.i2p.mode = DaemonMode.MANAGED
+            save_core_config(config, config_path)
+            print(f"✓ i2p mode set to MANAGED and config saved.")
+        else:
+            print("i2pd binary not found — config not modified.")
+            return 1
+
     return 0
 
 
