@@ -373,7 +373,7 @@ class RBACPolicy:
     def from_dict(cls, data: dict) -> RBACPolicy:
         """Deserialize an RBACPolicy from a serialized config dict.
 
-        Accepts the format produced by ``_serialize_config`` in
+        Accepts the format produced by ``serialize_config`` in
         ``services/config.py``::
 
             {

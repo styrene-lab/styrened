@@ -437,16 +437,17 @@ class MeshDeviceDetailScreen(Screen[None]):
             except Exception:
                 pass
 
-        # Fall back to RPC over LXMF
+        # Fall back to RPC-over-LXMF via IPC bridge
         if not got_status:
             try:
-                app: StyreneApp = self.app  # type: ignore[assignment]
-                response = await app.rpc_client.call_status(
-                    self.device_identity,
-                    timeout=30.0,
-                )
-                status_widget.status = response
-                _cache_status(self.device_identity, response)
+                bridge = getattr(getattr(self.app, "services", None), "bridge", None)
+                if bridge is not None:
+                    response = await bridge.query_device_status(
+                        destination=self.device_identity,
+                        timeout=30.0,
+                    )
+                    status_widget.status = response
+                    _cache_status(self.device_identity, response)
             except Exception:
                 # No RPC data — status widget shows announce data only
                 pass

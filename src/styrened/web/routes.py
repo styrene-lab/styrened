@@ -79,10 +79,10 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
     @router.get("/api/config")
     async def config():
         """Return sanitized configuration (all 10 sections, no secrets)."""
-        from styrened.services.config import _serialize_config
+        from styrened.services.config import serialize_config
 
         cfg = daemon.config
-        config_dict = _serialize_config(cfg)
+        config_dict = serialize_config(cfg)
 
         # Sanitize sensitive fields
         if "identity" in config_dict:
@@ -118,7 +118,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         """Update configuration (partial merge). Protected fields are rejected."""
         from styrened.models.config import ConfigValidationError
         from styrened.services.config import (
-            _serialize_config,
+            serialize_config,
             load_core_config,
             save_core_config,
             validate_core_config,
@@ -155,7 +155,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
 
         # Load current → deep-merge → validate → save
         current = load_core_config()
-        current_dict = _serialize_config(current)
+        current_dict = serialize_config(current)
 
         for section_key, section_val in updates.items():
             if isinstance(section_val, dict):
@@ -206,7 +206,7 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         broadcaster.broadcast_config_event()
 
         # Return sanitized config
-        result = _serialize_config(daemon.config)
+        result = serialize_config(daemon.config)
         if "identity" in result:
             yk = result["identity"].get("yubikey")
             if yk and yk.get("credential_id"):

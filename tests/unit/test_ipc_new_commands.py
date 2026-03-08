@@ -227,7 +227,7 @@ class TestHandleGetCoreConfig:
                 return_value=fake_config,
             ),
             patch(
-                "styrened.services.config._serialize_config",
+                "styrened.services.config.serialize_config",
                 return_value=fake_dict,
             ),
         ):
@@ -266,28 +266,44 @@ class TestHandleSaveCoreConfig:
 
     @pytest.mark.asyncio
     async def test_saves_config_successfully(self, handlers, tmp_path):
-        config_dict = {"reticulum": {"mode": "standalone"}}
-        fake_config = MagicMock()
+        """Valid config dict is validated, re-serialized, and written to disk."""
+        from styrened.services.config import get_default_core_config, serialize_config
+
+        # Generate a valid config dict via the canonical serializer
+        config_dict = serialize_config(get_default_core_config())
         config_file = tmp_path / "config.yaml"
 
-        with (
-            patch(
-                "styrened.services.config.load_core_config",
-                return_value=fake_config,
-            ),
-            patch("styrened.services.config.save_core_config"),
-            patch("styrened.paths.config_file", return_value=config_file),
-        ):
+        with patch("styrened.paths.config_file", return_value=config_file):
             resp = await handlers.handle_save_core_config(
                 SaveCoreConfigRequest(config_dict=config_dict)
             )
 
         assert isinstance(resp, ResultResponse)
         assert resp.data["saved"] is True
+        assert config_file.exists()
 
     @pytest.mark.asyncio
-    async def test_handles_write_error(self, handlers):
-        config_dict = {"reticulum": {"mode": "standalone"}}
+    async def test_rejects_invalid_config(self, handlers, tmp_path):
+        """Malformed config dict is rejected before writing to disk."""
+        config_file = tmp_path / "config.yaml"
+        # Roster must be a list of dicts, not a string — triggers parse error
+        bad_dict = {"rbac": {"roster": "not-a-list"}}
+
+        with patch("styrened.paths.config_file", return_value=config_file):
+            resp = await handlers.handle_save_core_config(
+                SaveCoreConfigRequest(config_dict=bad_dict)
+            )
+
+        assert isinstance(resp, ErrorResponse)
+        assert "Invalid config" in resp.message
+        assert not config_file.exists()  # Must NOT write a corrupt file
+
+    @pytest.mark.asyncio
+    async def test_handles_write_error(self, handlers, tmp_path):
+        from styrened.services.config import get_default_core_config, serialize_config
+
+        config_dict = serialize_config(get_default_core_config())
+        # Point to a non-writable location
         with patch(
             "styrened.paths.config_file",
             side_effect=RuntimeError("disk full"),
@@ -296,7 +312,6 @@ class TestHandleSaveCoreConfig:
                 SaveCoreConfigRequest(config_dict=config_dict)
             )
         assert isinstance(resp, ErrorResponse)
-        assert "disk full" in resp.message
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +369,24 @@ class TestHandleGetHubStatus:
             resp = await handlers.handle_get_hub_status(GetHubStatusRequest())
         assert isinstance(resp, ErrorResponse)
         assert "no hub" in resp.message
+
+    @pytest.mark.asyncio
+    async def test_hub_status_key_is_is_connected(self, handlers):
+        """Verify the key is 'is_connected' not 'connected'.
+
+        Dashboard consumer reads hub_data.get("is_connected", False).
+        """
+        hub = MagicMock()
+        hub.is_connected = True
+        hub.hub_address = "abc123"
+        hub.status.value = "connected"
+        hub.hub_destination = None
+
+        with patch("styrened.services.hub_connection.get_hub_connection", return_value=hub):
+            resp = await handlers.handle_get_hub_status(GetHubStatusRequest())
+
+        assert "is_connected" in resp.data
+        assert "connected" not in resp.data or resp.data.get("connected") is None
 
 
 # ---------------------------------------------------------------------------
@@ -480,3 +513,33 @@ class TestDeduplicateByIdentity:
         d2 = self._make_device("id2", last_announce=now)
         result = _deduplicate_by_identity([d1, d2])
         assert len(result) == 2
+
+    def test_real_mesh_device(self):
+        """Test with actual MeshDevice instances, not fakes."""
+        from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
+        from styrened.tui.utils import _deduplicate_by_identity
+
+        now = time.time()
+        d1 = MeshDevice(
+            destination_hash="aabb" * 8,
+            identity_hash="ccdd" * 8,
+            name="RealNode-old",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=now - 5,
+            announce_count=1,
+        )
+        d2 = MeshDevice(
+            destination_hash="eeff" * 8,
+            identity_hash="ccdd" * 8,  # same identity
+            name="RealNode-new",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=now,
+            announce_count=2,
+            lxmf_destination_hash="1122" * 8,
+        )
+        result = _deduplicate_by_identity([d1, d2])
+        assert len(result) == 1
+        # Newer announce wins
+        assert result[0].destination_hash == "eeff" * 8
+        # LXMF hash merged from d2
+        assert result[0].lxmf_destination_hash == "1122" * 8

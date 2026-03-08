@@ -14,8 +14,10 @@ class TestRBACPolicyFromDict:
 
     def test_none_returns_default(self) -> None:
         # Edge: callers may pass None when config section is missing
-        policy = RBACPolicy.from_dict({})
+        policy = RBACPolicy.from_dict(None)  # type: ignore[arg-type]
         assert policy.default_role == Role.PEER
+        assert policy.roster == {}
+        assert policy.blocked == []
 
     def test_default_role_parsed(self) -> None:
         policy = RBACPolicy.from_dict({"default_role": "admin"})
@@ -56,7 +58,7 @@ class TestRBACPolicyFromDict:
         assert policy.blocked == ["deadbeef", "cafebabe"]
 
     def test_full_round_trip(self) -> None:
-        """Verify from_dict matches the format produced by _serialize_config."""
+        """Verify from_dict matches the format produced by serialize_config."""
         original = RBACPolicy(
             default_role=Role.MONITOR,
             roster={
@@ -69,7 +71,7 @@ class TestRBACPolicyFromDict:
             },
             blocked=["dead"],
         )
-        # Simulate _serialize_config output format
+        # Simulate serialize_config output format
         serialized = {
             "default_role": original.default_role.name.lower(),
             "roster": [

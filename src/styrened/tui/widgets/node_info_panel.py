@@ -15,7 +15,7 @@ from textual.widgets import Static
 
 from styrened.models.mesh_device import DeviceType
 from styrened.models.rns_error import RNSErrorState
-from styrened.services.hub_connection import HubStatus  # Data enum only
+from styrened.services.hub_connection import HubStatus  # Pure data enum, no service state
 from styrened.tui.models.hardware import NetworkInterface, SystemInfo
 from styrened.tui.services.config import load_config
 from styrened.tui.services.hardware import (
@@ -395,8 +395,8 @@ class NodeInfoPanel(Static):
             return
 
         # Hub connection managed by daemon — status pushed via IPC in managed mode
-        # In non-managed mode, just report unknown
-        self.hub_status = HubStatus.UNKNOWN
+        # In non-managed mode, report as disabled (no daemon to poll)
+        self.hub_status = HubStatus.DISABLED
 
         # Get Styrene mesh device count from discovery
         from styrened.tui.utils import _deduplicate_by_identity
