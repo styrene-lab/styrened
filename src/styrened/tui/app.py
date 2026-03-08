@@ -12,7 +12,6 @@ from textual.app import App, ComposeResult
 
 if TYPE_CHECKING:
     from styrened.protocols.chat import ChatProtocol
-    from styrened.rpc import RPCClient
     from styrened.tui.models.config import DeploymentMode, PeerConfig
 from textual.binding import Binding, BindingType
 from textual.screen import Screen
@@ -170,9 +169,6 @@ class StyreneApp(App[None]):
 
     # Lifecycle manager for standalone service initialization
     _lifecycle: StyreneLifecycle
-
-    # RPC client for fleet communication (mock in development)
-    rpc_client: "RPCClient"
 
     # Database engine for message persistence
     db_engine: Engine | None
@@ -347,15 +343,8 @@ class StyreneApp(App[None]):
         if not success:
             self.log.warning("Service initialization failed - running in offline mode")
 
-        # In IPC mode, RPC and chat go through the bridge
-        # Initialize offline RPC client for backward compat with screens
-        # that still use self.rpc_client directly
-        from styrened.rpc.offline import OfflineRPCClient
-
-        self.rpc_client = OfflineRPCClient()  # type: ignore[assignment]
-        self.log.info(
-            "IPC mode active — screens should migrate to IPCBridge"
-        )
+        # All RPC/chat flows through the IPC bridge.
+        self.log.info("IPC mode active — all service calls via IPCBridge")
 
     def compose(self) -> ComposeResult:
         yield Header()

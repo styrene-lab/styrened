@@ -700,7 +700,7 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
 
     paths.ensure_directories()
 
-    config_dict = _serialize_config(config)
+    config_dict = serialize_config(config)
 
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -710,8 +710,12 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
         raise ConfigLoadError(f"Failed to save config to {config_path}: {e}", config_path) from e
 
 
-def _serialize_config(config: CoreConfig) -> dict[str, Any]:
+def serialize_config(config: CoreConfig) -> dict[str, Any]:
     """Serialize CoreConfig to a dictionary suitable for YAML output.
+
+    This is a public API — used by the IPC handler (SAVE_CORE_CONFIG),
+    TUI settings screen, and any consumer that needs to round-trip
+    CoreConfig through a dict representation.
 
     Args:
         config: CoreConfig instance to serialize.
@@ -1205,3 +1209,6 @@ def validate_core_config(
         raise ConfigValidationError(errors)
 
     return errors
+
+# Backward-compat alias (was private, now public)
+_serialize_config = serialize_config

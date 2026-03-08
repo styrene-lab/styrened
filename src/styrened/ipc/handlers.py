@@ -464,10 +464,10 @@ class IPCHandlers:
             ResultResponse with full config dict.
         """
         try:
-            from styrened.services.config import _serialize_config, load_core_config
+            from styrened.services.config import load_core_config, serialize_config
 
             config = load_core_config()
-            config_dict = _serialize_config(config)
+            config_dict = serialize_config(config)
             return ResultResponse(data={"config": config_dict})
 
         except Exception as e:
@@ -495,16 +495,39 @@ class IPCHandlers:
 
         try:
             import yaml
+            from pathlib import Path
 
             from styrened import paths
+            from styrened.services.config import load_core_config, serialize_config
 
-            # Write the caller's serialized config dict directly to disk.
-            # The caller is responsible for sending a complete, valid config
-            # (e.g. via _serialize_config(CoreConfig)).
+            # Validate by round-tripping through CoreConfig.
+            # Write to a temp file, parse with load_core_config (full validation),
+            # then re-serialize for a canonical representation. This ensures
+            # malformed dicts cannot corrupt the config file.
+            import tempfile
+
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".yaml", delete=False
+                ) as tmp:
+                    yaml.dump(req.config_dict, tmp, default_flow_style=False)
+                    tmp_path = Path(tmp.name)
+                try:
+                    parsed_config = load_core_config(tmp_path)
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+            except Exception as e:
+                return ErrorResponse.invalid_request(
+                    f"Invalid config: {e}"
+                )
+
+            # Re-serialize the validated config for a canonical write
+            validated_dict = serialize_config(parsed_config)
+
             config_path = paths.config_file()
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with config_path.open("w") as f:
-                yaml.dump(req.config_dict, f, default_flow_style=False, sort_keys=False)
+                yaml.dump(validated_dict, f, default_flow_style=False, sort_keys=False)
 
             return ResultResponse(data={"saved": True})
 

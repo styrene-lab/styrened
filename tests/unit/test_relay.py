@@ -278,12 +278,12 @@ relay:
 def test_relay_config_round_trip():
     """Serialize and load back preserves relay config."""
     from styrened.models.config import CoreConfig
-    from styrened.services.config import _serialize_config
+    from styrened.services.config import serialize_config
     import yaml
 
     config = CoreConfig()
     config.relay = RelayConfig(enabled=True, max_sessions=32)
-    serialized = _serialize_config(config)
+    serialized = serialize_config(config)
     assert serialized["relay"]["enabled"] is True
     assert serialized["relay"]["max_sessions"] == 32
 

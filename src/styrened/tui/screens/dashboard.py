@@ -340,8 +340,10 @@ class MeshDeviceTree(Tree[str]):
         Nodes that have failed META_MAX_RETRIES times are skipped — they're
         likely running an older version without /meta support, or are
         unreachable over direct link.
+
+        Uses the same retry limit as services.direct_link.META_MAX_RETRIES.
         """
-        _META_MAX_RETRIES = 3
+        from styrened.services.direct_link import META_MAX_RETRIES as _META_MAX_RETRIES
         for device in devices:
             if not device.identity_hash or not device.destination_hash:
                 continue
@@ -568,7 +570,6 @@ class DashboardScreen(Screen[None]):
         if self._ipc_bridge is not None:
             self.run_worker(self._refresh_hub_status(), group="hub-status")
 
-    @work(thread=False, exclusive=True, group="hub-status")
     async def _refresh_hub_status(self) -> None:
         """Fetch hub status from daemon and update the info panel."""
         try:
@@ -580,7 +581,7 @@ class DashboardScreen(Screen[None]):
             if hub_data:
                 try:
                     panel = self.query_one(NodeInfoPanel)
-                    panel.daemon_connected = hub_data.get("connected", False)
+                    panel.daemon_connected = hub_data.get("is_connected", False)
                 except Exception:
                     pass
         except Exception:

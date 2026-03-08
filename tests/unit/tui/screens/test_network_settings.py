@@ -130,14 +130,14 @@ class TestCoreConfigPeerRoundTrip:
 
     def test_peer_config_serialization(self):
         """PeerConfig should serialize to dict correctly."""
-        from styrened.services.config import _serialize_config
+        from styrened.services.config import serialize_config
 
         config = CoreConfig()
         config.reticulum.interfaces.peers = [
             PeerConfig(host="rns.styrene.io", port=4242, name="Hub"),
             PeerConfig(host="10.0.0.1", port=5555),
         ]
-        data = _serialize_config(config)
+        data = serialize_config(config)
         peers = data["reticulum"]["interfaces"]["peers"]
         assert len(peers) == 2
         assert peers[0]["host"] == "rns.styrene.io"

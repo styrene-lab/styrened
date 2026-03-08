@@ -98,12 +98,17 @@ class CommandWidget(Widget):
         except Exception:
             return None
 
-    def _no_bridge_error(self, label: str) -> None:
-        """Show error when IPC bridge is unavailable."""
+    def _no_bridge_error(self, label: str, entry_type: str = "system") -> None:
+        """Show error when IPC bridge is unavailable.
+
+        Args:
+            label: Command label for the output entry.
+            entry_type: Entry type for rendering (e.g. "ping", "reboot").
+        """
         self._append_output(OutputEntry(
             command=label,
             stderr="Not connected to daemon (IPC bridge unavailable)",
-            entry_type="system",
+            entry_type=entry_type,
         ))
 
     def compose(self) -> ComposeResult:
@@ -391,7 +396,7 @@ class CommandWidget(Widget):
                     entry_type="ping",
                 ))
             else:
-                self._no_bridge_error("ping")
+                self._no_bridge_error("ping", entry_type="ping")
                 return
 
             self._refresh_available_display()
@@ -433,7 +438,7 @@ class CommandWidget(Widget):
                         entry_type="reboot",
                     ))
             else:
-                self._no_bridge_error("reboot")
+                self._no_bridge_error("reboot", entry_type="reboot")
                 return
 
             self._set_status("")
@@ -473,7 +478,7 @@ class CommandWidget(Widget):
                         entry_type="system",
                     ))
             else:
-                self._no_bridge_error("update")
+                self._no_bridge_error("update", entry_type="update")
                 return
 
             self._set_status("")

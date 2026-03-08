@@ -743,10 +743,10 @@ class SettingsScreen(Screen[None]):
 
             # Reset core config via IPC — serialize a fresh default CoreConfig
             from styrened.models.config import CoreConfig
-            from styrened.services.config import _serialize_config
+            from styrened.services.config import serialize_config
 
             default_config = CoreConfig()
-            default_dict = _serialize_config(default_config)
+            default_dict = serialize_config(default_config)
 
             bridge = self._ipc_bridge
             if bridge is not None:
@@ -1199,9 +1199,9 @@ class SettingsScreen(Screen[None]):
             try:
                 bridge = self._ipc_bridge
                 if bridge is not None:
-                    from styrened.services.config import _serialize_config
+                    from styrened.services.config import serialize_config
 
-                    config_dict = _serialize_config(self.config.core)
+                    config_dict = serialize_config(self.config.core)
                     await bridge.save_core_config(config_dict)
 
                 # Regenerate RNS config from TUI config

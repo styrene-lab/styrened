@@ -14,7 +14,7 @@ import yaml
 from styrened.models.config import AutoReplyMode, CoreConfig, DeploymentMode, Profile
 from styrened.services.config import (
     _parse_bool,
-    _serialize_config,
+    serialize_config,
     get_profile_defaults,
     load_core_config,
     save_core_config,
@@ -269,13 +269,13 @@ class TestProfileRoundTrip:
     def test_profile_in_serialized_output(self) -> None:
         """Profile appears in serialized dict."""
         config = get_profile_defaults(Profile.ENDPOINT)
-        output = _serialize_config(config)
+        output = serialize_config(config)
         assert output["profile"] == "endpoint"
 
     def test_operator_profile_in_serialized_output(self) -> None:
         """Operator profile appears in serialized dict."""
         config = get_profile_defaults(Profile.OPERATOR)
-        output = _serialize_config(config)
+        output = serialize_config(config)
         assert output["profile"] == "operator"
 
 
@@ -387,7 +387,7 @@ class TestHubProfileFromYAML:
     def test_hub_profile_in_serialized_output(self) -> None:
         """Hub profile appears in serialized dict."""
         config = get_profile_defaults(Profile.HUB)
-        output = _serialize_config(config)
+        output = serialize_config(config)
         assert output["profile"] == "hub"
 
 
@@ -397,7 +397,7 @@ class TestPublicModeConfig:
     def test_public_mode_in_serialized_output(self) -> None:
         """public_mode appears in serialized API section."""
         config = get_profile_defaults(Profile.OPERATOR)
-        output = _serialize_config(config)
+        output = serialize_config(config)
         assert "public_mode" in output["api"]
         assert output["api"]["public_mode"] is False
 
@@ -547,7 +547,7 @@ class TestPublicModeEdgeCases:
         """Serialized hub config with public_mode=False emits both profile and override."""
         config = get_profile_defaults(Profile.HUB)
         config.api.public_mode = False
-        output = _serialize_config(config)
+        output = serialize_config(config)
 
         assert output["profile"] == "hub"
         assert output["api"]["public_mode"] is False

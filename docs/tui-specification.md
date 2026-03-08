@@ -3,12 +3,7 @@ id: tui-specification
 title: Styrene TUI Specification
 status: exploring
 tags: [tui, ux, specification, textual]
-open_questions:
-  - What is the target user persona — solo operator managing their own node, or fleet admin managing many nodes, or both?
-  - Should the TUI have a formal screen hierarchy / information architecture, or remain flat with global keybinding navigation?
-  - What is the relationship between the full TUI (StyreneApp) and the compact dashboard (LocalDashboardScreen) — are these separate products or modes of one?
-  - How should relay sessions be surfaced — passive status indicator, dedicated screen, or per-device detail?
-  - Where should RBAC management live — its own screen, or embedded in settings, or a context menu on device nodes?
+open_questions: []
 ---
 
 # Styrene TUI Specification
@@ -148,6 +143,21 @@ The adversarial review found 6 critical bugs and 6 warnings in the TUI services 
 
 **Summary**: The IPC commands exist for most operations. The problems are: (a) wrong type handling at the TUI↔IPC boundary, (b) missing deserialization helpers on model classes, (c) incomplete or no-op replacements where the old logic was complex.
 
+### TUIMode Enum — Initial Values and Future Candidates
+
+```python
+class TUIMode(str, Enum):
+    OPERATOR = "operator"    # Solo node management. Default.
+    FLEET = "fleet"          # Full admin — all screens, panels, management surfaces.
+    KIOSK = "kiosk"          # Read-only display. Wall-mounted Pi, public status board.
+    FIELD = "field"          # Bandwidth-constrained. Minimal IPC, essential ops only.
+    HEADLESS = "headless"    # No TUI — daemon-only with status via API/IPC.
+```
+
+**Gating model:** Screens/widgets check `app.tui_mode` to determine visibility. Not a hierarchy (FLEET > OPERATOR) — modes are profiles, not permission levels. Each mode defines which surfaces are visible, which keybindings are active, and how aggressively the TUI polls for data.
+
+**Config:** `tui.mode: operator` in core-config.yaml. Changeable at runtime from settings (except HEADLESS which implies no TUI).
+
 ## Decisions
 
 ### Decision: Introduce typed TUIServices protocol as the screen/widget API contract
@@ -185,10 +195,36 @@ The adversarial review found 6 critical bugs and 6 warnings in the TUI services 
 **Status:** decided
 **Rationale:** IPCBridge moved from styrened.tui.services.ipc_bridge to styrened.ipc.bridge. Zero TUI/Textual dependencies confirmed — clean move. Re-export shim at old location for backward compatibility. All 4 direct importers updated. Any consumer (TUI, web API, web bridge) can now import from styrened.ipc without pulling in Textual.
 
+### Decision: Primary persona: solo operator managing their own node
+
+**Status:** decided
+**Rationale:** Default UX optimized for a single operator managing their own node — minimal chrome, direct actions, no fleet abstractions in the way. Fleet admin path exists but is exercised organically by the developer through daily use rather than designed up-front. This means: dashboard defaults to local node status, device list is secondary, RBAC/relay management are power-user surfaces not prominent in navigation.
+
+### Decision: Flat navigation with progressive disclosure via "Advanced Mode" toggle
+
+**Status:** decided
+**Rationale:** Navigation stays flat (global keybindings jump between screens). No formal IA hierarchy. Design for fleet admin UX first to capture all granular details, then reduce via an "Advanced Mode" toggle in settings. Default (off) = solo operator view with sensible defaults and hidden fleet surfaces. Advanced (on) = full fleet admin UX with all screens, panels, and management surfaces visible. This ensures nothing is architecturally missing — the simple view is a curated subset, not a separate code path.
+
+### Decision: TUI mode is an enum, not a boolean toggle
+
+**Status:** decided
+**Rationale:** Instead of a binary advanced_mode bool, use a TUIMode enum in config (`tui.mode`). Starting values: OPERATOR (solo, default) and FLEET (full admin surfaces). Enum is extensible — a future KIOSK mode (read-only display), MINIMAL mode (headless status only), or FIELD mode (low-bandwidth optimized) can be added without refactoring the gating logic. Screens check `app.tui_mode` to determine which panels, bindings, and surfaces to expose. Each mode defines a visibility profile, not a separate code path.
+
+### Decision: LocalDashboardScreen is OPERATOR default; DashboardScreen is FLEET default — same app, different landing
+
+**Status:** decided
+**Rationale:** No separate products. TUIMode determines the landing screen: OPERATOR → LocalDashboardScreen, FLEET → DashboardScreen. User can always navigate between them. LocalDashboardScreen gets a cheeky easter-egg-style mode toggle — a small icon/emoji tucked in a corner that switches to FLEET mode. Discoverable but not prominent. 50/50 whether the user finds it there or in settings. Either path works. The toggle writes to config so it persists.
+
+### Decision: Relay surfacing: passive badge in OPERATOR, full panel in FLEET
+
+**Status:** decided
+**Rationale:** OPERATOR mode: relay status is a passive indicator on the dashboard — "relay: 2 active" badge, invisible when no sessions exist. Clickable for a summary tooltip. FLEET mode: dedicated relay panel with session list (requester, target, bytes forwarded, duration, permanent flag), teardown actions, and config. No dedicated relay screen in either mode — it's a dashboard panel that scales with TUIMode.
+
+### Decision: RBAC management: settings subsection in OPERATOR, expanded panel in FLEET
+
+**Status:** decided
+**Rationale:** Same progressive disclosure as relay. OPERATOR: RBAC is a settings subsection — view/edit your roster and roles, minimal surface. FLEET: expanded RBAC panel with full roster management, role assignment, capability grants, and per-device role view in MeshDeviceDetailScreen. No dedicated RBAC screen in either mode.
+
 ## Open Questions
 
-- What is the target user persona — solo operator managing their own node, or fleet admin managing many nodes, or both?
-- Should the TUI have a formal screen hierarchy / information architecture, or remain flat with global keybinding navigation?
-- What is the relationship between the full TUI (StyreneApp) and the compact dashboard (LocalDashboardScreen) — are these separate products or modes of one?
-- How should relay sessions be surfaced — passive status indicator, dedicated screen, or per-device detail?
-- Where should RBAC management live — its own screen, or embedded in settings, or a context menu on device nodes?
+*No open questions.*

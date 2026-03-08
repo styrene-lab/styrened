@@ -1078,6 +1078,7 @@ class DeviceInfo:
     announce_count: int
     short_name: str | None = None
     system_fingerprint: str | None = None
+    discovered_via: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1092,6 +1093,7 @@ class DeviceInfo:
             "announce_count": self.announce_count,
             "short_name": self.short_name,
             "system_fingerprint": self.system_fingerprint,
+            "discovered_via": self.discovered_via,
         }
 
     @classmethod
@@ -1108,6 +1110,7 @@ class DeviceInfo:
             announce_count=data.get("announce_count", 0),
             short_name=data.get("short_name"),
             system_fingerprint=data.get("system_fingerprint"),
+            discovered_via=data.get("discovered_via"),
         )
 
     @classmethod
@@ -1132,6 +1135,7 @@ class DeviceInfo:
             announce_count=device.announce_count or 0,
             short_name=getattr(device, "short_name", None),
             system_fingerprint=getattr(device, "system_fingerprint", None),
+            discovered_via=getattr(device, "discovered_via", None),
         )
 
 
