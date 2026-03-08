@@ -695,6 +695,7 @@ class MeshVPNConfig:
     subnet_prefix: str = "fd73:7479:7265:6e65"
     gateway: bool = False
     endpoint: str = ""
+    peer_discovery: str = "lazy"  # "eager" | "lazy" — when to fetch /meta for Ygg address
 
 
 @dataclass
