@@ -22,7 +22,7 @@ import logging
 import os
 import platform
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,23 @@ logger = logging.getLogger(__name__)
 
 # Protocol version for handshake compatibility
 HANDSHAKE_VERSION = 1
+
+# Capability bit advertised in RNS announces when Yggdrasil is running locally.
+CAPABILITY_YGGDRASIL = "yggdrasil"
+
+
+class PeerDiscovery(Enum):
+    """When to fetch /meta from a peer to learn their Yggdrasil address.
+
+    EAGER: /meta is fetched at announce time (via ygg-announce-integration).
+           initiate_handshake() can skip the fetch — ygg_endpoint already set.
+    LAZY:  /meta is fetched lazily inside initiate_handshake() only when the
+           target carries CAPABILITY_YGGDRASIL.  Slower first-handshake but
+           avoids a /meta round-trip for every announce.
+    """
+
+    EAGER = "eager"
+    LAZY = "lazy"
 
 # Default mesh subnet: ULA fd73:7479:7265:6e65::/64
 # "styrene" in hex: 73 74 79 72 65 6e 65 → fd73:7479:7265:6e65
@@ -173,15 +190,18 @@ class PeerInfo:
     """Information about a VPN peer."""
     public_key: str          # WireGuard public key (base64)
     mesh_ip: str             # Assigned mesh IP
-    endpoint: str | None = None  # IP:port for WireGuard (may be None if behind NAT)
-    gateway: bool = False    # Whether this peer serves as a bat0 gateway
-    identity_hash: str = ""  # RNS identity hash of the peer
+    endpoint: str | None = None      # IP:port for WireGuard (may be None if behind NAT)
+    gateway: bool = False            # Whether this peer serves as a bat0 gateway
+    identity_hash: str = ""          # RNS identity hash of the peer
+    ygg_endpoint: str | None = None  # [addr]:port Yggdrasil endpoint, or None
+    capabilities: list[str] = field(default_factory=list)  # Announced capability flags
 
 
 def build_handshake_request(
     public_key: str,
     mesh_ip: str,
     endpoint: str | None = None,
+    ygg_endpoint: str | None = None,
 ) -> bytes:
     """Build a VPN handshake request to send over LXMF.
 
@@ -189,17 +209,20 @@ def build_handshake_request(
         public_key: Our WireGuard public key.
         mesh_ip: Our derived mesh IP.
         endpoint: Our WireGuard endpoint (IP:port), if known.
+        ygg_endpoint: Our Yggdrasil endpoint in [addr]:port format, or None.
 
     Returns:
         JSON-encoded bytes.
     """
-    payload = {
+    payload: dict[str, Any] = {
         "version": HANDSHAKE_VERSION,
         "wg_pubkey": public_key,
         "mesh_ip": mesh_ip,
         "subnet_prefix": extract_prefix(mesh_ip),
         "endpoint": endpoint or "",
     }
+    if ygg_endpoint:
+        payload["ygg_endpoint"] = ygg_endpoint
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
@@ -208,6 +231,7 @@ def build_handshake_response(
     mesh_ip: str,
     endpoint: str | None = None,
     gateway: bool = False,
+    ygg_endpoint: str | None = None,
 ) -> bytes:
     """Build a VPN handshake response.
 
@@ -216,11 +240,12 @@ def build_handshake_response(
         mesh_ip: Our derived mesh IP.
         endpoint: Our WireGuard endpoint.
         gateway: Whether we serve as a bat0 gateway.
+        ygg_endpoint: Our Yggdrasil endpoint in [addr]:port format, or None.
 
     Returns:
         JSON-encoded bytes.
     """
-    payload = {
+    payload: dict[str, Any] = {
         "version": HANDSHAKE_VERSION,
         "wg_pubkey": public_key,
         "mesh_ip": mesh_ip,
@@ -228,6 +253,8 @@ def build_handshake_response(
         "endpoint": endpoint or "",
         "gateway": gateway,
     }
+    if ygg_endpoint:
+        payload["ygg_endpoint"] = ygg_endpoint
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
@@ -256,6 +283,7 @@ def parse_handshake_request(data: bytes) -> PeerInfo:
         public_key=payload["wg_pubkey"],
         mesh_ip=payload["mesh_ip"],
         endpoint=payload.get("endpoint") or None,
+        ygg_endpoint=payload.get("ygg_endpoint") or None,
     )
 
 
@@ -287,6 +315,7 @@ def parse_handshake_response(data: bytes) -> PeerInfo:
         mesh_ip=payload["mesh_ip"],
         endpoint=payload.get("endpoint") or None,
         gateway=payload.get("gateway", False),
+        ygg_endpoint=payload.get("ygg_endpoint") or None,
     )
 
 
@@ -334,6 +363,7 @@ class MeshVPNService:
         self._started = False
         self._styrene_protocol: Any = None  # Set by daemon after start
         self._pending_handshakes: dict[str, Any] = {}  # identity_hash → asyncio.Future
+        self._ygg_adapter: Any = None  # YggdrasilAdapter, injected by daemon after start
 
     @property
     def enabled(self) -> bool:
@@ -363,6 +393,120 @@ class MeshVPNService:
         except Exception:
             pass
         return ""
+
+    async def _detect_yggdrasil_endpoint(self, port: int) -> str | None:
+        """Detect our local Yggdrasil address and format it as [addr]:port.
+
+        Priority order:
+          1. If _ygg_adapter is set and running, use its cached address.
+          2. Otherwise probe the same socket paths as YggdrasilAdapter._probe().
+
+        Args:
+            port: WireGuard listen port to attach to the endpoint string.
+
+        Returns:
+            "[ygg_addr]:port" IPv6 endpoint string, or None if Yggdrasil is
+            not running or no address is discoverable.
+        """
+        import json as _json
+        import socket as _socket
+
+        # Fast path: adapter already running and has cached address.
+        if self._ygg_adapter is not None:
+            addr = self._ygg_adapter.get_local_address()
+            if addr:
+                return f"[{addr}]:{port}"
+
+        # Slow path: probe admin sockets directly.
+        try:
+            from styrened.services.yggdrasil import SYSTEM_SOCKET_PATHS
+        except ImportError:
+            return None
+
+        candidates = list(SYSTEM_SOCKET_PATHS)
+
+        for sock_path in candidates:
+            if not sock_path.exists():
+                continue
+            try:
+                request = _json.dumps({"request": "getself", "keepalive": False}).encode()
+                with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
+                    sock.settimeout(3.0)
+                    sock.connect(str(sock_path))
+                    sock.sendall(request)
+                    buf = b""
+                    while True:
+                        chunk = sock.recv(4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        try:
+                            data = _json.loads(buf)
+                            addr = (
+                                data.get("address")
+                                or data.get("self", {}).get("address")
+                            )
+                            if addr:
+                                return f"[{addr}]:{port}"
+                            break
+                        except _json.JSONDecodeError:
+                            continue
+            except Exception:
+                continue
+
+        return None
+
+    def _select_peer_endpoint(self, peer: "PeerInfo") -> str | None:
+        """Choose the best WireGuard endpoint for a peer.
+
+        If our local Yggdrasil is running (adapter present and running) and
+        the peer has a ygg_endpoint, prefer the Yggdrasil overlay address —
+        it stays routable even when the peer's public IP changes.
+
+        Falls back to peer.endpoint otherwise.
+
+        Args:
+            peer: The peer whose endpoint we are selecting.
+
+        Returns:
+            Endpoint string ("ip:port" or "[addr]:port"), or None.
+        """
+        ygg_running = (
+            self._ygg_adapter is not None
+            and self._ygg_adapter.get_local_address() is not None
+        )
+        if ygg_running and peer.ygg_endpoint:
+            return peer.ygg_endpoint
+        return peer.endpoint
+
+    async def _fetch_meta_ygg_address(self, target_hash: str) -> str | None:
+        """Fetch /meta from *target_hash* over a DirectLink and return ygg_address.
+
+        Delegates to DirectLinkService.request_meta() which manages link
+        establishment and teardown.  Returns None if the link cannot be
+        established, the peer is not running Yggdrasil, or the request times out.
+
+        Args:
+            target_hash: Hex identity hash of the target peer.
+
+        Returns:
+            Yggdrasil IPv6 address string, or None.
+        """
+        try:
+            from styrened.services.direct_link import DirectLinkService
+
+            dl: DirectLinkService | None = getattr(self, "_direct_link_service", None)
+            if dl is None:
+                return None
+
+            meta = await dl.request_meta(target_hash)
+            if meta is None:
+                return None
+            return meta.get("ygg_address") or None
+
+        except Exception as exc:
+            logger.debug("_fetch_meta_ygg_address: %s", exc)
+            return None
 
     def _ensure_keypair(self) -> None:
         """Load or generate WireGuard keypair."""
@@ -474,19 +618,41 @@ class MeshVPNService:
                 )
                 return
 
+            # If peer advertises a Yggdrasil endpoint, add them as an ephemeral
+            # Yggdrasil peer so the overlay route exists before WG comes up.
+            if peer_info.ygg_endpoint and self._ygg_adapter is not None:
+                # ygg_endpoint is "[addr]:port" — extract just the address.
+                ygg_addr_raw = peer_info.ygg_endpoint.split("]:")[0].lstrip("[")
+                await self._ygg_adapter.add_peer(ygg_addr_raw)
+
+            # Prefer Yggdrasil overlay endpoint for configuration when available.
+            effective_endpoint = self._select_peer_endpoint(peer_info)
+            if effective_endpoint != peer_info.endpoint:
+                peer_info = PeerInfo(
+                    public_key=peer_info.public_key,
+                    mesh_ip=peer_info.mesh_ip,
+                    endpoint=effective_endpoint,
+                    gateway=peer_info.gateway,
+                    identity_hash=peer_info.identity_hash,
+                    ygg_endpoint=peer_info.ygg_endpoint,
+                    capabilities=peer_info.capabilities,
+                )
+
             # Store and configure peer
             self._peers[remote_hash] = peer_info
             await self._configure_peer(remote_hash, peer_info)
 
-            # Send response via LXMF
+            # Send response via LXMF — include our Yggdrasil endpoint.
             endpoint = self.config.endpoint or self._detect_local_endpoint(
                 self.config.listen_port
             )
+            our_ygg_endpoint = await self._detect_yggdrasil_endpoint(self.config.listen_port)
             response_data = build_handshake_response(
                 public_key=self.public_key,
                 mesh_ip=self.mesh_ip,
                 endpoint=endpoint,
                 gateway=self.config.gateway,
+                ygg_endpoint=our_ygg_endpoint,
             )
             await self._send_vpn_message(
                 remote_hash,
@@ -522,6 +688,24 @@ class MeshVPNService:
                 f"VPN handshake response from {remote_hash[:16]}: "
                 f"ip={peer_info.mesh_ip} gateway={peer_info.gateway}"
             )
+
+            # If peer advertises a Yggdrasil endpoint, add ephemeral Ygg peer.
+            if peer_info.ygg_endpoint and self._ygg_adapter is not None:
+                ygg_addr_raw = peer_info.ygg_endpoint.split("]:")[0].lstrip("[")
+                await self._ygg_adapter.add_peer(ygg_addr_raw)
+
+            # Prefer Yggdrasil overlay endpoint when our Ygg is running.
+            effective_endpoint = self._select_peer_endpoint(peer_info)
+            if effective_endpoint != peer_info.endpoint:
+                peer_info = PeerInfo(
+                    public_key=peer_info.public_key,
+                    mesh_ip=peer_info.mesh_ip,
+                    endpoint=effective_endpoint,
+                    gateway=peer_info.gateway,
+                    identity_hash=peer_info.identity_hash,
+                    ygg_endpoint=peer_info.ygg_endpoint,
+                    capabilities=peer_info.capabilities,
+                )
 
             # Store and configure peer
             self._peers[remote_hash] = peer_info
@@ -1040,14 +1224,36 @@ class MeshVPNService:
             logger.error("StyreneProtocol not set — cannot initiate handshake")
             return None
 
-        # Build handshake request
+        # LAZY peer_discovery: if target advertises CAPABILITY_YGGDRASIL, fetch
+        # /meta now to learn their Yggdrasil address before sending handshake.
+        # EAGER mode already fetched /meta at announce time — skip here.
+        peer = self._peers.get(target_hash)
+        is_lazy = self.config.peer_discovery == PeerDiscovery.LAZY.value
+        has_ygg_cap = CAPABILITY_YGGDRASIL in (peer.capabilities if peer else [])
+        if is_lazy and has_ygg_cap and (peer is None or not peer.ygg_endpoint):
+            ygg_addr = await self._fetch_meta_ygg_address(target_hash)
+            if ygg_addr:
+                if peer is None:
+                    # Create a stub PeerInfo to hold capabilities/ygg data
+                    peer = PeerInfo(public_key="", mesh_ip="", capabilities=[CAPABILITY_YGGDRASIL])
+                    self._peers[target_hash] = peer
+                peer.ygg_endpoint = await self._detect_yggdrasil_endpoint(
+                    self.config.listen_port
+                )
+                # Add peer to Yggdrasil so the overlay route exists before WG starts.
+                if self._ygg_adapter is not None and ygg_addr:
+                    await self._ygg_adapter.add_peer(ygg_addr)
+
+        # Build handshake request — include our Yggdrasil endpoint if known.
         endpoint = self.config.endpoint or self._detect_local_endpoint(
             self.config.listen_port
         )
+        ygg_endpoint = await self._detect_yggdrasil_endpoint(self.config.listen_port)
         request_data = build_handshake_request(
             public_key=self.public_key,
             mesh_ip=self.mesh_ip,
             endpoint=endpoint,
+            ygg_endpoint=ygg_endpoint,
         )
 
         # Create future to wait for response

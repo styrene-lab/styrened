@@ -1256,13 +1256,26 @@ class RPCServer:
             except Exception:
                 pass
 
-        return {
+        meta: dict[str, Any] = {
             "styrene_version": _styrened_version,
             "profile": profile,
             "capabilities": caps,
             "arch": os_info.get("arch", ""),
             "os_id": os_info.get("os_id", ""),
         }
+        # Include Yggdrasil address when adapter has one cached.
+        if config is not None:
+            try:
+                ygg_adapter = getattr(config, "_ygg_adapter", None)
+                if ygg_adapter is not None:
+                    ygg_addr = ygg_adapter.get_local_address()
+                    if ygg_addr:
+                        meta["ygg_address"] = ygg_addr
+                        if "yggdrasil" not in caps:
+                            caps.append("yggdrasil")
+            except Exception:
+                pass
+        return meta
 
     def _gather_info(self, config: Any = None) -> dict[str, Any]:
         """Gather identifiable node metadata for /info requests.
