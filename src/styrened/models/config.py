@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 
 from styrened.models.rbac import RBACPolicy
+from styrened.models.daemon_mode import DaemonMode
 
 # -----------------------------------------------------------------------------
 # Enums
@@ -697,6 +698,57 @@ class MeshVPNConfig:
 
 
 @dataclass
+class YggdrasilConfig:
+    """Configuration for Yggdrasil overlay network integration.
+
+    Attributes:
+        mode: How styrened interacts with Yggdrasil (disabled/adopt/managed).
+        binary_path: Path to the yggdrasil binary (used in MANAGED mode).
+        listen_port: Port for the managed Yggdrasil instance (distinct from
+            the system default of 9001 to avoid conflicts).
+        admin_socket: Path to the admin Unix socket. Empty means auto-detect.
+        multicast: Enable multicast peer discovery on the local network.
+        bootstrap_from_rns: Advertise and discover Yggdrasil peers via RNS
+            announces so mesh-connected nodes can peer automatically.
+        initial_peers: Static list of Yggdrasil peer URIs to connect to.
+    """
+
+    mode: DaemonMode = DaemonMode.DISABLED
+    binary_path: str = "yggdrasil"
+    listen_port: int = 9002
+    admin_socket: str = ""
+    multicast: bool = True
+    bootstrap_from_rns: bool = True
+    initial_peers: list = field(default_factory=list)
+
+
+@dataclass
+class I2PConfig:
+    """Configuration for I2P (i2pd) integration.
+
+    Attributes:
+        mode: How styrened interacts with i2pd (disabled/adopt/managed).
+        http_proxy_host: Host where the I2P HTTP proxy is listening.
+        http_proxy_port: Port used when adopting an existing i2pd instance.
+        managed_http_proxy_port: Port used for the managed i2pd instance
+            (distinct from the default 4444 to avoid conflicts).
+        managed_i2pcontrol_port: I2PControl API port for the managed instance.
+        b32_address: Static b32 address override. Leave empty for auto-detect.
+        cache_ttl: Seconds to cache resolved I2P addresses.
+        fetch_timeout: Seconds before an I2P fetch request times out.
+    """
+
+    mode: DaemonMode = DaemonMode.DISABLED
+    http_proxy_host: str = "127.0.0.1"
+    http_proxy_port: int = 4444
+    managed_http_proxy_port: int = 4445
+    managed_i2pcontrol_port: int = 7651
+    b32_address: str = ""
+    cache_ttl: int = 3600
+    fetch_timeout: float = 45.0
+
+
+@dataclass
 class CoreConfig:
     """Core Styrene configuration for headless applications.
 
@@ -718,6 +770,8 @@ class CoreConfig:
         page_server: NomadNet page server configuration.
         pqc: Post-quantum cryptographic session layer configuration.
         mesh_vpn: WireGuard mesh VPN configuration.
+        yggdrasil: Yggdrasil overlay network integration.
+        i2p: I2P network integration.
     """
 
     profile: Profile = Profile.OPERATOR
@@ -736,6 +790,8 @@ class CoreConfig:
     mesh_vpn: MeshVPNConfig = field(default_factory=MeshVPNConfig)
     relay: "RelayConfig" = field(default_factory=lambda: _default_relay_config())
     rbac: RBACPolicy = field(default_factory=RBACPolicy)
+    yggdrasil: YggdrasilConfig = field(default_factory=YggdrasilConfig)
+    i2p: I2PConfig = field(default_factory=I2PConfig)
 
 
 def _default_relay_config():
