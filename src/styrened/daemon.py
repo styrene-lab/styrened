@@ -2118,6 +2118,17 @@ class StyreneDaemon:
         if self.config.chat.auto_reply_mode != AutoReplyMode.DISABLED:
             capabilities.append("autoreply")
 
+        # Advertise Yggdrasil capability if local adapter is live
+        try:
+            from styrened.models.capabilities import CAPABILITY_YGGDRASIL
+            from styrened.services.yggdrasil import YggdrasilAdapter
+
+            ygg: YggdrasilAdapter | None = getattr(self, "_ygg_adapter", None)
+            if ygg is not None and ygg.get_local_address() is not None:
+                capabilities.append(CAPABILITY_YGGDRASIL)
+        except Exception:
+            pass
+
         # Use display_name from config, fall back to hostname
         display_name = self.config.identity.display_name or hostname
         # Include icon in display_name if configured

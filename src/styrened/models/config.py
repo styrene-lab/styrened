@@ -697,6 +697,18 @@ class MeshVPNConfig:
     endpoint: str = ""
 
 
+class PeerDiscovery(str, Enum):
+    """Controls when /meta is fetched for Yggdrasil peer bootstrapping.
+
+    - EAGER: fetch /meta and call add_peer() immediately on each announce
+      that carries CAPABILITY_YGGDRASIL (when bootstrap_from_rns=True).
+    - LAZY: only bootstrap when the user explicitly requests a connection.
+    """
+
+    EAGER = "eager"
+    LAZY = "lazy"
+
+
 @dataclass
 class YggdrasilConfig:
     """Configuration for Yggdrasil overlay network integration.
@@ -710,6 +722,8 @@ class YggdrasilConfig:
         multicast: Enable multicast peer discovery on the local network.
         bootstrap_from_rns: Advertise and discover Yggdrasil peers via RNS
             announces so mesh-connected nodes can peer automatically.
+        peer_discovery: Whether to bootstrap peers eagerly (on every announce)
+            or lazily (only on explicit request).
         initial_peers: Static list of Yggdrasil peer URIs to connect to.
     """
 
@@ -719,6 +733,7 @@ class YggdrasilConfig:
     admin_socket: str = ""
     multicast: bool = True
     bootstrap_from_rns: bool = True
+    peer_discovery: PeerDiscovery = PeerDiscovery.EAGER
     initial_peers: list = field(default_factory=list)
 
 
