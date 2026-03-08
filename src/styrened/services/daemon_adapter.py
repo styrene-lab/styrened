@@ -12,18 +12,14 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 
-class DaemonMode(str, Enum):
-    """Operating mode for an optional daemon integration."""
-
-    DISABLED = "disabled"
-    ADOPT = "adopt"
-    MANAGED = "managed"
+# Re-export from models to avoid circular imports via services/__init__.py.
+# Public API: styrened.services.daemon_adapter.DaemonMode is canonical.
+from styrened.models.daemon_mode import DaemonMode  # noqa: F401, E402
 
 
 @dataclass
