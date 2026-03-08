@@ -659,6 +659,12 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     # Parse relay section
     _parse_relay(config, data)
 
+    # Parse yggdrasil section
+    _parse_yggdrasil(config, data)
+
+    # Parse i2p section
+    _parse_i2p(config, data)
+
     # Parse RBAC policy
     config.rbac = _parse_rbac(data)
 
@@ -680,6 +686,58 @@ def _parse_relay(config: CoreConfig, data: dict) -> None:
             allow_permanent=_parse_bool(r.get("allow_permanent", False)),
             allowed_identities=list(r.get("allowed_identities", [])),
         )
+
+
+def _parse_yggdrasil(config: CoreConfig, data: dict) -> None:
+    """Parse yggdrasil section from config data into config.yggdrasil."""
+    if "yggdrasil" not in data or not isinstance(data["yggdrasil"], dict):
+        return
+    from styrened.models.config import YggdrasilConfig
+    from styrened.services.daemon_adapter import DaemonMode
+
+    y = data["yggdrasil"]
+    raw_mode = y.get("mode", DaemonMode.DISABLED.value)
+    try:
+        mode = DaemonMode(raw_mode)
+    except ValueError:
+        mode = DaemonMode.DISABLED
+    peers = y.get("initial_peers", [])
+    if not isinstance(peers, list):
+        peers = []
+    config.yggdrasil = YggdrasilConfig(
+        mode=mode,
+        binary_path=str(y.get("binary_path", "yggdrasil")),
+        listen_port=int(y.get("listen_port", 9002)),
+        admin_socket=str(y.get("admin_socket", "")),
+        multicast=_parse_bool(y.get("multicast", True)),
+        bootstrap_from_rns=_parse_bool(y.get("bootstrap_from_rns", True)),
+        initial_peers=[str(p) for p in peers],
+    )
+
+
+def _parse_i2p(config: CoreConfig, data: dict) -> None:
+    """Parse i2p section from config data into config.i2p."""
+    if "i2p" not in data or not isinstance(data["i2p"], dict):
+        return
+    from styrened.models.config import I2PConfig
+    from styrened.services.daemon_adapter import DaemonMode
+
+    i = data["i2p"]
+    raw_mode = i.get("mode", DaemonMode.DISABLED.value)
+    try:
+        mode = DaemonMode(raw_mode)
+    except ValueError:
+        mode = DaemonMode.DISABLED
+    config.i2p = I2PConfig(
+        mode=mode,
+        http_proxy_host=str(i.get("http_proxy_host", "127.0.0.1")),
+        http_proxy_port=int(i.get("http_proxy_port", 4444)),
+        managed_http_proxy_port=int(i.get("managed_http_proxy_port", 4445)),
+        managed_i2pcontrol_port=int(i.get("managed_i2pcontrol_port", 7651)),
+        b32_address=str(i.get("b32_address", "")),
+        cache_ttl=int(i.get("cache_ttl", 3600)),
+        fetch_timeout=float(i.get("fetch_timeout", 45.0)),
+    )
 
 
 def save_core_config(config: CoreConfig, config_path: Path | None = None) -> None:
