@@ -308,7 +308,6 @@ class TestIPCManagedGating:
             patch(
                 "styrened.tui.widgets.node_info_panel.discover_devices"
             ) as mock_discover,
-            patch("styrened.tui.widgets.node_info_panel.get_hub_connection"),
         ):
             mock_cfg = MagicMock()
             mock_cfg.reticulum.mode.value = "standalone"
@@ -326,7 +325,6 @@ class TestIPCManagedGating:
         with (
             patch("styrened.tui.widgets.node_info_panel.load_config") as mock_config,
             patch("styrened.tui.widgets.node_info_panel.discover_devices"),
-            patch("styrened.tui.widgets.node_info_panel.get_hub_connection"),
         ):
             mock_cfg = MagicMock()
             mock_cfg.reticulum.mode.value = "peer"

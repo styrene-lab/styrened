@@ -19,6 +19,7 @@ from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
 if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
+from styrened.ui_state import WorkspaceId
 
 
 class MeshDeviceTree(Tree[str]):
@@ -341,9 +342,9 @@ class MeshDeviceTree(Tree[str]):
         likely running an older version without /meta support, or are
         unreachable over direct link.
 
-        Uses the same retry limit as services.direct_link.META_MAX_RETRIES.
+        Uses the same retry limit as DirectLink service (3 attempts).
         """
-        from styrened.services.direct_link import META_MAX_RETRIES as _META_MAX_RETRIES
+        _META_MAX_RETRIES = 3  # Same as services.direct_link.META_MAX_RETRIES
         for device in devices:
             if not device.identity_hash or not device.destination_hash:
                 continue
@@ -632,7 +633,12 @@ class DashboardScreen(Screen[None]):
         if event.node.data:
             device_identity = str(event.node.data)
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+            self.app.push_screen(
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    origin_workspace=WorkspaceId.HOME,
+                )
+            )
 
     def _get_selected_identity(self) -> str | None:
         """Get the identity of the currently selected tree node."""
@@ -644,7 +650,12 @@ class DashboardScreen(Screen[None]):
         device_identity = self._get_selected_identity()
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+            self.app.push_screen(
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    origin_workspace=WorkspaceId.HOME,
+                )
+            )
 
     def action_open_chat(self) -> None:
         """Open chat tab directly for the selected device."""
@@ -652,7 +663,11 @@ class DashboardScreen(Screen[None]):
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
             self.app.push_screen(
-                MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    initial_tab="chat",
+                    origin_workspace=WorkspaceId.HOME,
+                )
             )
         else:
             self.app.notify("Select a device in the mesh tree first.", severity="warning")
