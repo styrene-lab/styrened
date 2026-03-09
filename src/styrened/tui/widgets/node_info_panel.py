@@ -375,18 +375,24 @@ class NodeInfoPanel(Static):
         # Load operator identity hash and security tier (works in both modes)
         if not self.identity_hash:
             try:
-                from styrened.tui.services.reticulum import get_operator_identity
-                op_hash = get_operator_identity()
-                if op_hash:
-                    self.identity_hash = op_hash
-                    # Security tier reflects identity provider
-                    provider = "file"
-                    if config and hasattr(config, "identity"):
-                        provider = getattr(config.identity, "provider", "file")
-                    if provider == "yubikey":
-                        self.security_tier = "YubiKey/FIDO2"
-                    else:
-                        self.security_tier = "X25519"
+                # Try IPC bridge first (preferred in managed mode)
+                if hasattr(self.app, 'services') and self.app.services.bridge:
+                    # This is async, so schedule it as a worker task
+                    self.run_worker(self._load_identity_via_bridge(), group="identity-load")
+                else:
+                    # Fallback to direct import for legacy/non-managed modes
+                    from styrened.tui.services.reticulum import get_operator_identity
+                    op_hash = get_operator_identity()
+                    if op_hash:
+                        self.identity_hash = op_hash
+                        # Security tier reflects identity provider
+                        provider = "file"
+                        if config and hasattr(config, "identity"):
+                            provider = getattr(config.identity, "provider", "file")
+                        if provider == "yubikey":
+                            self.security_tier = "YubiKey/FIDO2"
+                        else:
+                            self.security_tier = "X25519"
             except Exception:
                 pass
 
@@ -399,15 +405,79 @@ class NodeInfoPanel(Static):
         self.hub_status = HubStatus.DISABLED
 
         # Get Styrene mesh device count from discovery
-        from styrened.tui.utils import _deduplicate_by_identity
+        if hasattr(self.app, 'services') and self.app.services.bridge:
+            # Use IPC bridge for device discovery (preferred)
+            self.run_worker(self._load_mesh_count_via_bridge(), group="mesh-discovery")
+        else:
+            # Fallback to direct discovery for legacy/non-managed modes
+            from styrened.tui.utils import _deduplicate_by_identity
 
-        live_nodes = discover_devices()
-        all_devices = {n.destination_hash: n for n in live_nodes}
+            live_nodes = discover_devices()
+            all_devices = {n.destination_hash: n for n in live_nodes}
 
-        styrene_nodes = _deduplicate_by_identity(
-            [d for d in all_devices.values() if d.device_type == DeviceType.STYRENE_NODE]
-        )
-        self.styrene_mesh_count = len(styrene_nodes)
+            styrene_nodes = _deduplicate_by_identity(
+                [d for d in all_devices.values() if d.device_type == DeviceType.STYRENE_NODE]
+            )
+            self.styrene_mesh_count = len(styrene_nodes)
+
+    async def _load_identity_via_bridge(self) -> None:
+        """Load operator identity via IPC bridge."""
+        try:
+            bridge = self.app.services.bridge  # type: ignore
+            if bridge is None:
+                return
+            
+            identity_info = await bridge.get_identity()
+            if identity_info.identity_hash:
+                self.identity_hash = identity_info.identity_hash
+                
+                # Load config to determine security tier
+                config = load_config()
+                provider = "file"
+                if config and hasattr(config, "identity"):
+                    provider = getattr(config.identity, "provider", "file")
+                if provider == "yubikey":
+                    self.security_tier = "YubiKey/FIDO2"
+                else:
+                    self.security_tier = "X25519"
+        except Exception:
+            # Fallback to direct method if IPC fails
+            try:
+                from styrened.tui.services.reticulum import get_operator_identity
+                op_hash = get_operator_identity()
+                if op_hash:
+                    self.identity_hash = op_hash
+            except Exception:
+                pass
+    
+    async def _load_mesh_count_via_bridge(self) -> None:
+        """Load mesh device count via IPC bridge."""
+        try:
+            bridge = self.app.services.bridge  # type: ignore
+            if bridge is None:
+                return
+            
+            # Get only Styrene nodes to match the original behavior
+            device_infos = await bridge.get_devices(styrene_only=True)
+            
+            # Convert DeviceInfo objects to MeshDevice objects for deduplication
+            from styrened.tui.utils import _deduplicate_by_identity, device_info_to_mesh
+            
+            mesh_devices = [device_info_to_mesh(info) for info in device_infos]
+            styrene_nodes = _deduplicate_by_identity(mesh_devices)
+            self.styrene_mesh_count = len(styrene_nodes)
+        except Exception:
+            # Fallback to direct discovery if IPC fails
+            try:
+                from styrened.tui.utils import _deduplicate_by_identity
+                live_nodes = discover_devices()
+                all_devices = {n.destination_hash: n for n in live_nodes}
+                styrene_nodes = _deduplicate_by_identity(
+                    [d for d in all_devices.values() if d.device_type == DeviceType.STYRENE_NODE]
+                )
+                self.styrene_mesh_count = len(styrene_nodes)
+            except Exception:
+                pass
 
     def _load_reticulum_data(self) -> None:
         """Load Reticulum stack status."""
