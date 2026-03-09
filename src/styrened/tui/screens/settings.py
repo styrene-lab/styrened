@@ -14,6 +14,7 @@ from styrened.models.config import (
     COMMUNITY_HUB_PROPAGATION_HASH,
     WELL_KNOWN_HUBS,
     DeploymentMode,
+    GroupThreadFeatureTierConfig,
     MeshAccessMode,
     PeerConfig,
     validate_short_name,
@@ -516,6 +517,79 @@ class SettingsScreen(Screen[None]):
                         )
                         yield HighlightedPanel(
                             Horizontal(
+                                Label("Enable Group Threads:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.group_threads.enabled,
+                                    id="group_threads_enabled",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Feature Tier:", classes="setting-label"),
+                                Select(
+                                    [(tier.value.title(), tier) for tier in GroupThreadFeatureTierConfig],
+                                    value=self.config.core.group_threads.feature_tier,
+                                    id="group_threads_feature_tier",
+                                    classes="setting-select",
+                                    allow_blank=False,
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Bounded Retention:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.group_threads.bounded_retention,
+                                    id="group_threads_bounded_retention",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Metadata-first Sync:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.group_threads.metadata_first_sync,
+                                    id="group_threads_metadata_first_sync",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Auto-fetch Media:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.group_threads.auto_media_fetch,
+                                    id="group_threads_auto_media_fetch",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Background Catch-up:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.group_threads.background_catchup,
+                                    id="group_threads_background_catchup",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("Auto-select First-run Tier:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.group_threads.first_run_auto_tier,
+                                    id="group_threads_first_run_auto_tier",
+                                    classes="setting-checkbox",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "Keeps one room identity across transports while tuning local storage and sync pressure. "
+                                "Minimal favors bounded retention, metadata-first sync, and explicit confirmation before expensive media actions.",
+                                classes="setting-description",
+                            ),
+                            title="GROUP THREADS",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
                                 Button("Restart Daemon", id="btn-restart-daemon", classes="setting-btn"),
                                 Button("Install as Service", id="btn-install-service", classes="setting-btn"),
                                 Button(
@@ -743,10 +817,9 @@ class SettingsScreen(Screen[None]):
 
             # Reset core config via IPC — serialize a fresh default CoreConfig
             from styrened.models.config import CoreConfig
-            from styrened.services.config import serialize_config
 
             default_config = CoreConfig()
-            default_dict = serialize_config(default_config)
+            default_dict = default_config.to_dict()
 
             bridge = self._ipc_bridge
             if bridge is not None:
@@ -1183,6 +1256,32 @@ class SettingsScreen(Screen[None]):
             page_node_name = self.query_one("#page_server_node_name", Input).value.strip()
             self.config.core.page_server.node_name = page_node_name or None
 
+            # Group thread footprint policy
+            group_thread_tier_select = self.query_one("#group_threads_feature_tier", Select)
+            if not isinstance(group_thread_tier_select.value, GroupThreadFeatureTierConfig):
+                self._show_error("Invalid group thread feature tier")
+                return
+
+            self.config.core.group_threads.enabled = self.query_one(
+                "#group_threads_enabled", Switch
+            ).value
+            self.config.core.group_threads.feature_tier = group_thread_tier_select.value
+            self.config.core.group_threads.bounded_retention = self.query_one(
+                "#group_threads_bounded_retention", Switch
+            ).value
+            self.config.core.group_threads.metadata_first_sync = self.query_one(
+                "#group_threads_metadata_first_sync", Switch
+            ).value
+            self.config.core.group_threads.auto_media_fetch = self.query_one(
+                "#group_threads_auto_media_fetch", Switch
+            ).value
+            self.config.core.group_threads.background_catchup = self.query_one(
+                "#group_threads_background_catchup", Switch
+            ).value
+            self.config.core.group_threads.first_run_auto_tier = self.query_one(
+                "#group_threads_first_run_auto_tier", Switch
+            ).value
+
             # Validate configuration
             errors = validate_config(self.config)
             if errors:
@@ -1199,9 +1298,7 @@ class SettingsScreen(Screen[None]):
             try:
                 bridge = self._ipc_bridge
                 if bridge is not None:
-                    from styrened.services.config import serialize_config
-
-                    config_dict = serialize_config(self.config.core)
+                    config_dict = self.config.core.to_dict()
                     await bridge.save_core_config(config_dict)
 
                 # Regenerate RNS config from TUI config
