@@ -247,6 +247,46 @@ class TestDetectLinux:
         assert len(disks) == 1
         assert disks[0].name == "Unknown"
 
+    def test_null_model_defaults_to_unknown(self):
+        """Null model field defaults to 'Unknown' instead of crashing."""
+        lsblk_data = {
+            "blockdevices": [
+                {"name": "mmcblk0", "size": "58.2G", "model": None, "type": "disk", "tran": "mmc"},
+            ]
+        }
+
+        with patch("styrened.tui.forge.disk_detect.subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = json.dumps(lsblk_data)
+            mock_run.return_value = mock_result
+
+            disks = _detect_linux()
+
+        assert len(disks) == 1
+        assert disks[0].device == "/dev/mmcblk0"
+        assert disks[0].name == "Unknown"
+        assert disks[0].media_type == "SD"
+
+    def test_whitespace_model_defaults_to_unknown(self):
+        """Whitespace-only model values normalize to 'Unknown'."""
+        lsblk_data = {
+            "blockdevices": [
+                {"name": "sda", "size": "8G", "model": "   ", "type": "disk", "tran": "usb"},
+            ]
+        }
+
+        with patch("styrened.tui.forge.disk_detect.subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = json.dumps(lsblk_data)
+            mock_run.return_value = mock_result
+
+            disks = _detect_linux()
+
+        assert len(disks) == 1
+        assert disks[0].name == "Unknown"
+
     def test_null_tran_filtered(self):
         """Devices with null/None transport are filtered out."""
         lsblk_data = {
