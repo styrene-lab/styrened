@@ -1,9 +1,9 @@
-"""Tests for CommsScreen workspace structure and navigation semantics."""
+"""Tests for CommsScreen workspace structure, navigation, and capability gating."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from textual.widgets import Static, TabPane, TabbedContent
+from textual.widgets import Input, Static, TabPane, TabbedContent
 
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.comms import CommsScreen
@@ -35,7 +35,8 @@ class TestCommsScreenStructure:
         assert escape_bindings[0].action == "app.pop_screen"
 
     @pytest.mark.asyncio
-    async def test_comms_screen_has_expected_modes_and_placeholders(self):
+    async def test_comms_screen_has_expected_modes(self):
+        """CommsScreen renders all four mode tabs."""
         app = StyreneApp()
 
         async with app.run_test() as pilot:
@@ -60,15 +61,235 @@ class TestCommsScreenStructure:
                 CommsMode.PRESENCE.value,
             }
 
-            assert "Direct synchronous communication" in str(
-                screen.query_one("#comms-direct-placeholder", Static).render()
-            )
-            assert "Active sessions" in str(
-                screen.query_one("#comms-active-placeholder", Static).render()
-            )
-            assert "Bridge-backed communication surfaces" in str(
-                screen.query_one("#comms-bridges-placeholder", Static).render()
-            )
-            assert "Live presence and reachability" in str(
-                screen.query_one("#comms-presence-placeholder", Static).render()
-            )
+    @pytest.mark.asyncio
+    async def test_comms_direct_tab_shows_no_sessions_by_default(self):
+        """Direct tab should show 'No active direct sessions.' when no daemon."""
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            await app.push_screen(CommsScreen())
+            await pilot.pause()
+
+            screen = app.screen
+            placeholder = screen.query_one("#comms-direct-placeholder", Static)
+            assert "No active direct sessions" in str(placeholder.render())
+
+    @pytest.mark.asyncio
+    async def test_comms_bridges_shows_no_capabilities_by_default(self):
+        """Bridges tab shows 'no capabilities' message when bridge is unavailable."""
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            await app.push_screen(CommsScreen())
+            await pilot.pause()
+
+            screen = app.screen
+            placeholder = screen.query_one("#comms-bridges-placeholder", Static)
+            assert not placeholder.has_class("hidden")
+            # Yggdrasil/I2P sections should be hidden
+            ygg = screen.query_one("#comms-yggdrasil-section")
+            i2p = screen.query_one("#comms-i2p-section")
+            assert ygg.has_class("hidden")
+            assert i2p.has_class("hidden")
+
+    @pytest.mark.asyncio
+    async def test_comms_bridges_i2p_url_input_present(self):
+        """I2P section contains a URL input widget."""
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            await app.push_screen(CommsScreen())
+            await pilot.pause()
+
+            screen = app.screen
+            i2p_input = screen.query_one("#comms-i2p-url-input", Input)
+            assert i2p_input is not None
+
+
+class TestCommsCapabilityGating:
+    """Capability-gated sections appear/disappear based on daemon config."""
+
+    def test_apply_capability_state_shows_yggdrasil_section(self):
+        """Yggdrasil section becomes visible when yggdrasil_enabled=True."""
+        screen = CommsScreen()
+
+        ygg = MagicMock()
+        ygg.has_class = MagicMock(return_value=True)
+        i2p_sec = MagicMock()
+        i2p_sec.has_class = MagicMock(return_value=True)
+        placeholder = MagicMock()
+        direct_ph = MagicMock()
+
+        def query_one_side_effect(selector, *args):
+            if selector == "#comms-direct-placeholder":
+                return direct_ph
+            if selector == "#comms-bridges-placeholder":
+                return placeholder
+            if selector == "#comms-yggdrasil-section":
+                return ygg
+            if selector == "#comms-i2p-section":
+                return i2p_sec
+            raise Exception(f"Unknown selector: {selector}")
+
+        screen.query_one = query_one_side_effect
+
+        screen._apply_capability_state(
+            yggdrasil_enabled=True,
+            i2p_enabled=False,
+            active_links=0,
+        )
+
+        ygg.remove_class.assert_called_once_with("hidden")
+        i2p_sec.add_class.assert_called_once_with("hidden")
+        placeholder.add_class.assert_called_once_with("hidden")
+
+    def test_apply_capability_state_shows_i2p_section(self):
+        """I2P section becomes visible when i2p_enabled=True."""
+        screen = CommsScreen()
+
+        ygg = MagicMock()
+        i2p_sec = MagicMock()
+        placeholder = MagicMock()
+        direct_ph = MagicMock()
+
+        def query_one_side_effect(selector, *args):
+            if selector == "#comms-direct-placeholder":
+                return direct_ph
+            if selector == "#comms-bridges-placeholder":
+                return placeholder
+            if selector == "#comms-yggdrasil-section":
+                return ygg
+            if selector == "#comms-i2p-section":
+                return i2p_sec
+            raise Exception(f"Unknown: {selector}")
+
+        screen.query_one = query_one_side_effect
+
+        screen._apply_capability_state(
+            yggdrasil_enabled=False,
+            i2p_enabled=True,
+            active_links=0,
+        )
+
+        ygg.add_class.assert_called_once_with("hidden")
+        i2p_sec.remove_class.assert_called_once_with("hidden")
+
+    def test_apply_capability_state_shows_active_links_count(self):
+        """Direct tab placeholder updates with active link count."""
+        screen = CommsScreen()
+
+        direct_ph = MagicMock()
+        placeholder = MagicMock()
+        ygg = MagicMock()
+        i2p_sec = MagicMock()
+
+        def query_one_side_effect(selector, *args):
+            if selector == "#comms-direct-placeholder":
+                return direct_ph
+            if selector == "#comms-bridges-placeholder":
+                return placeholder
+            if selector == "#comms-yggdrasil-section":
+                return ygg
+            if selector == "#comms-i2p-section":
+                return i2p_sec
+            raise Exception(f"Unknown: {selector}")
+
+        screen.query_one = query_one_side_effect
+
+        screen._apply_capability_state(
+            yggdrasil_enabled=False,
+            i2p_enabled=False,
+            active_links=3,
+        )
+
+        direct_ph.update.assert_called_once_with("3 active direct session(s).")
+
+    def test_apply_capability_state_no_bridges_shows_placeholder(self):
+        """Bridges 'no capabilities' placeholder is visible when neither bridge active."""
+        screen = CommsScreen()
+
+        direct_ph = MagicMock()
+        placeholder = MagicMock()
+        ygg = MagicMock()
+        i2p_sec = MagicMock()
+
+        def query_one_side_effect(selector, *args):
+            if selector == "#comms-direct-placeholder":
+                return direct_ph
+            if selector == "#comms-bridges-placeholder":
+                return placeholder
+            if selector == "#comms-yggdrasil-section":
+                return ygg
+            if selector == "#comms-i2p-section":
+                return i2p_sec
+            raise Exception(f"Unknown: {selector}")
+
+        screen.query_one = query_one_side_effect
+
+        screen._apply_capability_state(
+            yggdrasil_enabled=False,
+            i2p_enabled=False,
+            active_links=0,
+        )
+
+        placeholder.remove_class.assert_called_once_with("hidden")
+
+    @pytest.mark.asyncio
+    async def test_load_capabilities_calls_get_core_config_and_status(self):
+        """_load_capabilities() calls bridge.get_core_config() and get_status()."""
+        screen = CommsScreen()
+        bridge = MagicMock()
+        bridge.get_core_config = AsyncMock(return_value={
+            "yggdrasil": {"mode": "adopt"},
+            "i2p": {"mode": "disabled"},
+        })
+        bridge.get_status = AsyncMock(return_value=MagicMock(active_links=2))
+
+        apply_mock = MagicMock()
+        screen._apply_capability_state = apply_mock
+
+        with patch.object(CommsScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge):
+            await screen._load_capabilities()
+
+        bridge.get_core_config.assert_awaited_once()
+        bridge.get_status.assert_awaited_once()
+        apply_mock.assert_called_once_with(
+            yggdrasil_enabled=True,
+            i2p_enabled=False,
+            active_links=2,
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_capabilities_handles_both_bridges_enabled(self):
+        """Both Yggdrasil and I2P enabled → both sections visible."""
+        screen = CommsScreen()
+        bridge = MagicMock()
+        bridge.get_core_config = AsyncMock(return_value={
+            "yggdrasil": {"mode": "managed"},
+            "i2p": {"mode": "adopt"},
+        })
+        bridge.get_status = AsyncMock(return_value=MagicMock(active_links=0))
+
+        apply_mock = MagicMock()
+        screen._apply_capability_state = apply_mock
+
+        with patch.object(CommsScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge):
+            await screen._load_capabilities()
+
+        apply_mock.assert_called_once_with(
+            yggdrasil_enabled=True,
+            i2p_enabled=True,
+            active_links=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_capabilities_gracefully_handles_missing_bridge(self):
+        """No bridge → _apply_capability_state is never called."""
+        screen = CommsScreen()
+        apply_mock = MagicMock()
+        screen._apply_capability_state = apply_mock
+
+        with patch.object(CommsScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=None):
+            await screen._load_capabilities()
+
+        apply_mock.assert_not_called()
