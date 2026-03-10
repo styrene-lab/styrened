@@ -9,7 +9,7 @@ Covers:
 - MAX_RESPONSE_BYTES: response size cap before json.loads
 - VPN_HANDSHAKE orthogonal-only semantics in RBAC
 - _serve_datalink_status RBAC gating (unit level, no RNS)
-- Cache boundedness in MeshDeviceTree
+- Cache boundedness (MeshDeviceTree removed in v0.16.1; those tests retired)
 """
 
 from __future__ import annotations
@@ -379,67 +379,3 @@ class TestVpnHandshakeOrthogonal:
             }
         )
         assert not policy.has_capability("cc" * 16, Capability.VPN_HANDSHAKE)
-
-
-# ---------------------------------------------------------------------------
-# MeshDeviceTree cache boundedness
-# ---------------------------------------------------------------------------
-
-
-class TestMeshDeviceTreeCacheBounds:
-    def _make_tree(self):
-        from styrened.tui.screens.dashboard import MeshDeviceTree
-        tree = MeshDeviceTree.__new__(MeshDeviceTree)
-        tree._meta_cache = {}
-        tree._info_cache = {}
-        tree._meta_fail_count = {}
-        tree._meta_pending = set()
-        return tree
-
-    def test_meta_cache_bounded(self):
-        tree = self._make_tree()
-        limit = tree._CACHE_MAX
-        # Fill beyond limit
-        for i in range(limit + 10):
-            key = f"{i:032x}"
-            tree._cache_put(tree._meta_cache, key, {"styrene_version": "0.14.3"})
-        assert len(tree._meta_cache) <= limit
-
-    def test_info_cache_bounded(self):
-        tree = self._make_tree()
-        limit = tree._CACHE_MAX
-        for i in range(limit + 10):
-            key = f"{i:032x}"
-            tree._cache_put(tree._info_cache, key, {"name": "node"})
-        assert len(tree._info_cache) <= limit
-
-    def test_cache_put_updates_existing_without_eviction(self):
-        tree = self._make_tree()
-        key = "aa" * 16
-        tree._cache_put(tree._meta_cache, key, {"v": "1"})
-        initial_size = len(tree._meta_cache)
-        tree._cache_put(tree._meta_cache, key, {"v": "2"})
-        assert len(tree._meta_cache) == initial_size
-        assert tree._meta_cache[key]["v"] == "2"
-
-    def test_cache_evicts_oldest_entry_first(self):
-        tree = self._make_tree()
-        # Insert keys in order — first key should be evicted when full
-        first_key = "11" * 16
-        tree._cache_put(tree._meta_cache, first_key, {"v": "first"})
-        limit = tree._CACHE_MAX
-        for i in range(limit):
-            tree._cache_put(tree._meta_cache, f"{i:032x}", {"v": str(i)})
-        assert first_key not in tree._meta_cache, (
-            "Oldest entry should have been evicted"
-        )
-
-    def test_fail_count_eviction(self):
-        tree = self._make_tree()
-        limit = tree._CACHE_MAX
-        # Fill fail count to limit
-        for i in range(limit):
-            tree._meta_fail_count[f"{i:032x}"] = 1
-        # Adding a new key should trigger eviction
-        tree._evict_stale_fail_counts()
-        assert len(tree._meta_fail_count) < limit
