@@ -620,13 +620,20 @@ class IPCBridge:
 
     # ── Direct data link methods ──────────────────────────────────
 
-    async def block_peer(self, peer_hash: str) -> dict:
+    async def block_peer(
+        self, identity_hash: str, lxmf_dest_hash: str = "", alias: str = ""
+    ) -> dict:
         """Block a peer."""
-        return await self._call("block_peer", peer_hash=peer_hash)
+        return await self._call(
+            "block_peer",
+            identity_hash=identity_hash,
+            lxmf_dest_hash=lxmf_dest_hash,
+            alias=alias,
+        )
 
-    async def unblock_peer(self, peer_hash: str) -> dict:
+    async def unblock_peer(self, identity_hash: str) -> dict:
         """Unblock a peer."""
-        return await self._call("unblock_peer", peer_hash=peer_hash)
+        return await self._call("unblock_peer", identity_hash=identity_hash)
 
     async def get_blocked_peers(self) -> dict:
         """List blocked peers."""

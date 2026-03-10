@@ -80,7 +80,7 @@ class MailGroupThreadScreen(Screen[None]):
         for participant in self.group.participants:
             route = participant.highest_available_interface or "unknown"
             path_label = participant.delivery_path_class.value
-            line = f"- {participant.display_name or participant.identity}: {route} ({path_label})"
+            line = f"- {participant.display_name or participant.identity_hash}: {route} ({path_label})"
             if participant.media_friction != MediaFrictionLevel.NONE:
                 line += f" · media={participant.media_friction.value}"
             if participant.fallback_interfaces:

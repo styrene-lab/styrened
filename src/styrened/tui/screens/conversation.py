@@ -231,7 +231,7 @@ class ConversationScreen(Screen[None]):
         if bridge is None:
             return
         try:
-            await bridge.block_peer(self.peer_hash)
+            await bridge.block_peer(identity_hash=self.peer_hash)
             self.notify(
                 f"Blocked {self.peer_hash[:8]}... — messages will be dropped",
                 title="Peer Blocked",

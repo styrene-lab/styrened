@@ -237,6 +237,11 @@ class ChatWidget(Widget, can_focus=True):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        # peer_hash MUST be the RNS identity hash (not the LXMF destination hash).
+        # Callers sourcing this from contacts should use contact["identity_hash"], not
+        # contact["peer_hash"] (the old contacts schema key, which stored the LXMF dest hash).
+        # Passing an LXMF dest hash here will cause block_peer() to silently block the wrong
+        # identity. Verified: contacts.py passes the identity_hash column as the row key.
         self.peer_hash = peer_hash
         self.display_name = display_name
         self._pending_messages: list[str] = []
@@ -1322,7 +1327,7 @@ class ChatWidget(Widget, can_focus=True):
         if not bridge:
             return
         try:
-            await bridge.block_peer(self.peer_hash)
+            await bridge.block_peer(identity_hash=self.peer_hash)
             self.notify(
                 f"Blocked {self.peer_hash[:8]}... — messages will be dropped",
                 title="Peer Blocked",

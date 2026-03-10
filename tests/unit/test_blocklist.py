@@ -346,19 +346,19 @@ class TestIPCMessages:
     def test_block_request_roundtrip(self):
         from styrened.ipc.messages import CmdBlockPeerRequest
 
-        req = CmdBlockPeerRequest(peer_hash="deadbeef12345678")
+        req = CmdBlockPeerRequest(identity_hash="deadbeef12345678")
         payload = req.to_payload()
-        assert payload == {"peer_hash": "deadbeef12345678"}
+        assert payload["identity_hash"] == "deadbeef12345678"
         restored = CmdBlockPeerRequest.from_payload(payload)
-        assert restored.peer_hash == "deadbeef12345678"
+        assert restored.identity_hash == "deadbeef12345678"
 
     def test_unblock_request_roundtrip(self):
         from styrened.ipc.messages import CmdUnblockPeerRequest
 
-        req = CmdUnblockPeerRequest(peer_hash="deadbeef12345678")
+        req = CmdUnblockPeerRequest(identity_hash="deadbeef12345678")
         payload = req.to_payload()
         restored = CmdUnblockPeerRequest.from_payload(payload)
-        assert restored.peer_hash == "deadbeef12345678"
+        assert restored.identity_hash == "deadbeef12345678"
 
     def test_query_blocked_roundtrip(self):
         from styrened.ipc.messages import QueryBlockedPeersRequest

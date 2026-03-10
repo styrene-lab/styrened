@@ -2931,15 +2931,19 @@ class IPCHandlers:
         from styrened.ipc.messages import CmdBlockPeerRequest
 
         assert isinstance(request, CmdBlockPeerRequest)
-        peer_hash = request.peer_hash
-        if not peer_hash:
-            return ErrorResponse(message="peer_hash required")
+        identity_hash = request.identity_hash
+        lxmf_dest_hash = request.lxmf_dest_hash
+        alias = request.alias
+        if not identity_hash:
+            return ErrorResponse(message="identity_hash required")
+        if len(identity_hash) < 16 or not all(c in "0123456789abcdefABCDEF" for c in identity_hash):
+            return ErrorResponse(message="identity_hash must be a valid hex string (min 16 chars)")
 
         from styrened.services.lxmf_service import get_lxmf_service
 
         svc = get_lxmf_service()
-        if svc.block_peer(peer_hash):
-            return ResultResponse(data={"blocked": True, "peer_hash": peer_hash})
+        if svc.block_peer(identity_hash, lxmf_dest_hash=lxmf_dest_hash, alias=alias):
+            return ResultResponse(data={"blocked": True, "identity_hash": identity_hash})
         return ErrorResponse(message="Failed to block peer")
 
     async def handle_cmd_unblock_peer(self, request: IPCRequest) -> IPCResponse:
@@ -2947,15 +2951,15 @@ class IPCHandlers:
         from styrened.ipc.messages import CmdUnblockPeerRequest
 
         assert isinstance(request, CmdUnblockPeerRequest)
-        peer_hash = request.peer_hash
-        if not peer_hash:
-            return ErrorResponse(message="peer_hash required")
+        identity_hash = request.identity_hash
+        if not identity_hash:
+            return ErrorResponse(message="identity_hash required")
 
         from styrened.services.lxmf_service import get_lxmf_service
 
         svc = get_lxmf_service()
-        if svc.unblock_peer(peer_hash):
-            return ResultResponse(data={"unblocked": True, "peer_hash": peer_hash})
+        if svc.unblock_peer(identity_hash):
+            return ResultResponse(data={"unblocked": True, "identity_hash": identity_hash})
         return ErrorResponse(message="Failed to unblock peer")
 
     async def handle_query_blocked_peers(self, request: IPCRequest) -> IPCResponse:
