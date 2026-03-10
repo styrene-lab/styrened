@@ -1541,7 +1541,7 @@ class IPCHandlers:
                             node_store = get_node_store()
                             is_styrene = False
                             if node_store:
-                                node = node_store.get_node(req.peer_hash)
+                                node = node_store.get_node_by_destination(req.peer_hash)
                                 if node and node.is_styrene_node:
                                     is_styrene = True
                             if is_styrene:
@@ -2934,11 +2934,13 @@ class IPCHandlers:
         identity_hash = request.identity_hash
         if not identity_hash:
             return ErrorResponse(message="identity_hash required")
+        if len(identity_hash) < 8 or not all(c in "0123456789abcdefABCDEF" for c in identity_hash):
+            return ErrorResponse(message="identity_hash must be a valid hex string (min 16 chars)")
 
         from styrened.services.lxmf_service import get_lxmf_service
 
         svc = get_lxmf_service()
-        if svc.block_peer(identity_hash, request.lxmf_dest_hash, request.alias):
+        if svc.block_peer(identity_hash):
             return ResultResponse(data={"blocked": True, "identity_hash": identity_hash})
         return ErrorResponse(message="Failed to block peer")
 
