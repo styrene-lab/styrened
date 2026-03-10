@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "changeName": "block-store-canonicalization",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-10T21:15:46.468Z",
+  "summary": "All specs satisfied and design-tree binding added (styrene-distrust-model). All 3105 unit + TUI tests green. v0.16.0 tagged and pushed.\"",
+  "snapshot": {
+    "gitHead": "a5d269dfb5f3fdb2d0f8521ecd8399bdd9ea190e",
+    "fingerprint": "029633d34bd1b9fb036c1be1e91880ee22250fca52d46ff276bf4055fde82a00",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/block-store-canonicalization/design.md",
+        "exists": true,
+        "size": 269,
+        "sha256": "f91a1e375f0d0170c00cbf9cf5cfb370048f8109e0ffe95ab0d86fb00ec95755"
+      },
+      {
+        "path": "openspec/changes/block-store-canonicalization/proposal.md",
+        "exists": true,
+        "size": 779,
+        "sha256": "5e3ae7130ff656dd1e91c46c53f2473da5f0a2bb4120618ec3d09e9be50bfc45"
+      },
+      {
+        "path": "openspec/changes/block-store-canonicalization/specs/block-ops.md",
+        "exists": true,
+        "size": 3646,
+        "sha256": "9318295d8055936e7a01b241ce02df69fa058d87f6983108f93103cf2e8d7f58"
+      },
+      {
+        "path": "openspec/changes/block-store-canonicalization/specs/data.md",
+        "exists": true,
+        "size": 3494,
+        "sha256": "95728b1bb43c8c2c90bf4429e02be1d1eb775520b07854f3c9745a373176fe6c"
+      },
+      {
+        "path": "openspec/changes/block-store-canonicalization/specs/ipc.md",
+        "exists": true,
+        "size": 3132,
+        "sha256": "c6b0bcfc9d54d93ef5868a1f14a9aed5f0df0bfa932e8de69574a3c70727e294"
+      },
+      {
+        "path": "openspec/changes/block-store-canonicalization/specs/message-receive.md",
+        "exists": true,
+        "size": 2360,
+        "sha256": "e9c735f38ab59de769c336a0fe2ad0fcd53cffc5afabd5f747f0e4e86f4730f1"
+      },
+      {
+        "path": "openspec/changes/block-store-canonicalization/tasks.md",
+        "exists": true,
+        "size": 7719,
+        "sha256": "a2c1c4410e4eca563096e7d7e8a80e93fda9e81801c057467d579551b62ac8c0"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/block-store-canonicalization/proposal.md",
+      "openspec/changes/block-store-canonicalization/tasks.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  },
+  "designNode": "styrene-distrust-model"
+}
