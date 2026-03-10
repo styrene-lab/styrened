@@ -1152,17 +1152,25 @@ class ControlClient:
     # Direct data link methods
     # -------------------------------------------------------------------------
 
-    async def block_peer(self, peer_hash: str) -> dict[str, Any]:
+    async def block_peer(
+        self, identity_hash: str, lxmf_dest_hash: str = "", alias: str = ""
+    ) -> dict[str, Any]:
         """Block a peer — silently drop all future messages from them."""
         from styrened.ipc.messages import CmdBlockPeerRequest
 
-        return await self._request(CmdBlockPeerRequest(peer_hash=peer_hash))
+        return await self._request(
+            CmdBlockPeerRequest(
+                identity_hash=identity_hash,
+                lxmf_dest_hash=lxmf_dest_hash,
+                alias=alias,
+            )
+        )
 
-    async def unblock_peer(self, peer_hash: str) -> dict[str, Any]:
+    async def unblock_peer(self, identity_hash: str) -> dict[str, Any]:
         """Unblock a previously blocked peer."""
         from styrened.ipc.messages import CmdUnblockPeerRequest
 
-        return await self._request(CmdUnblockPeerRequest(peer_hash=peer_hash))
+        return await self._request(CmdUnblockPeerRequest(identity_hash=identity_hash))
 
     async def get_blocked_peers(self) -> dict[str, Any]:
         """List all blocked peers."""
