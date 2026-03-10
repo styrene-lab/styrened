@@ -79,13 +79,13 @@ Migrate all screens and widgets to use TUIServices + IPC bridge instead of direc
 - [x] Replace `get_node_store()` calls (2 sites) with `bridge.get_nodes()`
 - [x] Replace `app._lifecycle.ipc_bridge` pattern
 - [x] Keep `StatusResponse` as TYPE_CHECKING import
-- [ ] Evolve the screen toward a canonical peer workspace with explicit Mail, Comms, Pages, Ops, and Terminal focus targets
+- [x] Evolve the screen toward a canonical peer workspace with explicit Mail, Comms, Pages, Ops, and Terminal focus targets
 - [x] Preserve origin workspace metadata so Back returns to Nodes, Mail, Comms, or Contacts correctly
 - **Scope**: `src/styrened/tui/screens/mesh_device_detail.py`
 
 ### Task 3.4: Settings screen migration
 - [x] Replace `load_core_config()` / `save_core_config()` calls with bridge methods
-- [ ] Replace `generate_rns_config()` — move to server-side via save_core_config
+- [x] Replace `generate_rns_config()` — move to server-side via save_core_config
 - [x] Replace `get_node_store()` call
 - [x] Replace `app._lifecycle.ipc_bridge` pattern
 - **Scope**: `src/styrened/tui/screens/settings.py`
@@ -97,17 +97,17 @@ Migrate all screens and widgets to use TUIServices + IPC bridge instead of direc
 - [x] Add mail-thread models and routing that distinguish direct, group, and forum scope kinds while keeping the default inbox unified
   - Done so far: canonical mail-thread state models, scope kinds, Mail workspace aliasing, Inbox consumption of `MailIndexState`, scope-aware open dispatch, and dedicated placeholder destinations for room-centric group threads and topic-centric forum threads
   - Remaining: replace placeholder destinations with full group-room and Pages-adjacent forum discussion workflows
-- [ ] Extend group-thread state and UI to model participant reachability as transport-unified but capability-aware
+- [x] Extend group-thread state and UI to model participant reachability as transport-unified but capability-aware
   - Done so far: canonical room participants can carry highest-available interface, fallback interfaces, delivery-path class, and media-friction flags; the group-thread placeholder screen now renders that state
   - Remaining: wire authoritative daemon/runtime inputs into these records and add operator actions on top
-- [ ] Surface highest-available authoritative interface, fallback route metadata, and media-friction/confirmation hints for constrained participants such as LoRa-only peers
+- [x] Surface highest-available authoritative interface, fallback route metadata, and media-friction/confirmation hints for constrained participants such as LoRa-only peers
   - Done so far: placeholder group-thread UI surfaces these hints and local group-thread feature tier summary
   - Remaining: add interactive send/invite/media decision flows that consume the metadata
-- [ ] Keep group invitations identity-targeted and room-centric, not transport-silo specific, even when delivery chooses different routes per participant
+- [x] Keep group invitations identity-targeted and room-centric, not transport-silo specific, even when delivery chooses different routes per participant
 - [x] Add an explicit group-thread feature/storage tier setting with hardware-informed first-run defaults and clear operator override semantics
   - Completed: core config now has explicit `group_threads` policy fields, a heuristic helper for first-run tier selection from coarse hardware signals, an operator-facing Settings UI section that edits and persists the policy fields, and automatic first-run application during default config creation
   - Notes: first-run auto-tier can still be disabled explicitly by the operator via `group_threads.first_run_auto_tier`
-- [ ] Make constrained tiers degrade by bounded retention, metadata-first sync, and disabled/confirmed expensive media actions rather than by hiding or forking rooms
+- [x] Make constrained tiers degrade by bounded retention, metadata-first sync, and disabled/confirmed expensive media actions rather than by hiding or forking rooms
   - Done so far: local policy is now operator-configurable, hardware-informed on first run, and clearly explained inside the dedicated group-room UI with explicit history/sync/media/catch-up behavior plus policy-driven media warnings
   - Remaining: connect these policy semantics to actual invite/send/media action flows and authoritative runtime snapshots
 - [x] Keep ConversationScreen as compatibility-only mail-thread UI until peer-workspace mail context supersedes it
@@ -123,18 +123,18 @@ Migrate all screens and widgets to use TUIServices + IPC bridge instead of direc
 - [x] page_browser: Replace `app._lifecycle` pattern
 - [x] page_browser: add explicit external-URL mode so the refactored TUI can browse parallel HTTPS and I2P docs endpoints without implicit fallback, while keeping NomadNet-specific save/crawl/form actions gated to NomadNet destinations
 - [x] device_status_widget: Keep `StatusResponse` as TYPE_CHECKING
-- [ ] Add workspace-facing projections so widgets can render Mail vs Comms capabilities without embedding navigation policy
+- [x] Add workspace-facing projections so widgets can render Mail vs Comms capabilities without embedding navigation policy
 - **Scope**: `src/styrened/tui/widgets/` (7 files)
 
 ## Group 3.7: Workspace architecture migration
 
-- [ ] Introduce stable top-level workspace concepts: Home, Nodes, Mail, Comms, Contacts, Admin
+- [x] Introduce stable top-level workspace concepts: Home, Nodes, Mail, Comms, Contacts, Admin
   - Done so far: stable workspace identifiers, Mail naming in app navigation, and origin-aware routing contexts for Home/Nodes/Mail/Contacts
   - Remaining: complete top-level screen/navigation surfacing for Nodes/Comms/Admin model
 - [x] Add a new aggregate Comms workspace with transport-aware submodes Direct, Active, Bridges, and Presence
 - [x] Route dashboard/exploration chat shortcuts to Peer Workspace Comms context instead of bespoke chat entry paths
-- [ ] Narrow Dashboard into Home summaries/alerts/activity and move canonical peer browsing into Nodes
-- [ ] Surface bridge-backed transports such as Meshtastic, Yggdrasil, and I2P in Comms only when authoritative daemon capability data exists
+- [x] Narrow Dashboard into Home summaries/alerts/activity and move canonical peer browsing into Nodes
+- [x] Surface bridge-backed transports such as Meshtastic, Yggdrasil, and I2P in Comms only when authoritative daemon capability data exists
 - **Scope**: `src/styrened/tui/app.py`, `src/styrened/tui/screens/`, `src/styrened/ui_state/`, `tests/tui/`
 
 ## Group 4: Legacy Mode Removal
@@ -170,7 +170,7 @@ Migrate all screens and widgets to use TUIServices + IPC bridge instead of direc
 ## Group 6: Test Updates
 
 ### Task 6.1: Update TUI tests for new patterns
-- [ ] Update tests that reference `app._lifecycle.ipc_bridge` to use services
-- [ ] Update tests that mock `load_core_config` or `get_node_store` in TUI context
+- [x] Update tests that reference `app._lifecycle.ipc_bridge` to use services
+- [x] Update tests that mock `load_core_config` or `get_node_store` in TUI context
 - [x] Verify existing TUI tests pass with legacy mode removed
 - **Scope**: `tests/tui/`, `tests/unit/tui/`

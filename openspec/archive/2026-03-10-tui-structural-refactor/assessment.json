@@ -3,11 +3,11 @@
   "changeName": "tui-structural-refactor",
   "assessmentKind": "cleave",
   "outcome": "pass",
-  "timestamp": "2026-03-10T17:32:09.209Z",
-  "summary": "Three consolidation scaffolds completed: (1) StyreneScreen base class with full lifecycle contract, retry logic, loading indicator, bridge property, and 11 tests. (2) app.py workspace nav hardened — action_open_admin() added, grave_accent→open_admin, action_open_mail uses services.bridge. (3) 6 test files updated to patch bridge.get_nodes() instead of daemon-layer get_node_store(). Also fixed app_lifecycle.py __future__ import placement (merge artifact). All scaffolding needed before the screen overhaul is now in place.\"",
+  "timestamp": "2026-03-10T22:15:04.148Z",
+  "summary": "All 87 tasks complete. 12 remaining tasks (screen content overhaul) were absorbed into tui-workspace-completion and completed there. Groups 1-4 of tui-workspace-completion are shipped. tui-structural-refactor is fully superseded.",
   "snapshot": {
-    "gitHead": "8ca007022a6cad78c74fbec914b41c3c470057da",
-    "fingerprint": "fd78517c0473f4311dcd3e04ca3c695195c36a8ad1071c9e3d85b19ffc5f539a",
+    "gitHead": "83320feb57997d07a5c3f4545ddae6b4294d9c4c",
+    "fingerprint": "ae7ebb6d948f50997d0345215423f2b44bb68c666739b944b8b57bdc71ee7dc6",
     "dirty": false,
     "scopedPaths": [],
     "files": [
@@ -65,25 +65,21 @@
         "size": 12770,
         "sha256": "f40ada0aad66eb41c95f7cae6b7733527b799a30a40ac498f923aedffd47d46e"
       }
-    ]
+    ],
+    "git": "83320feb57997d07a5c3f4545ddae6b4294d9c4c"
   },
   "reconciliation": {
     "reopen": false,
     "changedFiles": [
-      "src/styrened/tui/screens/base.py",
-      "src/styrened/tui/screens/__init__.py",
-      "tests/tui/screens/test_screen_base.py",
-      "src/styrened/tui/app.py",
-      "tests/tui/widgets/test_page_browser.py",
-      "tests/tui/integration/test_ipc_lifecycle.py",
-      "tests/tui/integration/test_chat_dashboard_flow.py",
-      "tests/tui/screens/test_dashboard_chat_integration.py",
+      "src/styrened/tui/screens/dashboard.py",
+      "src/styrened/tui/screens/mesh_device_detail.py",
+      "src/styrened/tui/screens/comms.py",
       "tests/tui/screens/test_dashboard_tui.py",
-      "tests/tui/screens/test_chat_edge_cases.py",
-      "tests/tui/test_navigation_workflows.py",
-      "src/styrened/tui/services/app_lifecycle.py"
+      "tests/tui/screens/test_device_detail_tui.py",
+      "tests/tui/screens/test_comms.py"
     ],
     "constraints": [],
     "recommendedAction": null
-  }
+  },
+  "recommended_action": "archive"
 }
