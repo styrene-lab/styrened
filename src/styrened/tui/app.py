@@ -18,9 +18,11 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header
 
 from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
+from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
 from styrened.tui.screens.dashboard import DashboardScreen
+from styrened.tui.screens.exploration import ExplorationScreen
 from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
@@ -69,9 +71,13 @@ class StyreneApp(App[None]):
         Binding("ctrl+c", "interrupt", "Quit", show=False, priority=True),
         # Global navigation
         Binding("?", "toggle_help", "Help"),
-        Binding("grave_accent", "push_screen_settings", "Settings", show=True),
-        Binding("i", "open_inbox", "Inbox", show=True),
+        Binding("grave_accent", "push_screen_settings", "Admin", show=True),
+        Binding("n", "open_nodes", "Nodes", show=True),
+        Binding("m", "open_mail", "Mail", show=True),
+        Binding("c", "open_comms", "Comms", show=True),
         Binding("b", "open_contacts", "Contacts", show=True),
+        # Backward-compatible / admin-adjacent shortcuts
+        Binding("i", "open_mail", "Mail", show=False),
         # Screen shortcuts (can be overridden by screens)
         Binding("p", "open_provision", "Provision", show=True),
         Binding("ctrl+r", "restart_daemon", "Restart Daemon", show=False),
@@ -79,8 +85,10 @@ class StyreneApp(App[None]):
     ]
 
     SCREENS: ClassVar[dict[str, type[Screen[Any]]]] = {  # type: ignore[assignment]
+        "comms": CommsScreen,
         "contacts": ContactsScreen,
         "dashboard": DashboardScreen,
+        "exploration": ExplorationScreen,
         "provision": ProvisionScreen,
     }
 
@@ -115,17 +123,33 @@ class StyreneApp(App[None]):
             return
         self.push_screen(SettingsScreen(self.config))
 
-    def action_open_inbox(self) -> None:
-        """Open inbox screen showing all conversations (no-op if already in stack)."""
+    def action_open_nodes(self) -> None:
+        """Open the canonical Nodes workspace."""
+        if self._screen_in_stack(ExplorationScreen):
+            return
+        self.push_screen("exploration")
+
+    def action_open_mail(self) -> None:
+        """Open the Mail workspace showing async conversations."""
         if self._lifecycle.ipc_bridge is None:
             self.notify("Chat requires daemon mode", severity="warning")
             return
 
-        from styrened.tui.screens.inbox import InboxScreen
+        from styrened.tui.screens.inbox import MailScreen
 
-        if self._screen_in_stack(InboxScreen):
+        if self._screen_in_stack(MailScreen):
             return
-        self.push_screen(InboxScreen())
+        self.push_screen(MailScreen())
+
+    def action_open_inbox(self) -> None:
+        """Backward-compatible alias for opening the Mail workspace."""
+        self.action_open_mail()
+
+    def action_open_comms(self) -> None:
+        """Open the aggregate Comms workspace."""
+        if self._screen_in_stack(CommsScreen):
+            return
+        self.push_screen("comms")
 
     def action_open_contacts(self) -> None:
         """Push contacts screen (no-op if already in stack)."""

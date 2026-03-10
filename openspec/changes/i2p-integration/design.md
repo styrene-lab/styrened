@@ -7,10 +7,10 @@
 **Status:** rejected
 **Rationale:** Latency (3–10s tunnel build) makes RNS interactive features unusable. I2P adds transport-layer IP anonymity but RNS identity is still visible at the application layer — minimal anonymity gain for significant complexity. The use case (hiding your IP while running RNS) is a narrow, deliberate operator choice that doesn't belong in the core daemon. If ever implemented, it would be a separate RNSsam interface plugin outside styrened.
 
-### Decision: styrened detects i2pd but never manages it — follows BATMAN-ADV model not WireGuard model
+### Decision: Earlier detect-only i2pd model is superseded by DISABLED | ADOPT | MANAGED
 
-**Status:** decided
-**Rationale:** i2pd needs 5–10 minutes to integrate into the I2P network on first start — running it ephemerally defeats the purpose. Users who want I2P are already running i2pd persistently as a system service. Tunnel configs and bandwidth limits are deliberate operator decisions, not generated dynamically. NixOS handles i2pd via services.i2pd. styrened's I2PDetector probes localhost:4444 and uses it if available.
+**Status:** superseded
+**Rationale:** The initial BATMAN-ADV-style "detect and use, never manage" model captured real operational concerns — especially i2pd warm-up time and the fact that many privacy-conscious operators already run it persistently. Those concerns still inform the design, but they no longer prohibit management entirely. The active decision is the explicit three-mode model below: DISABLED for no use, ADOPT for existing operator-managed routers, and MANAGED for styrened-managed routers with separate ports and visible warm-up state.
 
 ### Decision: I2P eepsite browsing via HTTP proxy — PageCacheService becomes transport-agnostic
 
@@ -55,6 +55,6 @@
 
 
 
-### The I2PService design: detect-only vs managed process
+### The I2PService design: detect-only concerns that motivated the final managed/adopt split
 
 

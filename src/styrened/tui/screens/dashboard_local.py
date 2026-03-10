@@ -5,10 +5,12 @@ from __future__ import annotations
 import contextlib
 from typing import ClassVar
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Footer, Header
 
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
@@ -29,6 +31,10 @@ class LocalDashboardScreen(Screen[None]):
         Binding("r", "refresh", "Refresh", show=True),
     ]
 
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._refresh_timer: Timer | None = None
+
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll(id="dashboard-local-container"):
@@ -46,7 +52,24 @@ class LocalDashboardScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Set up periodic refresh."""
-        self.set_interval(5.0, self._refresh_all)
+        self._refresh_timer = self.set_interval(5.0, self._refresh_all)
+
+    def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
+        """Pause refresh while the local dashboard is inactive."""
+        if self._refresh_timer is not None:
+            self._refresh_timer.pause()
+
+    def on_screen_resume(self, event: events.ScreenResume) -> None:
+        """Resume refresh and immediately repaint local status."""
+        if self._refresh_timer is not None:
+            self._refresh_timer.resume()
+        self._refresh_all()
+
+    def on_unmount(self) -> None:
+        """Stop periodic refresh when the local dashboard is removed."""
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+            self._refresh_timer = None
 
     def _refresh_all(self) -> None:
         """Refresh all dashboard panels."""

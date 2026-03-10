@@ -953,21 +953,23 @@ class ControlClient:
         form_data: dict[str, Any] | None = None,
         timeout: float = 30.0,
     ) -> dict[str, Any]:
-        """Fetch a page from a NomadNet node.
-
-        Args:
-            destination_hash: Hex-encoded destination hash of the NomadNet node.
-            path: Page path to request.
-            form_data: Optional form data to submit.
-            timeout: Request timeout in seconds.
-
-        Returns:
-            Dict with content, status, transfer_time, etc.
-        """
+        """Fetch a page from a NomadNet node."""
         request = QueryPageRequest(
             destination_hash=destination_hash,
             path=path,
             form_data=form_data,
+            timeout=timeout,
+        )
+        return await self._request(request, timeout=timeout + 20)
+
+    async def fetch_page_url(
+        self,
+        url: str,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Fetch an explicit HTTP(S) or I2P URL through the page browser."""
+        request = QueryPageRequest(
+            url=url,
             timeout=timeout,
         )
         return await self._request(request, timeout=timeout + 20)

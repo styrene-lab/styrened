@@ -1195,12 +1195,22 @@ class StyreneAnnounceHandler:
         except Exception as e:
             logger.debug(f"Could not determine path info: {e}")
 
-        # ── Yggdrasil capability detection ──────────────────────────────────
-        # If the announce carries CAPABILITY_YGGDRASIL, mark ygg_address=None
-        # (address unknown until /meta fetch) and optionally fire bootstrap.
+        # ── Overlay capability detection ────────────────────────────────────
+        # Addresses remain unknown until /meta fetch; announces carry only bits.
         try:
-            from styrened.models.capabilities import CAPABILITY_YGGDRASIL, has_capability
+            from styrened.models.capabilities import (
+                CAPABILITY_I2P,
+                CAPABILITY_YGGDRASIL,
+                has_capability,
+            )
             from styrened.models.config import PeerDiscovery
+
+            if has_capability(device.capabilities, CAPABILITY_I2P):
+                device.b32_address = None
+                logger.debug(
+                    "[I2P] Peer %s advertises I2P capability",
+                    identity_hash_hex[:16],
+                )
 
             if has_capability(device.capabilities, CAPABILITY_YGGDRASIL):
                 device.ygg_address = None  # address fetched via /meta on demand
@@ -1232,8 +1242,8 @@ class StyreneAnnounceHandler:
                         "[YGG] Dispatched bootstrap task for peer %s",
                         identity_hash_hex[:16],
                     )
-        except Exception as _ygg_err:
-            logger.debug("[YGG] Capability detection error: %s", _ygg_err)
+        except Exception as _overlay_err:
+            logger.debug("[OVERLAY] Capability detection error: %s", _overlay_err)
 
         self.discovered_devices[dest_hash_hex] = device
 

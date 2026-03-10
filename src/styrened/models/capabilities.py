@@ -18,6 +18,7 @@ from __future__ import annotations
 
 __all__ = [
     "CAPABILITY_YGGDRASIL",
+    "CAPABILITY_I2P",
     "has_capability",
     "add_capability",
 ]
@@ -32,6 +33,13 @@ CAPABILITY_YGGDRASIL: str = "yggdrasil"
 Receivers that see this capability SHOULD fetch the node's Ygg IPv6 address
 via a DirectLink ``/meta`` request rather than reading it from the announce
 (which keeps announce size LoRa-friendly).
+"""
+
+CAPABILITY_I2P: str = "i2p"
+"""Token advertised when the node has I2P enabled and knows its b32 address.
+
+Receivers that see this capability SHOULD fetch the concrete ``b32_address``
+via DirectLink ``/meta`` rather than expecting it in the announce payload.
 """
 
 # ---------------------------------------------------------------------------

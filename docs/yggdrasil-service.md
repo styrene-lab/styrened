@@ -1,7 +1,7 @@
 ---
 id: yggdrasil-service
 title: YggdrasilService — styrened-managed Yggdrasil daemon
-status: implementing
+status: blocked
 parent: overlay-network-integration
 tags: [yggdrasil, service, daemon, packaging, nix]
 open_questions: []
@@ -92,6 +92,10 @@ The CAPABILITY_YGGDRASIL bit (already in the capabilities bitmap framework) sign
 
 
 
+### OpenSpec reconciliation note
+
+styrened-side Yggdrasil work is effectively complete through adapter, capability, /meta, announce bootstrap, handshake extension, doctor, and setup CLI. The remaining blocker for closing the broader YggdrasilService effort is the external NixOS module work in styrene-edge (`styrene-edge/sbc/common/yggdrasil.nix`).
+
 ## Decisions
 
 ### Decision: Hybrid deployment model: NixOS delegates to system, others use managed process
@@ -128,6 +132,11 @@ The CAPABILITY_YGGDRASIL bit (already in the capabilities bitmap framework) sign
 
 **Status:** decided
 **Rationale:** The three-tier DaemonMode (DISABLED/ADOPT/MANAGED) pattern was established as universal across all optional daemons. YggdrasilConfig.manage_process (bool) was a two-state approximation that missed the ADOPT case cleanly. Replace with mode: DaemonMode = DaemonMode.DISABLED. YggdrasilAdapter subclasses DaemonAdapter. warm_up_seconds = 30.0 (fast, unlike i2pd's 480s).
+
+### Decision: The raw Ygg-address-in-announce idea is superseded by CAPABILITY_YGGDRASIL plus DirectLink /meta
+
+**Status:** decided
+**Rationale:** The node still carries older research text about embedding raw Ygg address bytes into announce app_data. That approach was rejected to preserve constrained-link bandwidth. The active design is capability bit only in announces, with address fetched via /meta when a peer actually wants to bootstrap.
 
 ## Open Questions
 

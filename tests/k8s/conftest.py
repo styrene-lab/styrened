@@ -610,9 +610,14 @@ def pytest_collection_modifyitems(config, items):
 
 def pytest_addoption(parser):
     """Add custom CLI options."""
-    parser.addoption(
-        "--run-slow",
-        action="store_true",
-        default=False,
-        help="Run slow tests (load and scaling tests)",
-    )
+    try:
+        parser.addoption(
+            "--run-slow",
+            action="store_true",
+            default=False,
+            help="Run slow tests (load and scaling tests)",
+        )
+    except ValueError:
+        # Another test subtree already registered the shared flag.
+        # Keep collection idempotent across mixed full-suite runs.
+        pass

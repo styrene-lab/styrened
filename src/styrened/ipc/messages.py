@@ -434,11 +434,12 @@ class QueryPathInfoRequest(IPCRequest):
 
 @dataclass
 class QueryPageRequest(IPCRequest):
-    """Fetch a page from a NomadNet node."""
+    """Fetch a page from a NomadNet node or an explicit URL."""
 
     MSG_TYPE = IPCMessageType.QUERY_PAGE
     destination_hash: str = ""
     path: str = "/page/index.mu"
+    url: str = ""
     form_data: dict[str, Any] | None = None
     timeout: float = 30.0
 
@@ -448,6 +449,8 @@ class QueryPageRequest(IPCRequest):
             "path": self.path,
             "timeout": self.timeout,
         }
+        if self.url:
+            payload["url"] = self.url
         if self.form_data is not None:
             payload["form_data"] = self.form_data
         return payload

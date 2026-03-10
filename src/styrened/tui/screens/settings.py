@@ -1,5 +1,6 @@
 """Settings screen for configuration management."""
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -26,6 +27,7 @@ from styrened.tui.models.config import (
     StyreneConfig,
 )
 from styrened.tui.services.config import save_config, validate_config
+from styrened.ui_state import ConfigDraftInputs, ConfigDraftState, build_config_draft_state
 
 # Announce interval presets: (label, seconds)
 ANNOUNCE_INTERVALS: list[tuple[str, int]] = [
@@ -73,6 +75,13 @@ class SettingsScreen(Screen[None]):
         """
         super().__init__()
         self.config = config
+        self._persisted_core_config = config.core.to_dict()
+        self._draft_state = build_config_draft_state(
+            ConfigDraftInputs(
+                persisted=self._persisted_core_config,
+                editable=self._persisted_core_config,
+            )
+        )
         self._status_message = ""
 
     @property
@@ -766,6 +775,17 @@ class SettingsScreen(Screen[None]):
         self._update_server_visibility()
         self._update_allowed_peers_visibility()
 
+    def _set_draft_state(self, draft_state: ConfigDraftState) -> None:
+        """Store the current shared config-draft snapshot."""
+        self._draft_state = draft_state
+
+    def _validation_error_map(self, errors: list[Exception]) -> dict[str, str]:
+        """Normalize validation errors into field/message mapping."""
+        error_map: dict[str, str] = {}
+        for index, error in enumerate(errors):
+            error_map[f"config.{index}"] = str(error)
+        return error_map
+
     def action_save(self) -> None:
         """Save configuration."""
         self.run_worker(self._save_settings())
@@ -803,7 +823,6 @@ class SettingsScreen(Screen[None]):
         import shutil
 
         from styrened import paths
-        from styrened.tui.services.reticulum import generate_rns_config
 
         try:
             # Back up existing configs
@@ -822,13 +841,9 @@ class SettingsScreen(Screen[None]):
             default_dict = default_config.to_dict()
 
             bridge = self._ipc_bridge
-            if bridge is not None:
-                await bridge.save_core_config(default_dict)
-
-            # Regenerate RNS config from defaults (not the TUI's stale config)
-            rns_content = generate_rns_config(default_config)
-            rns_config.parent.mkdir(parents=True, exist_ok=True)
-            rns_config.write_text(rns_content)
+            if bridge is None:
+                raise RuntimeError("Not connected to daemon")
+            await bridge.save_core_config(default_dict)
 
             self.notify(
                 "Config reset to defaults (backups saved as .bak)",
@@ -1016,14 +1031,12 @@ class SettingsScreen(Screen[None]):
     async def _do_generate_page(self) -> None:
         """Send page regenerate command to daemon."""
         try:
-            from styrened.tui.services.lifecycle import get_lifecycle
-
-            lifecycle = get_lifecycle()
-            if not lifecycle or not lifecycle.ipc:
+            bridge = self._ipc_bridge
+            if bridge is None:
                 self._show_error("Not connected to daemon")
                 return
 
-            result = await lifecycle.ipc.page_regenerate_index()
+            result = await bridge.page_regenerate_index()
             if result:
                 self._show_success("Node page generated ✓")
             else:
@@ -1034,6 +1047,19 @@ class SettingsScreen(Screen[None]):
     async def _save_settings(self) -> None:
         """Read form values, validate, and save configuration."""
         try:
+            persisted_core = self._persisted_core_config
+            live_config = self.config
+            self._set_draft_state(
+                build_config_draft_state(
+                    ConfigDraftInputs(
+                        persisted=persisted_core,
+                        editable=persisted_core,
+                        saving=True,
+                    )
+                )
+            )
+            draft_config = deepcopy(self.config)
+
             # Read Operator Identity settings
             identity_display_name = self.query_one(
                 "#identity_display_name", Input
@@ -1064,11 +1090,11 @@ class SettingsScreen(Screen[None]):
             await self._save_identity(
                 identity_display_name, identity_icon, identity_short_name
             )
-            # Update in-memory config so the later save_core_config(self.config.core)
+            # Update in-memory config so the later save_core_config(draft_config.core)
             # at the end of this method doesn't overwrite with stale identity values.
-            self.config.core.identity.display_name = identity_display_name
-            self.config.core.identity.icon = identity_icon
-            self.config.core.identity.short_name = (
+            draft_config.core.identity.display_name = identity_display_name
+            draft_config.core.identity.icon = identity_icon
+            draft_config.core.identity.short_name = (
                 identity_short_name if identity_short_name else None
             )
 
@@ -1080,43 +1106,43 @@ class SettingsScreen(Screen[None]):
             if not isinstance(log_level_select.value, LogLevel):
                 self._show_error("Invalid log level selection")
                 return
-            self.config.tui.log_level = log_level_select.value
-            self.config.tui.show_hardware_panel = show_hardware.value
-            self.config.tui.confirm_destructive = confirm_destructive.value
+            draft_config.tui.log_level = log_level_select.value
+            draft_config.tui.show_hardware_panel = show_hardware.value
+            draft_config.tui.confirm_destructive = confirm_destructive.value
 
             # Read Fleet settings
             edge_fleet_path = self.query_one("#edge_fleet_path", Input).value.strip()
-            self.config.fleet.edge_fleet_path = (
+            draft_config.fleet.edge_fleet_path = (
                 Path(edge_fleet_path).expanduser() if edge_fleet_path else None
             )
-            self.config.fleet.inventory_file = self.query_one(
+            draft_config.fleet.inventory_file = self.query_one(
                 "#inventory_file", Input
             ).value.strip()
-            self.config.fleet.auto_sync_inventory = self.query_one(
+            draft_config.fleet.auto_sync_inventory = self.query_one(
                 "#auto_sync_inventory", Switch
             ).value
 
             # Read Provisioning defaults
-            self.config.provisioning.default_hostname_prefix = self.query_one(
+            draft_config.provisioning.default_hostname_prefix = self.query_one(
                 "#default_hostname_prefix", Input
             ).value.strip()
 
             # Parse SSH key paths (comma-separated)
             ssh_keys_str = self.query_one("#ssh_key_paths", Input).value.strip()
             if ssh_keys_str:
-                self.config.provisioning.ssh_key_paths = [
+                draft_config.provisioning.ssh_key_paths = [
                     Path(p.strip()).expanduser() for p in ssh_keys_str.split(",") if p.strip()
                 ]
             else:
-                self.config.provisioning.ssh_key_paths = []
+                draft_config.provisioning.ssh_key_paths = []
 
             # Read Mesh defaults
-            self.config.mesh.enable = self.query_one("#mesh_enable", Switch).value
-            self.config.mesh.mesh_id = self.query_one("#mesh_id", Input).value.strip()
+            draft_config.mesh.enable = self.query_one("#mesh_enable", Switch).value
+            draft_config.mesh.mesh_id = self.query_one("#mesh_id", Input).value.strip()
 
             channel_str = self.query_one("#channel", Input).value.strip()
             try:
-                self.config.mesh.channel = int(channel_str)
+                draft_config.mesh.channel = int(channel_str)
             except ValueError:
                 self._show_error("Invalid channel number")
                 return
@@ -1126,19 +1152,19 @@ class SettingsScreen(Screen[None]):
                 self._show_error("Invalid gateway mode selection")
                 return
 
-            self.config.mesh.gateway_mode = gateway_mode_select.value
+            draft_config.mesh.gateway_mode = gateway_mode_select.value
 
             # Read Transport settings
             mode_select = self.query_one("#deployment_mode", Select)
             if isinstance(mode_select.value, DeploymentMode):
-                self.config.core.reticulum.mode = mode_select.value
+                draft_config.core.reticulum.mode = mode_select.value
 
             transport_enabled = self.query_one("#enable_transport", Switch).value
-            self.config.core.reticulum.enable_transport = transport_enabled
+            draft_config.core.reticulum.enable_transport = transport_enabled
 
             announce_select = self.query_one("#announce_interval", Select)
             if isinstance(announce_select.value, int):
-                self.config.core.reticulum.announce_interval = announce_select.value
+                draft_config.core.reticulum.announce_interval = announce_select.value
             else:
                 self._show_error("Invalid announce interval selection")
                 return
@@ -1194,7 +1220,7 @@ class SettingsScreen(Screen[None]):
                     if p.host == community_host:
                         p.enabled = False
 
-            self.config.core.reticulum.interfaces.peers = peers
+            draft_config.core.reticulum.interfaces.peers = peers
 
             # Read propagation destination
             prop_dest = self.query_one("#propagation_destination", Input).value.strip()
@@ -1202,12 +1228,12 @@ class SettingsScreen(Screen[None]):
                 if len(prop_dest) != 32 or not all(c in "0123456789abcdef" for c in prop_dest.lower()):
                     self._show_error("Propagation node must be a 32-character hex hash")
                     return
-                self.config.core.lxmf.propagation_destination = prop_dest
+                draft_config.core.lxmf.propagation_destination = prop_dest
             else:
-                self.config.core.lxmf.propagation_destination = None
+                draft_config.core.lxmf.propagation_destination = None
 
             # Read AutoInterface
-            self.config.core.reticulum.interfaces.auto = self.query_one(
+            draft_config.core.reticulum.interfaces.auto = self.query_one(
                 "#auto_interface", Switch
             ).value
 
@@ -1222,16 +1248,16 @@ class SettingsScreen(Screen[None]):
             except ValueError:
                 self._show_error("Invalid server port (must be a number)")
                 return
-            self.config.core.reticulum.interfaces.server = ServerInterfaceConfig(
+            draft_config.core.reticulum.interfaces.server = ServerInterfaceConfig(
                 enabled=server_enabled, listen_ip=server_ip, port=server_port,
             )
 
             # Read Security / mesh access control settings
             mode_select = self.query_one("#mesh_access_mode", Select)
             if isinstance(mode_select.value, MeshAccessMode):
-                self.config.core.discovery.access_mode = mode_select.value
+                draft_config.core.discovery.access_mode = mode_select.value
             else:
-                self.config.core.discovery.access_mode = MeshAccessMode.OPEN
+                draft_config.core.discovery.access_mode = MeshAccessMode.OPEN
 
             allowed_peers: set[str] = set()
             for row in self.query(".allowed-peer-row"):
@@ -1247,14 +1273,14 @@ class SettingsScreen(Screen[None]):
                     )
                     return
                 allowed_peers.add(h)
-            self.config.core.discovery.allowed_peers = allowed_peers
+            draft_config.core.discovery.allowed_peers = allowed_peers
 
             # Page server settings
-            self.config.core.page_server.enabled = self.query_one(
+            draft_config.core.page_server.enabled = self.query_one(
                 "#page_server_enabled", Switch
             ).value
             page_node_name = self.query_one("#page_server_node_name", Input).value.strip()
-            self.config.core.page_server.node_name = page_node_name or None
+            draft_config.core.page_server.node_name = page_node_name or None
 
             # Group thread footprint policy
             group_thread_tier_select = self.query_one("#group_threads_feature_tier", Select)
@@ -1262,55 +1288,79 @@ class SettingsScreen(Screen[None]):
                 self._show_error("Invalid group thread feature tier")
                 return
 
-            self.config.core.group_threads.enabled = self.query_one(
+            draft_config.core.group_threads.enabled = self.query_one(
                 "#group_threads_enabled", Switch
             ).value
-            self.config.core.group_threads.feature_tier = group_thread_tier_select.value
-            self.config.core.group_threads.bounded_retention = self.query_one(
+            draft_config.core.group_threads.feature_tier = group_thread_tier_select.value
+            draft_config.core.group_threads.bounded_retention = self.query_one(
                 "#group_threads_bounded_retention", Switch
             ).value
-            self.config.core.group_threads.metadata_first_sync = self.query_one(
+            draft_config.core.group_threads.metadata_first_sync = self.query_one(
                 "#group_threads_metadata_first_sync", Switch
             ).value
-            self.config.core.group_threads.auto_media_fetch = self.query_one(
+            draft_config.core.group_threads.auto_media_fetch = self.query_one(
                 "#group_threads_auto_media_fetch", Switch
             ).value
-            self.config.core.group_threads.background_catchup = self.query_one(
+            draft_config.core.group_threads.background_catchup = self.query_one(
                 "#group_threads_background_catchup", Switch
             ).value
-            self.config.core.group_threads.first_run_auto_tier = self.query_one(
+            draft_config.core.group_threads.first_run_auto_tier = self.query_one(
                 "#group_threads_first_run_auto_tier", Switch
             ).value
 
-            # Validate configuration
-            errors = validate_config(self.config)
+            # Validate configuration against the editable draft before mutating
+            # the live in-memory config.
+            errors = validate_config(draft_config)
+            draft_editable = draft_config.core.to_dict()
             if errors:
                 error_msgs = [str(e) for e in errors]
+                self._set_draft_state(
+                    build_config_draft_state(
+                        ConfigDraftInputs(
+                            persisted=persisted_core,
+                            editable=draft_editable,
+                            validation_errors=self._validation_error_map(errors),
+                        )
+                    )
+                )
                 self._show_error(f"Validation errors: {'; '.join(error_msgs[:3])}")
                 return
 
-            # Save to file
+            # Persist validated draft back into the live config object so
+            # callers holding the original SettingsScreen config reference see
+            # the saved values immediately.
+            live_config.__dict__.update(deepcopy(draft_config.__dict__))
+            self.config = live_config
             save_config(self.config)
 
-            # Persist core config changes via IPC.
-            # The TUI form writes into self.config.core (in-memory CoreConfig).
-            # Serialize it and send the full dict to the daemon for disk write.
             try:
                 bridge = self._ipc_bridge
                 if bridge is not None:
                     config_dict = self.config.core.to_dict()
                     await bridge.save_core_config(config_dict)
-
-                # Regenerate RNS config from TUI config
-                from styrened.tui.services.reticulum import generate_rns_config
-
-                rns_content = generate_rns_config(self.config)
-                rns_config_path = Path.home() / ".reticulum" / "config"
-                rns_config_path.parent.mkdir(parents=True, exist_ok=True)
-                rns_config_path.write_text(rns_content)
             except Exception as e:
+                self._set_draft_state(
+                    build_config_draft_state(
+                        ConfigDraftInputs(
+                            persisted=persisted_core,
+                            editable=draft_editable,
+                            save_error=str(e),
+                        )
+                    )
+                )
                 self._show_error(f"Failed to write network config: {e}")
                 return
+
+            self._persisted_core_config = self.config.core.to_dict()
+            self._set_draft_state(
+                build_config_draft_state(
+                    ConfigDraftInputs(
+                        persisted=self._persisted_core_config,
+                        editable=self._persisted_core_config,
+                        save_succeeded=True,
+                    )
+                )
+            )
 
             # Show success and dismiss.  dismiss() returns an AwaitComplete
             # that raises ScreenError when awaited from the screen's own

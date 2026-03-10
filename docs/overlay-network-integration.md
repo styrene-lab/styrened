@@ -5,7 +5,6 @@ status: exploring
 tags: [yggdrasil, i2p, transport, mesh, overlay]
 open_questions:
   - Should the public hub publish a well-known Yggdrasil address for peers to connect via?
-  - "Should the I2P eepsite proxy be in the page browser (browsing .i2p pages) or a separate tunnel service for the hub's API?"
 ---
 
 # Overlay Network Integration: Yggdrasil + I2P
@@ -100,10 +99,16 @@ Reticulum is explicitly designed as a transport-agnostic resilient mesh that wor
 
 
 
+## Decisions
+
+### Decision: I2P integration belongs in the page browser, not a separate hub tunnel service
+
+**Status:** decided
+**Rationale:** The concrete near-term value is eepsite browsing through the existing page browser and PageCacheService transport dispatch. A separate hub API hidden-service tunnel is niche and remains deferred; it should not shape the core I2P integration path.
+
 ## Open Questions
 
 - Should the public hub publish a well-known Yggdrasil address for peers to connect via?
-- Should the I2P eepsite proxy be in the page browser (browsing .i2p pages) or a separate tunnel service for the hub's API?
 
 ## Current three-tier architecture (from memory)
 

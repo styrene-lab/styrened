@@ -4,7 +4,7 @@ Tests the tabbed exploration interface with LXMF, Pages, Infrastructure, and Oth
 """
 
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from textual.widgets import Input, Static, TabbedContent
@@ -12,6 +12,7 @@ from textual.widgets import Input, Static, TabbedContent
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.exploration import ExplorationScreen, ReticumAnnounceTable
+from styrened.ui_state import WorkspaceId
 
 
 @pytest.fixture(autouse=True)
@@ -26,9 +27,13 @@ def mock_reticulum(tmp_path):
             "styrened.tui.services.reticulum.find_reticulum_config",
             return_value=fake_config,
         ),
+        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
+        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
+        mock_app_lifecycle.return_value.ipc_bridge = None
         yield
 
 
@@ -85,12 +90,23 @@ def _patch_discovery(devices):
     )
 
 
+class TestExplorationWorkspaceSemantics:
+    """Exploration now serves as the canonical Nodes workspace."""
+
+    def test_nodes_binding_exists_for_returning_home(self):
+        screen = ExplorationScreen()
+        n_bindings = [b for b in screen.BINDINGS if b.key == "n"]
+        assert len(n_bindings) == 1
+        assert n_bindings[0].action == "app.pop_screen"
+        assert n_bindings[0].description == "Home"
+
+
 class TestExplorationTabStructure:
     """The screen has 4 categorized tabs."""
 
     @pytest.mark.asyncio
     async def test_four_tabs_present(self, sample_devices):
-        """TabbedContent should have 4 tab panes."""
+        """TabbedContent should have 5 tab panes including Styrene."""
         app = StyreneApp()
         p1, p2, p3 = _patch_discovery(sample_devices)
         with p1, p2, p3:
@@ -100,7 +116,7 @@ class TestExplorationTabStructure:
 
                 tabs = app.screen.query_one("#explore-tabs", TabbedContent)
                 panes = list(tabs.query("TabPane"))
-                assert len(panes) == 4
+                assert len(panes) == 5
 
     @pytest.mark.asyncio
     async def test_each_tab_has_table(self, sample_devices):
@@ -115,6 +131,101 @@ class TestExplorationTabStructure:
                 for tid in ["#table-lxmf", "#table-pages", "#table-infra", "#table-other"]:
                     table = app.screen.query_one(tid, ReticumAnnounceTable)
                     assert table is not None
+
+
+class TestExplorationTimerLifecycle:
+    """Nodes workspace should manage its periodic refresh timer across lifecycle events."""
+
+    def test_screen_suspend_pauses_refresh_timer_and_cancels_workers(self):
+        screen = ExplorationScreen()
+        screen._refresh_timer = Mock()
+        node_worker = Mock()
+        stored_worker = Mock()
+        screen._node_refresh_worker = node_worker
+        screen._stored_nodes_worker = stored_worker
+
+        screen.on_screen_suspend(Mock())
+
+        screen._refresh_timer.pause.assert_called_once_with()
+        node_worker.cancel.assert_called_once_with()
+        stored_worker.cancel.assert_called_once_with()
+        assert screen._node_refresh_worker is None
+        assert screen._stored_nodes_worker is None
+
+    def test_screen_resume_resumes_refresh_timer_and_refreshes_nodes(self):
+        screen = ExplorationScreen()
+        screen._refresh_timer = Mock()
+        screen._start_node_refresh = Mock()
+
+        screen.on_screen_resume(Mock())
+
+        screen._refresh_timer.resume.assert_called_once_with()
+        screen._start_node_refresh.assert_called_once_with()
+
+    def test_on_unmount_stops_refresh_timer_and_cancels_workers(self):
+        screen = ExplorationScreen()
+        timer = Mock()
+        node_worker = Mock()
+        stored_worker = Mock()
+        screen._refresh_timer = timer
+        screen._node_refresh_worker = node_worker
+        screen._stored_nodes_worker = stored_worker
+
+        screen.on_unmount()
+
+        timer.stop.assert_called_once_with()
+        node_worker.cancel.assert_called_once_with()
+        stored_worker.cancel.assert_called_once_with()
+        assert screen._refresh_timer is None
+        assert screen._node_refresh_worker is None
+        assert screen._stored_nodes_worker is None
+
+
+class TestExplorationWorkerOwnership:
+    """Nodes workspace should route refresh starts through explicit worker helpers."""
+
+    def test_refresh_via_bridge_uses_refresh_helper(self):
+        screen = ExplorationScreen()
+        screen._start_node_refresh = Mock()
+
+        screen._refresh_via_bridge()
+
+        screen._start_node_refresh.assert_called_once_with()
+
+
+class TestExplorationRouting:
+    """Nodes workspace should preserve explicit NODES origin when drilling down."""
+
+    def test_enter_from_nodes_workspace_sets_nodes_origin(self, sample_devices):
+        screen = ExplorationScreen()
+        fake_app = Mock()
+
+        with (
+            patch.object(
+                ExplorationScreen,
+                "_get_selected_identity",
+                return_value=sample_devices[0].identity_hash,
+            ),
+            patch.object(
+                ExplorationScreen,
+                "_find_device_by_identity",
+                return_value=sample_devices[0],
+            ),
+            patch.object(
+                ExplorationScreen,
+                "app",
+                new_callable=PropertyMock,
+                return_value=fake_app,
+            ),
+        ):
+            screen.action_select_device()
+
+        from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+        fake_app.push_screen.assert_called_once()
+        pushed_screen = fake_app.push_screen.call_args.args[0]
+        assert isinstance(pushed_screen, MeshDeviceDetailScreen)
+        assert pushed_screen.origin_workspace == WorkspaceId.NODES
 
 
 class TestDevicesInCorrectTab:

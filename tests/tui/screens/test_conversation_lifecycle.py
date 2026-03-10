@@ -6,7 +6,7 @@ These tests verify:
 - Proper screen navigation
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -14,6 +14,7 @@ from styrened.tui.app import StyreneApp
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.services.app_lifecycle import LifecycleMode
 from styrened.tui.widgets.chat_widget import ChatWidget
+from styrened.ui_state import PeerWorkspaceFocus, WorkspaceId
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,16 @@ def _make_mock_lifecycle() -> MagicMock:
     bridge.mark_read = AsyncMock(return_value=3)
     bridge.send_chat = AsyncMock(return_value={"status": "sent"})
     bridge.get_conversations = AsyncMock(return_value=[])
+    bridge.get_path_info = AsyncMock(return_value={"found": False})
+    bridge.delete_conversation = AsyncMock(return_value=3)
+    bridge.block_peer = AsyncMock(return_value=True)
+    bridge.get_status = AsyncMock(return_value={})
+    bridge.get_identity = AsyncMock(return_value={})
+    bridge.get_hub_status = AsyncMock(return_value={})
+    bridge.get_core_config = AsyncMock(return_value={})
+    bridge.get_devices = AsyncMock(return_value=[])
+    bridge.get_contacts = AsyncMock(return_value=[])
+    bridge.get_auto_reply = AsyncMock(return_value={"mode": "disabled", "message": "", "cooldown": 300})
 
     lifecycle = MagicMock()
     lifecycle.ipc_bridge = bridge
@@ -45,6 +56,25 @@ def _make_mock_lifecycle() -> MagicMock:
     lifecycle.active_mode = LifecycleMode.IPC
     lifecycle.shutdown_async = AsyncMock()
     return lifecycle
+
+
+class TestConversationRoutingContext:
+    """Tests for mail-thread compatibility routing context."""
+
+    def test_conversation_defaults_to_mail_focus(self):
+        conversation = ConversationScreen(
+            peer_hash="peer_hash_xyz",
+            origin_workspace="mail",
+        )
+
+        assert conversation.origin_workspace == WorkspaceId.MAIL
+        assert conversation.requested_focus == PeerWorkspaceFocus.MAIL
+
+    def test_conversation_defaults_origin_to_home_when_unspecified(self):
+        conversation = ConversationScreen(peer_hash="peer_hash_xyz")
+
+        assert conversation.origin_workspace == WorkspaceId.HOME
+        assert conversation.requested_focus == PeerWorkspaceFocus.MAIL
 
 
 class TestConversationMarkAsRead:
@@ -59,11 +89,88 @@ class TestConversationMarkAsRead:
         app._lifecycle = lifecycle
 
         async with app.run_test() as pilot:
-            conversation = ConversationScreen(peer_hash="peer_hash_xyz")
+            conversation = ConversationScreen(peer_hash="a1b2c3d4e5f60708")
             await app.push_screen(conversation)
             await pilot.pause()
 
-            lifecycle.ipc_bridge.mark_read.assert_called_with("peer_hash_xyz")
+            lifecycle.ipc_bridge.mark_read.assert_called_with("a1b2c3d4e5f60708")
+
+
+class TestConversationPathInfo:
+    """Tests for path info header behavior."""
+
+    @pytest.mark.asyncio
+    async def test_load_path_info_renders_route_details(self):
+        screen = ConversationScreen(peer_hash="peer_hash_xyz")
+        bridge = MagicMock()
+        bridge.get_path_info = AsyncMock(
+            return_value={
+                "found": True,
+                "hops": 2,
+                "interface_name": "tcp0",
+                "bitrate": 125000,
+            }
+        )
+        app = MagicMock()
+        app.services.bridge = bridge
+        path_widget = MagicMock()
+
+        with (
+            patch.object(ConversationScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "query_one", return_value=path_widget),
+        ):
+            await screen._load_path_info()
+
+        path_widget.update.assert_called_once()
+        rendered = path_widget.update.call_args.args[0]
+        assert "2 hops" in rendered
+        assert "via tcp0" in rendered
+        assert "125 kbps" in rendered
+
+    @pytest.mark.asyncio
+    async def test_load_path_info_handles_missing_route(self):
+        screen = ConversationScreen(peer_hash="peer_hash_xyz")
+        bridge = MagicMock()
+        bridge.get_path_info = AsyncMock(return_value={"found": False})
+        app = MagicMock()
+        app.services.bridge = bridge
+        path_widget = MagicMock()
+
+        with (
+            patch.object(ConversationScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "query_one", return_value=path_widget),
+        ):
+            await screen._load_path_info()
+
+        path_widget.update.assert_called_once_with("[dim]No path info available[/]")
+
+
+class TestConversationDeleteAndBlock:
+    """Tests for destructive conversation actions."""
+
+    def test_delete_conversation_second_press_uses_worker(self):
+        screen = ConversationScreen(peer_hash="peer_hash_xyz")
+        screen._delete_conv_pending = True
+        screen._cancel_delete_conv_timer = MagicMock()
+        screen.run_worker = MagicMock()
+
+        with patch.object(ConversationScreen, "_execute_delete_conversation", new=lambda self: None):
+            screen.action_delete_conversation()
+
+        screen._cancel_delete_conv_timer.assert_called_once_with()
+        screen.run_worker.assert_called_once()
+
+    def test_block_peer_second_press_uses_worker(self):
+        screen = ConversationScreen(peer_hash="peer_hash_xyz")
+        screen._block_confirm_time = 9999999999
+        screen.run_worker = MagicMock()
+
+        with patch("time.time", return_value=9999999999.5), patch.object(
+            ConversationScreen, "_execute_block_peer", new=lambda self: None
+        ):
+            screen.action_block_peer()
+
+        screen.run_worker.assert_called_once()
 
 
 class TestConversationNavigation:
@@ -80,7 +187,7 @@ class TestConversationNavigation:
         async with app.run_test() as pilot:
             initial_screen_type = type(app.screen).__name__
 
-            conversation = ConversationScreen(peer_hash="peer_hash_xyz")
+            conversation = ConversationScreen(peer_hash="a1b2c3d4e5f60708")
             await app.push_screen(conversation)
             await pilot.pause()
 
@@ -108,7 +215,7 @@ class TestConversationNavigation:
 
             title_widget = app.screen.query_one("#conv-title", Static)
             title_text = str(title_widget.render())
-            assert "peer_node_identi" in title_text, (
+            assert "peer_node_id" in title_text, (
                 f"Peer identity should appear in title. Got: {title_text}"
             )
 
@@ -125,7 +232,7 @@ class TestConversationMessageSending:
         app._lifecycle = lifecycle
 
         async with app.run_test() as pilot:
-            conversation = ConversationScreen(peer_hash="peer_hash_xyz")
+            conversation = ConversationScreen(peer_hash="a1b2c3d4e5f60708")
             await app.push_screen(conversation)
             await pilot.pause()
 
@@ -133,4 +240,4 @@ class TestConversationMessageSending:
             await chat_widget._send_message("Hello!")
             await pilot.pause()
 
-            lifecycle.ipc_bridge.send_chat.assert_called_with("peer_hash_xyz", "Hello!")
+            lifecycle.ipc_bridge.send_chat.assert_called_with("a1b2c3d4e5f60708", "Hello!")

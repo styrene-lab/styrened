@@ -13,7 +13,10 @@ from styrened.tui.models.config import (
     StyreneConfig,
     ThemeMode,
 )
+from styrened.models.config import GroupThreadFeatureTierConfig
+from styrened.services.group_threads import HardwareFootprintInputs
 from styrened.tui.services.config import (
+    apply_group_thread_first_run_defaults,
     get_default_config,
     load_config,
     save_config,
@@ -49,6 +52,64 @@ class TestGetDefaultConfig:
         # Each entry should be a Path
         for path in config.provisioning.ssh_key_paths:
             assert isinstance(path, Path)
+
+    def test_default_config_applies_group_thread_hardware_defaults(self, monkeypatch):
+        monkeypatch.setattr(
+            "styrened.tui.services.config._detect_group_thread_hardware_inputs",
+            lambda: HardwareFootprintInputs(memory_mb=512, storage_gb=4, device_profile="lora"),
+        )
+
+        config = get_default_config()
+
+        assert config.core.group_threads.feature_tier is GroupThreadFeatureTierConfig.MINIMAL
+        assert config.core.group_threads.bounded_retention is True
+        assert config.core.group_threads.metadata_first_sync is True
+        assert config.core.group_threads.auto_media_fetch is False
+        assert config.core.group_threads.background_catchup is False
+
+
+class TestGroupThreadFirstRunDefaults:
+    def test_apply_group_thread_defaults_balanced(self):
+        config = StyreneConfig()
+
+        apply_group_thread_first_run_defaults(
+            config,
+            HardwareFootprintInputs(memory_mb=2048, storage_gb=16),
+        )
+
+        assert config.core.group_threads.feature_tier is GroupThreadFeatureTierConfig.BALANCED
+        assert config.core.group_threads.bounded_retention is True
+        assert config.core.group_threads.metadata_first_sync is False
+        assert config.core.group_threads.auto_media_fetch is False
+        assert config.core.group_threads.background_catchup is True
+
+    def test_apply_group_thread_defaults_full(self):
+        config = StyreneConfig()
+
+        apply_group_thread_first_run_defaults(
+            config,
+            HardwareFootprintInputs(memory_mb=8192, storage_gb=256, device_profile="desktop"),
+        )
+
+        assert config.core.group_threads.feature_tier is GroupThreadFeatureTierConfig.FULL
+        assert config.core.group_threads.bounded_retention is False
+        assert config.core.group_threads.metadata_first_sync is False
+        assert config.core.group_threads.auto_media_fetch is True
+        assert config.core.group_threads.background_catchup is True
+
+    def test_apply_group_thread_defaults_respects_operator_override(self):
+        config = StyreneConfig()
+        config.core.group_threads.first_run_auto_tier = False
+        config.core.group_threads.feature_tier = GroupThreadFeatureTierConfig.MINIMAL
+        config.core.group_threads.auto_media_fetch = False
+
+        apply_group_thread_first_run_defaults(
+            config,
+            HardwareFootprintInputs(memory_mb=8192, storage_gb=256, device_profile="desktop"),
+        )
+
+        assert config.core.group_threads.feature_tier is GroupThreadFeatureTierConfig.MINIMAL
+        assert config.core.group_threads.auto_media_fetch is False
 
 
 class TestConfigValidation:

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from styrened.services.config import load_core_config, save_core_config
 from styrened.tui.models.config import DeploymentMode, PeerConfig
 from styrened.tui.services.config import (
     get_default_config,
@@ -30,8 +31,14 @@ def test_save_and_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         PeerConfig(host="home.example.com", port=4242, name="Home Hub")
     ]
 
-    # Save
+    # Save TUI config plus core-config-backed runtime settings.
     save_config(config)
+    core_config = load_core_config()
+    core_config.reticulum.mode = config.reticulum.mode
+    core_config.reticulum.interfaces.server.enabled = config.reticulum.interfaces.server.enabled
+    core_config.reticulum.interfaces.server.port = config.reticulum.interfaces.server.port
+    core_config.reticulum.interfaces.peers = config.reticulum.interfaces.peers
+    save_core_config(core_config)
 
     # Verify file exists
     config_file = config_dir / "tui.yaml"
@@ -44,9 +51,12 @@ def test_save_and_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert loaded_config.reticulum.mode == DeploymentMode.HUB
     assert loaded_config.reticulum.interfaces.server.enabled is True
     assert loaded_config.reticulum.interfaces.server.port == 4242
-    assert len(loaded_config.reticulum.interfaces.peers) == 1
-    assert loaded_config.reticulum.interfaces.peers[0].host == "home.example.com"
-    assert loaded_config.reticulum.interfaces.peers[0].name == "Home Hub"
+    peer_hosts = {peer.host for peer in loaded_config.reticulum.interfaces.peers}
+    assert "home.example.com" in peer_hosts
+    home_peer = next(
+        peer for peer in loaded_config.reticulum.interfaces.peers if peer.host == "home.example.com"
+    )
+    assert home_peer.name == "Home Hub"
 
 
 def test_cli_overrides_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,9 +83,8 @@ def test_cli_overrides_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert updated_config.reticulum.mode == DeploymentMode.HUB
     assert updated_config.reticulum.interfaces.server.port == 4242
     assert updated_config.reticulum.interfaces.server.enabled is True  # Auto-enabled in hub mode
-    # Default config includes hub peer, CLI adds another peer
-    assert len(updated_config.reticulum.interfaces.peers) == 2
-    assert updated_config.reticulum.interfaces.peers[1].host == "peer.example.com"
+    peer_hosts = {peer.host for peer in updated_config.reticulum.interfaces.peers}
+    assert "peer.example.com" in peer_hosts
     assert updated_config.api.enabled is True
     assert updated_config.api.port == 8000
     assert updated_config.advanced.headless is True
@@ -83,6 +92,12 @@ def test_cli_overrides_persist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     # Verify persisted to disk
     config_file = config_dir / "tui.yaml"
     assert config_file.exists()
+
+    core_config = load_core_config()
+    core_config.reticulum.mode = updated_config.reticulum.mode
+    core_config.reticulum.interfaces.server.enabled = updated_config.reticulum.interfaces.server.enabled
+    core_config.api.enabled = updated_config.api.enabled
+    save_core_config(core_config)
 
     # Load from disk and verify
     loaded_config = load_config()
@@ -146,11 +161,15 @@ def test_config_defaults() -> None:
     assert config.reticulum.interfaces.auto is False
     assert config.reticulum.interfaces.server.enabled is False
     assert config.reticulum.interfaces.server.port == 4242
-    # Default config includes pre-configured Styrene Community Hub peer
-    assert len(config.reticulum.interfaces.peers) == 1
-    assert config.reticulum.interfaces.peers[0].host == "192.168.0.102"
-    assert config.reticulum.interfaces.peers[0].port == 4242
-    assert config.reticulum.interfaces.peers[0].name == "Styrene Community Hub"
+    # Default config includes the well-known hub set, with the Styrene hub enabled.
+    peer_hosts = {peer.host for peer in config.reticulum.interfaces.peers}
+    assert "rns.styrene.io" in peer_hosts
+    primary_hub = next(
+        peer for peer in config.reticulum.interfaces.peers if peer.host == "rns.styrene.io"
+    )
+    assert primary_hub.port == 4242
+    assert primary_hub.name == "Styrene Community Hub"
+    assert primary_hub.enabled is True
     assert config.reticulum.announce_interval == 300
     # Hub is pre-configured
     assert config.reticulum.hub_enabled is True

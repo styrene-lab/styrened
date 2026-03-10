@@ -504,6 +504,18 @@ class IPCBridge:
             timeout=timeout,
         )
 
+    async def fetch_page_url(
+        self,
+        url: str,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Fetch an explicit HTTP(S) or I2P URL."""
+        return await self._call(
+            "fetch_page_url",
+            url=url,
+            timeout=timeout,
+        )
+
     async def page_disconnect(self, destination_hash: str) -> bool:
         """Disconnect a cached link to a NomadNet node."""
         return await self._call(
@@ -557,6 +569,10 @@ class IPCBridge:
             destination_hash=destination_hash,
             path=path,
         )
+
+    async def page_regenerate_index(self) -> bool:
+        """Regenerate the default node info page."""
+        return await self._call("page_regenerate_index")
 
     # -------------------------------------------------------------------------
     # Event subscriptions

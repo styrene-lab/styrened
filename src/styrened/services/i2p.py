@@ -274,6 +274,16 @@ class I2PAdapter(DaemonAdapter):
             return None
         return f"http://{self._config.http_proxy_host}:{port}"
 
+    def get_b32_address(self) -> str | None:
+        """Return the cached local `.b32.i2p` address, if known.
+
+        Uses cached details only; does not perform network I/O.
+        """
+        if self.mode == DaemonMode.DISABLED or self._cached_details is None:
+            return None
+        b32 = self._cached_details.get("b32_address")
+        return b32 if isinstance(b32, str) and b32 else None
+
     async def provision(self) -> None:
         """Check for i2pd binary. Print instructions if not found. Does NOT install."""
         binary = shutil.which("i2pd")

@@ -5,12 +5,13 @@ and gating of local queries behind ipc_managed flag.
 """
 
 import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 from rich.console import Console
 
 from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
+from styrened.ui_state.daemon import HomeNodeInfoState, HomeNodeLocalState
 
 
 def _render_panel(panel: NodeInfoPanel) -> str:
@@ -60,6 +61,186 @@ class TestFormatUptime:
         """Fractional seconds are truncated to int."""
         assert NodeInfoPanel._format_uptime(45.7) == "45s"
         assert NodeInfoPanel._format_uptime(3661.9) == "1h 1m"
+
+
+class TestNodeInfoPanelLifecycle:
+    """Test bridge worker lifecycle ownership."""
+
+    def test_on_unmount_cancels_inflight_workers(self) -> None:
+        panel = NodeInfoPanel()
+        identity_worker = Mock()
+        mesh_worker = Mock()
+        panel._identity_worker = identity_worker
+        panel._mesh_count_worker = mesh_worker
+
+        panel.on_unmount()
+
+        identity_worker.cancel.assert_called_once_with()
+        mesh_worker.cancel.assert_called_once_with()
+        assert panel._identity_worker is None
+        assert panel._mesh_count_worker is None
+
+    def test_refresh_identity_via_bridge_uses_identity_worker_helper(self) -> None:
+        panel = NodeInfoPanel()
+        panel._start_identity_load = Mock()
+        panel.identity_hash = ""
+
+        with patch.object(NodeInfoPanel, "_bridge", new_callable=PropertyMock, return_value=Mock()):
+            panel._refresh_identity_via_bridge()
+
+        panel._start_identity_load.assert_called_once_with()
+
+    def test_refresh_mesh_count_via_bridge_uses_mesh_count_worker_helper(self) -> None:
+        panel = NodeInfoPanel()
+        panel._start_mesh_count_load = Mock()
+        panel.identity_hash = "already-loaded"
+        panel.ipc_managed = False
+
+        with patch.object(NodeInfoPanel, "_bridge", new_callable=PropertyMock, return_value=Mock()):
+            panel._refresh_mesh_count_via_bridge()
+
+        panel._start_mesh_count_load.assert_called_once_with()
+
+
+class TestNodeInfoPanelIntegrationSeams:
+    """Test local/bridge separation and future integration hooks."""
+
+    def test_load_all_data_uses_local_fallback_mode_when_not_ipc_managed(self) -> None:
+        panel = NodeInfoPanel()
+        panel._refresh_local_fallback_mode = Mock()
+
+        panel._load_all_data()
+
+        panel._refresh_local_fallback_mode.assert_called_once_with()
+
+    def test_load_all_data_uses_presentation_mode_when_ipc_managed(self) -> None:
+        panel = NodeInfoPanel()
+        panel.ipc_managed = True
+        panel._refresh_ipc_managed_presentation = Mock()
+
+        panel._load_all_data()
+
+        panel._refresh_ipc_managed_presentation.assert_called_once_with()
+
+    def test_refresh_bridge_backed_fallback_state_only_requests_identity_when_missing(self) -> None:
+        panel = NodeInfoPanel()
+        panel.identity_hash = ""
+        panel._start_identity_load = Mock()
+        panel._start_mesh_count_load = Mock()
+
+        with patch.object(NodeInfoPanel, "_bridge", new_callable=PropertyMock, return_value=Mock()):
+            panel._refresh_bridge_backed_fallback_state()
+
+        panel._start_identity_load.assert_called_once_with()
+        panel._start_mesh_count_load.assert_called_once_with()
+
+    def test_apply_identity_snapshot_sets_security_tier(self) -> None:
+        panel = NodeInfoPanel()
+        config = MagicMock()
+        config.identity.provider = "yubikey"
+
+        with patch("styrened.tui.widgets.node_info_panel.load_config", return_value=config):
+            panel._apply_identity_snapshot("abc123")
+
+        assert panel.identity_hash == "abc123"
+        assert panel.security_tier == "YubiKey/FIDO2"
+
+    def test_apply_identity_snapshot_defaults_when_config_load_fails(self) -> None:
+        panel = NodeInfoPanel()
+
+        with patch(
+            "styrened.tui.widgets.node_info_panel.load_config",
+            side_effect=RuntimeError("boom"),
+        ):
+            panel._apply_identity_snapshot("abc123")
+
+        assert panel.identity_hash == "abc123"
+        assert panel.security_tier == "X25519"
+
+    def test_apply_mesh_catalog_count_normalizes_via_node_catalog(self) -> None:
+        panel = NodeInfoPanel()
+        fake_catalog = MagicMock()
+        fake_catalog.nodes = [object(), object(), object()]
+
+        with patch(
+            "styrened.ui_state.nodes.build_node_catalog",
+            return_value=fake_catalog,
+        ):
+            count = panel._apply_mesh_catalog_count((MagicMock(),))
+
+        assert count == 3
+        assert panel.styrene_mesh_count == 3
+
+    def test_apply_home_local_snapshot_updates_panel_from_coherent_state(self) -> None:
+        panel = NodeInfoPanel()
+        local_snapshot = HomeNodeLocalState(
+            hardware_error="unsupported platform",
+            mode="peer",
+            identity_display_name="Alice",
+            identity_icon="🖥️",
+            identity_short_name="alice",
+            security_tier="YubiKey/FIDO2",
+        )
+
+        panel.apply_home_local_snapshot(local_snapshot)
+
+        assert panel.hardware_error == "unsupported platform"
+        assert panel.mode == "peer"
+        assert panel.identity_display_name == "Alice"
+        assert panel.identity_icon == "🖥️"
+        assert panel.identity_short_name == "alice"
+        assert panel.security_tier == "YubiKey/FIDO2"
+
+    def test_load_local_fallback_state_applies_builder_snapshot(self) -> None:
+        panel = NodeInfoPanel()
+        panel._fallback_state_builder = Mock()
+        panel._fallback_state_builder.build_local_snapshot.return_value = HomeNodeLocalState(mode="peer")
+        panel._load_reticulum_data = Mock()
+
+        panel._load_local_fallback_state()
+
+        panel._fallback_state_builder.build_local_snapshot.assert_called_once_with()
+        panel._load_reticulum_data.assert_called_once_with()
+        assert panel.mode == "peer"
+
+    def test_apply_home_snapshot_updates_panel_from_coherent_state(self) -> None:
+        panel = NodeInfoPanel()
+        snapshot = HomeNodeInfoState(
+            daemon_connected=True,
+            daemon_version="1.2.3",
+            daemon_uptime=90.0,
+            local_identity_hash="abc123",
+            styrene_mesh_count=4,
+            rns_online=True,
+            interface_count=2,
+            propagation_enabled=True,
+            transport_enabled=False,
+            active_links=3,
+            unread_count=2,
+            conversation_count=5,
+            contact_count=7,
+            messages_received=11,
+            auto_reply_enabled=True,
+        )
+        panel._apply_identity_snapshot = Mock()
+
+        panel.apply_home_snapshot(snapshot)
+
+        assert panel.daemon_connected is True
+        assert panel.daemon_version == "1.2.3"
+        assert panel.daemon_uptime == 90.0
+        assert panel.styrene_mesh_count == 4
+        assert panel.rns_online is True
+        assert panel.interface_count == 2
+        assert panel.propagation_enabled is True
+        assert panel.transport_enabled is False
+        assert panel.active_links == 3
+        assert panel.unread_count == 2
+        assert panel.conversation_count == 5
+        assert panel.contact_count == 7
+        assert panel.messages_received == 11
+        assert panel.auto_reply_enabled is True
+        panel._apply_identity_snapshot.assert_called_once_with("abc123", security_tier="")
 
 
 class TestDaemonSection:
@@ -301,40 +482,42 @@ class TestIPCManagedGating:
             # get_reticulum_status should NOT be called
             mock_status.assert_not_called()
 
-    def test_ipc_managed_skips_local_discovery(self) -> None:
-        """ipc_managed=True causes _load_styrene_data to skip discover_devices."""
-        with (
-            patch("styrened.tui.widgets.node_info_panel.load_config") as mock_config,
-            patch(
-                "styrened.tui.widgets.node_info_panel.discover_devices"
-            ) as mock_discover,
-        ):
-            mock_cfg = MagicMock()
-            mock_cfg.reticulum.mode.value = "standalone"
-            mock_config.return_value = mock_cfg
+    def test_ipc_managed_presentation_refresh_is_a_noop(self) -> None:
+        """ipc_managed=True leaves all refresh ownership with the parent screen."""
+        panel = NodeInfoPanel()
+        panel.ipc_managed = True
+        panel._load_hardware_data = Mock()
+        panel._load_styrene_local_data = Mock()
+        panel._load_reticulum_data = Mock()
+        panel._start_identity_load = Mock()
+        panel._start_mesh_count_load = Mock()
 
-            panel = NodeInfoPanel()
-            panel.ipc_managed = True
-            panel._load_styrene_data()
+        panel._refresh_ipc_managed_presentation()
 
-            # discover_devices should NOT be called
-            mock_discover.assert_not_called()
+        panel._load_hardware_data.assert_not_called()
+        panel._load_styrene_local_data.assert_not_called()
+        panel._load_reticulum_data.assert_not_called()
+        panel._start_identity_load.assert_not_called()
+        panel._start_mesh_count_load.assert_not_called()
 
     def test_ipc_managed_still_loads_mode(self) -> None:
-        """ipc_managed=True still loads config mode (always relevant)."""
-        with (
-            patch("styrened.tui.widgets.node_info_panel.load_config") as mock_config,
-            patch("styrened.tui.widgets.node_info_panel.discover_devices"),
-        ):
+        """ipc_managed=True still loads local config-derived mode."""
+        with patch("styrened.tui.widgets.node_info_panel.load_config") as mock_config:
             mock_cfg = MagicMock()
             mock_cfg.reticulum.mode.value = "peer"
+            mock_cfg.identity.display_name = "Alice"
+            mock_cfg.identity.icon = "🖥️"
+            mock_cfg.identity.short_name = "alice"
+            mock_cfg.identity.provider = "yubikey"
             mock_config.return_value = mock_cfg
 
             panel = NodeInfoPanel()
             panel.ipc_managed = True
-            panel._load_styrene_data()
+            panel._load_styrene_local_data()
 
             assert panel.mode == "peer"
+            assert panel.identity_display_name == "Alice"
+            assert panel.security_tier == "YubiKey/FIDO2"
 
     def test_non_ipc_managed_loads_reticulum(self) -> None:
         """ipc_managed=False (default) loads Reticulum data normally."""

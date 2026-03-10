@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from styrened.tui.services.ipc_bridge import (
+from styrened.ipc.bridge import (
     _MAX_RECONNECT_ATTEMPTS,
     _RECONNECT_BACKOFF_FACTOR,
     _RECONNECT_DELAY_INITIAL,
@@ -19,7 +19,7 @@ from styrened.tui.services.ipc_bridge import (
 @pytest.fixture
 def mock_client():
     """Patch ControlClient at import location in ipc_bridge module."""
-    with patch("styrened.tui.services.ipc_bridge.ControlClient") as mock_client_cls:
+    with patch("styrened.ipc.bridge.ControlClient") as mock_client_cls:
         client = AsyncMock()
         client.connect = AsyncMock()
         client.disconnect = AsyncMock()
@@ -309,7 +309,7 @@ class TestReconnect:
 
         bridge = IPCBridge()
 
-        with patch("styrened.tui.services.ipc_bridge.asyncio.sleep", new_callable=AsyncMock):
+        with patch("styrened.ipc.bridge.asyncio.sleep", new_callable=AsyncMock):
             result = await bridge._reconnect()
 
         assert result is False
@@ -324,7 +324,7 @@ class TestReconnect:
 
         bridge = IPCBridge()
 
-        with patch("styrened.tui.services.ipc_bridge.asyncio.sleep", side_effect=track_sleep):
+        with patch("styrened.ipc.bridge.asyncio.sleep", side_effect=track_sleep):
             await bridge._reconnect()
 
         # Should have _MAX_RECONNECT_ATTEMPTS - 1 delays (no delay after last attempt)
@@ -344,7 +344,7 @@ class TestReconnect:
 
         bridge = IPCBridge()
 
-        with patch("styrened.tui.services.ipc_bridge.asyncio.sleep", new_callable=AsyncMock):
+        with patch("styrened.ipc.bridge.asyncio.sleep", new_callable=AsyncMock):
             await bridge._reconnect()
 
         # connect() is called once per attempt

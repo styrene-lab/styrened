@@ -284,7 +284,12 @@ class ContactsScreen(Screen[None]):
 
             from styrened.tui.screens.conversation import ConversationScreen
 
-            self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
+            self.app.push_screen(
+                ConversationScreen(
+                    peer_hash=peer_hash,
+                    origin_workspace="contacts",
+                )
+            )
 
     def action_open_chat(self) -> None:
         """Open chat with the selected contact.
@@ -302,7 +307,12 @@ class ContactsScreen(Screen[None]):
 
         from styrened.tui.screens.conversation import ConversationScreen
 
-        self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
+        self.app.push_screen(
+            ConversationScreen(
+                peer_hash=peer_hash,
+                origin_workspace="contacts",
+            )
+        )
 
     def action_go_back(self) -> None:
         """Go back, hiding forms first if visible."""

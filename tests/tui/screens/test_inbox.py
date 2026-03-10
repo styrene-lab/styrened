@@ -2,11 +2,15 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from styrened.tui.screens.inbox import InboxScreen
+from styrened.tui.screens.inbox import InboxScreen, MailScreen
 
 
 class TestInboxScreenInit:
     """Tests for InboxScreen initialization."""
+
+    def test_mail_screen_alias_points_to_inbox_screen(self) -> None:
+        """MailScreen should remain a compatibility alias during migration."""
+        assert MailScreen is InboxScreen
 
     def test_inbox_screen_initialization(self) -> None:
         """InboxScreen should initialize without errors."""

@@ -3,6 +3,7 @@ id: i2p-integration
 title: I2P Integration
 status: implementing
 parent: overlay-network-integration
+dependencies: [optional-daemon-adoption-model]
 tags: [i2p, i2pd, eepsite, anonymity, page-browser, hidden-service]
 open_questions: []
 branches: ["feature/i2p-integration"]
@@ -36,6 +37,10 @@ Explore I2P integration dimensions for styrened: eepsite browsing in the NomadNe
 ### The I2PService design: detect-only vs managed process
 
 
+
+### Design tree hygiene note
+
+The design tree still contains an older detect-only decision title and an extra section arguing against management. Treat those as superseded historical context, not active guidance. Active implementation and docs follow the explicit DISABLED | ADOPT | MANAGED model plus explicit transport selection for page browsing.
 
 ## Decisions
 
@@ -73,6 +78,16 @@ Explore I2P integration dimensions for styrened: eepsite browsing in the NomadNe
 
 **Status:** decided
 **Rationale:** Do not route traffic through someone's personal i2pd without their consent. i2p.mode: adopt or managed IS the consent, set deliberately by the operator. If mode is DISABLED and the user tries to open a .i2p URL, return a clear error: 'I2P not enabled — set i2p.mode: adopt or managed in config.' I2P users are privacy-aware by definition and expect conscious control over which applications use their I2P router.
+
+### Decision: Graceful degradation for published docs uses explicit parallel endpoints, not implicit transport fallback
+
+**Status:** decided
+**Rationale:** Styrene Docs may exist simultaneously on NomadNet, HTTPS, and I2P. The browser should handle each transport explicitly and return clear errors when one path is unavailable, letting the caller or operator choose another endpoint deliberately rather than silently downgrading privacy-sensitive traffic.
+
+### Decision: Earlier detect-only i2pd discussion is superseded by the explicit DISABLED | ADOPT | MANAGED model
+
+**Status:** decided
+**Rationale:** The old BATMAN-ADV-style detect-only reasoning remains useful historical context, but it is no longer the active design. The source of truth is the three-mode model: DISABLED for no I2P use, ADOPT for operator-managed routers, and MANAGED for styrened-managed routers on non-conflicting ports with visible warm-up behavior.
 
 ## Open Questions
 

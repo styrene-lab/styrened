@@ -210,8 +210,9 @@ class RPCServer:
         # Optional daemon reference for activity event emission
         self._daemon: Any = None
 
-        # Optional YggdrasilAdapter reference for /meta enrichment
+        # Optional overlay adapter references for /meta enrichment
         self._ygg_adapter: Any = None
+        self._i2p_adapter: Any = None
 
         # Log security configuration
         logger.info(
@@ -250,6 +251,18 @@ class RPCServer:
         """
         self._ygg_adapter = adapter
         logger.info("YggdrasilAdapter injected into RPC server")
+
+    def set_i2p_adapter(self, adapter: Any) -> None:
+        """Inject I2PAdapter for /meta enrichment.
+
+        When the adapter knows a local b32 address, ``b32_address`` is included
+        in _gather_meta() responses and the ``i2p`` capability is advertised.
+
+        Args:
+            adapter: I2PAdapter instance (or None to clear).
+        """
+        self._i2p_adapter = adapter
+        logger.info("I2PAdapter injected into RPC server")
 
     def _register_with_protocol(self) -> None:
         """Register RPC message handlers with StyreneProtocol."""
@@ -1250,17 +1263,19 @@ class RPCServer:
         Returns only information that cannot identify the operator or node:
         - styrene_version: what software is running
         - profile: node role (node/hub/workstation/edge-router)
-        - capabilities: feature flags (rpc, lxmf, datalink, yggdrasil, etc.)
+        - capabilities: feature flags (rpc, lxmf, datalink, yggdrasil, i2p, etc.)
         - arch: CPU architecture (aarch64, x86_64, etc.)
         - os_id: OS family (nixos, debian, darwin)
         - ygg_address: Yggdrasil IPv6 address (only when adapter is running)
         - ygg_port: Yggdrasil TCP listen port (only when adapter is running)
+        - b32_address: I2P base32 address (only when adapter knows it)
 
         Deliberately excluded: hostname, IP address, uptime, disk usage,
         nixos_generation, operator identity, peer list.
 
-        ygg_address and ygg_port are omitted entirely (not set to None) when
-        YggdrasilAdapter is not running — callers must check key presence.
+        ygg_address, ygg_port, and b32_address are omitted entirely (not set
+        to None) when the respective overlay is not available — callers must
+        check key presence.
         """
         os_info = get_os_info()
         caps: list[str] = ["lxmf"]
@@ -1288,6 +1303,22 @@ class RPCServer:
             except Exception:
                 pass
 
+        # I2P capability — only advertised when a local b32 address is known
+        b32_address: str | None = None
+        if self._i2p_adapter is not None:
+            try:
+                if hasattr(self._i2p_adapter, "get_b32_address"):
+                    candidate = self._i2p_adapter.get_b32_address()
+                else:
+                    status = self._i2p_adapter.status()
+                    details = getattr(status, "details", {}) or {}
+                    candidate = details.get("b32_address")
+                if candidate:
+                    b32_address = candidate
+                    caps.append("i2p")
+            except Exception:
+                pass
+
         profile = "node"
         if config:
             try:
@@ -1303,11 +1334,13 @@ class RPCServer:
             "os_id": os_info.get("os_id", ""),
         }
 
-        # Only include ygg keys when Yggdrasil is running.
+        # Only include overlay-specific keys when available.
         if ygg_address is not None:
             meta["ygg_address"] = ygg_address
         if ygg_port is not None:
             meta["ygg_port"] = ygg_port
+        if b32_address is not None:
+            meta["b32_address"] = b32_address
 
         return meta
 

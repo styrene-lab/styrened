@@ -10,7 +10,7 @@ not standalone dashboard bindings.
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -97,10 +97,14 @@ def mock_reticulum(tmp_path):
 
     with (
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
+        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
         patch("styrened.services.node_store.get_node_store", return_value=mock_store),
     ):
+        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
+        mock_app_lifecycle.return_value.ipc_bridge = None
         yield
 
     _ns_mod._node_store = old_singleton
@@ -138,10 +142,10 @@ class TestDashboardMessageIndicators:
                 assert _count_leaves(tree) == 2
 
     @pytest.mark.asyncio
-    async def test_device_row_shows_unread_count_from_database(
+    async def test_device_row_uses_anonymized_other_node_label(
         self, sample_devices, message_db, mock_local_identity
     ):
-        """Device tree leaves should include unread count in label."""
+        """Untrusted dashboard rows should stay anonymized even when unread data exists."""
         add_messages_to_db(
             message_db,
             [
@@ -167,8 +171,13 @@ class TestDashboardMessageIndicators:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices),
+            patch.object(
+                MeshDeviceTree,
+                "_async_get_unread_counts",
+                AsyncMock(return_value={"node01_identity_hash": 3}),
+            ),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
@@ -176,12 +185,10 @@ class TestDashboardMessageIndicators:
                 tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 labels = _get_leaf_labels(tree)
 
-                # Find node-01's label — should contain unread badge "✉3"
-                node01_labels = [lbl for lbl in labels if "node-01" in lbl]
+                # OTHER nodes are anonymized by default.
+                node01_labels = [lbl for lbl in labels if "node01_ident" in lbl]
                 assert len(node01_labels) == 1
-                assert "✉3" in node01_labels[0], (
-                    f"Expected unread badge ✉3 in label, got: {node01_labels[0]}"
-                )
+                assert "node-01" not in node01_labels[0]
 
     @pytest.mark.asyncio
     async def test_device_with_no_messages_has_no_badge(
@@ -192,8 +199,13 @@ class TestDashboardMessageIndicators:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices),
+            patch.object(
+                MeshDeviceTree,
+                "_async_get_unread_counts",
+                AsyncMock(return_value={}),
+            ),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
@@ -208,10 +220,10 @@ class TestDashboardMessageIndicators:
                     )
 
     @pytest.mark.asyncio
-    async def test_unread_count_highlighted_when_nonzero(
+    async def test_unread_data_does_not_deanonymize_other_nodes(
         self, sample_devices, message_db, mock_local_identity
     ):
-        """Non-zero unread counts should include Rich markup for highlighting."""
+        """Unread metadata should not switch OTHER rows to friendly-name rendering."""
         add_messages_to_db(
             message_db,
             [
@@ -227,8 +239,13 @@ class TestDashboardMessageIndicators:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
+        with (
+            patch("styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices),
+            patch.object(
+                MeshDeviceTree,
+                "_async_get_unread_counts",
+                AsyncMock(return_value={"node01_identity_hash": 1}),
+            ),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
@@ -236,42 +253,40 @@ class TestDashboardMessageIndicators:
                 tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
                 labels = _get_leaf_labels(tree)
 
-                node01_labels = [lbl for lbl in labels if "node-01" in lbl]
+                node01_labels = [lbl for lbl in labels if "node01_ident" in lbl]
                 assert len(node01_labels) == 1
-                # Unread badge should have Rich markup (bold)
-                assert "bold" in node01_labels[0] or "✉" in node01_labels[0]
+                assert "node-01" not in node01_labels[0]
 
 
 class TestDashboardEnterOpensDetail:
     """Tests for enter key navigating to device detail screen."""
 
-    @pytest.mark.asyncio
-    async def test_action_select_device_opens_detail(self, sample_devices):
+    def test_action_select_device_opens_detail(self, sample_devices):
         """action_select_device should navigate to MeshDeviceDetailScreen."""
-        app = StyreneApp()
+        screen = DashboardScreen()
+        fake_app = MagicMock()
 
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
+        with (
+            patch.object(
+                DashboardScreen,
+                "_get_selected_identity",
+                return_value=sample_devices[0].destination_hash,
+            ),
+            patch.object(
+                DashboardScreen,
+                "app",
+                new_callable=PropertyMock,
+                return_value=fake_app,
+            ),
         ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
+            screen.action_select_device()
 
-                screen = app.screen
+        from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
-                # Navigate to a leaf node first
-                await pilot.press("down")  # branch header
-                await pilot.pause()
-                await pilot.press("down")  # first device leaf
-                await pilot.pause()
-
-                screen.action_select_device()
-                await pilot.pause()
-
-                from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-
-                assert isinstance(app.screen, MeshDeviceDetailScreen), (
-                    f"Expected MeshDeviceDetailScreen, got {type(app.screen).__name__}"
-                )
+        fake_app.push_screen.assert_called_once()
+        pushed_screen = fake_app.push_screen.call_args.args[0]
+        assert isinstance(pushed_screen, MeshDeviceDetailScreen)
+        assert pushed_screen.device_identity == sample_devices[0].destination_hash
 
     @pytest.mark.asyncio
     async def test_enter_with_no_selection_does_nothing(self):

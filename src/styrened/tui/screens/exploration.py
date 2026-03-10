@@ -1,7 +1,7 @@
-"""Exploration Screen - Reticulum network discovery.
+"""Nodes workspace for Reticulum discovery and peer browsing.
 
-Categorized tabbed interface for Reticulum announces:
-- Styrene tab: Styrene fleet nodes with version, capabilities, hops
+Categorized tabbed interface for current network discovery:
+- Styrene tab: canonical Styrene peer browsing with version, capabilities, hops
 - LXMF tab: messaging peers (Sideband, MeshChat, NomadNet users)
 - Pages tab: NomadNet page services with inline page browser
 - Infrastructure tab: propagation nodes, RNodes
@@ -13,10 +13,12 @@ from __future__ import annotations
 from typing import ClassVar
 
 from textual.app import ComposeResult
+from textual import events
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import (
     DataTable,
     Footer,
@@ -29,6 +31,7 @@ from textual.widgets import (
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.services.reticulum import discover_devices, start_discovery
+from styrened.tui.screens.exploration_projection import build_styrene_fleet_projection
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import WorkspaceId
 
@@ -418,11 +421,14 @@ class StyreneFleetTable(DataTable[str]):
         self.cursor_type = "row"
 
     def load_from_devices(self, devices: list[MeshDevice]) -> None:
-        """Accept full device list, filter to Styrene nodes, deduplicate, rebuild."""
-        from styrened.tui.utils import _deduplicate_by_identity
+        """Accept full device list and rebuild from canonical node projection."""
+        from styrened.ui_state.nodes import NodeCatalogInputs, build_node_catalog
 
         styrene = [d for d in devices if d.device_type == DeviceType.STYRENE_NODE]
-        self._all_devices = _deduplicate_by_identity(styrene)
+        inputs = NodeCatalogInputs(devices=tuple(styrene))
+        catalog = build_node_catalog(inputs)
+        rows = build_styrene_fleet_projection(catalog=catalog, devices=styrene)
+        self._all_devices = [row.device for row in rows]
         self._rebuild_table()
 
     def _rebuild_table(self) -> None:
@@ -587,29 +593,30 @@ class StyreneFleetTable(DataTable[str]):
     def refresh_data(self) -> None:
         """Standalone fallback refresh using live discovery only."""
         try:
-            from styrened.tui.utils import _deduplicate_by_identity
-
-            # Try cached live nodes first (from IPC), fallback to direct discovery  
             live = getattr(self.screen, "_live_nodes_cache", [])
             if not live:
                 live = discover_devices()
-            styrene = [d for d in live if d.device_type == DeviceType.STYRENE_NODE]
-            self._all_devices = _deduplicate_by_identity(styrene)
-            self._rebuild_table()
+            self.load_from_devices(list(live))
         except Exception:
             pass
 
 
 class ExplorationScreen(Screen[None]):
-    """Reticulum network exploration screen.
+    """Canonical Nodes workspace for discovery and peer browsing.
 
     Categorized tabs:
-    - Styrene: fleet nodes with version, capabilities, hops
+    - Styrene: current Styrene nodes with version, capabilities, hops
     - LXMF: messaging destinations
     - Pages: NomadNet page services with inline browser
     - Infrastructure: propagation nodes, RNodes
     - Other: generic/unknown announces
     """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._refresh_timer: Timer | None = None
+        self._node_refresh_worker = None
+        self._stored_nodes_worker = None
 
     CSS = """
     #exploration-container {
@@ -686,6 +693,7 @@ class ExplorationScreen(Screen[None]):
         Binding("enter", "select_device", "Select"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
+        Binding("n", "app.pop_screen", "Home", show=True),
         Binding("h", "toggle_hide_lost", "Hide Lost"),
         Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),
@@ -696,6 +704,24 @@ class ExplorationScreen(Screen[None]):
     _last_discovery_refresh: float = 0.0
     _discovery_debounce_seconds: float = 2.0
 
+    def _start_node_refresh(self):
+        """Start or replace the live node refresh worker."""
+        self._node_refresh_worker = self.run_worker(
+            self._async_load_all_nodes(),
+            group="node-discovery",
+            exclusive=True,
+        )
+        return self._node_refresh_worker
+
+    def _start_stored_node_load(self):
+        """Start or replace the deferred stored-node hydration worker."""
+        self._stored_nodes_worker = self.run_worker(
+            self._async_load_stored_nodes(),
+            group="stored-nodes",
+            exclusive=True,
+        )
+        return self._stored_nodes_worker
+
     def on_mount(self) -> None:
         """Start device discovery and load initial data."""
         # Try IPC-based discovery first, fallback to direct discovery
@@ -703,66 +729,70 @@ class ExplorationScreen(Screen[None]):
         bridge = getattr(getattr(app, "services", None), "bridge", None)
         if bridge is not None:
             # IPC-managed mode: use periodic bridge calls instead of direct discovery
-            self.set_interval(15.0, self._refresh_via_bridge)
+            self._refresh_timer = self.set_interval(15.0, self._refresh_via_bridge)
             # Fetch initial data via IPC
-            self.run_worker(self._async_load_all_nodes(), group="node-discovery")
+            self._start_node_refresh()
         else:
             # Legacy/non-managed mode: use direct discovery
             start_discovery(callback=self._on_device_discovered)
-            self.set_interval(15.0, self._refresh_announce_tables)
+            self._refresh_timer = self.set_interval(15.0, self._refresh_announce_tables)
             # Fetch stored nodes via IPC (async), then refresh tables
-            self.run_worker(self._async_load_stored_nodes(), group="stored-nodes")
+            self._start_stored_node_load()
             # Initial load with live-only (stored nodes arrive async)
             self._refresh_announce_tables()
         # Focus active table after TabbedContent is ready
         self.call_later(self._focus_active_table)
 
+    def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
+        """Pause periodic refresh while Nodes is not the active workspace."""
+        if self._refresh_timer is not None:
+            self._refresh_timer.pause()
+        if self._node_refresh_worker is not None:
+            self._node_refresh_worker.cancel()
+            self._node_refresh_worker = None
+        if self._stored_nodes_worker is not None:
+            self._stored_nodes_worker.cancel()
+            self._stored_nodes_worker = None
+
+    def on_screen_resume(self, event: events.ScreenResume) -> None:
+        """Resume periodic refresh and fetch fresh node data."""
+        if self._refresh_timer is not None:
+            self._refresh_timer.resume()
+        self._start_node_refresh()
+
+    def on_unmount(self) -> None:
+        """Stop periodic refresh when the Nodes workspace is removed."""
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+            self._refresh_timer = None
+        if self._node_refresh_worker is not None:
+            self._node_refresh_worker.cancel()
+            self._node_refresh_worker = None
+        if self._stored_nodes_worker is not None:
+            self._stored_nodes_worker.cancel()
+            self._stored_nodes_worker = None
+
     async def _async_load_stored_nodes(self) -> None:
-        """Fetch stored nodes from the daemon via IPC and cache locally."""
+        """Historical node hydration is deferred during Nodes migration.
+
+        Exploration is currently kept live-biased so the in-progress Nodes
+        workspace reflects current discovery rather than daemon history.
+        """
+        self._stored_nodes_cache = []
+    
+    async def _async_load_all_nodes(self) -> None:
+        """Refresh live node discovery only during Nodes migration."""
         try:
-            app = self.app
-            bridge = getattr(getattr(app, "services", None), "bridge", None)
-            if bridge is None:
-                return
-            stored_raw = await bridge.get_nodes(styrene_only=False)
-            from styrened.tui.utils import device_info_to_mesh
-            self._stored_nodes_cache = [
-                device_info_to_mesh(d) for d in stored_raw
-            ]
-            # Refresh tables now that stored nodes are available
+            live_nodes = discover_devices()
+            self._stored_nodes_cache = []
+            self._live_nodes_cache = live_nodes
             self._refresh_announce_tables()
         except Exception:
             pass
     
-    async def _async_load_all_nodes(self) -> None:
-        """Fetch all nodes (live + stored) from daemon via IPC and cache locally."""
-        try:
-            app = self.app
-            bridge = getattr(getattr(app, "services", None), "bridge", None)
-            if bridge is None:
-                return
-            
-            # Get all devices from daemon (includes live discovery data)
-            all_raw = await bridge.get_nodes(styrene_only=False)
-            from styrened.tui.utils import device_info_to_mesh
-            
-            all_devices = [device_info_to_mesh(d) for d in all_raw]
-            
-            # Cache both for compatibility with existing methods
-            self._stored_nodes_cache = all_devices
-            self._live_nodes_cache = all_devices
-            
-            # Refresh tables now that all nodes are available
-            self._refresh_announce_tables()
-        except Exception:
-            # Fallback to direct discovery
-            live_nodes = discover_devices()
-            self._live_nodes_cache = live_nodes
-            self._refresh_announce_tables()
-    
     def _refresh_via_bridge(self) -> None:
         """Periodic refresh using IPC bridge data."""
-        self.run_worker(self._async_load_all_nodes(), group="node-discovery")
+        self._start_node_refresh()
 
     def _focus_active_table(self) -> None:
         """Focus the table in the currently active tab."""
@@ -888,17 +918,13 @@ class ExplorationScreen(Screen[None]):
         Returns:
             Tuple of (exploration devices with LXMF shadows filtered, all merged devices).
         """
-        stored_nodes: list[MeshDevice] = getattr(self, "_stored_nodes_cache", [])
-
-        # Try cached live nodes first (from IPC), fallback to direct discovery
+        # Exploration/Nodes is currently live-biased; broader stored history is
+        # being pushed toward canonical node browsing flows incrementally.
         live_nodes = getattr(self, "_live_nodes_cache", [])
         if not live_nodes:
             live_nodes = discover_devices()
 
-        all_devices_dict = {n.destination_hash: n for n in stored_nodes}
-        all_devices_dict.update({n.destination_hash: n for n in live_nodes})
-
-        all_merged = list(all_devices_dict.values())
+        all_merged = list({n.destination_hash: n for n in live_nodes}.values())
 
         styrene_identities = {
             d.identity_hash
@@ -1000,6 +1026,7 @@ class ExplorationScreen(Screen[None]):
             self.app.push_screen(MeshDeviceDetailScreen(
                 device_identity=device_identity,
                 device=device,
+                origin_workspace=WorkspaceId.NODES,
             ))
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
