@@ -23,23 +23,16 @@ def mock_reticulum(tmp_path):
     fake_config.mkdir()
     (fake_config / "config").write_text("")
 
-    mock_store = MagicMock()
-    mock_store.get_styrene_nodes.return_value = []
-
-    import styrened.services.node_store as _ns_mod
-
-    old_singleton = _ns_mod._node_store
-    _ns_mod._node_store = None
-
     with (
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
-        patch("styrened.services.node_store.get_node_store", return_value=mock_store),
+        # DashboardScreen.on_mount() calls start_discovery() which injected get_node_store().
+        # Patch start_discovery at the dashboard module level to prevent the direct
+        # daemon-service call. Device data flows via bridge.get_devices() instead.
+        patch("styrened.tui.screens.dashboard.start_discovery"),
     ):
         yield
-
-    _ns_mod._node_store = old_singleton
 
 
 @pytest.fixture
@@ -688,16 +681,13 @@ class TestDashboardLostNodeFiltering:
 
         app = StyreneApp()
 
-        mock_store = MagicMock()
-        mock_store.get_styrene_nodes.return_value = []
-
         with (
             patch(
                 "styrened.tui.screens.dashboard.discover_devices", return_value=devices
             ),
-            patch(
-                "styrened.services.node_store.get_node_store", return_value=mock_store
-            ),
+            # Suppress start_discovery's direct daemon-service call; device data comes
+            # from the discover_devices mock above (bridge.get_devices() path).
+            patch("styrened.tui.screens.dashboard.start_discovery"),
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
