@@ -15,9 +15,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ContactInfo:
-    """Contact information for API responses."""
+    """Contact information for API responses.
 
-    peer_hash: str
+    v0.16.0: primary key is identity_hash (RNS identity hash, 64-char hex).
+    The field is named identity_hash throughout; callers that previously used
+    peer_hash must be updated — no compat shim.
+    """
+
+    identity_hash: str
     alias: str
     notes: str | None = None
     created_at: float = 0.0
@@ -25,7 +30,7 @@ class ContactInfo:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "peer_hash": self.peer_hash,
+            "identity_hash": self.identity_hash,
             "alias": self.alias,
             "notes": self.notes,
             "created_at": self.created_at,
@@ -35,7 +40,7 @@ class ContactInfo:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ContactInfo":
         return cls(
-            peer_hash=data.get("peer_hash", ""),
+            identity_hash=data.get("identity_hash", ""),
             alias=data.get("alias", ""),
             notes=data.get("notes"),
             created_at=data.get("created_at", 0.0),
@@ -45,7 +50,7 @@ class ContactInfo:
     @classmethod
     def from_model(cls, contact: Contact) -> "ContactInfo":
         return cls(
-            peer_hash=contact.peer_hash,
+            identity_hash=contact.identity_hash,
             alias=contact.alias,
             notes=contact.notes,
             created_at=contact.created_at,
@@ -73,11 +78,13 @@ class ContactService:
         self._db_engine = db_engine
         self._node_store = node_store
 
-    def set_alias(self, peer_hash: str, alias: str, notes: str | None = None) -> ContactInfo:
+    def set_alias(
+        self, identity_hash: str, alias: str, notes: str | None = None
+    ) -> ContactInfo:
         """Set or update a contact alias.
 
         Args:
-            peer_hash: LXMF destination hash of the peer
+            identity_hash: RNS identity hash of the peer (64-char hex)
             alias: Display name alias
             notes: Optional notes
 
@@ -86,7 +93,7 @@ class ContactService:
         """
         now = time.time()
         with Session(self._db_engine) as session:
-            contact = session.get(Contact, peer_hash)
+            contact = session.get(Contact, identity_hash)
             if contact is not None:
                 contact.alias = alias
                 if notes is not None:
@@ -94,7 +101,7 @@ class ContactService:
                 contact.updated_at = now
             else:
                 contact = Contact(
-                    peer_hash=peer_hash,
+                    identity_hash=identity_hash,
                     alias=alias,
                     notes=notes,
                     created_at=now,
@@ -103,38 +110,38 @@ class ContactService:
                 session.add(contact)
             session.commit()
             info = ContactInfo.from_model(contact)
-        logger.info(f"Set contact alias: {peer_hash[:16]}... -> {alias!r}")
+        logger.info(f"Set contact alias: {identity_hash[:16]}... -> {alias!r}")
         return info
 
-    def remove_alias(self, peer_hash: str) -> bool:
+    def remove_alias(self, identity_hash: str) -> bool:
         """Remove a contact alias.
 
         Args:
-            peer_hash: LXMF destination hash of the peer
+            identity_hash: RNS identity hash of the peer
 
         Returns:
             True if contact was removed, False if not found
         """
         with Session(self._db_engine) as session:
-            contact = session.get(Contact, peer_hash)
+            contact = session.get(Contact, identity_hash)
             if contact is None:
                 return False
             session.delete(contact)
             session.commit()
-        logger.info(f"Removed contact: {peer_hash[:16]}...")
+        logger.info(f"Removed contact: {identity_hash[:16]}...")
         return True
 
-    def get_contact(self, peer_hash: str) -> ContactInfo | None:
-        """Get contact info by peer hash.
+    def get_contact(self, identity_hash: str) -> ContactInfo | None:
+        """Get contact info by identity hash.
 
         Args:
-            peer_hash: LXMF destination hash of the peer
+            identity_hash: RNS identity hash of the peer
 
         Returns:
             ContactInfo or None if not found
         """
         with Session(self._db_engine) as session:
-            contact = session.get(Contact, peer_hash)
+            contact = session.get(Contact, identity_hash)
             if contact is None:
                 return None
             return ContactInfo.from_model(contact)
@@ -150,7 +157,7 @@ class ContactService:
             return [ContactInfo.from_model(c) for c in contacts]
 
     def resolve_name(self, name: str, prefix_match: bool = True) -> str | None:
-        """Resolve a name to a peer hash.
+        """Resolve a name to an identity hash.
 
         Resolution chain:
         1. Exact alias match (case-insensitive)
@@ -165,7 +172,7 @@ class ContactService:
             prefix_match: Whether to try prefix matching
 
         Returns:
-            Peer hash or None if not resolved
+            Identity hash or None if not resolved
         """
         name_lower = name.lower()
 
@@ -174,7 +181,7 @@ class ContactService:
             contacts = session.query(Contact).all()
             for c in contacts:
                 if c.alias.lower() == name_lower:
-                    return c.peer_hash
+                    return c.identity_hash
 
             # 2. Prefix alias match (must be unique)
             if prefix_match:
@@ -182,7 +189,7 @@ class ContactService:
                     c for c in contacts if c.alias.lower().startswith(name_lower)
                 ]
                 if len(prefix_matches) == 1:
-                    return prefix_matches[0].peer_hash
+                    return prefix_matches[0].identity_hash
 
         if self._node_store is not None:
             # 3. Exact short_name match (unique with lxmf_dest)
@@ -226,7 +233,7 @@ class ContactService:
 
         return None
 
-    def get_display_name(self, peer_hash: str) -> str | None:
+    def get_display_name(self, identity_hash: str) -> str | None:
         """Get display name for a peer.
 
         Resolution chain:
@@ -234,20 +241,20 @@ class ContactService:
         2. NodeStore announce name
 
         Args:
-            peer_hash: LXMF destination hash of the peer
+            identity_hash: RNS identity hash of the peer
 
         Returns:
             Display name or None
         """
         # 1. Contact alias
         with Session(self._db_engine) as session:
-            contact = session.get(Contact, peer_hash)
+            contact = session.get(Contact, identity_hash)
             if contact is not None:
                 return contact.alias
 
         # 2. NodeStore announce name
         if self._node_store is not None:
-            node = self._node_store.get_node_by_lxmf_destination(peer_hash)
+            node = self._node_store.get_node_by_lxmf_destination(identity_hash)
             if node is not None and node.name:
                 name: str = node.name
                 return name

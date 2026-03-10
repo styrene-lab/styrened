@@ -431,9 +431,34 @@ def init_db(db_path: str | None = None) -> Engine:
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(contacts)"))
         cols = {row[1] for row in result}
-    if "peer_hash" in cols and "identity_hash" not in cols:
+    if "peer_hash" in cols and "identity_hash" in cols:
+        # Half-migrated state: both columns exist (e.g., previous migration crashed
+        # between CREATE and DROP).  contacts_new was renamed but peer_hash was
+        # never removed — or the inverse happened.  Log loudly and drop peer_hash
+        # to complete the migration.
+        logger.warning(
+            "contacts table has BOTH peer_hash and identity_hash columns — "
+            "detected incomplete prior migration.  Dropping peer_hash column."
+        )
+        with engine.connect() as conn:
+            # SQLite does not support DROP COLUMN before 3.35.0; use recreate.
+            conn.execute(
+                text(
+                    "CREATE TABLE contacts_clean AS "
+                    "SELECT identity_hash, alias, notes, "
+                    "COALESCE(blocked, 0) AS blocked, "
+                    "blocked_at, created_at, updated_at "
+                    "FROM contacts"
+                )
+            )
+            conn.execute(text("DROP TABLE contacts"))
+            conn.execute(text("ALTER TABLE contacts_clean RENAME TO contacts"))
+            conn.commit()
+        logger.info("contacts table half-migration recovery complete")
+    elif "peer_hash" in cols and "identity_hash" not in cols:
         logger.info("Migrating contacts table: peer_hash → identity_hash PK")
         with engine.connect() as conn:
+            conn.execute(text("BEGIN"))
             conn.execute(
                 text(
                     "CREATE TABLE contacts_new ("
