@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "changeName": "provision-disk-detect-null-model-hotfix",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-10T21:37:05.511Z",
+  "summary": "null lsblk model hotfix shipped in v0.15.5. disk_detect.py tolerates None model values, 40 tests in tests/tui/forge/test_disk_detect.py all pass. Already on main.",
+  "snapshot": {
+    "gitHead": "8216b8f3d03ade3c76ce216970ac765be4fd8408",
+    "fingerprint": "23f1716bec3c72b7d26faae1f9b7b80efd85f4291e1df5cce19fb860ca671d84",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/provision-disk-detect-null-model-hotfix/design.md",
+        "exists": true,
+        "size": 332,
+        "sha256": "d6b13505c75996cb4a77ad6ce111f461332fc8b4a79a837c6de422d42d326189"
+      },
+      {
+        "path": "openspec/changes/provision-disk-detect-null-model-hotfix/proposal.md",
+        "exists": true,
+        "size": 402,
+        "sha256": "560f468e0db1747f0e540067c0cc5fff13fcb822c360b78246731599b2ca4679"
+      },
+      {
+        "path": "openspec/changes/provision-disk-detect-null-model-hotfix/specs/tui/forge-disk-detect.md",
+        "exists": true,
+        "size": 933,
+        "sha256": "388ea261f9e46a83d0f779befa32069d05885565adfdbf7999b9cbf5c7998d92"
+      },
+      {
+        "path": "openspec/changes/provision-disk-detect-null-model-hotfix/tasks.md",
+        "exists": true,
+        "size": 307,
+        "sha256": "b7415cbc3f11c2b7b5c1c1184ff5e29e6760f9dbf2b035d39a3a04b5d9c637fd"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
