@@ -32,7 +32,7 @@ def mock_node_store():
     to prevent stale daemon-layer access in unit/integration tests.
     """
     with patch("styrened.tui.screens.dashboard.start_discovery"):
-        yield
+        yield  # yields None — autouse only, not intended to be referenced by name
 
 
 @pytest.fixture
