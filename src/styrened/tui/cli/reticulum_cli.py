@@ -88,7 +88,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         is_styrene = device.is_styrene_node
         marker = "✓ STYRENE" if is_styrene else "  OTHER"
         name = device.name or "unknown"
-        identity = device.identity[:16] if device.identity else ""
+        identity = device.identity_hash[:16] if device.identity_hash else ""
         announces = device.announce_count
 
         print(f"{marker} | {name:20s} | {identity}... | announces: {announces}")

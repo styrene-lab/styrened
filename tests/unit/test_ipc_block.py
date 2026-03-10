@@ -121,9 +121,7 @@ class TestHandleCmdBlockPeer:
         assert resp.success is True
         assert resp.data["blocked"] is True
         assert resp.data["identity_hash"] == "aabbcc112233"
-        mock_svc.block_peer.assert_called_once_with(
-            "aabbcc112233", "ddeeff445566", "Bob"
-        )
+        mock_svc.block_peer.assert_called_once_with("aabbcc112233")
 
     @pytest.mark.asyncio
     async def test_block_failure_returns_error(self, handler):

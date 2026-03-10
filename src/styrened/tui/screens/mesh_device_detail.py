@@ -127,7 +127,7 @@ class MeshInfoWidget(Static):
         yield Static(f"[bold]Type:[/] {type_text}", classes="info-field")
 
         # Identity (full hash — not truncated)
-        yield Static(f"[bold]Identity:[/] {self.device.identity}", classes="info-field")
+        yield Static(f"[bold]Identity:[/] {self.device.identity_hash}", classes="info-field")
 
         # Last seen
         yield Static(f"[bold]Last Seen:[/] {self.device.last_seen_display}", classes="info-field")
@@ -234,7 +234,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         live_nodes = discover_devices()
 
         for device in live_nodes:
-            if device.identity == self.device_identity:
+            if device.identity_hash == self.device_identity:
                 return device
 
         return None
@@ -468,7 +468,7 @@ class MeshDeviceDetailScreen(Screen[None]):
 
                 for info in stored_raw:
                     device = device_info_to_mesh(info)
-                    if device.identity == self.device_identity:
+                    if device.identity_hash == self.device_identity:
                         self.device = device
                         self._device_lookup_complete = True
                         self.refresh(recompose=True)

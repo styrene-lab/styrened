@@ -298,7 +298,7 @@ class ReticumAnnounceTable(DataTable[str]):
                 via_text,
                 status_text,
                 last_seen_text,
-                key=device.identity,
+                key=device.identity_hash,
             )
 
         # Restore cursor selection if possible
@@ -541,7 +541,7 @@ class StyreneFleetTable(DataTable[str]):
                 via_text,
                 status_text,
                 last_seen_text,
-                key=device.identity,
+                key=device.identity_hash,
             )
 
         # Restore selection

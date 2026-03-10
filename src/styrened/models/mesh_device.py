@@ -169,7 +169,7 @@ def _sanitize_fingerprint(raw: str | None) -> str | None:
 def _try_lxmf_parse(
     app_data: bytes,
     aspect_hint: DeviceType | None = None,
-) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None] | None:
+) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None, str | None] | None:
     """Try to parse app_data using LXMF library helpers.
 
     Handles msgpack-encoded LXMF delivery announces (v0.5.0+) and
