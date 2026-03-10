@@ -71,7 +71,7 @@ class StyreneApp(App[None]):
         Binding("ctrl+c", "interrupt", "Quit", show=False, priority=True),
         # Global navigation
         Binding("?", "toggle_help", "Help"),
-        Binding("grave_accent", "push_screen_settings", "Admin", show=True),
+        Binding("grave_accent", "open_admin", "Admin", show=True),
         Binding("n", "open_nodes", "Nodes", show=True),
         Binding("m", "open_mail", "Mail", show=True),
         Binding("c", "open_comms", "Comms", show=True),
@@ -117,11 +117,15 @@ class StyreneApp(App[None]):
         """Return True if any screen in the current stack is an instance of screen_type."""
         return any(isinstance(s, screen_type) for s in self.screen_stack)
 
-    def action_push_screen_settings(self) -> None:
-        """Push settings screen with current config (no-op if already in stack)."""
+    def action_open_admin(self) -> None:
+        """Open the Admin workspace (settings and diagnostics)."""
         if self._screen_in_stack(SettingsScreen):
             return
         self.push_screen(SettingsScreen(self.config))
+
+    def action_push_screen_settings(self) -> None:
+        """Backward-compatible alias for action_open_admin."""
+        self.action_open_admin()
 
     def action_open_nodes(self) -> None:
         """Open the canonical Nodes workspace."""
@@ -131,7 +135,7 @@ class StyreneApp(App[None]):
 
     def action_open_mail(self) -> None:
         """Open the Mail workspace showing async conversations."""
-        if self._lifecycle.ipc_bridge is None:
+        if self.services.bridge is None:
             self.notify("Chat requires daemon mode", severity="warning")
             return
 
