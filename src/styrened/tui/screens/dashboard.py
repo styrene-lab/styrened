@@ -335,7 +335,7 @@ class DashboardScreen(Screen[None]):
                     continue
                 try:
                     activity_widget = self.query_one(ActivityFeedWidget)
-                    activity_widget.add_event(event.get("type", "unknown"), event)
+                    activity_widget.add_event(event.get("event_type", "unknown"), event)
                 except Exception:
                     pass
         except Exception:

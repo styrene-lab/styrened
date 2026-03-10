@@ -362,8 +362,8 @@ class TestDashboardActivitySubscription:
         bridge.subscribe_activity = AsyncMock(return_value=True)
 
         async def _iter_events(_event_type):
-            yield ("unexpected", {"type": "ignored"})
-            yield (IPCMessageType.EVENT_ACTIVITY, {"type": "announce_sent"})
+            yield ("unexpected", {"event_type": "ignored"})
+            yield (IPCMessageType.EVENT_ACTIVITY, {"event_type": "announce_sent"})
 
         bridge.iter_events = _iter_events
         activity_widget = MagicMock()
@@ -382,5 +382,5 @@ class TestDashboardActivitySubscription:
         bridge.subscribe_activity.assert_awaited_once_with()
         activity_widget.add_event.assert_called_once_with(
             "announce_sent",
-            {"type": "announce_sent"},
+            {"event_type": "announce_sent"},
         )
