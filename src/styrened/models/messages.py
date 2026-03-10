@@ -12,9 +12,9 @@ Design decisions:
 
 import json
 import logging
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -411,9 +411,11 @@ def init_db(db_path: str | None = None) -> Engine:
             conn.execute(
                 text(
                     "CREATE TABLE IF NOT EXISTS contacts ("
-                    "peer_hash VARCHAR(32) PRIMARY KEY, "
+                    "identity_hash TEXT PRIMARY KEY, "
                     "alias VARCHAR(100) NOT NULL, "
                     "notes VARCHAR(500), "
+                    "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                    "blocked_at REAL, "
                     "created_at REAL NOT NULL, "
                     "updated_at REAL NOT NULL"
                     ")"
@@ -421,10 +423,81 @@ def init_db(db_path: str | None = None) -> Engine:
             )
             conn.commit()
             logger.debug("Contacts table initialized")
-    except Exception:
-        pass  # Table already exists or was created by create_all
+    except Exception as exc:
+        logger.debug("Contacts table creation skipped (likely already exists): %s", exc)
 
-    # Migrate contacts table: add blocked columns if missing
+    # Migrate contacts table: PK from peer_hash → identity_hash
+    # Detect old schema by checking if peer_hash column exists
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(contacts)"))
+        cols = {row[1] for row in result}
+    if "peer_hash" in cols and "identity_hash" in cols:
+        # Half-migrated state: both columns exist (e.g., previous migration crashed
+        # between CREATE and DROP).  contacts_new was renamed but peer_hash was
+        # never removed — or the inverse happened.  Log loudly and drop peer_hash
+        # to complete the migration.
+        logger.warning(
+            "contacts table has BOTH peer_hash and identity_hash columns — "
+            "detected incomplete prior migration.  Dropping peer_hash column."
+        )
+        with engine.connect() as conn:
+            # SQLite does not support DROP COLUMN before 3.35.0; use recreate.
+            conn.execute(
+                text(
+                    "CREATE TABLE contacts_clean AS "
+                    "SELECT identity_hash, alias, notes, "
+                    "COALESCE(blocked, 0) AS blocked, "
+                    "blocked_at, created_at, updated_at "
+                    "FROM contacts"
+                )
+            )
+            conn.execute(text("DROP TABLE contacts"))
+            conn.execute(text("ALTER TABLE contacts_clean RENAME TO contacts"))
+            conn.commit()
+        logger.info("contacts table half-migration recovery complete")
+    elif "peer_hash" in cols and "identity_hash" not in cols:
+        logger.info("Migrating contacts table: peer_hash → identity_hash PK")
+        with engine.connect() as conn:
+            conn.execute(text("BEGIN"))
+            conn.execute(
+                text(
+                    "CREATE TABLE contacts_new ("
+                    "identity_hash TEXT PRIMARY KEY, "
+                    "alias VARCHAR(100) NOT NULL, "
+                    "notes VARCHAR(500), "
+                    "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                    "blocked_at REAL, "
+                    "created_at REAL NOT NULL, "
+                    "updated_at REAL NOT NULL"
+                    ")"
+                )
+            )
+            # Copy rows; old peer_hash becomes identity_hash (best-effort, will be
+            # backfilled by NodeStore later when the mapping is available).
+            # Use conditional column references depending on what the old table has.
+            old_result = conn.execute(text("PRAGMA table_info(contacts)"))
+            old_cols = {row[1] for row in old_result}
+            blocked_expr = "COALESCE(blocked, 0)" if "blocked" in old_cols else "0"
+            blocked_at_expr = "blocked_at" if "blocked_at" in old_cols else "NULL"
+            notes_expr = "notes" if "notes" in old_cols else "NULL"
+            conn.execute(
+                text(
+                    "INSERT INTO contacts_new "
+                    "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at) "
+                    f"SELECT peer_hash, alias, {notes_expr}, "
+                    f"{blocked_expr}, {blocked_at_expr}, created_at, updated_at "
+                    "FROM contacts"
+                )
+            )
+            conn.execute(text("DROP TABLE contacts"))
+            conn.execute(text("ALTER TABLE contacts_new RENAME TO contacts"))
+            conn.commit()
+        logger.info("Contacts table migration complete")
+    elif "peer_hash" not in cols and "identity_hash" not in cols:
+        # Edge case: table exists but has neither column — nothing to migrate
+        logger.warning("contacts table has unexpected schema; skipping migration")
+
+    # Migrate contacts table: add blocked columns if missing (pre-migration DBs)
     for col_name, col_type in [
         ("blocked", "BOOLEAN NOT NULL DEFAULT 0"),
         ("blocked_at", "REAL"),
@@ -436,6 +509,25 @@ def init_db(db_path: str | None = None) -> Engine:
                 logger.info(f"Added '{col_name}' column to contacts table")
         except Exception:
             pass  # Column already exists
+
+    # Create peer_blocks table — authoritative block store keyed by identity_hash
+    # This replaces the contacts.blocked flag as the canonical block state.
+    # The contacts table retains blocked/blocked_at for UI display purposes.
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS peer_blocks ("
+                    "identity_hash TEXT PRIMARY KEY, "
+                    "blocked_at REAL NOT NULL, "
+                    "reason TEXT"
+                    ")"
+                )
+            )
+            conn.commit()
+            logger.debug("peer_blocks table initialized")
+    except Exception as exc:
+        logger.debug("peer_blocks table creation skipped (likely already exists): %s", exc)
 
     # Add performance indexes for conversation queries (idempotent)
     perf_indexes = [
@@ -510,6 +602,51 @@ def init_db(db_path: str | None = None) -> Engine:
         logger.debug("FTS5 virtual table and triggers initialized")
 
     return engine
+
+
+@runtime_checkable
+class _NodeStoreProtocol(Protocol):
+    def get_identity_hash_for_destination(self, dest_hash: str) -> str | None: ...
+
+
+def backfill_contacts_identity_hash(engine: Engine, node_store: _NodeStoreProtocol) -> int:
+    """Resolve 32-char dest-hashes in contacts.identity_hash to full 64-char identity hashes.
+
+    Called at daemon startup after NodeStore is populated.  Rows whose
+    ``identity_hash`` is exactly 32 characters long are assumed to be old
+    destination-hash values copied verbatim from the pre-v0.16 ``peer_hash``
+    column.  For each such row we ask *node_store* for the real identity hash;
+    if the mapping is known and no row with the full identity already exists,
+    the row is updated in-place.
+
+    Returns the number of rows updated.
+    """
+
+    updated = 0
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT identity_hash FROM contacts WHERE LENGTH(identity_hash) = 32")
+        ).fetchall()
+        for (ih,) in rows:
+            resolved = node_store.get_identity_hash_for_destination(ih)
+            if resolved and resolved != ih:
+                existing = conn.execute(
+                    text("SELECT 1 FROM contacts WHERE identity_hash = :ih"),
+                    {"ih": resolved},
+                ).fetchone()
+                if not existing:
+                    conn.execute(
+                        text(
+                            "UPDATE contacts SET identity_hash = :new "
+                            "WHERE identity_hash = :old"
+                        ),
+                        {"new": resolved, "old": ih},
+                    )
+                    updated += 1
+        conn.commit()
+    if updated:
+        logger.info("Backfilled %d contacts row(s) with full identity hashes", updated)
+    return updated
 
 
 def get_session(db_path: str | None = None) -> Session:

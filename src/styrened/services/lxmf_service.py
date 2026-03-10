@@ -319,6 +319,11 @@ class LXMFService:
             logger.info(
                 f"LXMF initialized and announced (delivery: {self._delivery_destination.hexhash[:16]}...)"
             )
+
+            # Seed peer_blocks into RBAC so messages from blocked peers are
+            # dropped immediately on first receipt, before any DB lookup.
+            self._seed_blocks_to_rbac()
+
             return True
 
         except Exception as e:
@@ -969,104 +974,208 @@ class LXMFService:
     # Blocklist management
     # ------------------------------------------------------------------
 
-    def _load_blocklist(self) -> set[str]:
-        """Load blocked peer hashes from the contacts DB."""
-        try:
-            from sqlalchemy import create_engine, text
-
-            from styrened import paths
-
-            db_path = str(paths.messages_db())
-            engine = create_engine(f"sqlite:///{db_path}")
-            with engine.connect() as conn:
-                rows = conn.execute(
-                    text("SELECT peer_hash FROM contacts WHERE blocked = 1")
-                ).fetchall()
-            return {row[0] for row in rows}
-        except Exception as e:
-            logger.warning(f"Failed to load blocklist: {e}")
-            return set()
-
     def invalidate_blocklist(self) -> None:
         """No-op — retained for API compatibility. Blocking is via RBAC."""
         pass
 
-    def block_peer(self, peer_hash: str) -> bool:
-        """Block a peer — all future messages silently dropped.
+    def _load_peer_blocks(self) -> list[str]:
+        """Return all identity_hashes currently in the peer_blocks table."""
+        try:
+            from sqlalchemy import create_engine, text
 
-        Creates a contact record if one doesn't exist. Returns True on success.
+            from styrened import paths
+
+            db_path = str(paths.messages_db())
+            engine = create_engine(f"sqlite:///{db_path}")
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT identity_hash FROM peer_blocks")
+                ).fetchall()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.warning(f"Failed to load peer_blocks: {e}")
+            return []
+
+    def _seed_blocks_to_rbac(self) -> None:
+        """Seed peer_blocks entries into RBAC policy at startup.
+
+        Reads all identity_hashes from peer_blocks and marks them BLOCKED in
+        the in-memory RBAC policy.  Avoids duplicating YAML entries — only
+        adds entries that are not already blocked in the policy.  Calls
+        invalidate_cache() once after all entries are added.
+        """
+        identity_hashes = self._load_peer_blocks()
+        if not identity_hashes:
+            return
+        added = 0
+        for ih in identity_hashes:
+            if self._rbac_policy.resolve_role(ih) != Role.BLOCKED:
+                self._rbac_policy.block(ih)
+                added += 1
+        if added:
+            self._rbac_policy.invalidate_cache()
+            logger.info(f"Seeded {added} block(s) from peer_blocks into RBAC")
+
+    def block_peer(
+        self,
+        identity_hash: str,
+        lxmf_dest_hash: str | None = None,
+        alias: str | None = None,
+    ) -> bool:
+        """Block a peer by identity_hash — all future messages silently dropped.
+
+        Write order:
+        1. Upsert into peer_blocks (authoritative store).  If this fails,
+           return False immediately — do NOT touch RBAC.
+        2. Update RBAC policy (_rbac_policy.block).
+        3. Update contacts.blocked best-effort (does not affect return value).
+
+        Args:
+            identity_hash: 64-char hex RNS identity hash (canonical key).
+            lxmf_dest_hash: Optional LXMF destination hash for contacts upsert.
+            alias: Optional display alias for new contacts entry.
+
+        Returns:
+            True on success, False if the peer_blocks write failed.
         """
         import time as _time
 
+        from sqlalchemy import create_engine, text
+
+        from styrened import paths
+
+        db_path = str(paths.messages_db())
+        now = _time.time()
+
+        # Step 1 — authoritative write to peer_blocks
+        blocks_engine = create_engine(f"sqlite:///{db_path}")
         try:
-            from sqlalchemy import create_engine, text
-
-            from styrened import paths
-
-            db_path = str(paths.messages_db())
-            engine = create_engine(f"sqlite:///{db_path}")
-            now = _time.time()
-            with engine.connect() as conn:
-                # Upsert: create contact if missing, set blocked
-                existing = conn.execute(
-                    text("SELECT peer_hash FROM contacts WHERE peer_hash = :h"),
-                    {"h": peer_hash},
-                ).fetchone()
-                if existing:
+            try:
+                with blocks_engine.connect() as conn:
                     conn.execute(
                         text(
-                            "UPDATE contacts SET blocked = 1, blocked_at = :t, updated_at = :t "
-                            "WHERE peer_hash = :h"
+                            "INSERT INTO peer_blocks (identity_hash, blocked_at) "
+                            "VALUES (:h, :t) "
+                            "ON CONFLICT(identity_hash) DO UPDATE SET blocked_at = :t"
                         ),
-                        {"h": peer_hash, "t": now},
+                        {"h": identity_hash, "t": now},
                     )
-                else:
-                    conn.execute(
-                        text(
-                            "INSERT INTO contacts (peer_hash, alias, blocked, blocked_at, created_at, updated_at) "
-                            "VALUES (:h, :a, 1, :t, :t, :t)"
-                        ),
-                        {"h": peer_hash, "a": peer_hash[:8], "t": now},
-                    )
-                conn.commit()
-            self.invalidate_blocklist()
-            self._rbac_policy.block(peer_hash)
-            logger.info(f"Blocked peer {peer_hash[:16]}...")
-            return True
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Failed to write to peer_blocks for {identity_hash[:16]}...: {e}")
+                return False
+        finally:
+            blocks_engine.dispose()
+
+        # Step 2 — RBAC (in-memory)
+        self._rbac_policy.block(identity_hash)
+
+        # Step 3 — contacts best-effort (UI state only)
+        # Always key contacts by identity_hash (canonical PK); lxmf_dest_hash is
+        # stored separately if provided but must NOT be used as the contacts PK.
+        display_alias = alias or identity_hash[:8]
+        try:
+            contacts_engine = create_engine(f"sqlite:///{db_path}")
+            try:
+                with contacts_engine.connect() as conn:
+                    existing = conn.execute(
+                        text("SELECT identity_hash FROM contacts WHERE identity_hash = :h"),
+                        {"h": identity_hash},
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            text(
+                                "UPDATE contacts SET blocked = 1, blocked_at = :t, updated_at = :t "
+                                "WHERE identity_hash = :h"
+                            ),
+                            {"h": identity_hash, "t": now},
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "INSERT INTO contacts "
+                                "(identity_hash, alias, blocked, blocked_at, created_at, updated_at) "
+                                "VALUES (:h, :a, 1, :t, :t, :t)"
+                            ),
+                            {"h": identity_hash, "a": display_alias, "t": now},
+                        )
+                    conn.commit()
+            finally:
+                contacts_engine.dispose()
         except Exception as e:
-            logger.error(f"Failed to block peer: {e}")
-            return False
+            logger.warning(f"contacts best-effort update failed for {identity_hash[:16]}...: {e}")
 
-    def unblock_peer(self, peer_hash: str) -> bool:
-        """Unblock a previously blocked peer. Returns True on success."""
+        logger.info(f"Blocked peer {identity_hash[:16]}...")
+        return True
+
+    def unblock_peer(self, identity_hash: str) -> bool:
+        """Unblock a previously blocked peer.
+
+        Deletes the row from peer_blocks.  If no row existed, returns False.
+        On success: removes from RBAC and clears contacts.blocked best-effort.
+
+        Returns:
+            True if the peer was blocked and is now unblocked, False if the
+            identity_hash was not present in peer_blocks.
+        """
         import time as _time
 
+        from sqlalchemy import create_engine, text
+
+        from styrened import paths
+
+        db_path = str(paths.messages_db())
+
+        # Check presence and delete in a single transaction.
+        engine = create_engine(f"sqlite:///{db_path}")
         try:
-            from sqlalchemy import create_engine, text
+            try:
+                with engine.connect() as conn:
+                    existing = conn.execute(
+                        text("SELECT identity_hash FROM peer_blocks WHERE identity_hash = :h"),
+                        {"h": identity_hash},
+                    ).fetchone()
+                    if existing is None:
+                        logger.info(
+                            f"unblock_peer: {identity_hash[:16]}... not in peer_blocks, ignoring"
+                        )
+                        return False
+                    conn.execute(
+                        text("DELETE FROM peer_blocks WHERE identity_hash = :h"),
+                        {"h": identity_hash},
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Failed to delete from peer_blocks for {identity_hash[:16]}...: {e}")
+                return False
+        finally:
+            engine.dispose()
 
-            from styrened import paths
+        # Remove from RBAC
+        self._rbac_policy.unblock(identity_hash)
 
-            db_path = str(paths.messages_db())
-            engine = create_engine(f"sqlite:///{db_path}")
-            with engine.connect() as conn:
+        # Update contacts best-effort
+        contacts_engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with contacts_engine.connect() as conn:
                 conn.execute(
                     text(
                         "UPDATE contacts SET blocked = 0, blocked_at = NULL, updated_at = :t "
-                        "WHERE peer_hash = :h"
+                        "WHERE identity_hash = :h"
                     ),
-                    {"h": peer_hash, "t": _time.time()},
+                    {"h": identity_hash, "t": _time.time()},
                 )
                 conn.commit()
-            self.invalidate_blocklist()
-            self._rbac_policy.unblock(peer_hash)
-            logger.info(f"Unblocked peer {peer_hash[:16]}...")
-            return True
         except Exception as e:
-            logger.error(f"Failed to unblock peer: {e}")
-            return False
+            logger.warning(f"contacts best-effort unblock failed for {identity_hash[:16]}...: {e}")
+        finally:
+            contacts_engine.dispose()
+
+        logger.info(f"Unblocked peer {identity_hash[:16]}...")
+        return True
 
     def get_blocked_peers(self) -> list[dict]:
-        """Return list of blocked peers with metadata."""
+        """Return list of blocked peers with metadata, keyed by identity_hash."""
         try:
             from sqlalchemy import create_engine, text
 
@@ -1077,12 +1186,19 @@ class LXMFService:
             with engine.connect() as conn:
                 rows = conn.execute(
                     text(
-                        "SELECT peer_hash, alias, blocked_at FROM contacts "
-                        "WHERE blocked = 1 ORDER BY blocked_at DESC"
+                        "SELECT pb.identity_hash, c.alias, pb.blocked_at, pb.reason "
+                        "FROM peer_blocks pb "
+                        "LEFT JOIN contacts c ON c.identity_hash = pb.identity_hash "
+                        "ORDER BY pb.blocked_at DESC"
                     )
                 ).fetchall()
             return [
-                {"peer_hash": r[0], "alias": r[1], "blocked_at": r[2]}
+                {
+                    "identity_hash": r[0],
+                    "alias": r[1],
+                    "blocked_at": r[2],
+                    "reason": r[3],
+                }
                 for r in rows
             ]
         except Exception as e:
@@ -1105,8 +1221,23 @@ class LXMFService:
         # Extract source hash for logging
         source_hash = message.source_hash.hex()
 
-        # Check if sender is blocked via RBAC policy
-        if self._rbac_policy.resolve_role(source_hash) == Role.BLOCKED:
+        # Check if sender is blocked via RBAC policy.
+        # RBAC is keyed by identity_hash; source_hash is an LXMF destination hash.
+        # Attempt a NodeStore lookup to resolve the canonical identity_hash first.
+        rbac_key = source_hash
+        try:
+            from styrened.services.node_store import get_node_store
+
+            store = get_node_store()
+            identity_hash = store.get_identity_for_lxmf_destination(
+                source_hash
+            ) or store.get_identity_for_destination(source_hash)
+            if identity_hash:
+                rbac_key = identity_hash
+        except Exception:
+            pass  # NodeStore unavailable — fall back to dest hash
+
+        if self._rbac_policy.resolve_role(rbac_key) == Role.BLOCKED:
             logger.info(f"Dropped message from blocked peer {source_hash[:16]}... (RBAC)")
             return
 

@@ -13,6 +13,12 @@ A `TUIServices` runtime protocol class at `src/styrened/tui/services/protocol.py
 - When the screen accesses `self.services.bridge`
 - Then it receives a typed `IPCBridge` reference with no `type: ignore` annotation
 
+#### Scenario: Page browser widget opens explicit external URLs through services
+- Given a page browser widget showing documentation from `https://` or `.i2p`
+- When the widget uses `self.services.bridge`
+- Then the request flows through typed TUI services and daemon IPC
+- And the widget does not reach into app lifecycle internals or daemon service modules directly
+
 #### Scenario: Screen accesses unread counts
 - Given a screen needs unread message counts
 - When the screen calls `self.services.get_unread_counts()`
@@ -54,3 +60,19 @@ No screen or widget accesses `app.db_engine` or creates SQLAlchemy sessions. The
 - Given `src/styrened/tui/screens/` and `src/styrened/tui/widgets/`
 - When searching for `db_engine`
 - Then zero matches are found
+
+### REQ-SVC-5: Shared state normalization sits between services and visual frontends
+
+The visual frontend consumes canonical UI-facing state objects rather than reshaping raw IPC payloads directly in screens or widgets.
+
+#### Scenario: Screens use canonical node state instead of ad hoc deduplication
+- Given node data from daemon IPC
+- When a screen renders mesh peers
+- Then it receives canonical node records from the shared state layer
+- And screen-local deduplication or merge logic is not required to establish semantic correctness
+
+#### Scenario: Screens route peer actions through canonical workspace contexts
+- Given a user opens a peer from Nodes, Mail, or Comms
+- When the TUI transitions into the peer workspace
+- Then it passes canonical origin and focus context rather than inferring navigation locally
+- And Back navigation can return to the correct aggregate workspace

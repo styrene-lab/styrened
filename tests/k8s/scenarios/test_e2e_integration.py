@@ -51,13 +51,11 @@ class TestLXMFMessagePassing:
         pods = styrened_stack(replica_count=2, mode="standalone", announce_interval=30)
         pod_a, pod_b = pods[0], pods[1]
 
-        # Wait for RNS initialization and discovery
-        await asyncio.sleep(15)
+        # Wait for RNS initialization and peer discovery/announce propagation.
+        await asyncio.sleep(45)
 
-        # Get Pod B's identity hash from logs
+        # Get Pod B's identity hash, then resolve its sendable destination from Pod A's discovery view.
         script_get_hash = """
-import sys
-sys.path.insert(0, '/app/src')
 from styrened.services.reticulum import get_operator_identity_object
 
 identity = get_operator_identity_object()
@@ -70,16 +68,32 @@ else:
         result = k8s_cluster.exec_in_pod(pod_b, ["python3", "-c", script_get_hash])
         assert result.returncode == 0, f"Failed to get Pod B identity: {result.stderr}"
 
-        # Parse hash from output
+        # Parse Pod B identity hash, then discover its sendable LXMF destination from Pod A.
         hash_line = [line for line in result.stdout.split("\n") if "HASH:" in line]
         assert len(hash_line) > 0, f"Identity hash not found in output: {result.stdout}"
-        dest_hash = hash_line[0].split("HASH:")[1].strip()
+        pod_b_hash = hash_line[0].split("HASH:")[1].strip()
+
+        result = k8s_cluster.exec_in_pod(
+            pod_a,
+            ["styrened", "devices", "-w", "60", "--json"],
+            timeout=150,
+        )
+        assert result.returncode == 0, f"Device discovery failed: {result.stderr}"
+
+        devices_json_start = result.stdout.find("[")
+        assert devices_json_start != -1, f"No device JSON found: {result.stdout}"
+        devices = json.loads(result.stdout[devices_json_start:])
+        pod_b_device = next(
+            (d for d in devices if str(d.get("identity_hash", "")).startswith(pod_b_hash[:16])),
+            None,
+        )
+        assert pod_b_device is not None, f"Pod B not discovered from Pod A: {devices}"
+        dest_hash = pod_b_device.get("lxmf_destination_hash") or pod_b_device.get("destination_hash")
+        assert dest_hash, f"No sendable destination found for Pod B: {pod_b_device}"
 
         # Send message from Pod A to Pod B using CLI
         test_message = "Hello from Pod A"
 
-        # Use styrened CLI to send message (CLI creates its own RNS instance for discovery)
-        # Allow more time for discovery in mesh networks
         result = k8s_cluster.exec_in_pod(
             pod_a,
             ["styrened", "send", dest_hash, test_message, "-w", "45", "--max-wait", "60"],
@@ -151,10 +165,11 @@ else:
         script_get_hash = """
 import sys
 sys.path.insert(0, '/app/src')
-from styrened.services.reticulum import get_operator_identity_object
+from styrened.services.lxmf_service import get_lxmf_service
 
-identity = get_operator_identity_object()
-print(f"HASH:{identity.hash.hex()}" if identity else "ERROR:No identity")
+service = get_lxmf_service()
+dest = service.delivery_destination
+print(f"HASH:{dest.hexhash}" if dest else "ERROR:No LXMF destination")
 """
 
         result = k8s_cluster.exec_in_pod(peer_b, ["python3", "-c", script_get_hash])
@@ -212,14 +227,15 @@ print("MESSAGE_SENT")
         # Wait for mesh discovery and path establishment
         await asyncio.sleep(60)
 
-        # Get destination hash for Pod D
+        # Get LXMF delivery destination for Pod D
         script_get_hash = """
 import sys
 sys.path.insert(0, '/app/src')
-from styrened.services.reticulum import get_operator_identity_object
+from styrened.services.lxmf_service import get_lxmf_service
 
-identity = get_operator_identity_object()
-print(f"HASH:{identity.hash.hex()}" if identity else "ERROR")
+service = get_lxmf_service()
+dest = service.delivery_destination
+print(f"HASH:{dest.hexhash}" if dest else "ERROR")
 """
 
         result = k8s_cluster.exec_in_pod(pods[3], ["python3", "-c", script_get_hash])

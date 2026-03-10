@@ -125,7 +125,7 @@ class TestPageBrowserLoadPage:
 
         # Mock the app with no bridge
         mock_app = MagicMock()
-        mock_app._lifecycle.ipc_bridge = None
+        mock_app.services.bridge = None
         widget._dom_element = mock_app  # Prevent real DOM access
 
         # Override the property to return None

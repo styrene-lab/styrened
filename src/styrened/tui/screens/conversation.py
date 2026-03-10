@@ -16,6 +16,12 @@ from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 
 from styrened.tui.widgets.chat_widget import ChatWidget
+from styrened.ui_state import (
+    PeerWorkspaceContext,
+    PeerWorkspaceFocus,
+    WorkspaceId,
+    build_peer_workspace_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +39,7 @@ class ConversationScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "app.pop_screen", "Back"),
+        Binding("escape", "go_back", "Back"),
         Binding("ctrl+d", "delete_conversation", "Delete All", show=True),
         Binding("B", "block_peer", "Block", show=True),
     ]
@@ -67,18 +73,37 @@ class ConversationScreen(Screen[None]):
         self,
         peer_hash: str,
         display_name: str | None = None,
+        origin_workspace: WorkspaceId | str | None = None,
+        peer_context: PeerWorkspaceContext | None = None,
     ) -> None:
         """Initialize ConversationScreen.
 
         Args:
             peer_hash: Conversation partner's identity hash
             display_name: Optional display name for the peer
+            origin_workspace: Aggregate workspace that launched this mail-thread view.
+            peer_context: Optional pre-built canonical peer workspace context.
         """
         super().__init__()
         self.peer_hash = peer_hash
         self.display_name = display_name
+        self.peer_context = peer_context or build_peer_workspace_context(
+            peer_hash,
+            origin_workspace,
+            focus=PeerWorkspaceFocus.MAIL,
+        )
         self._delete_conv_pending: bool = False
         self._delete_conv_timer: Timer | None = None
+
+    @property
+    def origin_workspace(self) -> WorkspaceId:
+        """Aggregate workspace that launched this mail-thread view."""
+        return self.peer_context.origin_workspace
+
+    @property
+    def requested_focus(self) -> PeerWorkspaceFocus:
+        """Requested focus for this compatibility mail-thread context."""
+        return self.peer_context.focus
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -101,6 +126,10 @@ class ConversationScreen(Screen[None]):
                 id="chat-widget",
             )
         yield Footer()
+
+    def action_go_back(self) -> None:
+        """Leave the mail-thread compatibility screen."""
+        self.app.pop_screen()
 
     def on_mount(self) -> None:
         """Load path info on mount."""
@@ -202,7 +231,7 @@ class ConversationScreen(Screen[None]):
         if bridge is None:
             return
         try:
-            await bridge.block_peer(self.peer_hash)
+            await bridge.block_peer(identity_hash=self.peer_hash)
             self.notify(
                 f"Blocked {self.peer_hash[:8]}... — messages will be dropped",
                 title="Peer Blocked",

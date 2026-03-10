@@ -38,6 +38,11 @@ class CommandResult:
         """Combined stdout/stderr for compatibility."""
         return self.stdout + self.stderr
 
+    @property
+    def returncode(self) -> int:
+        """Subprocess-style alias retained for older tests/helpers."""
+        return self.return_code
+
     def as_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {

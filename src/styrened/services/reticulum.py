@@ -975,6 +975,9 @@ class StyreneAnnounceHandler:
         node_store: Any | None = None,
         access_mode: MeshAccessMode | None = None,
         allowed_peers: set[str] | None = None,
+        ygg_adapter: Any | None = None,
+        ygg_config: Any | None = None,
+        direct_link_service: Any | None = None,
     ):
         """Initialize announce handler.
 
@@ -986,6 +989,10 @@ class StyreneAnnounceHandler:
                 unaffected.
             allowed_peers: Set of lower-cased 32-char hex identity hashes
                 permitted when *access_mode* is ALLOWLIST.
+            ygg_adapter: Optional YggdrasilAdapter instance for capability
+                detection and peer bootstrapping.
+            ygg_config: Optional YggdrasilConfig (peer_discovery / bootstrap_from_rns).
+            direct_link_service: Optional DirectLinkService for /meta fetches.
         """
         self.callback = callback
         self.node_store = node_store
@@ -993,6 +1000,9 @@ class StyreneAnnounceHandler:
         self._allowed_peers: set[str] = (
             {h.lower() for h in allowed_peers} if allowed_peers else set()
         )
+        self._ygg_adapter = ygg_adapter
+        self._ygg_config = ygg_config
+        self._direct_link_service = direct_link_service
         self.aspect_filter = None  # Listen to ALL announces
         self.receive_path_responses = False  # Don't interfere with RNS path discovery
         self.discovered_devices: dict[str, MeshDevice] = {}
@@ -1185,6 +1195,56 @@ class StyreneAnnounceHandler:
         except Exception as e:
             logger.debug(f"Could not determine path info: {e}")
 
+        # ── Overlay capability detection ────────────────────────────────────
+        # Addresses remain unknown until /meta fetch; announces carry only bits.
+        try:
+            from styrened.models.capabilities import (
+                CAPABILITY_I2P,
+                CAPABILITY_YGGDRASIL,
+                has_capability,
+            )
+            from styrened.models.config import PeerDiscovery
+
+            if has_capability(device.capabilities, CAPABILITY_I2P):
+                device.b32_address = None
+                logger.debug(
+                    "[I2P] Peer %s advertises I2P capability",
+                    identity_hash_hex[:16],
+                )
+
+            if has_capability(device.capabilities, CAPABILITY_YGGDRASIL):
+                device.ygg_address = None  # address fetched via /meta on demand
+                logger.debug(
+                    "[YGG] Peer %s advertises Yggdrasil capability",
+                    identity_hash_hex[:16],
+                )
+
+                # EAGER bootstrap: fetch /meta and call add_peer() asynchronously
+                cfg = self._ygg_config
+                if (
+                    cfg is not None
+                    and cfg.bootstrap_from_rns
+                    and cfg.peer_discovery == PeerDiscovery.EAGER
+                    and self._ygg_adapter is not None
+                    and self._ygg_adapter.get_local_address() is not None
+                ):
+                    import asyncio
+
+                    asyncio.create_task(
+                        _bootstrap_ygg_peer(
+                            identity_hash_hex,
+                            device.lxmf_destination_hash or dest_hash_hex,
+                            self._ygg_adapter,
+                            direct_link=self._direct_link_service,
+                        )
+                    )
+                    logger.debug(
+                        "[YGG] Dispatched bootstrap task for peer %s",
+                        identity_hash_hex[:16],
+                    )
+        except Exception as _overlay_err:
+            logger.debug("[OVERLAY] Capability detection error: %s", _overlay_err)
+
         self.discovered_devices[dest_hash_hex] = device
 
         # Persist to store if available
@@ -1205,6 +1265,56 @@ class StyreneAnnounceHandler:
             self.callback(device)
 
 
+async def _bootstrap_ygg_peer(
+    identity_hash: str,
+    lxmf_dest_hash: str,
+    ygg_adapter: Any,
+    direct_link: Any | None = None,
+) -> None:
+    """Fetch /meta from a peer and add it as a Yggdrasil peer.
+
+    Silently ignores all errors — this is a best-effort operation.
+    The next announce cycle will retry automatically.
+
+    Args:
+        identity_hash: Hex identity hash of the remote peer (for logging).
+        lxmf_dest_hash: LXMF delivery destination hash used to open a
+            DirectLink and request /meta.
+        ygg_adapter: Running YggdrasilAdapter instance.
+        direct_link: Optional DirectLinkService override (for testing).
+    """
+    try:
+        if direct_link is None:
+            logger.debug("[YGG] No DirectLinkService — skipping bootstrap for %s", identity_hash[:16])
+            return
+
+        meta = await direct_link.fetch_meta(lxmf_dest_hash)
+        if meta is None:
+            logger.debug("[YGG] /meta returned None for %s", identity_hash[:16])
+            return
+
+        ygg_address = meta.get("ygg_address")
+        ygg_port = int(meta.get("ygg_port", 9001))
+        if not ygg_address:
+            logger.debug("[YGG] /meta has no ygg_address for %s", identity_hash[:16])
+            return
+
+        ok = await ygg_adapter.add_peer(ygg_address, ygg_port)
+        if ok:
+            logger.info(
+                "[YGG] Peered with %s at %s:%d", identity_hash[:16], ygg_address, ygg_port
+            )
+        else:
+            logger.debug(
+                "[YGG] add_peer(%s:%d) failed for %s — will retry on next announce",
+                ygg_address,
+                ygg_port,
+                identity_hash[:16],
+            )
+    except Exception as exc:
+        logger.debug("[YGG] Bootstrap error for %s: %s", identity_hash[:16], exc)
+
+
 # Global announce handler
 _announce_handler: StyreneAnnounceHandler | None = None
 
@@ -1214,6 +1324,9 @@ def start_discovery(
     node_store: Any | None = None,
     access_mode: MeshAccessMode | None = None,
     allowed_peers: set[str] | None = None,
+    ygg_adapter: Any | None = None,
+    ygg_config: Any | None = None,
+    direct_link_service: Any | None = None,
 ) -> None:
     """Start device discovery via RNS announces.
 
@@ -1227,12 +1340,23 @@ def start_discovery(
         access_mode: Mesh admission policy.  When ``ALLOWLIST``, only nodes
             whose identity hash appears in *allowed_peers* are accepted.
         allowed_peers: Identity hashes permitted when *access_mode* is ALLOWLIST.
+        ygg_adapter: Optional YggdrasilAdapter for peer bootstrapping.
+        ygg_config: Optional YggdrasilConfig (peer_discovery / bootstrap_from_rns).
+        direct_link_service: Optional DirectLinkService for /meta fetches.
     """
     global _announce_handler
     if _announce_handler:
         return
 
-    _announce_handler = StyreneAnnounceHandler(callback, node_store, access_mode, allowed_peers)
+    _announce_handler = StyreneAnnounceHandler(
+        callback,
+        node_store,
+        access_mode,
+        allowed_peers,
+        ygg_adapter=ygg_adapter,
+        ygg_config=ygg_config,
+        direct_link_service=direct_link_service,
+    )
     try:
         if not RNS:
             logger.error("RNS library not available. Install with: pip install rns")

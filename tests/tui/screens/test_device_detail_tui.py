@@ -4,15 +4,18 @@ Tests device information display, RPC actions, tabbed layout, and real-time upda
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
+from textual.app import ComposeResult
+from textual.screen import Screen
 from textual.widgets import Button, Static, TabbedContent
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.rpc.messages import ExecResult, StatusResponse
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+from styrened.ui_state import PeerWorkspaceFocus, WorkspaceId
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +36,15 @@ def mock_reticulum(tmp_path):
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
         yield
+
+
+class DummyOriginScreen(Screen[None]):
+    def __init__(self, label: str) -> None:
+        super().__init__()
+        self.label = label
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.label)
 
 
 @pytest.fixture
@@ -63,7 +75,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -85,7 +97,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -106,7 +118,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -134,7 +146,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -156,7 +168,7 @@ class TestDeviceDetailComposition:
             async with app.run_test() as pilot:
                 await app.push_screen(
                     MeshDeviceDetailScreen(
-                        device_identity=test_device.identity,
+                        device_identity=test_device.identity_hash,
                         initial_tab="chat",
                     )
                 )
@@ -171,12 +183,10 @@ class TestDeviceDetailRPCActions:
     """Test RPC action buttons."""
 
     @pytest.mark.asyncio
-    async def test_status_button_sends_rpc_request(self, test_device):
-        """Status button should send RPC status request."""
-        app = StyreneApp()
-
-        # Mock RPC client with real StatusResponse
-        mock_rpc_client = AsyncMock()
+    async def test_auto_fetch_status_uses_bridge_status_query(self, test_device):
+        """Status refresh should use the IPC bridge status query contract."""
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        mock_bridge = MagicMock()
         mock_response = StatusResponse(
             uptime=3600,
             ip="192.168.1.100",
@@ -184,29 +194,24 @@ class TestDeviceDetailRPCActions:
             disk_total=10000000,
             services=[],
         )
-        mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
+        mock_bridge.datalink_status = AsyncMock(return_value={"connected": False})
+        mock_bridge.query_device_status = AsyncMock(return_value=mock_response)
+        status_widget = Mock()
+        status_widget.link_info = None
+        status_widget.status = None
+        status_widget.loading = False
+        status_widget.error = None
+        app = Mock()
+        app.services.bridge = mock_bridge
 
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=[test_device],
+        with (
+            patch.object(MeshDeviceDetailScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "query_one", return_value=status_widget),
         ):
-            async with app.run_test() as pilot:
-                await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
-                )
-                await pilot.pause()
+            await screen._auto_fetch_status()
 
-                # Set mock AFTER app startup
-                app.rpc_client = mock_rpc_client
-
-                screen = app.screen
-
-                # Trigger refresh status action
-                await screen.action_refresh_status()
-                await pilot.pause()
-
-                # RPC call should be made
-                assert mock_rpc_client.call_status.called
+        mock_bridge.query_device_status.assert_awaited_once()
+        assert status_widget.status == mock_response
 
     @pytest.mark.asyncio
     async def test_exec_button_shows_command_prompt(self, test_device):
@@ -219,11 +224,232 @@ class TestDeviceDetailRPCActions:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
                 # Screen renders successfully
+
+
+class TestDeviceDetailLoadingState:
+    """Test lifecycle-managed unresolved-device behavior."""
+
+    def test_init_does_not_try_sync_device_lookup(self):
+        with patch("styrened.tui.screens.mesh_device_detail.discover_devices") as discover:
+            screen = MeshDeviceDetailScreen(device_identity="peer-1", device=None)
+
+        discover.assert_not_called()
+        assert screen.device is None
+        assert screen._device_lookup_complete is False
+
+
+class TestDeviceDetailLifecycle:
+    """Test peer workspace worker lifecycle management."""
+
+    def test_on_mount_starts_device_load_when_device_missing(self):
+        screen = MeshDeviceDetailScreen(device_identity="peer-1", device=None)
+        screen._start_device_load = Mock()
+        screen.device = None
+
+        screen.on_mount()
+
+        screen._start_device_load.assert_called_once_with()
+
+    def test_on_mount_starts_status_refresh_when_device_present_without_status(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        screen._start_status_refresh = Mock()
+        screen.initial_status = None
+
+        screen.on_mount()
+
+        screen._start_status_refresh.assert_called_once_with()
+
+    def test_screen_suspend_cancels_inflight_workers(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        load_worker = Mock()
+        status_worker = Mock()
+        link_worker = Mock()
+        speedtest_worker = Mock()
+        contact_worker = Mock()
+        screen._device_load_worker = load_worker
+        screen._status_worker = status_worker
+        screen._link_worker = link_worker
+        screen._speedtest_worker = speedtest_worker
+        screen._contact_worker = contact_worker
+
+        screen.on_screen_suspend(Mock())
+
+        load_worker.cancel.assert_called_once_with()
+        status_worker.cancel.assert_called_once_with()
+        link_worker.cancel.assert_called_once_with()
+        speedtest_worker.cancel.assert_called_once_with()
+        contact_worker.cancel.assert_called_once_with()
+        assert screen._device_load_worker is None
+        assert screen._status_worker is None
+        assert screen._link_worker is None
+        assert screen._speedtest_worker is None
+        assert screen._contact_worker is None
+
+    def test_screen_resume_refreshes_loaded_device_status(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        screen._start_status_refresh = Mock()
+
+        screen.on_screen_resume(Mock())
+
+        screen._start_status_refresh.assert_called_once_with()
+
+    def test_screen_resume_retries_device_load_when_missing(self):
+        screen = MeshDeviceDetailScreen(device_identity="peer-1", device=None)
+        screen._start_device_load = Mock()
+        screen.device = None
+
+        screen.on_screen_resume(Mock())
+
+        screen._start_device_load.assert_called_once_with()
+
+    def test_on_unmount_cancels_inflight_workers(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        load_worker = Mock()
+        status_worker = Mock()
+        link_worker = Mock()
+        speedtest_worker = Mock()
+        contact_worker = Mock()
+        screen._device_load_worker = load_worker
+        screen._status_worker = status_worker
+        screen._link_worker = link_worker
+        screen._speedtest_worker = speedtest_worker
+        screen._contact_worker = contact_worker
+
+        screen.on_unmount()
+
+        load_worker.cancel.assert_called_once_with()
+        status_worker.cancel.assert_called_once_with()
+        link_worker.cancel.assert_called_once_with()
+        speedtest_worker.cancel.assert_called_once_with()
+        contact_worker.cancel.assert_called_once_with()
+        assert screen._device_load_worker is None
+        assert screen._status_worker is None
+        assert screen._link_worker is None
+        assert screen._speedtest_worker is None
+        assert screen._contact_worker is None
+
+    def test_action_refresh_status_uses_status_worker_helper(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        screen._start_status_refresh = Mock()
+        screen.notify = Mock()
+
+        import asyncio
+        asyncio.run(screen.action_refresh_status())
+
+        screen._start_status_refresh.assert_called_once_with()
+        screen.notify.assert_called_once()
+
+    def test_action_establish_link_uses_worker_helper(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        bridge = Mock()
+        app = Mock()
+        app.services.bridge = bridge
+        screen.notify = Mock()
+        screen._start_link_establish = Mock()
+
+        with patch.object(MeshDeviceDetailScreen, "app", new_callable=PropertyMock, return_value=app):
+            import asyncio
+            asyncio.run(screen.action_establish_link())
+
+        screen._start_link_establish.assert_called_once_with(bridge)
+
+    def test_action_run_speedtest_uses_worker_helper(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        bridge = Mock()
+        bridge.datalink_status = AsyncMock(return_value={"connected": True})
+        app = Mock()
+        app.services.bridge = bridge
+        screen.notify = Mock()
+        screen._start_speedtest = Mock()
+
+        with patch.object(MeshDeviceDetailScreen, "app", new_callable=PropertyMock, return_value=app):
+            import asyncio
+            asyncio.run(screen.action_run_speedtest())
+
+        screen._start_speedtest.assert_called_once_with(bridge)
+
+    def test_action_add_contact_uses_worker_helper(self, test_device):
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        bridge = Mock()
+        app = Mock()
+        app.services.bridge = bridge
+        screen._start_contact_save = Mock()
+
+        with patch.object(MeshDeviceDetailScreen, "app", new_callable=PropertyMock, return_value=app):
+            screen.action_add_contact()
+
+        screen._start_contact_save.assert_called_once_with(bridge, test_device.name)
+
+
+class TestDeviceDetailRoutingContext:
+    """Test peer workspace routing context."""
+
+    def test_screen_builds_canonical_peer_workspace_context(self, test_device):
+        screen = MeshDeviceDetailScreen(
+            device_identity=test_device.identity_hash,
+            initial_tab="chat",
+            device=test_device,
+            origin_workspace=WorkspaceId.NODES,
+        )
+
+        assert screen.origin_workspace == WorkspaceId.NODES
+        assert screen.requested_focus == PeerWorkspaceFocus.COMMS
+        assert screen.peer_context.peer_identity_hash == test_device.identity_hash
+
+    @pytest.mark.asyncio
+    async def test_escape_returns_to_originating_dashboard_screen(self, test_device):
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=[test_device],
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(DummyOriginScreen("dashboard-root"))
+                await app.push_screen(
+                    MeshDeviceDetailScreen(
+                        device_identity=test_device.identity_hash,
+                        device=test_device,
+                        origin_workspace=WorkspaceId.HOME,
+                    )
+                )
+                await pilot.pause()
+
+                await pilot.press("escape")
+                await pilot.pause()
+
+                assert isinstance(app.screen, DummyOriginScreen)
+                assert app.screen.label == "dashboard-root"
+
+    @pytest.mark.asyncio
+    async def test_escape_returns_to_originating_nodes_screen(self, test_device):
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=[test_device],
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(DummyOriginScreen("nodes-root"))
+                await app.push_screen(
+                    MeshDeviceDetailScreen(
+                        device_identity=test_device.identity_hash,
+                        device=test_device,
+                        origin_workspace=WorkspaceId.NODES,
+                    )
+                )
+                await pilot.pause()
+
+                await pilot.press("escape")
+                await pilot.pause()
+
+                assert isinstance(app.screen, DummyOriginScreen)
+                assert app.screen.label == "nodes-root"
 
 
 class TestDeviceDetailKeyboardBindings:
@@ -240,7 +466,7 @@ class TestDeviceDetailKeyboardBindings:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -250,40 +476,16 @@ class TestDeviceDetailKeyboardBindings:
 
                 # Should pop detail screen
 
-    @pytest.mark.asyncio
-    async def test_r_refreshes_device_status(self, test_device):
-        """Pressing 'r' should refresh device status."""
-        app = StyreneApp()
+    def test_r_refreshes_device_status_via_helper(self, test_device):
+        """Pressing 'r' should route through the status refresh helper."""
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
+        screen._start_status_refresh = Mock()
+        screen.notify = Mock()
 
-        mock_rpc_client = AsyncMock()
-        mock_response = StatusResponse(
-            uptime=3600,
-            ip="192.168.1.100",
-            disk_used=1000000,
-            disk_total=10000000,
-            services=[],
-        )
-        mock_rpc_client.call_status = AsyncMock(return_value=mock_response)
+        import asyncio
+        asyncio.run(screen.action_refresh_status())
 
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=[test_device],
-        ):
-            async with app.run_test() as pilot:
-                await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
-                )
-                await pilot.pause()
-
-                # Set mock AFTER app startup
-                app.rpc_client = mock_rpc_client
-
-                # Press 'r' to refresh
-                await pilot.press("r")
-                await pilot.pause()
-
-                # Should make RPC call
-                assert mock_rpc_client.call_status.called
+        screen._start_status_refresh.assert_called_once_with()
 
 
 class TestDeviceDetailRealTimeUpdates:
@@ -311,7 +513,7 @@ class TestDeviceDetailRealTimeUpdates:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -345,7 +547,7 @@ class TestDeviceDetailRealTimeUpdates:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -380,7 +582,7 @@ class TestDeviceDetailErrorHandling:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -405,7 +607,7 @@ class TestDeviceDetailErrorHandling:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -436,7 +638,7 @@ class TestDeviceDetailErrorHandling:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=offline_device.identity)
+                    MeshDeviceDetailScreen(device_identity=offline_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -466,7 +668,7 @@ class TestDeviceDetailExecCommand:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -492,7 +694,7 @@ class TestDeviceDetailExecCommand:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -513,7 +715,7 @@ class TestDeviceDetailNavigation:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -544,31 +746,40 @@ class TestDeviceDetailNodeStoreFallback:
     """Test NodeStore fallback for IPC mode where discover_devices is empty."""
 
     @pytest.mark.asyncio
-    async def test_device_loaded_from_node_store_when_discover_empty(self, test_device):
-        """Device should load from NodeStore when discover_devices returns empty."""
-        app = StyreneApp()
-
-        mock_store = MagicMock()
-        mock_store.get_all_nodes.return_value = [test_device]
+    async def test_device_loaded_from_ipc_nodes_when_discover_empty(self, test_device):
+        """Device should load from IPC bridge node inventory when live discovery is empty."""
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
+        bridge = MagicMock()
+        bridge.get_nodes = AsyncMock(
+            return_value=[
+                {
+                    "destination_hash": test_device.destination_hash,
+                    "identity_hash": test_device.identity_hash,
+                    "name": test_device.name,
+                    "device_type": test_device.device_type.value,
+                    "last_announce": test_device.last_announce,
+                    "announce_count": test_device.announce_count,
+                }
+            ]
+        )
+        app = MagicMock()
+        app.services.bridge = bridge
+        screen.call_after_refresh = Mock()
 
         with (
             patch(
                 "styrened.tui.screens.mesh_device_detail.discover_devices",
                 return_value=[],
             ),
-            patch(
-                "styrened.services.node_store.get_node_store",
-                return_value=mock_store,
-            ),
+            patch("styrened.tui.utils.device_info_to_mesh", return_value=test_device),
+            patch.object(MeshDeviceDetailScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "refresh"),
         ):
-            async with app.run_test() as pilot:
-                screen = MeshDeviceDetailScreen(device_identity=test_device.identity)
-                await app.push_screen(screen)
-                await pilot.pause()
+            await screen._async_load_device()
 
-                assert isinstance(app.screen, MeshDeviceDetailScreen)
-                assert app.screen.device is not None
-                assert app.screen.device.identity == test_device.identity
+        assert screen.device is not None
+        assert screen.device.identity_hash == test_device.identity_hash
+        screen.call_after_refresh.assert_called_once_with(screen._start_status_refresh)
 
     @pytest.mark.asyncio
     async def test_live_devices_take_precedence_over_node_store(self, test_device):
@@ -599,7 +810,7 @@ class TestDeviceDetailNodeStoreFallback:
             ),
         ):
             async with app.run_test() as pilot:
-                screen = MeshDeviceDetailScreen(device_identity=test_device.identity)
+                screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 await app.push_screen(screen)
                 await pilot.pause()
 
@@ -608,25 +819,24 @@ class TestDeviceDetailNodeStoreFallback:
 
     @pytest.mark.asyncio
     async def test_device_not_found_in_either_source(self):
-        """Device not in NodeStore or discover_devices should show error."""
-        app = StyreneApp()
-
-        mock_store = MagicMock()
-        mock_store.get_all_nodes.return_value = []
+        """Device not in live discovery or stored IPC nodes should show error state."""
+        screen = MeshDeviceDetailScreen(device_identity="nonexistent")
+        bridge = MagicMock()
+        bridge.get_nodes = AsyncMock(return_value=[])
+        app = MagicMock()
+        app.services.bridge = bridge
+        screen.notify = MagicMock()
 
         with (
             patch(
                 "styrened.tui.screens.mesh_device_detail.discover_devices",
                 return_value=[],
             ),
-            patch(
-                "styrened.services.node_store.get_node_store",
-                return_value=mock_store,
-            ),
+            patch.object(MeshDeviceDetailScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "refresh"),
         ):
-            async with app.run_test() as pilot:
-                screen = MeshDeviceDetailScreen(device_identity="nonexistent")
-                await app.push_screen(screen)
-                await pilot.pause()
+            await screen._async_load_device()
 
-                assert app.screen.device is None
+        assert screen.device is None
+        assert screen._device_lookup_complete is True
+        screen.notify.assert_called_once()

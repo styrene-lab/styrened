@@ -68,6 +68,15 @@ def _make_mock_lifecycle(messages=None):
     bridge.get_messages = AsyncMock(return_value=messages or [])
     bridge.mark_read = AsyncMock(return_value=0)
     bridge.send_chat = AsyncMock(return_value={"status": "sent"})
+    bridge.get_status = AsyncMock(return_value={})
+    bridge.get_identity = AsyncMock(return_value={})
+    bridge.get_hub_status = AsyncMock(return_value={})
+    bridge.get_core_config = AsyncMock(return_value={})
+    bridge.get_devices = AsyncMock(return_value=[])
+    bridge.get_conversations = AsyncMock(return_value=[])
+    bridge.get_contacts = AsyncMock(return_value=[])
+    bridge.get_auto_reply = AsyncMock(return_value={})
+    bridge.subscribe_activity = AsyncMock(return_value=None)
 
     lifecycle = MagicMock()
     lifecycle.ipc_bridge = bridge
@@ -88,9 +97,13 @@ def mock_reticulum_for_tests(tmp_path):
         patch(
             "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
         ),
+        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
+        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
+        mock_app_lifecycle.return_value.ipc_bridge = None
         yield
 
 
@@ -130,12 +143,11 @@ class TestBoundaryConditions:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        mock_store = MagicMock()
-        mock_store.get_styrene_nodes.return_value = []
-
         with (
             patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
-            patch("styrened.services.node_store.get_node_store", return_value=mock_store),
+            # Suppress start_discovery's direct daemon-service call; device data comes
+            # from the discover_devices mock above (bridge.get_devices() path).
+            patch("styrened.tui.screens.dashboard.start_discovery"),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
@@ -401,12 +413,9 @@ class TestMultiDeviceScenarios:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Navigate past branch header to a leaf node
-                await pilot.press("down")  # branch header
-                await pilot.pause()
-                await pilot.press("down")  # first device leaf
-                await pilot.pause()
-                await pilot.press("enter")
+                tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                tree._select_by_identity(devices[0].destination_hash)
+                app.screen.action_select_device()
                 await pilot.pause()
 
                 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen

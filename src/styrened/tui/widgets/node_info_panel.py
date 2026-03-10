@@ -12,6 +12,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import Static
+from textual.worker import Worker
 
 from styrened.models.mesh_device import DeviceType
 from styrened.models.rns_error import RNSErrorState
@@ -24,9 +25,75 @@ from styrened.tui.services.hardware import (
     get_network_interfaces,
     get_system_info,
 )
-from styrened.tui.services.reticulum import discover_devices, get_reticulum_status
+from styrened.tui.services.reticulum import get_reticulum_status
 from styrened.tui.themes.semantic import SemanticSymbols
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
+from styrened.ui_state.daemon import (
+    HomeNodeInfoState,
+    HomeNodeLocalState,
+    build_home_node_local_state,
+)
+
+
+class _NodeInfoPanelFallbackStateBuilder:
+    """Compatibility helper for the widget-owned non-IPC fallback path."""
+
+    def read_hardware_inputs(self) -> tuple[SystemInfo | None, NetworkInterface | None, int, str | None]:
+        """Read hardware inputs for local fallback snapshot construction."""
+        try:
+            system_info = get_system_info()
+        except PlatformNotSupportedError as e:
+            return None, None, 0, str(e)
+
+        primary_interface = None
+        try:
+            interfaces = get_network_interfaces()
+            hardware_ifaces = [i for i in interfaces if i.is_hardware and i.is_up and i.ip_address]
+            primary_interface = hardware_ifaces[0] if hardware_ifaces else None
+        except PlatformNotSupportedError:
+            primary_interface = None
+
+        removable_count = 0
+        try:
+            disks = get_disks()
+            removable_count = len([d for d in disks if d.is_removable])
+        except PlatformNotSupportedError:
+            removable_count = 0
+
+        return system_info, primary_interface, removable_count, None
+
+    def read_local_identity_config(self) -> tuple[str, str, str, str | None, str]:
+        """Read local config inputs for fallback/local snapshot construction."""
+        try:
+            config = load_config()
+            mode = config.reticulum.mode.value
+            if hasattr(config, "identity"):
+                return (
+                    mode,
+                    config.identity.display_name,
+                    config.identity.icon,
+                    config.identity.short_name,
+                    getattr(config.identity, "provider", "file"),
+                )
+            return mode, "", "", None, "file"
+        except Exception:
+            return "standalone", "", "", None, "file"
+
+    def build_local_snapshot(self) -> HomeNodeLocalState:
+        """Build a coherent local fallback snapshot for non-IPC widget mode."""
+        system_info, primary_interface, removable_count, hardware_error = self.read_hardware_inputs()
+        mode, display_name, icon, short_name, identity_provider = self.read_local_identity_config()
+        return build_home_node_local_state(
+            system_info=system_info,
+            primary_interface=primary_interface,
+            removable_count=removable_count,
+            hardware_error=hardware_error,
+            mode=mode,
+            identity_display_name=display_name,
+            identity_icon=icon,
+            identity_short_name=short_name,
+            identity_provider=identity_provider,
+        )
 
 
 class NodeInfoPanel(Static):
@@ -38,6 +105,12 @@ class NodeInfoPanel(Static):
     - RETICULUM: Network stack and interface status
     - STYRENE: Mesh participation and hub connection
     """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._identity_worker: Worker | None = None
+        self._mesh_count_worker: Worker | None = None
+        self._fallback_state_builder = _NodeInfoPanelFallbackStateBuilder()
 
     DEFAULT_CSS = """
     NodeInfoPanel {
@@ -319,95 +392,236 @@ class NodeInfoPanel(Static):
 
         return table
 
+    @property
+    def _bridge(self) -> object | None:
+        """Best-effort access to the app bridge without raising in tests/legacy mode."""
+        try:
+            return self.app.services.bridge  # type: ignore[union-attr]
+        except Exception:
+            return None
+
+    def _start_identity_load(self) -> Worker:
+        """Start or replace the identity-loading worker."""
+        self._identity_worker = self.run_worker(
+            self._load_identity_via_bridge(),
+            group="identity-load",
+            exclusive=True,
+        )
+        return self._identity_worker
+
+    def _start_mesh_count_load(self) -> Worker:
+        """Start or replace the mesh-count worker."""
+        self._mesh_count_worker = self.run_worker(
+            self._load_mesh_count_via_bridge(),
+            group="mesh-discovery",
+            exclusive=True,
+        )
+        return self._mesh_count_worker
+
     def on_mount(self) -> None:
         """Load all node data on mount."""
         self._load_all_data()
 
-    def _load_all_data(self) -> None:
-        """Load hardware, Styrene, and Reticulum data.
+    def on_unmount(self) -> None:
+        """Cancel in-flight bridge workers when the panel is removed."""
+        if self._identity_worker is not None:
+            self._identity_worker.cancel()
+            self._identity_worker = None
+        if self._mesh_count_worker is not None:
+            self._mesh_count_worker.cancel()
+            self._mesh_count_worker = None
 
-        Comms data (message counts, conversation counts) is populated
-        externally by the dashboard via IPC, not loaded here.
+    def _load_all_data(self) -> None:
+        """Dispatch to the appropriate widget-owned refresh mode.
+
+        IPC-managed Home treats this widget as presentation-only. Fallback/local
+        mode retains the historical widget-owned refresh path.
         """
-        self._load_hardware_data()
-        self._load_styrene_data()
+        if self.ipc_managed:
+            self._refresh_ipc_managed_presentation()
+            return
+        self._refresh_local_fallback_mode()
+
+    def _refresh_ipc_managed_presentation(self) -> None:
+        """No-op refresh path for presentation-only IPC-managed Home.
+
+        Parent screens own both local and daemon-backed snapshots in this mode.
+        """
+        return
+
+    def _refresh_local_fallback_mode(self) -> None:
+        """Legacy/local widget-owned refresh path used outside IPC-managed Home."""
+        self._load_local_fallback_state()
+        self._refresh_bridge_backed_fallback_state()
+
+    def _load_local_fallback_state(self) -> None:
+        """Load synchronous local fallback state only."""
+        self.apply_home_local_snapshot(self._build_local_fallback_snapshot())
         self._load_reticulum_data()
 
-    def _load_hardware_data(self) -> None:
-        """Load system hardware information."""
-        try:
-            self.system_info = get_system_info()
-        except PlatformNotSupportedError as e:
-            self.hardware_error = str(e)
+    def _refresh_bridge_backed_fallback_state(self) -> None:
+        """Schedule async bridge-backed refreshes for fallback/local mode only."""
+        self._refresh_identity_via_bridge()
+        self._refresh_mesh_count_via_bridge()
+
+    def apply_home_local_snapshot(self, snapshot: HomeNodeLocalState) -> None:
+        """Apply a coherent local Home snapshot to presentation state."""
+        self.system_info = snapshot.system_info
+        self.primary_interface = snapshot.primary_interface
+        self.removable_count = snapshot.removable_count
+        self.hardware_error = snapshot.hardware_error
+        self.mode = snapshot.mode
+        self.identity_display_name = snapshot.identity_display_name
+        self.identity_icon = snapshot.identity_icon
+        self.identity_short_name = snapshot.identity_short_name
+        self.security_tier = snapshot.security_tier
+
+    def _build_local_fallback_snapshot(self) -> HomeNodeLocalState:
+        """Build a coherent local fallback snapshot for non-IPC widget mode."""
+        return self._fallback_state_builder.build_local_snapshot()
+
+    def _load_styrene_local_data(self) -> None:
+        """Load synchronous Styrene-local config only.
+
+        This intentionally excludes bridge-backed identity and mesh queries so
+        callers can refresh local and async state independently.
+        """
+        snapshot = build_home_node_local_state(
+            mode=self.mode,
+            identity_display_name=self.identity_display_name,
+            identity_icon=self.identity_icon,
+            identity_short_name=self.identity_short_name,
+            identity_provider="yubikey" if self.security_tier == "YubiKey/FIDO2" else "file",
+        )
+        mode, display_name, icon, short_name, identity_provider = (
+            self._fallback_state_builder.read_local_identity_config()
+        )
+        snapshot = build_home_node_local_state(
+            system_info=snapshot.system_info,
+            primary_interface=snapshot.primary_interface,
+            removable_count=snapshot.removable_count,
+            hardware_error=snapshot.hardware_error,
+            mode=mode,
+            identity_display_name=display_name,
+            identity_icon=icon,
+            identity_short_name=short_name,
+            identity_provider=identity_provider,
+        )
+        self.mode = snapshot.mode
+        self.identity_display_name = snapshot.identity_display_name
+        self.identity_icon = snapshot.identity_icon
+        self.identity_short_name = snapshot.identity_short_name
+        self.security_tier = snapshot.security_tier
+
+        # In IPC mode, dashboard pushes mesh count and hub status from daemon.
+        # In non-managed mode, report hub status as disabled locally.
+        if not self.ipc_managed:
+            self.hub_status = HubStatus.DISABLED
+
+    def _refresh_identity_via_bridge(self) -> None:
+        """Schedule identity refresh if bridge-backed identity is still missing."""
+        if self.identity_hash or self._bridge is None:
+            return
+        self._start_identity_load()
+
+    def _refresh_mesh_count_via_bridge(self) -> None:
+        """Schedule mesh-count refresh when local mode owns mesh counting."""
+        if self.ipc_managed or self._bridge is None:
+            return
+        self._start_mesh_count_load()
+
+    def _apply_identity_snapshot(self, identity_hash: str, *, security_tier: str | None = None) -> None:
+        """Apply bridge-backed identity data to panel state.
+
+        Kept as a separate integration point so future app-level state models can
+        push identity snapshots into the widget without going through worker code.
+        """
+        self.identity_hash = identity_hash
+
+        if security_tier is not None:
+            self.security_tier = security_tier
             return
 
-        # Network interfaces
-        try:
-            interfaces = get_network_interfaces()
-            hardware_ifaces = [i for i in interfaces if i.is_hardware and i.is_up and i.ip_address]
-            self.primary_interface = hardware_ifaces[0] if hardware_ifaces else None
-        except PlatformNotSupportedError:
-            self.primary_interface = None
-
-        # Storage
-        try:
-            disks = get_disks()
-            self.removable_count = len([d for d in disks if d.is_removable])
-        except PlatformNotSupportedError:
-            self.removable_count = 0
-
-    def _load_styrene_data(self) -> None:
-        """Load Styrene mesh and hub configuration."""
-        # Get config for mode and identity (always relevant, even in IPC mode)
-        config = None
+        provider = "file"
         try:
             config = load_config()
-            self.mode = config.reticulum.mode.value
-
-            # Load identity appearance from config (always — identity is local config, not daemon state)
-            if hasattr(config, "identity"):
-                self.identity_display_name = config.identity.display_name
-                self.identity_icon = config.identity.icon
-                self.identity_short_name = config.identity.short_name
+            if config and hasattr(config, "identity"):
+                provider = getattr(config.identity, "provider", "file")
         except Exception:
-            self.mode = "standalone"
+            provider = "file"
+        if provider == "yubikey":
+            self.security_tier = "YubiKey/FIDO2"
+        else:
+            self.security_tier = "X25519"
 
-        # Load operator identity hash and security tier (works in both modes)
-        if not self.identity_hash:
-            try:
-                from styrened.tui.services.reticulum import get_operator_identity
-                op_hash = get_operator_identity()
-                if op_hash:
-                    self.identity_hash = op_hash
-                    # Security tier reflects identity provider
-                    provider = "file"
-                    if config and hasattr(config, "identity"):
-                        provider = getattr(config.identity, "provider", "file")
-                    if provider == "yubikey":
-                        self.security_tier = "YubiKey/FIDO2"
-                    else:
-                        self.security_tier = "X25519"
-            except Exception:
-                pass
+    async def _load_identity_via_bridge(self) -> None:
+        """Load operator identity via IPC bridge."""
+        try:
+            bridge = self._bridge
+            if bridge is None:
+                return
 
-        # In IPC mode, dashboard pushes mesh count and hub status from daemon
-        if self.ipc_managed:
-            return
+            identity_info = await bridge.get_identity()
+            if identity_info.identity_hash:
+                self._apply_identity_snapshot(identity_info.identity_hash)
+        except Exception:
+            # No fallback - rely on IPC bridge only
+            pass
+    
+    def _apply_mesh_catalog_count(self, device_infos: tuple[object, ...]) -> int:
+        """Apply mesh count from canonical node catalog normalization.
 
-        # Hub connection managed by daemon — status pushed via IPC in managed mode
-        # In non-managed mode, report as disabled (no daemon to poll)
-        self.hub_status = HubStatus.DISABLED
+        This exists as an integration seam for future app-level/shared state so
+        dashboard code can push normalized node inventories into the widget.
+        Returns the normalized mesh node count for parent-owned snapshot builders.
+        """
+        from styrened.ui_state.nodes import NodeCatalogInputs, build_node_catalog
 
-        # Get Styrene mesh device count from discovery
-        from styrened.tui.utils import _deduplicate_by_identity
+        inputs = NodeCatalogInputs(devices=device_infos)
+        catalog = build_node_catalog(inputs)
+        self.styrene_mesh_count = len(catalog.nodes)
+        return self.styrene_mesh_count
 
-        live_nodes = discover_devices()
-        all_devices = {n.destination_hash: n for n in live_nodes}
+    def apply_home_snapshot(self, snapshot: HomeNodeInfoState) -> None:
+        """Apply a coherent dashboard-owned Home snapshot to presentation state."""
+        self.daemon_connected = snapshot.daemon_connected
+        self.daemon_version = snapshot.daemon_version
+        self.daemon_uptime = snapshot.daemon_uptime
+        self.hub_status = snapshot.hub_status
+        self.styrene_mesh_count = snapshot.styrene_mesh_count
+        self.rns_online = snapshot.rns_online
+        self.interface_count = snapshot.interface_count
+        self.propagation_enabled = snapshot.propagation_enabled
+        self.transport_enabled = snapshot.transport_enabled
+        self.active_links = snapshot.active_links
+        self.unread_count = snapshot.unread_count
+        self.conversation_count = snapshot.conversation_count
+        self.contact_count = snapshot.contact_count
+        self.messages_sent = snapshot.messages_sent
+        self.messages_received = snapshot.messages_received
+        self.pending_deliveries = snapshot.pending_deliveries
+        self.auto_reply_enabled = snapshot.auto_reply_enabled
 
-        styrene_nodes = _deduplicate_by_identity(
-            [d for d in all_devices.values() if d.device_type == DeviceType.STYRENE_NODE]
-        )
-        self.styrene_mesh_count = len(styrene_nodes)
+        self.identity_hash = ""
+        if snapshot.local_identity_hash:
+            self._apply_identity_snapshot(
+                snapshot.local_identity_hash,
+                security_tier=self.security_tier,
+            )
+
+    async def _load_mesh_count_via_bridge(self) -> None:
+        """Load mesh device count via IPC bridge."""
+        try:
+            bridge = self._bridge
+            if bridge is None:
+                return
+
+            # Get only Styrene nodes using canonical node catalog normalization
+            device_infos = await bridge.get_devices(styrene_only=True)
+            self._apply_mesh_catalog_count(tuple(device_infos))
+        except Exception:
+            # No fallback - rely on IPC bridge only
+            pass
 
     def _load_reticulum_data(self) -> None:
         """Load Reticulum stack status."""

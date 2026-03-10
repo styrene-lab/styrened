@@ -659,6 +659,15 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     # Parse relay section
     _parse_relay(config, data)
 
+    # Parse yggdrasil section
+    _parse_yggdrasil(config, data)
+
+    # Parse i2p section
+    _parse_i2p(config, data)
+
+    # Parse group thread footprint policy
+    _parse_group_threads(config, data)
+
     # Parse RBAC policy
     config.rbac = _parse_rbac(data)
 
@@ -680,6 +689,81 @@ def _parse_relay(config: CoreConfig, data: dict) -> None:
             allow_permanent=_parse_bool(r.get("allow_permanent", False)),
             allowed_identities=list(r.get("allowed_identities", [])),
         )
+
+
+def _parse_yggdrasil(config: CoreConfig, data: dict) -> None:
+    """Parse yggdrasil section from config data into config.yggdrasil."""
+    if "yggdrasil" not in data or not isinstance(data["yggdrasil"], dict):
+        return
+    from styrened.models.config import YggdrasilConfig
+    from styrened.services.daemon_adapter import DaemonMode
+
+    y = data["yggdrasil"]
+    raw_mode = y.get("mode", DaemonMode.DISABLED.value)
+    try:
+        mode = DaemonMode(raw_mode)
+    except ValueError:
+        mode = DaemonMode.DISABLED
+    peers = y.get("initial_peers", [])
+    if not isinstance(peers, list):
+        peers = []
+    config.yggdrasil = YggdrasilConfig(
+        mode=mode,
+        binary_path=str(y.get("binary_path", "yggdrasil")),
+        listen_port=int(y.get("listen_port", 9002)),
+        admin_socket=str(y.get("admin_socket", "")),
+        multicast=_parse_bool(y.get("multicast", True)),
+        bootstrap_from_rns=_parse_bool(y.get("bootstrap_from_rns", True)),
+        initial_peers=[str(p) for p in peers],
+    )
+
+
+def _parse_i2p(config: CoreConfig, data: dict) -> None:
+    """Parse i2p section from config data into config.i2p."""
+    if "i2p" not in data or not isinstance(data["i2p"], dict):
+        return
+    from styrened.models.config import I2PConfig
+    from styrened.services.daemon_adapter import DaemonMode
+
+    i = data["i2p"]
+    raw_mode = i.get("mode", DaemonMode.DISABLED.value)
+    try:
+        mode = DaemonMode(raw_mode)
+    except ValueError:
+        mode = DaemonMode.DISABLED
+    config.i2p = I2PConfig(
+        mode=mode,
+        http_proxy_host=str(i.get("http_proxy_host", "127.0.0.1")),
+        http_proxy_port=int(i.get("http_proxy_port", 4444)),
+        managed_http_proxy_port=int(i.get("managed_http_proxy_port", 4445)),
+        managed_i2pcontrol_port=int(i.get("managed_i2pcontrol_port", 7651)),
+        b32_address=str(i.get("b32_address", "")),
+        cache_ttl=int(i.get("cache_ttl", 3600)),
+        fetch_timeout=float(i.get("fetch_timeout", 45.0)),
+    )
+
+
+def _parse_group_threads(config: CoreConfig, data: dict) -> None:
+    """Parse group_threads section from config data into config.group_threads."""
+    if "group_threads" not in data or not isinstance(data["group_threads"], dict):
+        return
+    from styrened.models.config import GroupThreadFeatureTierConfig, GroupThreadsConfig
+
+    g = data["group_threads"]
+    raw_tier = str(g.get("feature_tier", GroupThreadFeatureTierConfig.BALANCED.value)).lower()
+    try:
+        feature_tier = GroupThreadFeatureTierConfig(raw_tier)
+    except ValueError:
+        feature_tier = GroupThreadFeatureTierConfig.BALANCED
+    config.group_threads = GroupThreadsConfig(
+        enabled=_parse_bool(g.get("enabled", True)),
+        feature_tier=feature_tier,
+        bounded_retention=_parse_bool(g.get("bounded_retention", False)),
+        auto_media_fetch=_parse_bool(g.get("auto_media_fetch", True)),
+        metadata_first_sync=_parse_bool(g.get("metadata_first_sync", False)),
+        background_catchup=_parse_bool(g.get("background_catchup", True)),
+        first_run_auto_tier=_parse_bool(g.get("first_run_auto_tier", True)),
+    )
 
 
 def save_core_config(config: CoreConfig, config_path: Path | None = None) -> None:
@@ -713,9 +797,9 @@ def save_core_config(config: CoreConfig, config_path: Path | None = None) -> Non
 def serialize_config(config: CoreConfig) -> dict[str, Any]:
     """Serialize CoreConfig to a dictionary suitable for YAML output.
 
-    This is a public API — used by the IPC handler (SAVE_CORE_CONFIG),
-    TUI settings screen, and any consumer that needs to round-trip
-    CoreConfig through a dict representation.
+    This is a public API — used by the IPC handler (SAVE_CORE_CONFIG)
+    and any consumer that needs to round-trip CoreConfig through a dict
+    representation.
 
     Args:
         config: CoreConfig instance to serialize.
@@ -723,240 +807,7 @@ def serialize_config(config: CoreConfig) -> dict[str, Any]:
     Returns:
         Nested dictionary matching the YAML config file structure.
     """
-    # Reticulum section
-    reticulum_dict: dict[str, Any] = {
-        "mode": config.reticulum.mode.value,
-        "auto_initialize": config.reticulum.auto_initialize,
-        "announce_interval": config.reticulum.announce_interval,
-        "hub_enabled": config.reticulum.hub_enabled,
-        "hub_announce_interval": config.reticulum.hub_announce_interval,
-    }
-    if config.reticulum.enable_transport is not None:
-        reticulum_dict["enable_transport"] = config.reticulum.enable_transport
-    if config.reticulum.config_path_override is not None:
-        reticulum_dict["config_path_override"] = str(config.reticulum.config_path_override)
-    if config.reticulum.operator_identity_path is not None:
-        reticulum_dict["operator_identity_path"] = str(config.reticulum.operator_identity_path)
-    if config.reticulum.hub_address is not None:
-        reticulum_dict["hub_address"] = config.reticulum.hub_address
-
-    # Interfaces sub-section
-    interfaces_dict: dict[str, Any] = {
-        "auto": config.reticulum.interfaces.auto,
-        "server": {
-            "enabled": config.reticulum.interfaces.server.enabled,
-            "listen_ip": config.reticulum.interfaces.server.listen_ip,
-            "port": config.reticulum.interfaces.server.port,
-        },
-    }
-    if config.reticulum.interfaces.peers:
-        interfaces_dict["peers"] = [
-            {
-                "host": p.host,
-                "port": p.port,
-                **({"name": p.name} if p.name else {}),
-                "enabled": p.enabled,
-            }
-            for p in config.reticulum.interfaces.peers
-        ]
-    reticulum_dict["interfaces"] = interfaces_dict
-
-    # Identity section
-    identity_dict: dict[str, Any] = {
-        "display_name": config.identity.display_name,
-        "icon": config.identity.icon,
-        "provider": config.identity.provider,
-    }
-    if config.identity.short_name:
-        identity_dict["short_name"] = config.identity.short_name
-    if config.identity.provider == "yubikey" or config.identity.yubikey.credential_id:
-        identity_dict["yubikey"] = {
-            "credential_id": config.identity.yubikey.credential_id,
-            "rp_id": config.identity.yubikey.rp_id,
-            "require_touch": config.identity.yubikey.require_touch,
-        }
-
-    # RPC section
-    rpc_dict: dict[str, Any] = {
-        "enabled": config.rpc.enabled,
-        "relay_mode": config.rpc.relay_mode,
-        "allow_command_execution": config.rpc.allow_command_execution,
-    }
-
-    # Discovery section
-    discovery_dict: dict[str, Any] = {
-        "enabled": config.discovery.enabled,
-        "auto_announce": config.discovery.auto_announce,
-        "access_mode": config.discovery.access_mode.value,
-        "allowed_peers": sorted(config.discovery.allowed_peers),
-        "info_respond": config.discovery.info_respond,
-    }
-    if config.discovery.operator_label:
-        discovery_dict["operator_label"] = config.discovery.operator_label
-
-    # Chat section
-    chat_dict: dict[str, Any] = {
-        "enabled": config.chat.enabled,
-        "auto_reply_mode": config.chat.auto_reply_mode.value,
-        "auto_reply_message": config.chat.auto_reply_message,
-        "auto_reply_cooldown": config.chat.auto_reply_cooldown,
-        "persist_messages": config.chat.persist_messages,
-    }
-    # Include chatbot config
-    chatbot_dict: dict[str, Any] = {
-        "endpoint": config.chat.chatbot.endpoint,
-        "model": config.chat.chatbot.model,
-        "system_prompt": config.chat.chatbot.system_prompt,
-        "max_tokens": config.chat.chatbot.max_tokens,
-        "temperature": config.chat.chatbot.temperature,
-        "max_context_messages": config.chat.chatbot.max_context_messages,
-    }
-    if config.chat.chatbot.api_key:
-        chatbot_dict["api_key"] = config.chat.chatbot.api_key
-    chat_dict["chatbot"] = chatbot_dict
-
-    # API section
-    auth_dict: dict[str, Any] = {
-        "enabled": config.api.auth.enabled,
-        "exempt_localhost": config.api.auth.exempt_localhost,
-        "session_ttl": config.api.auth.session_ttl,
-    }
-
-    api_dict: dict[str, Any] = {
-        "enabled": config.api.enabled,
-        "host": config.api.host,
-        "port": config.api.port,
-        "public_mode": config.api.public_mode,
-        "metrics": {
-            "enabled": config.api.metrics.enabled,
-        },
-        "auth": auth_dict,
-    }
-
-    # IPC section
-    ipc_dict: dict[str, Any] = {
-        "enabled": config.ipc.enabled,
-        "socket_mode": config.ipc.socket_mode,
-    }
-    if config.ipc.socket_path is not None:
-        ipc_dict["socket_path"] = str(config.ipc.socket_path)
-
-    # Notifications section
-    notifications_dict: dict[str, Any] = {
-        "enabled": config.notifications.enabled,
-    }
-    if config.notifications.quiet_hours_start is not None:
-        notifications_dict["quiet_hours_start"] = config.notifications.quiet_hours_start
-    if config.notifications.quiet_hours_end is not None:
-        notifications_dict["quiet_hours_end"] = config.notifications.quiet_hours_end
-
-    # LXMF section
-    lxmf_dict: dict[str, Any] = {
-        "propagation_node": {
-            "enabled": config.lxmf.propagation_node.enabled,
-        },
-        "propagation_limit": config.lxmf.propagation_limit,
-        "sync_limit": config.lxmf.sync_limit,
-        "delivery_limit": config.lxmf.delivery_limit,
-        "autopeer": config.lxmf.autopeer,
-        "autopeer_maxdepth": config.lxmf.autopeer_maxdepth,
-        "max_peers": config.lxmf.max_peers,
-        "from_static_only": config.lxmf.from_static_only,
-        "propagation_cost": config.lxmf.propagation_cost,
-        "propagation_cost_flexibility": config.lxmf.propagation_cost_flexibility,
-        "peering_cost": config.lxmf.peering_cost,
-        "max_peering_cost": config.lxmf.max_peering_cost,
-    }
-    if config.lxmf.propagation_node.name is not None:
-        lxmf_dict["propagation_node"]["name"] = config.lxmf.propagation_node.name
-    if config.lxmf.propagation_destination is not None:
-        lxmf_dict["propagation_destination"] = config.lxmf.propagation_destination
-    if config.lxmf.static_peers:
-        lxmf_dict["static_peers"] = list(config.lxmf.static_peers)
-
-    # Terminal section
-    terminal_dict: dict[str, Any] = {
-        "enabled": config.terminal.enabled,
-        "session_idle_timeout": config.terminal.session_idle_timeout,
-        "max_sessions_per_identity": config.terminal.max_sessions_per_identity,
-        "max_total_sessions": config.terminal.max_total_sessions,
-        "rate_limit_requests": config.terminal.rate_limit_requests,
-    }
-    if config.terminal.default_shell is not None:
-        terminal_dict["default_shell"] = config.terminal.default_shell
-    if config.terminal.allowed_shells:
-        terminal_dict["allowed_shells"] = sorted(config.terminal.allowed_shells)
-    # Page server section
-    page_server_dict: dict[str, Any] = {
-        "enabled": config.page_server.enabled,
-    }
-    if config.page_server.pages_dir is not None:
-        page_server_dict["pages_dir"] = str(config.page_server.pages_dir)
-    if config.page_server.node_name is not None:
-        page_server_dict["node_name"] = config.page_server.node_name
-    if config.page_server.demo:
-        page_server_dict["demo"] = True
-
-    # PQC section
-    pqc_dict: dict[str, Any] = {
-        "enabled": config.pqc.enabled,
-        "rekey_interval_hours": config.pqc.rekey_interval_hours,
-        "require_pqc_for_rpc": config.pqc.require_pqc_for_rpc,
-        "auto_initiate": config.pqc.auto_initiate,
-    }
-
-    result: dict[str, Any] = {
-        "profile": config.profile.value,
-        "reticulum": reticulum_dict,
-        "identity": identity_dict,
-        "rpc": rpc_dict,
-        "discovery": discovery_dict,
-        "chat": chat_dict,
-        "api": api_dict,
-        "ipc": ipc_dict,
-        "notifications": notifications_dict,
-        "lxmf": lxmf_dict,
-        "terminal": terminal_dict,
-        "page_server": page_server_dict,
-        "pqc": pqc_dict,
-        "mesh_vpn": {
-            "enable": config.mesh_vpn.enable,
-            "listen_port": config.mesh_vpn.listen_port,
-            "subnet_prefix": config.mesh_vpn.subnet_prefix,
-            "gateway": config.mesh_vpn.gateway,
-            "endpoint": config.mesh_vpn.endpoint,
-        },
-        "relay": {
-            "enabled": config.relay.enabled,
-            "max_sessions": config.relay.max_sessions,
-            "max_per_identity": config.relay.max_per_identity,
-            "max_bytes_per_session": config.relay.max_bytes_per_session,
-            "idle_timeout": config.relay.idle_timeout,
-            "allow_permanent": config.relay.allow_permanent,
-            "allowed_identities": config.relay.allowed_identities,
-        },
-    }
-
-    # Serialize RBAC policy
-    rbac_roster = []
-    for entry in sorted(config.rbac.roster.values(), key=lambda e: e.identity_hash):
-        d: dict[str, Any] = {
-            "identity": entry.identity_hash,
-            "role": entry.role.name.lower(),
-        }
-        if entry.label:
-            d["label"] = entry.label
-        if entry.grants:
-            d["grants"] = sorted(entry.grants)
-        rbac_roster.append(d)
-
-    result["rbac"] = {
-        "default_role": config.rbac.default_role.name.lower(),
-        "roster": rbac_roster,
-        "blocked": config.rbac.blocked,
-    }
-
-    return result
+    return config.to_dict()
 
 
 def validate_core_config(

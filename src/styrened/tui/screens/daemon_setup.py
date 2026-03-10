@@ -206,17 +206,16 @@ class DaemonSetupScreen(Screen[bool]):
             self._enable_buttons()
 
     async def _verify_ipc(self, timeout: float = 10.0) -> bool:
-        """Verify daemon is reachable via IPC ping.
+        """Verify daemon is reachable via IPC bridge.
 
         Args:
             timeout: Maximum time to wait for daemon to respond.
 
         Returns:
-            True if daemon responded to ping.
+            True if daemon responded successfully.
         """
         import asyncio
-
-        from styrened.ipc import ControlClient, get_default_socket_path
+        from styrened.ipc.server import get_default_socket_path
 
         socket_path = get_default_socket_path()
         elapsed = 0.0
@@ -225,15 +224,14 @@ class DaemonSetupScreen(Screen[bool]):
         while elapsed < timeout:
             if socket_path.exists():
                 try:
-                    client = ControlClient(socket_path=socket_path, timeout=3.0)
-                    try:
-                        await client.connect()
-                        result = await client.ping(timeout=2.0)
-                        if result:
-                            return True
-                    finally:
-                        await client.disconnect()
+                    # Use TUIServices bridge instead of direct ControlClient
+                    bridge = self.app.services.bridge
+                    if bridge:
+                        # Simple status call to verify daemon is responding
+                        await bridge.get_status()
+                        return True
                 except Exception:
+                    # Daemon may not be fully ready yet, continue polling
                     pass
 
             await asyncio.sleep(interval)

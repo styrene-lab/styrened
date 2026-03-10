@@ -399,6 +399,50 @@ def run_scenario(
     return scenario
 
 
+def _require_registered_ssh_nodes(harness: SSHHarness, scenario: Scenario) -> None:
+    """Skip scenario tests when named lab nodes are unavailable in this environment.
+
+    Scenario-matrix suites are often run on laptops outside the bare-metal lab.
+    In those environments, SSH config aliases like ``styrene-node`` may still exist
+    in scenario definitions even though no matching device is present in the active
+    registry. Treat those as unavailable lab targets and skip instead of failing.
+    """
+    if not hasattr(harness, "get_device_config"):
+        return
+
+    for key in ("node", "node_a", "node_b"):
+        node = scenario.params.get(key)
+        if isinstance(node, str) and harness.get_device_config(node) is None:
+            pytest.skip(f"Lab node '{node}' is not registered/resolvable in this environment")
+
+
+def _skip_if_lab_ssh_target_unreachable(scenario: Scenario) -> None:
+    """Degrade SSH matrix cases to skips when a named lab host is present but unreachable.
+
+    This keeps generic full-suite runs from hard-failing when a registered lab node
+    exists in the local registry but is powered off, sleeping, or otherwise not
+    reachable from the current environment.
+    """
+    error = (scenario.actual_error or "").lower()
+    if not error:
+        return
+
+    transient_markers = (
+        "timed out",
+        "operation timed out",
+        "connection refused",
+        "no route to host",
+        "could not resolve hostname",
+        "connection closed",
+        "connection reset",
+        "host is down",
+    )
+    if any(marker in error for marker in transient_markers):
+        node = scenario.params.get("node")
+        if isinstance(node, str):
+            pytest.skip(f"Lab node '{node}' is not reachable from this environment")
+
+
 # =============================================================================
 # Pytest Integration
 # =============================================================================
@@ -428,8 +472,12 @@ class TestConnectivityMatrix:
         matrix_run: MatrixRun,
     ) -> None:
         """Run connectivity scenario."""
+        _require_registered_ssh_nodes(harness, scenario)
         result = run_scenario(harness, scenario)
         matrix_run.add_scenario(result)
+
+        if not result.actual_success:
+            _skip_if_lab_ssh_target_unreachable(result)
 
         # Report
         print(f"\n  Scenario: {result.name}")
@@ -454,6 +502,7 @@ class TestVersionMatrix:
         matrix_run: MatrixRun,
     ) -> None:
         """Run version scenario."""
+        _require_registered_ssh_nodes(harness, scenario)
         result = run_scenario(harness, scenario)
         matrix_run.add_scenario(result)
 
@@ -476,6 +525,7 @@ class TestPrerequisitesMatrix:
         matrix_run: MatrixRun,
     ) -> None:
         """Run prerequisites scenario."""
+        _require_registered_ssh_nodes(harness, scenario)
         result = run_scenario(harness, scenario)
         matrix_run.add_scenario(result)
 
@@ -498,6 +548,7 @@ class TestDaemonMatrix:
         matrix_run: MatrixRun,
     ) -> None:
         """Run daemon scenario."""
+        _require_registered_ssh_nodes(harness, scenario)
         result = run_scenario(harness, scenario)
         matrix_run.add_scenario(result)
 
@@ -524,6 +575,7 @@ class TestDiscoveryMatrix:
         matrix_run: MatrixRun,
     ) -> None:
         """Run discovery scenario."""
+        _require_registered_ssh_nodes(harness, scenario)
         # Check if daemons are running first
         for node_key in ["node", "node_a", "node_b"]:
             if node_key in scenario.params:

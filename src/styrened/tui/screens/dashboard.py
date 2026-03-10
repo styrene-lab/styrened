@@ -7,18 +7,38 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Footer, Header, Tree
 from textual.widgets.tree import TreeNode
+from textual.worker import Worker
 
+from styrened.ipc.protocol import IPCMessageType
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
+from styrened.services.hardware import (
+    PlatformNotSupportedError,
+    get_disks,
+    get_network_interfaces,
+    get_system_info,
+)
+from styrened.tui.services.config import load_config
 from styrened.tui.services.reticulum import discover_devices, start_discovery
-from styrened.tui.utils import _deduplicate_by_identity
+from styrened.tui.screens.dashboard_projection import (
+    DashboardTreeProjection,
+    build_dashboard_tree_projection,
+)
 from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
 if TYPE_CHECKING:
     from styrened.tui.app import StyreneApp
+from styrened.ui_state import WorkspaceId
+from styrened.ui_state.daemon import (
+    LocalDaemonInputs,
+    build_home_node_info_state,
+    build_home_node_local_state,
+    build_local_daemon_state,
+)
 
 
 class MeshDeviceTree(Tree[str]):
@@ -95,7 +115,8 @@ class MeshDeviceTree(Tree[str]):
             bridge = app.services.bridge
             if bridge is None:
                 return {}
-            return await bridge.get_unread_counts()
+            result = await bridge.get_unread_counts()
+            return result if isinstance(result, dict) else {}
         except Exception:
             return {}
 
@@ -120,25 +141,35 @@ class MeshDeviceTree(Tree[str]):
         app: StyreneApp = self.app  # type: ignore[assignment]
         bridge = app.services.bridge
 
-        # Fetch stored nodes via IPC + live discovery nodes
-        stored_nodes: list[MeshDevice] = []
-        if bridge is not None:
-            try:
-                stored_raw = await bridge.get_nodes(styrene_only=True)
-                stored_nodes = [self._device_info_to_mesh(d) for d in stored_raw]
-            except Exception:
-                pass
-
+        # Dashboard stays live-biased: current discovery belongs here, while
+        # broader stored history is moving toward the Nodes/Exploration workspace.
         live_nodes = discover_devices()
 
-        all_devices_dict = {n.destination_hash: n for n in stored_nodes}
-        all_devices_dict.update({n.destination_hash: n for n in live_nodes})
+        # Filter for Styrene nodes only and drop very old lost nodes so the
+        # home dashboard does not fill with stale history.
+        import time
 
-        devices = [
-            d for d in all_devices_dict.values()
+        now = time.time()
+        styrene_devices = [
+            d for d in live_nodes
             if d.device_type == DeviceType.STYRENE_NODE
+            and not (
+                d.status == NodeStatus.LOST and (now - float(d.last_announce or 0)) > 1800
+            )
         ]
-        devices = _deduplicate_by_identity(devices)
+        
+        # Use canonical shared node-catalog normalization instead of screen helper
+        from styrened.ui_state.nodes import NodeCatalogInputs, build_node_catalog
+        
+        inputs = NodeCatalogInputs(devices=tuple(styrene_devices))
+        catalog = build_node_catalog(inputs)
+        
+        # Convert back to MeshDevice list for tree population
+        devices = [
+            # Find the representative device for each identity
+            next(d for d in styrene_devices if d.identity_hash == node.identity_hash)
+            for node in catalog.nodes
+        ]
 
         unread_counts = await self._async_get_unread_counts()
         cascade = get_color_cascade()
@@ -148,17 +179,33 @@ class MeshDeviceTree(Tree[str]):
         if bridge is not None:
             try:
                 config_dict = await bridge.get_core_config()
-                rbac_dict = config_dict.get("rbac", {})
-                from styrened.models.rbac import RBACPolicy
-                rbac = RBACPolicy.from_dict(rbac_dict)
+                if isinstance(config_dict, dict):
+                    rbac_dict = config_dict.get("rbac", {})
+                    from styrened.models.rbac import RBACPolicy
+                    rbac = RBACPolicy.from_dict(rbac_dict)
             except Exception:
                 pass
 
+        devices_by_identity = {
+            d.identity_hash: d
+            for d in devices
+            if d.identity_hash
+        }
+        projection = build_dashboard_tree_projection(
+            catalog=catalog,
+            devices_by_identity=devices_by_identity,
+            unread_counts=unread_counts,
+            rbac=rbac,
+        )
+
         # Cache for sync lookups (_device_by_destination_hash, _refresh_other_labels)
-        self._device_cache = {d.destination_hash: d for d in devices}
+        self._device_cache = {
+            destination_hash: row.device
+            for destination_hash, row in projection.by_destination.items()
+        }
         self._last_rbac = rbac
 
-        self._render_tree(devices, unread_counts, cascade, rbac)
+        self._render_tree(projection, cascade, rbac)
 
     @staticmethod
     def _device_info_to_mesh(info: Any) -> MeshDevice:
@@ -169,12 +216,11 @@ class MeshDeviceTree(Tree[str]):
 
     def _render_tree(
         self,
-        devices: list[MeshDevice],
-        unread_counts: dict[str, int],
+        projection: DashboardTreeProjection,
         cascade: Any,
         rbac: Any,
     ) -> None:
-        """Rebuild the tree widget with device data. Called after async fetch."""
+        """Rebuild the tree widget from a thin dashboard projection snapshot."""
 
         # Restore cursor position
         selected_identity: str | None = None
@@ -183,42 +229,40 @@ class MeshDeviceTree(Tree[str]):
 
         self.clear()
 
-        if not devices:
+        if not projection.my_mesh and not projection.other_nodes:
             self.root.add_leaf(
                 f"[{cascade.dim}]No Styrene nodes discovered[/]",
                 data=None,
             )
             return
 
-        # Split into my mesh vs other — single pass, single config read
-        my_devices = [d for d in devices if self._is_my_mesh(d, rbac)]
-        other_devices = [d for d in devices if not self._is_my_mesh(d, rbac)]
+        my_rows = projection.my_mesh
+        other_rows = projection.other_nodes
 
         # --- MY MESH section ---
         my_label = f"[{cascade.bright} bold]MY MESH[/]"
         my_branch = self.root.add(my_label, data=None, expand=True)
 
-        if my_devices:
+        if my_rows:
             # Sub-group by interface within MY MESH
-            groups: dict[str, list[MeshDevice]] = {}
-            for device in my_devices:
-                key = device.discovered_via or "_direct"
-                groups.setdefault(key, []).append(device)
+            groups: dict[str, list[Any]] = {}
+            for row in my_rows:
+                groups.setdefault(row.interface_group, []).append(row)
 
             sorted_keys = sorted(groups.keys(), key=lambda k: (k == "_direct", k.lower()))
             for group_key in sorted_keys:
-                group_devices = sorted(
-                    groups[group_key], key=lambda d: d.last_announce, reverse=True
+                group_rows = sorted(
+                    groups[group_key], key=lambda row: row.device.last_announce, reverse=True
                 )
                 if group_key == "_direct":
                     iface_label = f"[{cascade.dim}]direct[/]"
                 else:
                     iface_label = f"[{cascade.medium}]{group_key}[/]"
                 iface_branch = my_branch.add(iface_label, data=None, expand=True)
-                for device in group_devices:
-                    line = self._format_my_mesh_line(device, cascade, unread_counts, rbac)
+                for row in group_rows:
+                    line = self._format_my_mesh_line(row, cascade, rbac)
                     # node.data stores destination_hash — used for all navigation.
-                    iface_branch.add_leaf(line, data=device.destination_hash)
+                    iface_branch.add_leaf(line, data=row.destination_hash)
         else:
             my_branch.add_leaf(
                 f"[{cascade.dim}]No trusted nodes — add nodes via Settings > Security[/]",
@@ -229,14 +273,14 @@ class MeshDeviceTree(Tree[str]):
         other_label = f"[{cascade.dim} bold]OTHER STYRENE NODES[/]"
         other_branch = self.root.add(other_label, data=None, expand=False)
 
-        if other_devices:
-            sorted_other = sorted(other_devices, key=lambda d: d.last_announce, reverse=True)
-            for device in sorted_other:
-                line = self._format_other_line(device, cascade)
+        if other_rows:
+            sorted_other = sorted(other_rows, key=lambda row: row.device.last_announce, reverse=True)
+            for row in sorted_other:
+                line = self._format_other_line(row, cascade)
                 # node.data stores destination_hash — used for all navigation.
-                other_branch.add_leaf(line, data=device.destination_hash)
+                other_branch.add_leaf(line, data=row.destination_hash)
             # Queue meta requests for any other nodes we haven't queried yet
-            self._queue_meta_requests(other_devices)
+            self._queue_meta_requests([row.device for row in other_rows])
         else:
             other_branch.add_leaf(
                 f"[{cascade.dim}]No other nodes visible[/]",
@@ -248,9 +292,8 @@ class MeshDeviceTree(Tree[str]):
 
     def _format_my_mesh_line(
         self,
-        device: MeshDevice,
+        row: Any,
         cascade: Any,
-        unread_counts: dict[str, int],
         rbac: Any = None,
     ) -> str:
         """Format a trusted mesh node — full detail with role badge.
@@ -259,6 +302,7 @@ class MeshDeviceTree(Tree[str]):
             rbac: Pre-loaded RBACPolicy (avoids disk read per device).
         """
         from styrened.models.rbac import Role
+        device = row.device
         status_syms = {
             NodeStatus.ACTIVE: f"[{cascade.bright}]●[/]",
             NodeStatus.STALE: f"[{cascade.dim}]◐[/]",
@@ -267,16 +311,17 @@ class MeshDeviceTree(Tree[str]):
         status = status_syms.get(device.status, f"[{cascade.dim}]?[/]")
         name = f"[{cascade.bright} bold]{device.name}[/]"
 
-        # Compute display fragments first (needed by all code paths)
-        unread = unread_counts.get(device.destination_hash, 0)
-        unread_text = f" [{cascade.bright} bold]✉{unread}[/]" if unread > 0 else ""
+        unread_text = (
+            f" [{cascade.bright} bold]✉{row.unread_count}[/]"
+            if row.unread_count > 0
+            else ""
+        )
 
         seen = device.last_seen_display
         if device.announce_count > 1:
             seen += f" ×{device.announce_count}"
         last_seen = f"[{cascade.dim}]{seen}[/]"
 
-        # Role badge — use pre-loaded rbac (no disk fallback)
         role_badge = ""
         if rbac is not None:
             try:
@@ -292,8 +337,9 @@ class MeshDeviceTree(Tree[str]):
 
         return f"{status} {name}{role_badge}  {last_seen}{unread_text}"
 
-    def _format_other_line(self, device: MeshDevice, cascade: Any) -> str:
+    def _format_other_line(self, row: Any, cascade: Any) -> str:
         """Format an unknown/foreign node — minimal, shows meta if available."""
+        device = row.device
         status_syms = {
             NodeStatus.ACTIVE: f"[{cascade.medium}]●[/]",
             NodeStatus.STALE: f"[{cascade.dim}]◐[/]",
@@ -341,9 +387,9 @@ class MeshDeviceTree(Tree[str]):
         likely running an older version without /meta support, or are
         unreachable over direct link.
 
-        Uses the same retry limit as services.direct_link.META_MAX_RETRIES.
+        Uses the same retry limit as DirectLink service (3 attempts).
         """
-        from styrened.services.direct_link import META_MAX_RETRIES as _META_MAX_RETRIES
+        _META_MAX_RETRIES = 3  # Same as services.direct_link.META_MAX_RETRIES
         for device in devices:
             if not device.identity_hash or not device.destination_hash:
                 continue
@@ -511,18 +557,25 @@ class MeshDeviceTree(Tree[str]):
 
 
 class DashboardScreen(Screen[None]):
-    """Main dashboard screen showing fleet overview."""
+    """Home workspace with local summaries, current nodes, and activity."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("enter", "select_device", "Details"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh", priority=True),
-        Binding("e", "open_exploration", "Explore", show=True),
+        Binding("n", "open_exploration", "Nodes", show=True),
+        Binding("e", "open_exploration", "Nodes", show=False),
         Binding("i", "request_identity", "Request ID", show=False),
     ]
 
     _last_discovery_refresh: float = 0.0
     _discovery_debounce_seconds: float = 2.0
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._device_refresh_timer: Timer | None = None
+        self._hub_retry_timer: Timer | None = None
+        self._activity_worker: Worker | None = None
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -535,32 +588,73 @@ class DashboardScreen(Screen[None]):
     def on_mount(self) -> None:
         """Start device discovery when dashboard mounts."""
         start_discovery(callback=self._on_device_discovered)
-        self.set_interval(15.0, self._refresh_device_table)
-        self.set_interval(30.0, self._retry_hub_connection)
+        self._device_refresh_timer = self.set_interval(15.0, self._refresh_device_table)
+        self._hub_retry_timer = self.set_interval(30.0, self._retry_hub_connection)
+
+        try:
+            panel = self.query_one(NodeInfoPanel)
+            panel.ipc_managed = self._ipc_bridge is not None
+            self._apply_local_panel_snapshot(panel)
+            if self._ipc_bridge is not None:
+                panel.daemon_connected = False
+        except Exception:
+            pass
 
         if self._ipc_bridge is not None:
-            try:
-                panel = self.query_one(NodeInfoPanel)
-                panel.ipc_managed = True
-                panel.daemon_connected = False
-            except Exception:
-                pass
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
-            self.run_worker(self._subscribe_activity())
+            self._activity_worker = self.run_worker(
+                self._subscribe_activity(),
+                group="dashboard-activity",
+                exclusive=True,
+            )
+
+    def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
+        """Pause periodic refresh while Home is not the active screen."""
+        if self._device_refresh_timer is not None:
+            self._device_refresh_timer.pause()
+        if self._hub_retry_timer is not None:
+            self._hub_retry_timer.pause()
+        if self._activity_worker is not None:
+            self._activity_worker.cancel()
+            self._activity_worker = None
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
         """Handle screen resume - refresh themed panels."""
+        if self._device_refresh_timer is not None:
+            self._device_refresh_timer.resume()
+        if self._hub_retry_timer is not None:
+            self._hub_retry_timer.resume()
+
         for panel in self.query(HighlightedPanel):
             panel.refresh_theme()
 
         node_info_panel = self.query_one(NodeInfoPanel)
-        node_info_panel.refresh_data()
+        self._apply_local_panel_snapshot(node_info_panel)
+        if self._ipc_bridge is None:
+            node_info_panel.refresh_data()
 
         for tree in self.query(MeshDeviceTree):
             tree.refresh_data()
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self._activity_worker = self.run_worker(
+                self._subscribe_activity(),
+                group="dashboard-activity",
+                exclusive=True,
+            )
+
+    def on_unmount(self) -> None:
+        """Stop periodic refresh timers when Home is removed."""
+        if self._device_refresh_timer is not None:
+            self._device_refresh_timer.stop()
+            self._device_refresh_timer = None
+        if self._hub_retry_timer is not None:
+            self._hub_retry_timer.stop()
+            self._hub_retry_timer = None
+        if self._activity_worker is not None:
+            self._activity_worker.cancel()
+            self._activity_worker = None
 
     def _retry_hub_connection(self) -> None:
         """Periodically refresh hub status via IPC.
@@ -570,22 +664,73 @@ class DashboardScreen(Screen[None]):
         if self._ipc_bridge is not None:
             self.run_worker(self._refresh_hub_status(), group="hub-status")
 
-    async def _refresh_hub_status(self) -> None:
-        """Fetch hub status from daemon and update the info panel."""
+    def _apply_local_panel_snapshot(self, panel: NodeInfoPanel) -> None:
+        """Push local hardware/config Home snapshot into NodeInfoPanel."""
+        system_info = None
+        primary_interface = None
+        removable_count = 0
+        hardware_error = None
+        mode = "standalone"
+        identity_display_name = ""
+        identity_icon = ""
+        identity_short_name = None
+        identity_provider = "file"
+
         try:
-            app: StyreneApp = self.app  # type: ignore[assignment]
-            bridge = app.services.bridge
-            if bridge is None:
-                return
-            hub_data = await bridge.get_hub_status()
-            if hub_data:
-                try:
-                    panel = self.query_one(NodeInfoPanel)
-                    panel.daemon_connected = hub_data.get("is_connected", False)
-                except Exception:
-                    pass
+            system_info = get_system_info()
+            interfaces = get_network_interfaces()
+            hardware_ifaces = [i for i in interfaces if i.is_hardware and i.is_up and i.ip_address]
+            primary_interface = hardware_ifaces[0] if hardware_ifaces else None
+            disks = get_disks()
+            removable_count = len([d for d in disks if d.is_removable])
+        except PlatformNotSupportedError as exc:
+            hardware_error = str(exc)
+
+        try:
+            config = load_config()
+            mode = config.reticulum.mode.value
+            if hasattr(config, "identity"):
+                identity_display_name = config.identity.display_name
+                identity_icon = config.identity.icon
+                identity_short_name = config.identity.short_name
+                identity_provider = getattr(config.identity, "provider", "file")
         except Exception:
             pass
+
+        panel.apply_home_local_snapshot(
+            build_home_node_local_state(
+                system_info=system_info,
+                primary_interface=primary_interface,
+                removable_count=removable_count,
+                hardware_error=hardware_error,
+                mode=mode,
+                identity_display_name=identity_display_name,
+                identity_icon=identity_icon,
+                identity_short_name=identity_short_name,
+                identity_provider=identity_provider,
+            )
+        )
+
+    def _apply_local_daemon_snapshot(
+        self,
+        panel: NodeInfoPanel,
+        *,
+        daemon_state: object,
+        mesh_device_infos: tuple[object, ...],
+        raw_status: object | None = None,
+    ) -> None:
+        """Push dashboard-owned daemon state into the Home status panel."""
+        mesh_node_count = panel._apply_mesh_catalog_count(mesh_device_infos)
+        home_snapshot = build_home_node_info_state(
+            daemon_state=daemon_state,
+            daemon_status=raw_status,
+            mesh_node_count=mesh_node_count,
+        )
+        panel.apply_home_snapshot(home_snapshot)
+
+    async def _refresh_hub_status(self) -> None:
+        """Refresh the Home status snapshot from dashboard-owned daemon state."""
+        await self._fetch_daemon_status()
 
     def _on_device_discovered(self, device: MeshDevice) -> None:
         """Handle newly discovered device - refresh table with debounce."""
@@ -612,17 +757,17 @@ class DashboardScreen(Screen[None]):
         with Container(id="dashboard-container"):
             yield HighlightedPanel(
                 NodeInfoPanel(id="node-info-panel-widget"),
-                title="NODE INFO",
+                title="HOME STATUS",
                 id="node-info-panel",
             )
             yield HighlightedPanel(
                 MeshDeviceTree(id="mesh-device-tree"),
-                title="MESH DEVICES",
+                title="CURRENT NODES",
                 id="mesh-devices-panel",
             )
             yield HighlightedPanel(
                 ActivityFeedWidget(id="activity-feed-widget"),
-                title="ACTIVITY",
+                title="RECENT ACTIVITY",
                 id="activity-feed-panel",
             )
         yield Footer()
@@ -632,7 +777,12 @@ class DashboardScreen(Screen[None]):
         if event.node.data:
             device_identity = str(event.node.data)
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+            self.app.push_screen(
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    origin_workspace=WorkspaceId.HOME,
+                )
+            )
 
     def _get_selected_identity(self) -> str | None:
         """Get the identity of the currently selected tree node."""
@@ -644,7 +794,12 @@ class DashboardScreen(Screen[None]):
         device_identity = self._get_selected_identity()
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
-            self.app.push_screen(MeshDeviceDetailScreen(device_identity=device_identity))
+            self.app.push_screen(
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    origin_workspace=WorkspaceId.HOME,
+                )
+            )
 
     def action_open_chat(self) -> None:
         """Open chat tab directly for the selected device."""
@@ -652,15 +807,18 @@ class DashboardScreen(Screen[None]):
         if device_identity:
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
             self.app.push_screen(
-                MeshDeviceDetailScreen(device_identity=device_identity, initial_tab="chat")
+                MeshDeviceDetailScreen(
+                    device_identity=device_identity,
+                    initial_tab="chat",
+                    origin_workspace=WorkspaceId.HOME,
+                )
             )
         else:
             self.app.notify("Select a device in the mesh tree first.", severity="warning")
 
     def action_open_exploration(self) -> None:
-        """Open exploration screen for all Reticulum announces."""
-        from styrened.tui.screens.exploration import ExplorationScreen
-        self.app.push_screen(ExplorationScreen())
+        """Open the canonical Nodes workspace from Home."""
+        self.app.action_open_nodes()
 
     def action_request_identity(self) -> None:
         """Send an /info request to the selected OTHER node.
@@ -687,7 +845,9 @@ class DashboardScreen(Screen[None]):
 
         try:
             node_info = self.query_one(NodeInfoPanel)
-            node_info.refresh_data()
+            self._apply_local_panel_snapshot(node_info)
+            if self._ipc_bridge is None:
+                node_info.refresh_data()
         except Exception:
             pass
 
@@ -705,7 +865,7 @@ class DashboardScreen(Screen[None]):
         self.app._check_for_updates()
 
     async def _fetch_daemon_status(self) -> None:
-        """Fetch daemon status and comms data via IPC bridge."""
+        """Fetch dashboard-owned Home status and push it into NodeInfoPanel."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
@@ -715,64 +875,91 @@ class DashboardScreen(Screen[None]):
         except Exception:
             return
 
-        try:
-            status = await bridge.get_status()
-            panel.daemon_connected = True
-            if hasattr(status, "uptime"):
-                panel.daemon_uptime = status.uptime
-            if hasattr(status, "daemon_version") and status.daemon_version:
-                panel.daemon_version = status.daemon_version
-            if hasattr(status, "propagation_enabled"):
-                panel.propagation_enabled = status.propagation_enabled
-            if hasattr(status, "transport_enabled"):
-                panel.transport_enabled = status.transport_enabled
-            if hasattr(status, "active_links"):
-                panel.active_links = status.active_links
-            if hasattr(status, "styrene_node_count"):
-                panel.styrene_mesh_count = status.styrene_node_count
-            if hasattr(status, "interface_count"):
-                panel.interface_count = status.interface_count
-            if hasattr(status, "rns_initialized"):
-                panel.rns_online = status.rns_initialized
-        except Exception:
-            panel.daemon_connected = False
-            return
-
         import asyncio
-        convs_task = asyncio.create_task(bridge.get_conversations())
-        contacts_task = asyncio.create_task(bridge.get_contacts())
-        auto_reply_task = asyncio.create_task(bridge.get_auto_reply())
+
+        tasks = {
+            "status": asyncio.create_task(bridge.get_status()),
+            "identity": asyncio.create_task(bridge.get_identity()),
+            "hub": asyncio.create_task(bridge.get_hub_status()),
+            "config": asyncio.create_task(bridge.get_core_config()),
+            "mesh_devices": asyncio.create_task(bridge.get_devices(styrene_only=True)),
+            "conversations": asyncio.create_task(bridge.get_conversations()),
+            "contacts": asyncio.create_task(bridge.get_contacts()),
+            "auto_reply": asyncio.create_task(bridge.get_auto_reply()),
+        }
 
         try:
-            convs = await convs_task
-            panel.conversation_count = len(convs)
-            panel.unread_count = sum(c.get("unread_count", 0) for c in convs)
-            total_messages = sum(c.get("message_count", 0) for c in convs)
-            panel.messages_sent = 0
-            panel.messages_received = total_messages
-            panel.pending_deliveries = 0
-        except Exception:
-            pass
+            try:
+                status = await tasks["status"]
+                identity = await tasks["identity"]
+                hub_data = await tasks["hub"]
+                core_config = await tasks["config"]
+                mesh_devices = tuple(await tasks["mesh_devices"])
+            except Exception:
+                panel.daemon_connected = False
+                return
 
-        try:
-            contacts = await contacts_task
-            panel.contact_count = len(contacts)
-        except Exception:
-            pass
+            daemon_state = build_local_daemon_state(
+                LocalDaemonInputs(
+                    daemon_status=status,
+                    identity_info=identity,
+                    hub_status=hub_data if isinstance(hub_data, dict) else None,
+                    core_config=core_config if isinstance(core_config, dict) else None,
+                )
+            )
+            self._apply_local_daemon_snapshot(
+                panel,
+                daemon_state=daemon_state,
+                mesh_device_infos=mesh_devices,
+                raw_status=status,
+            )
 
-        try:
-            auto_reply = await auto_reply_task
-            panel.auto_reply_enabled = bool(auto_reply.get("enabled", False))
-        except Exception:
-            pass
+            convs: list[dict[str, Any]] = []
+            contacts: list[dict[str, Any]] = []
+            auto_reply: dict[str, Any] = {}
+
+            try:
+                convs = await tasks["conversations"]
+            except Exception:
+                pass
+
+            try:
+                contacts = await tasks["contacts"]
+            except Exception:
+                pass
+
+            try:
+                auto_reply = await tasks["auto_reply"]
+            except Exception:
+                pass
+
+            mesh_node_count = panel.styrene_mesh_count
+            home_snapshot = build_home_node_info_state(
+                daemon_state=daemon_state,
+                daemon_status=status,
+                mesh_node_count=mesh_node_count,
+                conversations=convs,
+                contacts=contacts,
+                auto_reply=auto_reply,
+            )
+            panel.apply_home_snapshot(home_snapshot)
+        finally:
+            pending_tasks = [task for task in tasks.values() if not task.done()]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
     async def _subscribe_activity(self) -> None:
-        """Subscribe to activity events via IPC."""
+        """Subscribe to dashboard activity events via IPC."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
         try:
-            async for event in bridge.subscribe_events():
+            await bridge.subscribe_activity()
+            async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
+                if event_type != IPCMessageType.EVENT_ACTIVITY:
+                    continue
                 try:
                     activity_widget = self.query_one(ActivityFeedWidget)
                     activity_widget.add_event(

@@ -23,10 +23,12 @@ async def test_app_starts_with_dashboard(app: StyreneApp):
 
 @pytest.mark.asyncio
 async def test_quit_binding(app: StyreneApp):
-    """Verify ctrl+c quits the app."""
+    """Verify double ctrl+c quits the app (single press pops to dashboard)."""
     async with app.run_test() as pilot:
+        # First ctrl+c pops back to dashboard; second ctrl+c from dashboard exits
         await pilot.press("ctrl+c")
-        # App should exit after ctrl+c is pressed
+        await pilot.press("ctrl+c")
+        # App should exit after double ctrl+c
         assert app._exit
 
 

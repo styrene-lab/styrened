@@ -531,9 +531,15 @@ class TerminalWidget(Widget, can_focus=True):
             bridge = self._get_bridge()
             if bridge is not None:
                 try:
-                    asyncio.get_event_loop().create_task(
-                        bridge.terminal_close(self.session_id)
-                    )
+                    task = asyncio.create_task(bridge.terminal_close(self.session_id))
+
+                    def _consume_close_result(t: asyncio.Task[object]) -> None:
+                        try:
+                            _ = t.exception()
+                        except Exception:
+                            pass
+
+                    task.add_done_callback(_consume_close_result)
                 except Exception:
                     pass
         self._cleanup()

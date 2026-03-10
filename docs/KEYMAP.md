@@ -1,13 +1,67 @@
 # Keymap Reference
 
-Complete keybinding reference for the Styrene TUI. Bindings are organized by
-scope: global (app-level), per-screen, per-widget, and modal/setup.
+Complete keybinding reference for the Styrene TUI. This document serves two purposes:
+- document the **current** keybindings exactly as implemented today
+- define the **target workspace navigation model** the structural refactor is converging toward
+
+Bindings are organized by scope: global (app-level), per-screen, per-widget, and modal/setup.
 
 Textual resolves key presses bottom-up: focused widget → screen → app. A screen
 binding **shadows** an app binding on the same key while that screen is active.
 Bindings marked `priority=True` bypass this hierarchy and always fire.
 
 ---
+
+## Target Workspace Navigation Model
+
+The refactored TUI is converging on these aggregate workspaces:
+- **Home** — overview, alerts, activity, launch summaries
+- **Nodes** — canonical peer discovery and browsing
+- **Mail** — asynchronous store-and-forward correspondence
+- **Comms** — synchronous/direct/live communication
+- **Contacts** — identity and address-book management
+- **Admin** — configuration, provisioning, setup, maintenance
+
+And one canonical drill-down context:
+- **Peer Workspace** — selected-peer view for status, mail, comms, pages, ops, and terminal
+
+### Target navigation ownership
+
+| Destination | Role | Notes |
+|---|---|---|
+| `Home` | Aggregate workspace | Root overview; not a peer browser |
+| `Nodes` | Aggregate workspace | Canonical discovery/browsing surface |
+| `Mail` | Aggregate workspace | Async inbox/search/compose/sync |
+| `Comms` | Aggregate workspace | Direct, Active, Bridges, Presence |
+| `Contacts` | Aggregate workspace | Directory-first, not a hidden inbox |
+| `Admin` | Aggregate workspace | Settings, provision, setup/maintenance |
+| `Peer Workspace` | Drill-down context | Must preserve origin so Back returns to Nodes, Mail, Comms, Contacts, or Home summary context |
+
+### Target shortcut intent
+
+These are the intended stable top-level destinations for the refactor. They are not all implemented yet, and they must be reconciled with current screen/widget bindings before adoption.
+
+| Key | Target destination | Intent | Collision note |
+|---|---|---|---|
+| `h` | Home | Return to overview/root workspace | Currently used in Exploration for `toggle_hide_lost`; workable as a future global/workspace binding, but not collision-free today |
+| `n` | Nodes | Open canonical node discovery | Currently one of the least-contended candidates |
+| `m` | Mail | Open asynchronous correspondence | Currently one of the least-contended candidates |
+| `c` | Comms | Open live/direct communication workspace | Currently heavily overloaded by screen-local chat/crawl actions, so adoption likely requires redirecting or demoting legacy `c` bindings first |
+| `b` | Contacts | Open address book / identity directory | Already the current global Contacts shortcut and a good stable candidate |
+| `` ` `` | Admin | Open settings/admin domain | Already the current Settings/Admin-adjacent shortcut; preferable to `s`, which is overloaded in current screens/widgets |
+
+### Target navigation rules
+
+- `Mail` and `Comms` are intentionally separate. Mail owns inbox-style async flows; Comms owns direct/live/session-oriented flows.
+- `Mail` should present a unified async inbox across supported transports, with conversation scope (`direct`, `group`, `forum`) and transport shown as metadata rather than as protocol-silo tabs.
+- `Peer Workspace` is not a top-level workspace. It is entered from Nodes, Mail, Comms, Contacts, or Home summaries.
+- `Back` from Peer Workspace should return to the originating aggregate workspace rather than always collapsing to Home.
+- `Comms` should eventually expose transport-aware submodes such as `Direct`, `Active`, `Bridges`, and `Presence`.
+- Bridge-backed communication surfaces such as Meshtastic, Yggdrasil, and I2P belong under global Comms when authoritative daemon capability data exists.
+
+---
+
+## Current Binding Reference
 
 ## Global Bindings (App-Level)
 
@@ -18,9 +72,12 @@ unless a screen or widget declares the same key.
 |-----|--------|-------------|-------|
 | `Ctrl+C` | `interrupt` | Quit (double-press) | **Priority.** Single press pops current screen; double press within 1 s exits the app. |
 | `?` | `toggle_help` | Help | Opens Textual help overlay. |
-| `` ` `` | `push_screen_settings` | Settings | Opens Settings screen. No-op if already in stack. |
-| `i` | `open_inbox` | Inbox | Opens Inbox screen. No-op if already in stack. Requires daemon mode. |
+| `` ` `` | `push_screen_settings` | Admin | Opens Settings/Admin screen. No-op if already in stack. |
+| `n` | `open_nodes` | Nodes | Opens the canonical Nodes workspace (`ExplorationScreen`). |
+| `m` | `open_mail` | Mail | Opens the Mail workspace. No-op if already in stack. Requires daemon mode. |
+| `c` | `open_comms` | Comms | Opens the aggregate Comms workspace shell. Screen-local `c` bindings still override this on some screens. |
 | `b` | `open_contacts` | Contacts | Opens Contacts screen. No-op if already in stack. |
+| `i` | `open_mail` | Mail | Hidden backward-compatible alias for Mail. |
 | `p` | `open_provision` | Provision | Opens Provision screen. No-op if already in stack. |
 | `Ctrl+R` | `restart_daemon` | Restart Daemon | Hidden binding. Restarts the daemon process. |
 | `a` | `announce` | Announce | Triggers a Reticulum announce. |
@@ -36,15 +93,16 @@ unless a screen or widget declares the same key.
 
 ## Dashboard (`DashboardScreen`)
 
-Main fleet overview. Default screen after startup.
+Home workspace overview. Default screen after startup.
 
 | Key | Action | Description | Notes |
 |-----|--------|-------------|-------|
 | `Enter` | `select_device` | Details | Opens device detail for selected node. |
 | `c` | `open_chat` | Chat | Opens chat with selected device. |
-| `r` | `refresh` | Refresh | **Priority.** Refreshes fleet device list. |
-| `e` | `open_exploration` | Explore | Opens Exploration screen. |
-| `i` | `request_identity` | Request ID | Hidden. Requests identity from selected device. Shadows global `i` (Inbox). |
+| `r` | `refresh` | Refresh | **Priority.** Refreshes Home summaries and current-node list. |
+| `n` | `open_exploration` | Nodes | Opens the canonical Nodes workspace from Home. |
+| `e` | `open_exploration` | Nodes | Hidden legacy alias while Home→Nodes migration settles. |
+| `i` | `request_identity` | Request ID | Hidden. Requests identity from selected device in the Home current-nodes summary. Shadows global `i` (Inbox). |
 
 ---
 
@@ -118,16 +176,17 @@ Tabbed detail view for a mesh device: Status, Chat, Fleet Ops, Terminal.
 
 ---
 
-## Exploration (`ExplorationScreen`)
+## Nodes (`ExplorationScreen`)
 
 Device discovery and mesh browsing.
 
 | Key | Action | Description | Notes |
 |-----|--------|-------------|-------|
 | `Escape` | `dismiss_search` | Back | **Priority.** Closes search or returns to previous screen. |
-| `Enter` | `select_device` | Select | Opens detail for selected device. |
-| `c` | `open_chat` | Chat | Opens chat with selected device. |
-| `r` | `refresh` | Refresh | Refreshes device list. |
+| `Enter` | `select_device` | Select | Opens the selected peer from Nodes into the peer workspace. |
+| `c` | `open_chat` | Chat | Opens the selected peer directly into peer-workspace Comms context. |
+| `r` | `refresh` | Refresh | Refreshes the active Nodes tab. |
+| `n` | `app.pop_screen` | Home | Returns from Nodes to Home when no deeper transient state is active. |
 | `h` | `toggle_hide_lost` | Hide Lost | Toggles visibility of lost devices. |
 | `H` | `toggle_hide_stale` | Hide Stale | Toggles visibility of stale devices. Displayed as `Shift+H`. |
 | `/` | `show_search` | Search | **Priority.** Opens inline device search. |

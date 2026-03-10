@@ -70,7 +70,7 @@ def create_app(config: StyreneConfig) -> Any:
         devices = discover_devices()
         return [
             {
-                "identity": device.identity,
+                "identity": device.identity_hash,
                 "identity_short": device.identity_short,
                 "name": device.name,
                 "type": device.device_type.value,
@@ -92,7 +92,7 @@ def create_app(config: StyreneConfig) -> Any:
         devices = get_styrene_devices()
         return [
             {
-                "identity": device.identity,
+                "identity": device.identity_hash,
                 "identity_short": device.identity_short,
                 "name": device.name,
                 "type": device.device_type.value,
@@ -114,7 +114,7 @@ def create_app(config: StyreneConfig) -> Any:
         devices = get_rnodes()
         return [
             {
-                "identity": device.identity,
+                "identity": device.identity_hash,
                 "identity_short": device.identity_short,
                 "name": device.name,
                 "type": device.device_type.value,

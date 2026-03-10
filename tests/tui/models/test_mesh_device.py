@@ -242,8 +242,8 @@ class TestMeshDeviceProperties:
         )
         assert device.identity_short == "abcd1234"
 
-    def test_identity_legacy_alias(self):
-        """identity property is alias for destination_hash."""
+    def test_identity_legacy_alias_removed(self):
+        """MeshDevice.identity property is deleted — was a legacy alias for destination_hash."""
         device = MeshDevice(
             destination_hash="abcd1234efgh5678",
             identity_hash="ijkl9012mnop3456",
@@ -251,7 +251,9 @@ class TestMeshDeviceProperties:
             device_type=DeviceType.GENERIC,
             last_announce=0,
         )
-        assert device.identity == device.destination_hash
+        assert not hasattr(device, "identity"), (
+            "MeshDevice.identity must not exist; use .identity_hash or .destination_hash explicitly"
+        )
 
     def test_is_styrene_node(self):
         """is_styrene_node property works correctly."""

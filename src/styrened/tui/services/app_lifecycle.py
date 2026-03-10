@@ -21,11 +21,17 @@ Usage:
     await lifecycle.shutdown_async()
 """
 
+from __future__ import annotations
+
 import logging
 from enum import Enum
-from typing import Any
+
+from typing import TYPE_CHECKING, Any
 
 from styrened.tui.models.config import StyreneConfig
+
+if TYPE_CHECKING:
+    from styrened.ipc.bridge import IPCBridge
 from styrened.tui.services.config import get_default_config
 
 logger = logging.getLogger(__name__)
@@ -88,7 +94,7 @@ class StyreneLifecycle:
         return self._initialized
 
     @property
-    def ipc_bridge(self):
+    def ipc_bridge(self) -> "IPCBridge | None":
         """Access the IPC bridge (available after initialization)."""
         return self._ipc_bridge
 

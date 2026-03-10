@@ -130,6 +130,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
+exclude = ["tests/bare-metal/"]
 
 [[tool.mypy.overrides]]
 module = ["RNS.*", "LXMF.*", "msgpack", "fido2.*"]
@@ -139,6 +140,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+pythonpath = ["src"]
 addopts = "-v --strict-markers"
 markers = [
     "slow: marks tests as slow (load/scaling tests, >10min)",

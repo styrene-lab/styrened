@@ -160,7 +160,7 @@ class TestIPCInitialization:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -183,7 +183,7 @@ class TestIPCInitialization:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -205,7 +205,7 @@ class TestIPCInitialization:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -228,7 +228,7 @@ class TestIPCInitialization:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -252,7 +252,7 @@ class TestIPCInitialization:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -274,7 +274,7 @@ class TestIPCInitialization:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -306,7 +306,7 @@ class TestIPCShutdown:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):
@@ -330,7 +330,7 @@ class TestIPCShutdown:
                 return_value=mock_daemon_manager,
             ),
             patch(
-                "styrened.tui.services.ipc_bridge.IPCBridge",
+                "styrened.ipc.bridge.IPCBridge",
                 return_value=mock_ipc_bridge,
             ),
         ):

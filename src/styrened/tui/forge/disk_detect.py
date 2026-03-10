@@ -110,10 +110,11 @@ def _detect_linux() -> list[DiskInfo]:
         tran = (dev.get("tran") or "").lower()
         if tran in ("usb", "mmc"):
             media_type = "USB" if tran == "usb" else "SD"
+            model = (dev.get("model") or "").strip()
             disks.append(
                 DiskInfo(
                     device=f"/dev/{dev['name']}",
-                    name=dev.get("model", "").strip() or "Unknown",
+                    name=model or "Unknown",
                     size=dev.get("size", "Unknown"),
                     media_type=media_type,
                 )

@@ -603,7 +603,7 @@ class TestStyreneAnnounceHandler:
         assert len(handler.discovered_devices) == 1
         device = handler.discovered_devices["abcdef1234567890"]
         assert device.name.startswith("device-")
-        assert device.identity == "abcdef1234567890"
+        assert device.destination_hash == "abcdef1234567890"
         assert (device.device_type == DeviceType.STYRENE_NODE) is False
         assert device.announce_count == 1
 

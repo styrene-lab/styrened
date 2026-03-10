@@ -4,7 +4,11 @@ Tests widget mount/unmount, connection state transitions, pyte integration,
 and event handling via mocked IPC bridge.
 """
 
+import asyncio
+from unittest.mock import AsyncMock, Mock, patch
+
 import pyte
+import pytest
 
 from styrened.tui.widgets.terminal_widget import (
     TerminalWidget,
@@ -138,6 +142,36 @@ class TestTerminalWidgetState:
         line = widget._status_line()
         assert "CONNECTED" in line
         assert "80x24" in line
+
+
+class TestTerminalWidgetLifecycle:
+    """Test unmount-time cleanup behavior."""
+
+    @pytest.mark.asyncio
+    async def test_on_unmount_schedules_terminal_close(self):
+        """Unmount should schedule terminal_close without using deprecated loop access."""
+        widget = TerminalWidget(device_identity="test123")
+        widget._connected = True
+        widget.session_id = "sess123"
+        bridge = Mock()
+        bridge.terminal_close = AsyncMock(return_value=None)
+        widget._get_bridge = Mock(return_value=bridge)
+        scheduled: list[asyncio.Task[object]] = []
+        original_create_task = asyncio.create_task
+
+        def _create_task(coro):
+            task = original_create_task(coro)
+            scheduled.append(task)
+            return task
+
+        with patch("styrened.tui.widgets.terminal_widget.asyncio.create_task", side_effect=_create_task):
+            widget.on_unmount()
+
+        assert scheduled
+        await asyncio.gather(*scheduled)
+        bridge.terminal_close.assert_awaited_once_with("sess123")
+        assert widget._connected is False
+        assert widget.session_id is None
 
 
 class TestTerminalWidgetEventHandling:
