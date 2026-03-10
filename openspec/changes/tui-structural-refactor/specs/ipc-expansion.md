@@ -49,3 +49,19 @@ The IPC bridge exposes `get_unread_counts()` returning per-peer unread message c
 - Given the daemon has 3 unread messages from peer A and 1 from peer B
 - When the TUI calls `bridge.get_unread_counts()`
 - Then it receives `{"<peer_a_hash>": 3, "<peer_b_hash>": 1}`
+
+### REQ-IPC-5: page browser external URL fetches remain daemon-mediated
+
+The IPC bridge exposes page-browser operations for explicit external URLs so the TUI can browse HTTPS and `.i2p` endpoints through the daemon's transport policy.
+
+#### Scenario: TUI opens HTTPS docs via IPC
+- Given the operator selects an `https://` documentation endpoint in the TUI
+- When the TUI calls the page-browser bridge method for that URL
+- Then the daemon fetches it directly over HTTP(S)
+- And the TUI does not import or instantiate an HTTP client itself
+
+#### Scenario: TUI opens an I2P docs endpoint via IPC
+- Given the operator selects a `.i2p` documentation endpoint in the TUI
+- When the TUI calls the page-browser bridge method for that URL
+- Then the daemon applies the explicit I2P enablement policy and proxy routing
+- And the TUI receives either the rendered content or the operator-facing disabled-mode error
