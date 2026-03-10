@@ -114,33 +114,33 @@ class TestLXMFDefaultRBACPolicy:
 class TestBlockUnblockSyncsRBAC:
     """block_peer/unblock_peer should sync to RBAC policy when present."""
 
-    @patch("styrened.services.lxmf_service.LXMFService._load_blocklist", return_value=set())
-    def test_block_peer_syncs_to_rbac(self, _mock_load, lxmf_service, rbac_policy):
+    def test_block_peer_syncs_to_rbac(self, lxmf_service, rbac_policy):
         """block_peer adds to RBAC blocked list."""
         lxmf_service.set_rbac_policy(rbac_policy)
-        peer = "ca3e981348d3bb48abcdef1234567890"
+        peer = "ca3e981348d3bb48abcdef1234567890" * 2  # 64 chars
 
         with patch("styrened.paths.messages_db", return_value="/tmp/fake.db"), \
              patch("sqlalchemy.create_engine") as mock_engine:
             mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = None
             mock_engine.return_value.connect.return_value.__enter__ = lambda s: mock_conn
             mock_engine.return_value.connect.return_value.__exit__ = MagicMock(return_value=False)
-            mock_conn.execute.return_value.fetchone.return_value = None  # no existing contact
 
             lxmf_service.block_peer(peer)
 
         assert peer in rbac_policy.blocked
 
-    @patch("styrened.services.lxmf_service.LXMFService._load_blocklist", return_value=set())
-    def test_unblock_peer_syncs_to_rbac(self, _mock_load, lxmf_service, rbac_policy):
+    def test_unblock_peer_syncs_to_rbac(self, lxmf_service, rbac_policy):
         """unblock_peer removes from RBAC blocked list."""
-        rbac_policy.block("ca3e981348d3bb48abcdef1234567890")
+        peer = "ca3e981348d3bb48abcdef1234567890" * 2
+        rbac_policy.block(peer)
         lxmf_service.set_rbac_policy(rbac_policy)
-        peer = "ca3e981348d3bb48abcdef1234567890"
 
         with patch("styrened.paths.messages_db", return_value="/tmp/fake.db"), \
              patch("sqlalchemy.create_engine") as mock_engine:
             mock_conn = MagicMock()
+            # Simulate peer found in peer_blocks
+            mock_conn.execute.return_value.fetchone.return_value = (peer,)
             mock_engine.return_value.connect.return_value.__enter__ = lambda s: mock_conn
             mock_engine.return_value.connect.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -150,14 +150,14 @@ class TestBlockUnblockSyncsRBAC:
 
     def test_block_peer_always_syncs_to_rbac(self, lxmf_service):
         """block_peer always syncs to the default RBAC policy."""
-        peer = "ca3e981348d3bb48abcdef1234567890"
+        peer = "ca3e981348d3bb48abcdef1234567890" * 2
 
         with patch("styrened.paths.messages_db", return_value="/tmp/fake.db"), \
              patch("sqlalchemy.create_engine") as mock_engine:
             mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchone.return_value = None
             mock_engine.return_value.connect.return_value.__enter__ = lambda s: mock_conn
             mock_engine.return_value.connect.return_value.__exit__ = MagicMock(return_value=False)
-            mock_conn.execute.return_value.fetchone.return_value = None
 
             result = lxmf_service.block_peer(peer)
 
