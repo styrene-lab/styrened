@@ -1048,53 +1048,60 @@ class LXMFService:
         now = _time.time()
 
         # Step 1 — authoritative write to peer_blocks
+        blocks_engine = create_engine(f"sqlite:///{db_path}")
         try:
-            engine = create_engine(f"sqlite:///{db_path}")
-            with engine.connect() as conn:
-                conn.execute(
-                    text(
-                        "INSERT INTO peer_blocks (identity_hash, blocked_at) "
-                        "VALUES (:h, :t) "
-                        "ON CONFLICT(identity_hash) DO UPDATE SET blocked_at = :t"
-                    ),
-                    {"h": identity_hash, "t": now},
-                )
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to write to peer_blocks for {identity_hash[:16]}...: {e}")
-            return False
+            try:
+                with blocks_engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            "INSERT INTO peer_blocks (identity_hash, blocked_at) "
+                            "VALUES (:h, :t) "
+                            "ON CONFLICT(identity_hash) DO UPDATE SET blocked_at = :t"
+                        ),
+                        {"h": identity_hash, "t": now},
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Failed to write to peer_blocks for {identity_hash[:16]}...: {e}")
+                return False
+        finally:
+            blocks_engine.dispose()
 
         # Step 2 — RBAC (in-memory)
         self._rbac_policy.block(identity_hash)
 
         # Step 3 — contacts best-effort (UI state only)
+        # Always key contacts by identity_hash (canonical PK); lxmf_dest_hash is
+        # stored separately if provided but must NOT be used as the contacts PK.
+        display_alias = alias or identity_hash[:8]
         try:
-            engine = create_engine(f"sqlite:///{db_path}")
-            contact_key = lxmf_dest_hash or identity_hash
-            display_alias = alias or identity_hash[:8]
-            with engine.connect() as conn:
-                existing = conn.execute(
-                    text("SELECT identity_hash FROM contacts WHERE identity_hash = :h"),
-                    {"h": contact_key},
-                ).fetchone()
-                if existing:
-                    conn.execute(
-                        text(
-                            "UPDATE contacts SET blocked = 1, blocked_at = :t, updated_at = :t "
-                            "WHERE identity_hash = :h"
-                        ),
-                        {"h": contact_key, "t": now},
-                    )
-                else:
-                    conn.execute(
-                        text(
-                            "INSERT INTO contacts "
-                            "(identity_hash, alias, blocked, blocked_at, created_at, updated_at) "
-                            "VALUES (:h, :a, 1, :t, :t, :t)"
-                        ),
-                        {"h": contact_key, "a": display_alias, "t": now},
-                    )
-                conn.commit()
+            contacts_engine = create_engine(f"sqlite:///{db_path}")
+            try:
+                with contacts_engine.connect() as conn:
+                    existing = conn.execute(
+                        text("SELECT identity_hash FROM contacts WHERE identity_hash = :h"),
+                        {"h": identity_hash},
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            text(
+                                "UPDATE contacts SET blocked = 1, blocked_at = :t, updated_at = :t "
+                                "WHERE identity_hash = :h"
+                            ),
+                            {"h": identity_hash, "t": now},
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "INSERT INTO contacts "
+                                "(identity_hash, alias, blocked, blocked_at, created_at, updated_at) "
+                                "VALUES (:h, :a, 1, :t, :t, :t)"
+                            ),
+                            {"h": identity_hash, "a": display_alias, "t": now},
+                        )
+                    conn.commit()
+            finally:
+                contacts_engine.dispose()
         except Exception as e:
             logger.warning(f"contacts best-effort update failed for {identity_hash[:16]}...: {e}")
 
@@ -1119,36 +1126,38 @@ class LXMFService:
 
         db_path = str(paths.messages_db())
 
-        # Check presence first — we need to know whether to return False
+        # Check presence and delete in a single transaction.
+        engine = create_engine(f"sqlite:///{db_path}")
         try:
-            engine = create_engine(f"sqlite:///{db_path}")
-            with engine.connect() as conn:
-                existing = conn.execute(
-                    text("SELECT identity_hash FROM peer_blocks WHERE identity_hash = :h"),
-                    {"h": identity_hash},
-                ).fetchone()
-            if existing is None:
-                logger.info(
-                    f"unblock_peer: {identity_hash[:16]}... not in peer_blocks, ignoring"
-                )
+            try:
+                with engine.connect() as conn:
+                    existing = conn.execute(
+                        text("SELECT identity_hash FROM peer_blocks WHERE identity_hash = :h"),
+                        {"h": identity_hash},
+                    ).fetchone()
+                    if existing is None:
+                        logger.info(
+                            f"unblock_peer: {identity_hash[:16]}... not in peer_blocks, ignoring"
+                        )
+                        return False
+                    conn.execute(
+                        text("DELETE FROM peer_blocks WHERE identity_hash = :h"),
+                        {"h": identity_hash},
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Failed to delete from peer_blocks for {identity_hash[:16]}...: {e}")
                 return False
-
-            with engine.connect() as conn:
-                conn.execute(
-                    text("DELETE FROM peer_blocks WHERE identity_hash = :h"),
-                    {"h": identity_hash},
-                )
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Failed to delete from peer_blocks for {identity_hash[:16]}...: {e}")
-            return False
+        finally:
+            engine.dispose()
 
         # Remove from RBAC
         self._rbac_policy.unblock(identity_hash)
 
         # Update contacts best-effort
+        contacts_engine = create_engine(f"sqlite:///{db_path}")
         try:
-            with engine.connect() as conn:
+            with contacts_engine.connect() as conn:
                 conn.execute(
                     text(
                         "UPDATE contacts SET blocked = 0, blocked_at = NULL, updated_at = :t "
@@ -1159,6 +1168,8 @@ class LXMFService:
                 conn.commit()
         except Exception as e:
             logger.warning(f"contacts best-effort unblock failed for {identity_hash[:16]}...: {e}")
+        finally:
+            contacts_engine.dispose()
 
         logger.info(f"Unblocked peer {identity_hash[:16]}...")
         return True
