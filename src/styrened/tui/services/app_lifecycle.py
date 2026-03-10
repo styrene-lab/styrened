@@ -21,9 +21,10 @@ Usage:
     await lifecycle.shutdown_async()
 """
 
+from __future__ import annotations
+
 import logging
 from enum import Enum
-from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
