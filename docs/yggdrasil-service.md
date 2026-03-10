@@ -3,6 +3,7 @@ id: yggdrasil-service
 title: YggdrasilService — styrened-managed Yggdrasil daemon
 status: blocked
 parent: overlay-network-integration
+dependencies: [styrene-identity]
 tags: [yggdrasil, service, daemon, packaging, nix]
 open_questions: []
 branches: ["feature/yggdrasil-service"]
