@@ -2,11 +2,16 @@
 
 Contacts provide user-settable aliases for mesh peers, enabling
 name-based lookup and display name resolution in conversations.
+
+v0.16.0: PK migrated from peer_hash (LXMF destination hash, 32-char hex)
+to identity_hash (RNS identity hash, 64-char hex) for canonical identity-
+based blocking.  The peer_blocks table is the authoritative block store;
+Contact.blocked/blocked_at are retained for UI display.
 """
 
 import time
 
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from styrened.models.messages import Base
@@ -16,7 +21,7 @@ class Contact(Base):
     """Contact alias for a mesh peer.
 
     Attributes:
-        peer_hash: LXMF destination hash (primary key).
+        identity_hash: RNS identity hash (primary key, 64-char hex).
         alias: User-settable display name.
         notes: Optional notes about the contact.
         blocked: Whether this peer is blocked (all comms silently dropped).
@@ -27,7 +32,7 @@ class Contact(Base):
 
     __tablename__ = "contacts"
 
-    peer_hash: Mapped[str] = mapped_column(String(32), primary_key=True)
+    identity_hash: Mapped[str] = mapped_column(Text, primary_key=True)
     alias: Mapped[str] = mapped_column(String(100), nullable=False)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     blocked: Mapped[bool] = mapped_column(nullable=False, default=False)
@@ -37,7 +42,7 @@ class Contact(Base):
 
     def __init__(
         self,
-        peer_hash: str,
+        identity_hash: str,
         alias: str,
         notes: str | None = None,
         blocked: bool = False,
@@ -47,7 +52,7 @@ class Contact(Base):
     ) -> None:
         now = time.time()
         super().__init__(
-            peer_hash=peer_hash,
+            identity_hash=identity_hash,
             alias=alias,
             notes=notes,
             blocked=blocked,
@@ -57,4 +62,4 @@ class Contact(Base):
         )
 
     def __repr__(self) -> str:
-        return f"<Contact(peer_hash={self.peer_hash[:16]}..., alias={self.alias!r})>"
+        return f"<Contact(identity_hash={self.identity_hash[:16]}..., alias={self.alias!r})>"
