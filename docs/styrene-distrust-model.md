@@ -1,9 +1,11 @@
 ---
 id: styrene-distrust-model
 title: Styrene Distrust Model — Negative Signals, Propagation Boundaries, and Sybil Resistance
-status: decided
+status: implementing
 parent: styrene-trust-model
 open_questions: []
+branches: ["feature/styrene-distrust-model"]
+openspec_change: styrene-distrust-model
 ---
 
 # Styrene Distrust Model — Negative Signals, Propagation Boundaries, and Sybil Resistance
@@ -114,6 +116,11 @@ The current Contact.blocked field uses LXMF destination hash as primary key, whi
 
 **Status:** decided
 **Rationale:** Pre-1.0 software with no external users. All breaking changes ship together in 0.16.0: contacts.peer_hash PK migrated to identity_hash in this release (not deferred). CmdBlockPeerRequest.peer_hash field removed entirely — only identity_hash. No dual-field compat shim. MeshDevice.identity property deleted without deprecation warning. The cost of carrying shims forward in a pre-1.0 codebase exceeds the cost of the breaking change. Do it once, do it cleanly.
+
+### Decision: block-store-canonicalization implemented in v0.16.0
+
+**Status:** decided
+**Rationale:** peer_blocks SQLite table is the authoritative runtime block store keyed on identity_hash. contacts table PK migrated from peer_hash to identity_hash. MeshDevice.identity property deleted. IPC breaking changes landed (no shims). Blocks survive restart via _seed_blocks_to_rbac(). LXMF receive path resolves source_hash to identity_hash via NodeStore before RBAC check. Tagged v0.16.0.
 
 ## Open Questions
 
