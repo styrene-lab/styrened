@@ -282,7 +282,17 @@ class MeshDeviceDetailScreen(Screen[None]):
                             status_widget.status = self.initial_status
                         yield status_widget
 
-                    # Chat tab
+                    # Mail tab — peer-scoped thread list (placeholder for 0.16.1;
+                    # full implementation filters InboxScreen by identity_hash)
+                    with TabPane("Mail", id="mail"):
+                        yield Static(
+                            f"[dim]Mail for peer[/dim]\n"
+                            f"[dim]({self.device_identity[:16]}...)[/dim]\n\n"
+                            "[dim]Full per-peer mail view coming in a future release.[/dim]",
+                            id="mail-placeholder",
+                        )
+
+                    # Chat / Comms tab
                     with TabPane("Chat", id="chat"):
                         yield ChatWidget(
                             peer_hash=self.device_identity,

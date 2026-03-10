@@ -108,8 +108,8 @@ class TestDeviceDetailComposition:
                 assert len(tabbed) > 0, "Device detail should use TabbedContent"
 
     @pytest.mark.asyncio
-    async def test_device_detail_has_status_chat_fleet_ops_terminal_tabs(self, test_device):
-        """Device detail should have Status, Chat, Fleet Ops, and Terminal tabs."""
+    async def test_device_detail_has_status_mail_chat_fleet_ops_terminal_tabs(self, test_device):
+        """Device detail should have Status, Mail, Chat, Fleet Ops, and Terminal tabs."""
         app = StyreneApp()
 
         with patch(
@@ -131,6 +131,7 @@ class TestDeviceDetailComposition:
                 pane_ids = {p.id for p in panes}
 
                 assert "status" in pane_ids, f"Missing Status tab. Found: {pane_ids}"
+                assert "mail" in pane_ids, f"Missing Mail tab. Found: {pane_ids}"
                 assert "chat" in pane_ids, f"Missing Chat tab. Found: {pane_ids}"
                 assert "fleet-ops" in pane_ids, f"Missing Fleet Ops tab. Found: {pane_ids}"
                 assert "terminal" in pane_ids, f"Missing Terminal tab. Found: {pane_ids}"
@@ -400,6 +401,42 @@ class TestDeviceDetailRoutingContext:
         assert screen.origin_workspace == WorkspaceId.NODES
         assert screen.requested_focus == PeerWorkspaceFocus.COMMS
         assert screen.peer_context.peer_identity_hash == test_device.identity_hash
+
+    def test_mail_focus_maps_to_peer_workspace_focus_mail(self, test_device):
+        """initial_tab='mail' should map to PeerWorkspaceFocus.MAIL."""
+        screen = MeshDeviceDetailScreen(
+            device_identity=test_device.identity_hash,
+            initial_tab="mail",
+            device=test_device,
+            origin_workspace=WorkspaceId.MAIL,
+        )
+        assert screen.requested_focus == PeerWorkspaceFocus.MAIL
+        assert screen.origin_workspace == WorkspaceId.MAIL
+
+    @pytest.mark.asyncio
+    async def test_mail_tab_renders_placeholder_content(self, test_device):
+        """Mail tab should render without error (placeholder for 0.16.1)."""
+        app = StyreneApp()
+
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=[test_device],
+        ):
+            async with app.run_test() as pilot:
+                await app.push_screen(
+                    MeshDeviceDetailScreen(
+                        device_identity=test_device.identity_hash,
+                        device=test_device,
+                        initial_tab="mail",
+                        origin_workspace=WorkspaceId.MAIL,
+                    )
+                )
+                await pilot.pause()
+
+                screen = app.screen
+                # Mail placeholder widget should be present
+                mail_placeholder = screen.query_one("#mail-placeholder")
+                assert mail_placeholder is not None
 
     @pytest.mark.asyncio
     async def test_escape_returns_to_originating_dashboard_screen(self, test_device):
