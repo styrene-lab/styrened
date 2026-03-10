@@ -38,16 +38,24 @@ def _engine(db_path: str):
     return create_engine(f"sqlite:///{db_path}")
 
 
-def _build_old_schema(db_path: str) -> None:
-    """Create pre-v0.16 contacts table (peer_hash PK) without running init_db."""
+def _build_old_schema(db_path: str, *, include_notes: bool = False) -> None:
+    """Create pre-v0.16 contacts table (peer_hash PK) without running init_db.
+
+    By default the table mirrors the *oldest* pre-v0.16 schema that has no
+    ``notes``, ``blocked``, or ``blocked_at`` columns — the case that exposed
+    the C1 bug where the migration SELECT referenced ``notes`` unconditionally.
+
+    Pass ``include_notes=True`` to include the column (for tests that need it).
+    """
     eng = _engine(db_path)
+    notes_col = "notes VARCHAR(500), " if include_notes else ""
     with eng.connect() as conn:
         conn.execute(
             text(
                 "CREATE TABLE contacts ("
                 "peer_hash VARCHAR(32) PRIMARY KEY, "
                 "alias VARCHAR(100) NOT NULL, "
-                "notes VARCHAR(500), "
+                f"{notes_col}"
                 "created_at REAL NOT NULL, "
                 "updated_at REAL NOT NULL"
                 ")"
@@ -235,6 +243,43 @@ def test_migration_adds_blocked_columns():
     assert "blocked_at" in cols
 
 
+def test_migration_without_notes_column_succeeds():
+    """Migration must not fail when the old schema has no notes column.
+
+    This is the regression test for C1: the original migration SELECT referenced
+    ``notes`` unconditionally, which would raise OperationalError on any DB that
+    predates the notes column addition.
+    """
+    p = _fresh_db_path()
+    _build_old_schema(p, include_notes=False)  # no notes column in old table
+    eng_old = _engine(p)
+    with eng_old.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO contacts (peer_hash, alias, created_at, updated_at) "
+                "VALUES ('abc123', 'Alice', 1.0, 1.0)"
+            )
+        )
+        conn.commit()
+    eng_old.dispose()
+
+    # Must not raise OperationalError
+    _init(p)
+
+    eng = _engine(p)
+    with eng.connect() as conn:
+        row = conn.execute(
+            text("SELECT identity_hash, alias FROM contacts WHERE identity_hash = 'abc123'")
+        ).fetchone()
+    assert row is not None
+    assert row[1] == "Alice"
+    # notes should be NULL (no data to copy)
+    with eng.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(contacts)"))
+        cols = {row[1] for row in result}
+    assert "notes" in cols  # column should exist in new schema
+
+
 # ---------------------------------------------------------------------------
 # NodeStore backfill
 # ---------------------------------------------------------------------------
@@ -251,29 +296,10 @@ def _make_node_store_mock(mapping: dict[str, str]) -> MagicMock:
 
 
 def _backfill(eng, node_store) -> int:
-    """Inline backfill: resolve 32-char dest-hashes to full identity hashes."""
-    updated = 0
-    with eng.connect() as conn:
-        rows = conn.execute(
-            text("SELECT identity_hash FROM contacts WHERE LENGTH(identity_hash) = 32")
-        ).fetchall()
-        for (ih,) in rows:
-            resolved = node_store.get_identity_hash_for_destination(ih)
-            if resolved and resolved != ih:
-                existing = conn.execute(
-                    text("SELECT 1 FROM contacts WHERE identity_hash = :ih"),
-                    {"ih": resolved},
-                ).fetchone()
-                if not existing:
-                    conn.execute(
-                        text(
-                            "UPDATE contacts SET identity_hash = :new WHERE identity_hash = :old"
-                        ),
-                        {"new": resolved, "old": ih},
-                    )
-                    updated += 1
-        conn.commit()
-    return updated
+    """Delegate to the production backfill function."""
+    from styrened.models.messages import backfill_contacts_identity_hash
+
+    return backfill_contacts_identity_hash(eng, node_store)
 
 
 def test_backfill_updates_identity_hash_when_nodestore_has_mapping():
