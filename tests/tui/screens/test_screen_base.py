@@ -308,6 +308,8 @@ async def test_screen_cleanup_on_suspend():
     async with app.run_test(size=(80, 24)) as pilot:
         await app.push_screen(screen)
         await asyncio.wait_for(done.wait(), timeout=5.0)
+        # Call directly — on_screen_suspend only cancels worker + calls _cleanup(),
+        # no coroutine is created so no unawaited-coroutine risk here.
         screen.on_screen_suspend()
         await pilot.pause(0.1)
 
@@ -360,7 +362,9 @@ async def test_screen_refreshes_on_resume():
     async with app.run_test(size=(80, 24)) as pilot:
         await app.push_screen(screen)
         await asyncio.wait_for(first_done.wait(), timeout=5.0)
-        screen.on_screen_resume()
+        # Post the event through Textual's dispatcher to avoid un-awaited coroutines.
+        from textual.events import ScreenResume
+        screen.post_message(ScreenResume())
         await asyncio.wait_for(second_done.wait(), timeout=5.0)
 
     assert call_count >= 2
