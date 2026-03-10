@@ -143,12 +143,11 @@ class TestBoundaryConditions:
         app.db_engine = message_db
         app.local_identity_hash = mock_local_identity
 
-        mock_store = MagicMock()
-        mock_store.get_styrene_nodes.return_value = []
-
         with (
             patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
-            patch("styrened.services.node_store.get_node_store", return_value=mock_store),
+            # Suppress start_discovery's direct daemon-service call; device data comes
+            # from the discover_devices mock above (bridge.get_devices() path).
+            patch("styrened.tui.screens.dashboard.start_discovery"),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
