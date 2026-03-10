@@ -1541,7 +1541,7 @@ class IPCHandlers:
                             node_store = get_node_store()
                             is_styrene = False
                             if node_store:
-                                node = node_store.get_node(req.peer_hash)
+                                node = node_store.get_node_by_destination(req.peer_hash)
                                 if node and node.is_styrene_node:
                                     is_styrene = True
                             if is_styrene:
