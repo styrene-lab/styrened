@@ -151,6 +151,9 @@ class StyreneApp(App[None]):
 
     def action_open_comms(self) -> None:
         """Open the aggregate Comms workspace."""
+        if self.services.bridge is None:
+            self.notify("Comms requires daemon mode", severity="warning")
+            return
         if self._screen_in_stack(CommsScreen):
             return
         self.push_screen("comms")
