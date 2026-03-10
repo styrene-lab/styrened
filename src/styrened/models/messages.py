@@ -411,9 +411,11 @@ def init_db(db_path: str | None = None) -> Engine:
             conn.execute(
                 text(
                     "CREATE TABLE IF NOT EXISTS contacts ("
-                    "peer_hash VARCHAR(32) PRIMARY KEY, "
+                    "identity_hash TEXT PRIMARY KEY, "
                     "alias VARCHAR(100) NOT NULL, "
                     "notes VARCHAR(500), "
+                    "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                    "blocked_at REAL, "
                     "created_at REAL NOT NULL, "
                     "updated_at REAL NOT NULL"
                     ")"
@@ -424,7 +426,52 @@ def init_db(db_path: str | None = None) -> Engine:
     except Exception:
         pass  # Table already exists or was created by create_all
 
-    # Migrate contacts table: add blocked columns if missing
+    # Migrate contacts table: PK from peer_hash → identity_hash
+    # Detect old schema by checking if peer_hash column exists
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(contacts)"))
+        cols = {row[1] for row in result}
+    if "peer_hash" in cols and "identity_hash" not in cols:
+        logger.info("Migrating contacts table: peer_hash → identity_hash PK")
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE contacts_new ("
+                    "identity_hash TEXT PRIMARY KEY, "
+                    "alias VARCHAR(100) NOT NULL, "
+                    "notes VARCHAR(500), "
+                    "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                    "blocked_at REAL, "
+                    "created_at REAL NOT NULL, "
+                    "updated_at REAL NOT NULL"
+                    ")"
+                )
+            )
+            # Copy rows; old peer_hash becomes identity_hash (best-effort, will be
+            # backfilled by NodeStore later when the mapping is available).
+            # Use conditional column references depending on what the old table has.
+            old_result = conn.execute(text("PRAGMA table_info(contacts)"))
+            old_cols = {row[1] for row in old_result}
+            blocked_expr = "COALESCE(blocked, 0)" if "blocked" in old_cols else "0"
+            blocked_at_expr = "blocked_at" if "blocked_at" in old_cols else "NULL"
+            conn.execute(
+                text(
+                    "INSERT INTO contacts_new "
+                    "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at) "
+                    f"SELECT peer_hash, alias, notes, "
+                    f"{blocked_expr}, {blocked_at_expr}, created_at, updated_at "
+                    "FROM contacts"
+                )
+            )
+            conn.execute(text("DROP TABLE contacts"))
+            conn.execute(text("ALTER TABLE contacts_new RENAME TO contacts"))
+            conn.commit()
+        logger.info("Contacts table migration complete")
+    elif "peer_hash" not in cols and "identity_hash" not in cols:
+        # Edge case: table exists but has neither column — nothing to migrate
+        logger.warning("contacts table has unexpected schema; skipping migration")
+
+    # Migrate contacts table: add blocked columns if missing (pre-migration DBs)
     for col_name, col_type in [
         ("blocked", "BOOLEAN NOT NULL DEFAULT 0"),
         ("blocked_at", "REAL"),
@@ -436,6 +483,25 @@ def init_db(db_path: str | None = None) -> Engine:
                 logger.info(f"Added '{col_name}' column to contacts table")
         except Exception:
             pass  # Column already exists
+
+    # Create peer_blocks table — authoritative block store keyed by identity_hash
+    # This replaces the contacts.blocked flag as the canonical block state.
+    # The contacts table retains blocked/blocked_at for UI display purposes.
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS peer_blocks ("
+                    "identity_hash TEXT PRIMARY KEY, "
+                    "blocked_at REAL NOT NULL, "
+                    "reason TEXT"
+                    ")"
+                )
+            )
+            conn.commit()
+            logger.debug("peer_blocks table initialized")
+    except Exception:
+        pass  # Table already exists
 
     # Add performance indexes for conversation queries (idempotent)
     perf_indexes = [
