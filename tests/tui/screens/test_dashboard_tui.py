@@ -27,9 +27,11 @@ def mock_reticulum(tmp_path):
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
-        # DashboardScreen.on_mount() calls start_discovery() which injected get_node_store().
-        # Patch start_discovery at the dashboard module level to prevent the direct
-        # daemon-service call. Device data flows via bridge.get_devices() instead.
+        # DashboardScreen.on_mount() calls start_discovery() which triggers the
+        # RNS announce-handler pipeline: discover_devices() → services/reticulum.py →
+        # discover_devices_core() → _announce_handler.discovered_devices.
+        # Patch start_discovery at the dashboard module level to prevent that
+        # daemon-layer call from firing in unit tests.
         patch("styrened.tui.screens.dashboard.start_discovery"),
     ):
         yield
