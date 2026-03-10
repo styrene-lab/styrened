@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle
 title: Screen Lifecycle Contract
-status: decided
+status: implementing
 parent: tui-specification
 related: [tui-data-state-model]
 tags: [tui, architecture, textual, lifecycle]
@@ -292,6 +292,10 @@ To avoid another monolithic `-k 'not k8s'` timeout in the remaining TUI screen-h
 ### Parallel screen-tail execution validated across four streams
 
 The non-k8s TUI screen-heavy tail was successfully decomposed into four parallel pytest streams and exercised independently. Results: (A) settings/provision/daemon-setup = green after isolating `test_settings_tui.py` and fixing stale IPC bootstrap mocks for bridge-backed save/generate-page tests (`27 passed` for settings; `27 passed` for provision+daemon-setup), (B) dashboard/device-detail/dashboard-chat = `72 passed`, (C) exploration/contacts/comms/confirm-flash = `47 passed`, and (D) conversation/inbox/chat-edge/group-forum = `57 passed`. This confirms the remaining screen-heavy tail is no longer a single opaque timeout blob; it can be run as balanced, parallelizable streams to expose future failures quickly.
+
+### StyreneScreen base class implemented — consolidation checkpoint
+
+All pre-screen-overhaul scaffolding is now in place (commit 8ca0070, branch feature/tui-workspace-architecture):\n\n**StyreneScreen base class** (`src/styrened/tui/screens/base.py`):\n- Abstract `_load_data()` — subclasses implement, base handles when/how\n- Optional hooks: `_cleanup()`, `_on_error(error, attempt)`, `_loading_message() -> str`\n- `self.bridge` property — returns `IPCBridge`, raises `BridgeUnavailableError` if None\n- 3-attempt exponential-backoff retry (0.5s / 1s / 2s)\n- `StyreneLoadingIndicator` shown before first load, hidden after\n- Stale data preserved on error (no blank screen)\n- Worker ownership: suspend cancels `_load_worker`, unmount cancels + cleanup\n- `on_mount` and `on_screen_resume` both call `_start_load()` (always refresh on re-entry)\n- All lifecycle events logged at DEBUG with screen class name + attempt count\n- 11 tests in `tests/tui/screens/test_screen_base.py`, all green\n\n**WorkspaceId** (`src/styrened/ui_state/workspace.py`): HOME/NODES/MAIL/COMMS/CONTACTS/ADMIN\n\n**app.py hardening**: `action_open_admin()` added, `grave_accent`→`open_admin` binding, `action_open_mail` uses `self.services.bridge` not `self._lifecycle.ipc_bridge`, `action_push_screen_settings` kept as backward-compat alias\n\n**Test mocks**: 6 test files updated from `get_node_store` daemon patches to `bridge.get_nodes()` bridge patches\n\n**Next step**: Begin screen-by-screen migration to `StyreneScreen`. Recommended order:\n1. `ExplorationScreen` (Nodes workspace) — clear `_load_data()` split already exists\n2. `InboxScreen` / `MailScreen` — has `on_screen_resume` already, straightforward\n3. `ContactsScreen` — small, low risk\n4. `MeshDeviceDetailScreen` (peer workspace) — most complex, do last\n5. `DashboardScreen` (Home) — large but well-understood after NodeInfoPanel work\n6. `SettingsScreen` — largest (1264 LOC), split into sub-screens as part of migration"
 
 ## Decisions
 
