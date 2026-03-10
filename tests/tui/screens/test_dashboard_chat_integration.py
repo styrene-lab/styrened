@@ -88,26 +88,20 @@ def mock_reticulum(tmp_path):
     fake_config.mkdir()
     (fake_config / "config").write_text("")
 
-    mock_store = MagicMock()
-    mock_store.get_styrene_nodes.return_value = []
-
-    import styrened.services.node_store as _ns_mod
-    old_singleton = _ns_mod._node_store
-    _ns_mod._node_store = None
-
     with (
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
         patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
-        patch("styrened.services.node_store.get_node_store", return_value=mock_store),
+        # DashboardScreen.on_mount() calls start_discovery() which previously injected
+        # get_node_store() from the daemon layer. Device data flows via bridge.get_devices();
+        # no-op start_discovery to prevent daemon-layer access in screen-level tests.
+        patch("styrened.tui.screens.dashboard.start_discovery"),
     ):
         mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
         mock_app_lifecycle.return_value.ipc_bridge = None
         yield
-
-    _ns_mod._node_store = old_singleton
 
 
 def _get_leaf_labels(tree: MeshDeviceTree) -> list[str]:
@@ -293,13 +287,10 @@ class TestDashboardEnterOpensDetail:
         """Pressing enter with no device selected should not crash."""
         app = StyreneApp()
 
-        mock_store = MagicMock()
-        mock_store.get_styrene_nodes.return_value = []
-        mock_store.get_all_nodes.return_value = []
-
         with (
             patch("styrened.tui.screens.dashboard.discover_devices", return_value=[]),
-            patch("styrened.services.node_store.get_node_store", return_value=mock_store),
+            # Suppress start_discovery's direct daemon-service call; no devices needed here.
+            patch("styrened.tui.screens.dashboard.start_discovery"),
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()

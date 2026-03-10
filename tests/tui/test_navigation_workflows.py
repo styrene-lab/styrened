@@ -355,19 +355,14 @@ class TestUserWorkflows:
             announce_count=1,
         )
 
-        # Mock both discover_devices and NodeStore to control exact device list
-        mock_node_store = Mock()
-        mock_node_store.get_styrene_nodes.return_value = []
-
         with (
             patch(
                 "styrened.tui.screens.dashboard.discover_devices",
                 return_value=[discovered_device, discovered_device_2],
             ),
-            patch(
-                "styrened.services.node_store.get_node_store",
-                return_value=mock_node_store,
-            ),
+            # Suppress start_discovery's direct daemon-service call; device data comes
+            # from the discover_devices mock above (bridge.get_devices() path).
+            patch("styrened.tui.screens.dashboard.start_discovery"),
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())
@@ -623,12 +618,11 @@ class TestPerformance:
             for i in range(100)
         ]
 
-        mock_node_store = Mock()
-        mock_node_store.get_styrene_nodes.return_value = []
-
         with (
             patch("styrened.tui.screens.dashboard.discover_devices", return_value=devices),
-            patch("styrened.services.node_store.get_node_store", return_value=mock_node_store),
+            # Suppress start_discovery's direct daemon-service call; device data comes
+            # from the discover_devices mock above (bridge.get_devices() path).
+            patch("styrened.tui.screens.dashboard.start_discovery"),
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(DashboardScreen())

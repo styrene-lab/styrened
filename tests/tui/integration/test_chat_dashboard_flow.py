@@ -24,12 +24,15 @@ from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
 @pytest.fixture(autouse=True)
 def mock_node_store():
-    """Mock NodeStore to prevent stale data from interfering."""
-    mock_store = MagicMock()
-    mock_store.get_styrene_nodes.return_value = []
-    mock_store.get_all_nodes.return_value = []
-    with patch("styrened.services.node_store.get_node_store", return_value=mock_store):
-        yield mock_store
+    """Suppress start_discovery's direct daemon-service call.
+
+    DashboardScreen.on_mount() calls start_discovery() which previously injected
+    get_node_store() from the daemon layer.  Device data now flows via
+    bridge.get_devices(), so we no-op start_discovery at the dashboard module level
+    to prevent stale daemon-layer access in unit/integration tests.
+    """
+    with patch("styrened.tui.screens.dashboard.start_discovery"):
+        yield
 
 
 @pytest.fixture
