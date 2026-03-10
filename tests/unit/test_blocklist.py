@@ -34,12 +34,12 @@ class TestContactBlockedField:
     """Contact model has blocked flag."""
 
     def test_contact_default_not_blocked(self):
-        c = Contact(peer_hash="abc123", alias="test")
+        c = Contact(identity_hash="abc123", alias="test")
         assert c.blocked is False
         assert c.blocked_at is None
 
     def test_contact_blocked(self):
-        c = Contact(peer_hash="abc123", alias="test", blocked=True, blocked_at=time.time())
+        c = Contact(identity_hash="abc123", alias="test", blocked=True, blocked_at=time.time())
         assert c.blocked is True
         assert c.blocked_at is not None
 
