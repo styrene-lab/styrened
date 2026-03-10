@@ -491,6 +491,7 @@ class TestAuthorization:
 
         with patch("styrened.rpc.server.subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="ok", stderr="")
+            started_rpc_server._rbac_policy.has_capability = Mock(return_value=True)
 
             # First request should succeed
             await started_rpc_server._protocol_handler(message, envelope)

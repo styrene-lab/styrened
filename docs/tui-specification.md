@@ -158,6 +158,14 @@ class TUIMode(str, Enum):
 
 **Config:** `tui.mode: operator` in core-config.yaml. Changeable at runtime from settings (except HEADLESS which implies no TUI).
 
+### Planning checkpoint after Yggdrasil and I2P reconciliation
+
+The next TUI planning slice should build on the existing structural refactor and screen-lifecycle decisions. Immediate design targets: (1) repair OpenSpec parsing/bookkeeping for tui-structural-refactor so it reflects real completed work, (2) define the remaining migration plan around typed services, lifecycle base classes, and user-visible entrypoints such as explicit external docs browsing, and (3) choose the next thin vertical slice for implementation so design and OpenSpec stay aligned.
+
+### Refactor planning emphasis: data state before presentation
+
+The next refactor pass should treat the TUI's underlying state model as the primary design target, not just widget migration. IPC boundary bugs are symptoms of inconsistent post-IPC shaping: dicts vs dataclasses, direct DB reads bypassing canonical state, and screen-local transforms that each reinterpret daemon data. The planning goal is to define stable typed state objects and projection helpers shared across screens so presentation becomes a thin layer over a coherent model.
+
 ## Decisions
 
 ### Decision: Introduce typed TUIServices protocol as the screen/widget API contract

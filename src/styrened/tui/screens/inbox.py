@@ -16,6 +16,14 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Input, Static, Switch
 
+from styrened.ui_state import (
+    ConversationScopeKind,
+    MailIndexInputs,
+    MailIndexState,
+    MailThreadRecord,
+    build_mail_index,
+)
+
 logger = logging.getLogger(__name__)
 
 # Delete confirmation timeout (seconds)
@@ -48,7 +56,7 @@ def _format_timestamp(ts: float | int | None) -> str:
 
 
 class InboxScreen(Screen[None]):
-    """Inbox screen showing conversation list.
+    """Mail workspace compatibility screen showing conversation list.
 
     Displays all chat conversations with:
     - Display name or short hash
@@ -143,13 +151,14 @@ class InboxScreen(Screen[None]):
         self._compose_active: bool = False
         self._sort_mode: str = "time"
         self._conversations: list[dict[str, Any]] = []
+        self._mail_index = MailIndexState(threads=(), by_thread_id={})
 
     def compose(self) -> ComposeResult:
         """Compose inbox UI."""
         yield Header()
         yield Container(
             Horizontal(
-                Static("INBOX - LXMF Conversations", id="inbox-title"),
+                Static("MAIL - Async Conversations", id="inbox-title"),
                 Static("Auto-Reply (OOO): ", id="ooo-label"),
                 Switch(value=False, id="ooo-switch"),
                 id="inbox-header-bar",
@@ -216,7 +225,29 @@ class InboxScreen(Screen[None]):
             logger.warning(f"Failed to load conversations: {e}")
             self._conversations = []
 
+        self._mail_index = build_mail_index(
+            MailIndexInputs(
+                threads=tuple(self._conversation_to_mail_thread(conv) for conv in self._conversations),
+            )
+        )
         self._render_conversations()
+
+    def _conversation_to_mail_thread(self, conversation: dict[str, Any]) -> dict[str, Any]:
+        """Normalize legacy inbox conversation payloads into canonical mail-thread inputs."""
+        return {
+            "thread_id": conversation.get("peer_hash") or "",
+            "scope_kind": ConversationScopeKind.DIRECT.value,
+            "peer_identity": conversation.get("peer_hash"),
+            "peer_hash": conversation.get("peer_hash"),
+            "display_name": conversation.get("display_name"),
+            "unread_count": conversation.get("unread_count", 0),
+            "last_message_time": conversation.get("last_message_time"),
+            "last_message_preview": conversation.get("last_message_preview"),
+            "is_outgoing": conversation.get("last_message_outgoing", False),
+            "transport": "lxmf",
+            "attachment_count": conversation.get("attachment_count", 0),
+            "message_count": conversation.get("message_count", 0),
+        }
 
     def _render_conversations(self) -> None:
         """Render conversation table with current sort and styling."""
@@ -233,41 +264,35 @@ class InboxScreen(Screen[None]):
 
         cascade = get_color_cascade()
 
-        for conv in conversations:
-            peer_hash = conv.get("peer_hash", "")
-            display_name = conv.get("display_name")
-            unread = conv.get("unread_count", 0)
+        for thread in conversations:
+            peer_hash = thread.participant_identity or thread.thread_id
+            unread = thread.unread_count
             is_unread = unread > 0
 
-            # Use display_name when present, fall back to short hash
-            if display_name:
-                dest_display = display_name
+            if thread.display_name:
+                dest_display = thread.display_name
             else:
                 dest_display = peer_hash[:8] + "..." if peer_hash else "unknown"
 
-            # Format last message (truncate to 40 chars)
-            last_msg = conv.get("last_message_preview") or "No content"
+            last_msg = (thread.latest_message.preview if thread.latest_message else None) or "No content"
             if len(last_msg) > 40:
                 last_msg = last_msg[:37] + "..."
 
-            # Format unread count
             if is_unread:
                 unread_text = f"[{cascade.bright} bold]{unread}[/]"
             else:
                 unread_text = f"[{cascade.dim}]-[/]"
 
-            # Format attachment count
-            attach_count = conv.get("attachment_count", 0)
+            legacy = self._mail_conversation_meta(thread.thread_id)
+            attach_count = int(legacy.get("attachment_count", 0) or 0)
             if attach_count > 0:
                 attach_text = f"\U0001f4ce {attach_count}"
             else:
                 attach_text = f"[{cascade.dim}]-[/]"
 
-            # Format timestamp
-            last_time = conv.get("last_message_time")
+            last_time = thread.latest_message.timestamp if thread.latest_message else None
             timestamp_text = _format_timestamp(last_time) if last_time else "-"
 
-            # Dim read conversations, keep unread bright
             if is_unread:
                 dest_display = f"[{cascade.bright} bold]{dest_display}[/]"
                 last_msg = f"[{cascade.medium}]{last_msg}[/]"
@@ -283,19 +308,34 @@ class InboxScreen(Screen[None]):
                 unread_text,
                 attach_text if is_unread else f"[{cascade.dim}]{attach_text}[/]",
                 timestamp_text,
-                key=peer_hash,
+                key=thread.thread_id,
             )
 
-    def _sorted_conversations(self) -> list[dict[str, Any]]:
-        """Sort conversations based on current sort mode."""
-        convs = list(self._conversations)
+    def _mail_conversation_meta(self, thread_id: str) -> dict[str, Any]:
+        """Return legacy conversation metadata not yet modeled in canonical mail state."""
+        for conversation in self._conversations:
+            if conversation.get("peer_hash") == thread_id:
+                return conversation
+        return {}
+
+    def _sorted_conversations(self):
+        """Sort canonical mail threads based on current sort mode."""
+        threads = list(self._mail_index.threads)
         if self._sort_mode == "unread":
-            convs.sort(key=lambda c: (c.get("unread_count", 0) == 0, -(c.get("last_message_time") or 0)))
+            threads.sort(
+                key=lambda thread: (
+                    thread.unread_count == 0,
+                    -((thread.latest_message.timestamp if thread.latest_message and thread.latest_message.timestamp is not None else 0)),
+                )
+            )
         elif self._sort_mode == "name":
-            convs.sort(key=lambda c: (c.get("display_name") or c.get("peer_hash", "")).lower())
-        else:  # time (default)
-            convs.sort(key=lambda c: c.get("last_message_time") or 0, reverse=True)
-        return convs
+            threads.sort(key=lambda thread: (thread.display_name or thread.participant_identity or thread.thread_id).lower())
+        else:
+            threads.sort(
+                key=lambda thread: thread.latest_message.timestamp if thread.latest_message and thread.latest_message.timestamp is not None else 0,
+                reverse=True,
+            )
+        return threads
 
     def action_cycle_sort(self) -> None:
         """Cycle through sort modes: time -> unread -> name."""
@@ -338,8 +378,8 @@ class InboxScreen(Screen[None]):
             logger.warning(f"Failed to toggle auto-reply: {e}")
             self.notify(f"Failed to toggle auto-reply: {e}", severity="error")
 
-    def _get_selected_peer_hash(self) -> str | None:
-        """Get the peer_hash of the currently selected conversation row."""
+    def _get_selected_thread_id(self) -> str | None:
+        """Get the canonical thread id for the currently selected row."""
         table = self.query_one("#conversation-table", DataTable)
 
         cursor_row = table.cursor_row
@@ -355,6 +395,13 @@ class InboxScreen(Screen[None]):
             return None
 
         return str(cell_key.row_key.value)
+
+    def _get_selected_mail_thread(self) -> MailThreadRecord | None:
+        """Return the currently selected canonical Mail thread."""
+        thread_id = self._get_selected_thread_id()
+        if thread_id is None:
+            return None
+        return self._mail_index.by_thread_id.get(thread_id)
 
     def action_go_back(self) -> None:
         """Layered escape: close compose -> close search -> pop screen."""
@@ -401,40 +448,78 @@ class InboxScreen(Screen[None]):
         except Exception:
             pass
 
+    def _open_mail_thread(self, thread: MailThreadRecord) -> None:
+        """Open a canonical Mail thread using scope-aware routing."""
+        if thread.scope_kind == ConversationScopeKind.DIRECT:
+            peer_hash = thread.participant_identity or thread.thread_id
+            from styrened.tui.screens.conversation import ConversationScreen
+
+            self.app.push_screen(
+                ConversationScreen(
+                    peer_hash=peer_hash,
+                    display_name=thread.display_name,
+                    origin_workspace="mail",
+                )
+            )
+            return
+
+        if thread.scope_kind == ConversationScopeKind.GROUP:
+            from styrened.tui.screens.mail_group_thread import MailGroupThreadScreen
+
+            self.app.push_screen(
+                MailGroupThreadScreen(
+                    thread_id=thread.thread_id,
+                    display_name=thread.display_name,
+                    group=thread.group,
+                )
+            )
+            return
+
+        if thread.scope_kind == ConversationScopeKind.FORUM:
+            from styrened.tui.screens.forum_thread import ForumThreadScreen
+
+            self.app.push_screen(
+                ForumThreadScreen(
+                    thread_id=thread.thread_id,
+                    display_name=thread.display_name,
+                    forum=thread.forum,
+                )
+            )
+            return
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle DataTable enter key - open the selected conversation.
+        """Handle DataTable enter key with scope-aware Mail thread routing.
 
         The DataTable consumes enter key events when cursor_type="row",
         emitting RowSelected instead of letting the screen binding fire.
         """
-        if event.row_key and event.row_key.value and event.row_key.value != "-":
-            peer_hash = str(event.row_key.value)
-
-            if self._ipc_bridge is None:
-                self.notify("Chat requires daemon mode", severity="warning")
-                return
-
-            from styrened.tui.screens.conversation import ConversationScreen
-
-            self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
-
-    def action_open_conversation(self) -> None:
-        """Open conversation screen for selected row.
-
-        Fallback action for the enter binding. When DataTable is focused,
-        on_data_table_row_selected handles it instead.
-        """
-        peer_hash = self._get_selected_peer_hash()
-        if peer_hash is None:
+        if not event.row_key or not event.row_key.value or event.row_key.value == "-":
             return
 
         if self._ipc_bridge is None:
             self.notify("Chat requires daemon mode", severity="warning")
             return
 
-        from styrened.tui.screens.conversation import ConversationScreen
+        thread = self._mail_index.by_thread_id.get(str(event.row_key.value))
+        if thread is None:
+            return
+        self._open_mail_thread(thread)
 
-        self.app.push_screen(ConversationScreen(peer_hash=peer_hash))
+    def action_open_conversation(self) -> None:
+        """Open the selected canonical Mail thread.
+
+        Fallback action for the enter binding. When DataTable is focused,
+        on_data_table_row_selected handles it instead.
+        """
+        thread = self._get_selected_mail_thread()
+        if thread is None:
+            return
+
+        if self._ipc_bridge is None:
+            self.notify("Chat requires daemon mode", severity="warning")
+            return
+
+        self._open_mail_thread(thread)
 
     # -------------------------------------------------------------------------
     # Delete conversation (double-tap)
@@ -578,7 +663,11 @@ class InboxScreen(Screen[None]):
         from styrened.tui.screens.conversation import ConversationScreen
 
         self.app.push_screen(
-            ConversationScreen(peer_hash=peer_hash, display_name=display_name)
+            ConversationScreen(
+                peer_hash=peer_hash,
+                display_name=display_name,
+                origin_workspace="mail",
+            )
         )
 
     async def _execute_search(self, query: str) -> None:
@@ -669,3 +758,6 @@ class InboxScreen(Screen[None]):
         except Exception as e:
             logger.warning(f"Sync failed: {e}")
             self.notify(f"Sync failed: {e}", severity="error")
+
+
+MailScreen = InboxScreen

@@ -272,8 +272,12 @@ class TestHandleSaveCoreConfig:
         # Generate a valid config dict via the canonical serializer
         config_dict = serialize_config(get_default_core_config())
         config_file = tmp_path / "config.yaml"
+        rns_home = tmp_path / "home"
 
-        with patch("styrened.paths.config_file", return_value=config_file):
+        with (
+            patch("styrened.paths.config_file", return_value=config_file),
+            patch("pathlib.Path.home", return_value=rns_home),
+        ):
             resp = await handlers.handle_save_core_config(
                 SaveCoreConfigRequest(config_dict=config_dict)
             )
@@ -281,6 +285,7 @@ class TestHandleSaveCoreConfig:
         assert isinstance(resp, ResultResponse)
         assert resp.data["saved"] is True
         assert config_file.exists()
+        assert (rns_home / ".reticulum" / "config").exists()
 
     @pytest.mark.asyncio
     async def test_rejects_invalid_config(self, handlers, tmp_path):

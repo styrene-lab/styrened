@@ -8,17 +8,21 @@ Layout:
     Right column: LINK, SYSTEM, NETWORK
 """
 
+from __future__ import annotations
+
 import re
 import time
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from textual.reactive import reactive
 from textual.widgets import Static
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
-from styrened.rpc.messages import StatusResponse
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
+
+if TYPE_CHECKING:
+    from styrened.rpc.messages import StatusResponse
 
 
 class DeviceStatusWidget(Static):

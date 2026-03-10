@@ -91,3 +91,22 @@ class TestBuildAnnounceData:
         # short_name should be in the 6th field (index 5)
         assert len(parts) >= 6
         assert parts[5] == "tnode"
+
+    @patch("styrened.services.lxmf_service.get_lxmf_service")
+    def test_announce_includes_i2p_when_b32_known(self, mock_lxmf):
+        """Announce should include the i2p capability when the adapter has a b32 address."""
+        lxmf_svc = MagicMock()
+        lxmf_svc.is_initialized = True
+        lxmf_svc.delivery_destination = MagicMock()
+        lxmf_svc.delivery_destination.hash.hex.return_value = "deadbeef" * 4
+        mock_lxmf.return_value = lxmf_svc
+
+        daemon = self._make_daemon(auto_reply_mode=AutoReplyMode.DISABLED)
+        daemon._i2p_adapter = MagicMock()
+        daemon._i2p_adapter.get_b32_address.return_value = "deadbeef.b32.i2p"
+        daemon._i2p_adapter.status.return_value.details = {"b32_address": "deadbeef.b32.i2p"}
+
+        data = daemon._build_announce_data()
+        decoded = data.decode("utf-8")
+
+        assert "i2p" in decoded.split(":")[3]

@@ -347,7 +347,17 @@ class ChatWidget(Widget, can_focus=True):
                 pass
 
             try:
-                self.run_worker(bridge.unsubscribe("messages"), group="chat-unsub")
+                import asyncio
+
+                task = asyncio.create_task(bridge.unsubscribe("messages"))
+
+                def _consume_unsub_result(t: asyncio.Task[object]) -> None:
+                    try:
+                        _ = t.exception()
+                    except Exception:
+                        pass
+
+                task.add_done_callback(_consume_unsub_result)
             except Exception:
                 pass
 

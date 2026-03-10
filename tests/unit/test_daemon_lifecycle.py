@@ -176,6 +176,37 @@ class TestDaemonStartSequence:
         assert daemon._running is True
 
 
+class TestDaemonI2PAdapter:
+    """Tests for daemon-managed I2P adapter wiring."""
+
+    @pytest.mark.asyncio
+    async def test_start_i2p_adapter_injects_rpc_server(self, minimal_config: CoreConfig) -> None:
+        daemon = StyreneDaemon(minimal_config)
+        daemon._rpc_server = MagicMock()
+
+        with patch("styrened.services.i2p.I2PAdapter") as MockAdapter:
+            adapter = MockAdapter.return_value
+            adapter.start = AsyncMock()
+            adapter.status = AsyncMock()
+
+            await daemon._start_i2p_adapter()
+
+        daemon._rpc_server.set_i2p_adapter.assert_called_once_with(adapter)
+        assert daemon._i2p_adapter is adapter
+
+    @pytest.mark.asyncio
+    async def test_stop_i2p_adapter_clears_rpc_server(self, minimal_config: CoreConfig) -> None:
+        daemon = StyreneDaemon(minimal_config)
+        daemon._rpc_server = MagicMock()
+        daemon._i2p_adapter = MagicMock()
+        daemon._i2p_adapter.stop = AsyncMock()
+
+        await daemon._stop_i2p_adapter()
+
+        daemon._i2p_adapter = None
+        daemon._rpc_server.set_i2p_adapter.assert_called_once_with(None)
+
+
 class TestDaemonOptionalServices:
     """Tests for optional service startup based on config."""
 

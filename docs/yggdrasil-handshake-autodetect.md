@@ -1,7 +1,7 @@
 ---
 id: yggdrasil-handshake-autodetect
 title: Yggdrasil auto-detection in VPN handshake
-status: implementing
+status: decided
 parent: overlay-network-integration
 open_questions:
   - Does styrened need a YggdrasilInterfaceHelper that auto-generates RNS TCP config from detected Yggdrasil peers, or is a doc + doctor check sufficient?
@@ -226,6 +226,10 @@ async def add_peer(self, ygg_address: str, port: int = 9001) -> bool:
 **The Ygg peer announcement**: When a styrene node has Yggdrasil running, it should include its Ygg address in its RNS announce app_data. This way, every node that hears the announce can potentially add the Ygg peer — not just nodes doing a VPN handshake. This is the lowest-friction bootstrapping possible.
 
 Currently app_data carries: capabilities bitmap. Could add a Ygg address field in a backward-compatible way.
+
+### OpenSpec reconciliation note
+
+The handshake autodetect work shipped as part of the Yggdrasil integration: `PeerInfo.ygg_endpoint`, wire-format extension, local endpoint detection, endpoint preference, lazy /meta bootstrap, and daemon wiring are implemented. The remaining bookkeeping issue is OpenSpec lifecycle cleanup rather than missing styrened code.
 
 ## Decisions
 

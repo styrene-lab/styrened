@@ -3,8 +3,7 @@ id: turn-relay
 title: TURN-Style Link Relay via Hub
 status: decided
 parent: cross-enclave-features
-open_questions:
-  - What is the relay coordination protocol? How does Node A tell Hub to relay to Node B, and how does Hub authenticate/authorize the relay?
+open_questions: []
 ---
 
 # TURN-Style Link Relay via Hub
@@ -39,9 +38,14 @@ RNS.Channel provides reliable bidirectional message delivery but is size-constra
 **Status:** decided
 **Rationale:** RNS.Channel is single-packet (~383B) — unsuitable for bulk relay. Hybrid approach: Channel for relay signaling (setup, teardown, keepalive, error notification), link.request() forwarding for DirectLink endpoint proxying (/status, /ping, /meta, /info, /speedtest), RNS.Resource proxying for bulk transfer (file transfer). This matches existing DirectLink patterns — no new transport abstractions needed.
 
+### Decision: Relay coordination uses hub-mediated request/accept plus RelayService RBAC enforcement
+
+**Status:** decided
+**Rationale:** Node A requests relay to Node B through the hub /relay endpoint. The hub authenticates both identities from their RNS links, enforces requester and target relay capabilities via RelayService/RBAC, and only establishes a relayed session after explicit target-side acceptance where required. Control signaling uses channels; endpoint/data forwarding uses request forwarding and resource proxying.
+
 ## Open Questions
 
-- What is the relay coordination protocol? How does Node A tell Hub to relay to Node B, and how does Hub authenticate/authorize the relay?
+*No open questions.*
 
 ## Implementation Notes
 

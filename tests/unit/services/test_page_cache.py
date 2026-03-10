@@ -96,6 +96,25 @@ class TestPageCacheService:
         assert "/page/index.mu" in paths
         assert "/page/about.mu" in paths
 
+    def test_cache_and_retrieve_external_https_url(self, cache_service):
+        url = "https://docs.styrene.io/intro"
+        cache_service.cache_url(url, "Hello HTTPS")
+        result = cache_service.get_cached_url(url)
+        assert result is not None
+        assert result["content"] == "Hello HTTPS"
+
+    def test_i2p_cache_ttl_applies_only_to_i2p(self, engine):
+        cache_service = PageCacheService(engine, i2p_cache_ttl=42)
+        assert cache_service.get_cache_ttl_for_url("http://docs.example.i2p/") == 42
+        assert cache_service.get_cache_ttl_for_url("https://docs.styrene.io/") is None
+
+    def test_get_cached_url_respects_max_age(self, cache_service):
+        url = "http://docs.example.i2p/"
+        cache_service.cache_url(url, "cached")
+        cached = cache_service.get_cached_url(url)
+        assert cached is not None
+        assert cache_service.get_cached_url(url, max_age=-1) is None
+
 
 class TestSavedSites:
     """Test saved site operations."""

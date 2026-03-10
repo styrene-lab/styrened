@@ -10,8 +10,11 @@ import pytest
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.app import StyreneApp
+from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
+from styrened.tui.screens.exploration import ExplorationScreen
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+from styrened.ui_state import WorkspaceId
 
 
 class TestAppInitialization:
@@ -53,6 +56,26 @@ class TestAppInitialization:
 
 class TestScreenNavigation:
     """Test navigation between screens."""
+
+    @pytest.mark.asyncio
+    async def test_global_nodes_action_opens_exploration_workspace(self):
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            app.action_open_nodes()
+            await pilot.pause()
+
+            assert isinstance(app.screen, ExplorationScreen)
+
+    @pytest.mark.asyncio
+    async def test_global_comms_action_opens_comms_workspace(self):
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            app.action_open_comms()
+            await pilot.pause()
+
+            assert isinstance(app.screen, CommsScreen)
 
     @pytest.mark.asyncio
     async def test_dashboard_to_settings_navigation(self):
@@ -98,11 +121,43 @@ class TestScreenNavigation:
                 await app.push_screen(DashboardScreen())
                 await pilot.pause()
 
-                # Select device and press Enter
-                await pilot.press("enter")
+                screen = app.screen
+                assert isinstance(screen, DashboardScreen)
+
+                with patch.object(screen, "_get_selected_identity", return_value=device.identity):
+                    screen.action_select_device()
+                    await pilot.pause()
+
+                assert isinstance(app.screen, MeshDeviceDetailScreen)
+                assert app.screen.origin_workspace == WorkspaceId.HOME
+
+    @pytest.mark.asyncio
+    async def test_exploration_to_device_detail_sets_nodes_origin(self):
+        """Exploration should open peer workspace with Nodes origin context."""
+        app = StyreneApp()
+
+        device = MeshDevice(
+            destination_hash="test_device",
+            identity_hash="test_device",
+            name="Test Device",
+            device_type=DeviceType.STYRENE_NODE,
+            last_announce=int(datetime.now().timestamp()),
+            announce_count=1,
+        )
+
+        with patch("styrened.tui.screens.exploration.discover_devices", return_value=[device]):
+            from styrened.tui.screens.exploration import ExplorationScreen
+
+            async with app.run_test() as pilot:
+                await app.push_screen(ExplorationScreen())
                 await pilot.pause()
 
-                # Should push device detail screen
+                screen = app.screen
+                screen.action_select_device()
+                await pilot.pause()
+
+                assert isinstance(app.screen, MeshDeviceDetailScreen)
+                assert app.screen.origin_workspace == WorkspaceId.NODES
 
     @pytest.mark.asyncio
     async def test_dashboard_to_provision_navigation(self):
@@ -320,16 +375,16 @@ class TestUserWorkflows:
 
                 # Devices should be displayed
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                # Should show 2 devices
-                assert device_table.row_count == 2
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                # Should show 2 cached devices in the dashboard tree model
+                assert len(device_tree._device_cache) == 2
 
                 # Trigger refresh should still work
                 await pilot.press("r")
                 await pilot.pause()
 
                 # Should still show 2 devices
-                assert device_table.row_count == 2
+                assert len(device_tree._device_cache) == 2
 
     @pytest.mark.asyncio
     async def test_device_goes_offline_workflow(self):
@@ -581,8 +636,8 @@ class TestPerformance:
 
                 # Should render without hanging
                 screen = app.screen
-                device_table = screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                assert device_table.row_count == 100
+                device_tree = screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                assert len(device_tree._device_cache) == 100
 
     @pytest.mark.asyncio
     async def test_rapid_refresh_doesnt_hang(self):

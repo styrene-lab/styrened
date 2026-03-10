@@ -22,6 +22,7 @@ import pytest_asyncio
 from tests.harness.ipc_client import (
     MeshControlClient,
     poll_for_message,
+    poll_for_status,
 )
 from tests.harness.ipc_client import (
     wait_for_ping as _wait_for_ping,
@@ -90,6 +91,9 @@ def mesh_topology():
         timeout=120,
     )
     if up_result.returncode != 0:
+        stderr = up_result.stderr.lower()
+        if "cannot connect to the docker daemon" in stderr or "is the docker daemon running" in stderr:
+            pytest.skip("Docker daemon is not available for mesh tests")
         pytest.fail(
             f"docker compose up failed:\nstdout: {up_result.stdout}\nstderr: {up_result.stderr}"
         )
@@ -278,6 +282,9 @@ def multihop_topology():
         timeout=180,
     )
     if up_result.returncode != 0:
+        stderr = up_result.stderr.lower()
+        if "cannot connect to the docker daemon" in stderr or "is the docker daemon running" in stderr:
+            pytest.skip("Docker daemon is not available for multihop mesh tests")
         pytest.fail(
             f"multihop compose up failed:\nstdout: {up_result.stdout}\n"
             f"stderr: {up_result.stderr}"

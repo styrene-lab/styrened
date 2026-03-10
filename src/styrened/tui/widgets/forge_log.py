@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from textual.app import ComposeResult
+from textual.timer import Timer
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widget import Widget
@@ -92,6 +93,7 @@ class ForgeLog(Widget):
         self._is_error = False
         self._hostname: str = ""
         self._mesh_watch_start: float | None = None
+        self._mesh_watch_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Horizontal(id="forge-stage-bar")
@@ -152,11 +154,12 @@ class ForgeLog(Widget):
     def start_mesh_watch(self) -> None:
         """Transition to mesh-watch state after successful flash."""
         self._mesh_watch_start = time.monotonic()
+        self._stop_mesh_watch_timer()
         try:
             watch_panel = self.query_one("#forge-mesh-watch", Vertical)
             watch_panel.remove_class("hidden")
             self._update_mesh_watch_display()
-            self.set_interval(1.0, self._update_mesh_watch_display)
+            self._mesh_watch_timer = self.set_interval(1.0, self._update_mesh_watch_display)
         except Exception:
             pass
 
@@ -184,6 +187,11 @@ class ForgeLog(Widget):
         except Exception:
             pass
         self._mesh_watch_start = None
+        self._stop_mesh_watch_timer()
+
+    def on_unmount(self) -> None:
+        """Stop mesh-watch timer when the widget is removed."""
+        self._stop_mesh_watch_timer()
 
     def reset(self) -> None:
         """Reset the widget for a new forge run."""
@@ -193,6 +201,7 @@ class ForgeLog(Widget):
         self._is_complete = False
         self._is_error = False
         self._mesh_watch_start = None
+        self._stop_mesh_watch_timer()
         self._render_stage_bar()
         try:
             self.query_one("#forge-log-output", Static).update("")
@@ -203,6 +212,12 @@ class ForgeLog(Widget):
             abort_btn.disabled = False
         except Exception:
             pass
+
+    def _stop_mesh_watch_timer(self) -> None:
+        """Stop the mesh-watch timer if one is active."""
+        if self._mesh_watch_timer is not None:
+            self._mesh_watch_timer.stop()
+            self._mesh_watch_timer = None
 
     def _render_stage_bar(self) -> None:
         """Render the horizontal stage indicator bar."""

@@ -250,6 +250,7 @@ class TestLifecycleIPCIntegration:
             mock_dm = AsyncMock()
             mock_dm.ensure_running = AsyncMock(return_value=True)
             mock_dm.shutdown = AsyncMock()
+            mock_dm.socket_path = socket_path
             mock_dm_cls.return_value = mock_dm
 
             # Use real IPCBridge pointed at the socket

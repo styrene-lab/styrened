@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from textual.widgets import Input, Select, Switch
 
+from styrened.models.config import GroupThreadFeatureTierConfig
 from styrened.tui.app import StyreneApp
 from styrened.tui.models.config import StyreneConfig
 from styrened.tui.screens.settings import SettingsScreen
@@ -294,6 +295,67 @@ class TestSettingsKeyboardBindings:
             # Screen should close (doesn't crash)
 
 
+class TestGroupThreadSettings:
+    """Test group-thread footprint controls in Settings."""
+
+    @pytest.mark.asyncio
+    async def test_group_thread_controls_render_current_values(self, test_config):
+        test_config.core.group_threads.feature_tier = GroupThreadFeatureTierConfig.MINIMAL
+        test_config.core.group_threads.bounded_retention = True
+        test_config.core.group_threads.metadata_first_sync = True
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            await app.push_screen(SettingsScreen(test_config))
+            await pilot.pause()
+
+            screen = app.screen
+            assert screen.query_one("#group_threads_enabled", Switch).value is True
+            assert (
+                screen.query_one("#group_threads_feature_tier", Select).value
+                is GroupThreadFeatureTierConfig.MINIMAL
+            )
+            assert screen.query_one("#group_threads_bounded_retention", Switch).value is True
+            assert screen.query_one("#group_threads_metadata_first_sync", Switch).value is True
+
+    @pytest.mark.asyncio
+    async def test_save_persists_group_thread_policy(self, test_config):
+        app = StyreneApp()
+
+        with (
+            patch("styrened.tui.screens.settings.save_config") as mock_save,
+            patch("styrened.tui.screens.settings.SettingsScreen._save_identity") as mock_save_id,
+        ):
+            mock_save_id.return_value = None
+
+            async with app.run_test() as pilot:
+                await app.push_screen(SettingsScreen(test_config))
+                await pilot.pause()
+
+                screen = app.screen
+                screen.query_one("#group_threads_enabled", Switch).value = False
+                screen.query_one("#group_threads_bounded_retention", Switch).value = True
+                screen.query_one("#group_threads_metadata_first_sync", Switch).value = True
+                screen.query_one("#group_threads_auto_media_fetch", Switch).value = False
+                screen.query_one("#group_threads_background_catchup", Switch).value = False
+                screen.query_one("#group_threads_first_run_auto_tier", Switch).value = False
+                tier_select = screen.query_one("#group_threads_feature_tier", Select)
+                tier_select.value = GroupThreadFeatureTierConfig.FULL
+                await pilot.pause()
+
+                await pilot.press("ctrl+s")
+                await pilot.pause(1.0)
+
+                assert mock_save.called
+                assert test_config.core.group_threads.enabled is False
+                assert test_config.core.group_threads.feature_tier is GroupThreadFeatureTierConfig.FULL
+                assert test_config.core.group_threads.bounded_retention is True
+                assert test_config.core.group_threads.metadata_first_sync is True
+                assert test_config.core.group_threads.auto_media_fetch is False
+                assert test_config.core.group_threads.background_catchup is False
+                assert test_config.core.group_threads.first_run_auto_tier is False
+
+
 class TestSettingsThemeChanges:
     """Test theme configuration (theme selector disabled — single theme)."""
 
@@ -452,6 +514,15 @@ class TestIPCIdentitySaveFailure:
 
         bridge = MagicMock()
         bridge.set_identity = AsyncMock(side_effect=Exception("IPC failed"))
+        bridge.get_status = AsyncMock(return_value={})
+        bridge.get_identity = AsyncMock(return_value={})
+        bridge.get_hub_status = AsyncMock(return_value={})
+        bridge.get_core_config = AsyncMock(return_value={})
+        bridge.get_devices = AsyncMock(return_value=[])
+        bridge.get_conversations = AsyncMock(return_value=[])
+        bridge.get_contacts = AsyncMock(return_value=[])
+        bridge.get_auto_reply = AsyncMock(return_value={})
+        bridge.subscribe_activity = AsyncMock(return_value=None)
 
         lifecycle = MagicMock()
         lifecycle.ipc_bridge = bridge
@@ -508,6 +579,48 @@ class TestLocalModeClearIdentity:
                 if mock_save_id.called:
                     args = mock_save_id.call_args
                     assert args[0][0] == ""  # display_name == ""
+
+
+class TestSettingsBridgeUsage:
+    """Tests for Settings using the typed services bridge."""
+
+    @pytest.mark.asyncio
+    async def test_generate_page_uses_services_bridge(self, test_config):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from styrened.tui.services.app_lifecycle import LifecycleMode
+
+        app = StyreneApp()
+        bridge = MagicMock()
+        bridge.page_regenerate_index = AsyncMock(return_value=True)
+        bridge.get_status = AsyncMock(return_value={})
+        bridge.get_identity = AsyncMock(return_value={})
+        bridge.get_hub_status = AsyncMock(return_value={})
+        bridge.get_core_config = AsyncMock(return_value={})
+        bridge.get_devices = AsyncMock(return_value=[])
+        bridge.get_conversations = AsyncMock(return_value=[])
+        bridge.get_contacts = AsyncMock(return_value=[])
+        bridge.get_auto_reply = AsyncMock(return_value={})
+        bridge.subscribe_activity = AsyncMock(return_value=None)
+
+        lifecycle = MagicMock()
+        lifecycle.ipc_bridge = bridge
+        lifecycle.initialize_async = AsyncMock(return_value=True)
+        lifecycle.active_mode = LifecycleMode.IPC
+        lifecycle.shutdown_async = AsyncMock()
+        app._lifecycle = lifecycle
+
+        async with app.run_test() as pilot:
+            await app.push_screen(SettingsScreen(test_config))
+            await pilot.pause()
+
+            screen = app.screen
+            assert isinstance(screen, SettingsScreen)
+            worker = screen._do_generate_page()
+            await worker.wait()
+            await pilot.pause()
+
+            bridge.page_regenerate_index.assert_awaited_once()
 
 
 class TestSettingsResetToDefaults:

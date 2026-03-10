@@ -11,7 +11,7 @@ Covers:
 
 import pytest
 
-from styrened.models.config import CoreConfig, I2PConfig, YggdrasilConfig
+from styrened.models.config import CoreConfig, GroupThreadFeatureTierConfig, GroupThreadsConfig, I2PConfig, YggdrasilConfig
 from styrened.services.daemon_adapter import DaemonMode
 
 
@@ -80,6 +80,14 @@ class TestI2PConfigDefaults:
 # ---------------------------------------------------------------------------
 
 
+class TestGroupThreadsConfigDefaults:
+    def test_feature_tier_default(self):
+        assert GroupThreadsConfig().feature_tier is GroupThreadFeatureTierConfig.BALANCED
+
+    def test_first_run_auto_tier_default(self):
+        assert GroupThreadsConfig().first_run_auto_tier is True
+
+
 class TestCoreConfigHasFields:
     def test_yggdrasil_field_exists(self):
         cfg = CoreConfig()
@@ -90,6 +98,11 @@ class TestCoreConfigHasFields:
         cfg = CoreConfig()
         assert hasattr(cfg, "i2p")
         assert isinstance(cfg.i2p, I2PConfig)
+
+    def test_group_threads_field_exists(self):
+        cfg = CoreConfig()
+        assert hasattr(cfg, "group_threads")
+        assert isinstance(cfg.group_threads, GroupThreadsConfig)
 
     def test_separate_instances_independent(self):
         a = CoreConfig()
@@ -121,6 +134,14 @@ def _parse_i2p_cfg(data: dict) -> I2PConfig:
     cfg = _make_core()
     _parse_i2p(cfg, {"i2p": data})
     return cfg.i2p
+
+
+def _parse_group_threads_cfg(data: dict) -> GroupThreadsConfig:
+    from styrened.services.config import _parse_group_threads
+
+    cfg = _make_core()
+    _parse_group_threads(cfg, {"group_threads": data})
+    return cfg.group_threads
 
 
 class TestYggdrasilYAMLParsing:
@@ -188,6 +209,34 @@ class TestYggdrasilYAMLParsing:
         cfg = _make_core()
         _parse_yggdrasil(cfg, {"yggdrasil": "not a dict"})
         assert cfg.yggdrasil.mode is DaemonMode.DISABLED
+
+
+class TestGroupThreadsYAMLParsing:
+    def test_feature_tier_parsed(self):
+        g = _parse_group_threads_cfg({"feature_tier": "minimal"})
+        assert g.feature_tier is GroupThreadFeatureTierConfig.MINIMAL
+
+    def test_invalid_feature_tier_falls_back_to_balanced(self):
+        g = _parse_group_threads_cfg({"feature_tier": "bogus"})
+        assert g.feature_tier is GroupThreadFeatureTierConfig.BALANCED
+
+    def test_policy_flags_parsed(self):
+        g = _parse_group_threads_cfg(
+            {
+                "enabled": False,
+                "bounded_retention": True,
+                "auto_media_fetch": False,
+                "metadata_first_sync": True,
+                "background_catchup": False,
+                "first_run_auto_tier": False,
+            }
+        )
+        assert g.enabled is False
+        assert g.bounded_retention is True
+        assert g.auto_media_fetch is False
+        assert g.metadata_first_sync is True
+        assert g.background_catchup is False
+        assert g.first_run_auto_tier is False
 
 
 class TestI2PYAMLParsing:
@@ -317,3 +366,54 @@ class TestRoundTrip:
         assert i.b32_address == "deadbeef.b32.i2p"
         assert i.cache_ttl == 1800
         assert i.fetch_timeout == 30.0
+
+    def test_serialize_config_includes_yggdrasil_section(self):
+        from styrened.services.config import serialize_config
+
+        cfg = _make_core()
+        cfg.yggdrasil.mode = DaemonMode.MANAGED
+        cfg.yggdrasil.binary_path = "/nix/store/yggdrasil/bin/yggdrasil"
+        cfg.yggdrasil.listen_port = 9002
+        cfg.yggdrasil.admin_socket = "/tmp/ygg.sock"
+        cfg.yggdrasil.multicast = False
+        cfg.yggdrasil.bootstrap_from_rns = False
+        cfg.yggdrasil.initial_peers = ["tls://1.2.3.4:9001"]
+
+        data = serialize_config(cfg)
+
+        assert data["yggdrasil"] == {
+            "mode": "managed",
+            "binary_path": "/nix/store/yggdrasil/bin/yggdrasil",
+            "listen_port": 9002,
+            "admin_socket": "/tmp/ygg.sock",
+            "multicast": False,
+            "bootstrap_from_rns": False,
+            "peer_discovery": "eager",
+            "initial_peers": ["tls://1.2.3.4:9001"],
+        }
+
+    def test_serialize_config_includes_i2p_section(self):
+        from styrened.services.config import serialize_config
+
+        cfg = _make_core()
+        cfg.i2p.mode = DaemonMode.MANAGED
+        cfg.i2p.http_proxy_host = "127.0.0.2"
+        cfg.i2p.http_proxy_port = 4444
+        cfg.i2p.managed_http_proxy_port = 4445
+        cfg.i2p.managed_i2pcontrol_port = 7651
+        cfg.i2p.b32_address = "deadbeef.b32.i2p"
+        cfg.i2p.cache_ttl = 1800
+        cfg.i2p.fetch_timeout = 30.0
+
+        data = serialize_config(cfg)
+
+        assert data["i2p"] == {
+            "mode": "managed",
+            "http_proxy_host": "127.0.0.2",
+            "http_proxy_port": 4444,
+            "managed_http_proxy_port": 4445,
+            "managed_i2pcontrol_port": 7651,
+            "b32_address": "deadbeef.b32.i2p",
+            "cache_ttl": 1800,
+            "fetch_timeout": 30.0,
+        }

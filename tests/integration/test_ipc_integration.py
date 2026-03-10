@@ -7,11 +7,13 @@ validating the full request/response lifecycle.
 import asyncio
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from styrened.ipc.client import ControlClient, IPCConnectionError
+from styrened.models.config import CoreConfig
 from styrened.ipc.messages import (
     DaemonStatus,
 )
@@ -23,15 +25,12 @@ def mock_daemon():
     """Create a mock StyreneDaemon for testing."""
     daemon = MagicMock()
     daemon._start_time = 0.0
-    daemon._operator_destination = MagicMock()
-    daemon._operator_destination.hexhash = "abc123def456"
-    daemon._rpc_client = MagicMock()
-    daemon._rpc_client.pending_count = 0
-    daemon._lxmf_service = MagicMock()
+    daemon._operator_destination = SimpleNamespace(hexhash="abc123def456")
+    daemon._rpc_client = SimpleNamespace(pending_count=0)
+    daemon._lxmf_service = SimpleNamespace(router=None)
 
-    # Mock config
-    daemon.config = MagicMock()
-    daemon.config.reticulum.mode.value = "standalone"
+    # Use a real config object so IPC responses remain serializable.
+    daemon.config = CoreConfig()
     daemon.config.reticulum.announce_interval = 300
     daemon.config.reticulum.hub_enabled = False
     daemon.config.rpc.enabled = True
@@ -40,18 +39,12 @@ def mock_daemon():
     daemon.config.discovery.enabled = True
     daemon.config.discovery.auto_announce = True
     daemon.config.chat.enabled = True
-    daemon.config.chat.auto_reply_mode = MagicMock()
-    daemon.config.chat.auto_reply_mode.value = "disabled"
     daemon.config.chat.auto_reply_cooldown = 60
     daemon.config.chat.persist_messages = True
     daemon.config.api.enabled = False
     daemon.config.api.port = 8080
 
-    # Mock lifecycle
-    daemon.lifecycle = MagicMock()
-    daemon.lifecycle._initialized = True
-
-    # Mock announce
+    daemon.lifecycle = SimpleNamespace(_initialized=True)
     daemon._announce = MagicMock()
 
     return daemon
@@ -220,19 +213,19 @@ class TestQueryDevices:
     async def test_query_devices_with_results(self, mock_daemon, socket_path):
         """Query devices should return device list."""
         # Create mock devices
-        mock_device = MagicMock()
-        mock_device.destination_hash = "dest123"
-        mock_device.identity_hash = "id456"
-        mock_device.name = "test-node"
-        mock_device.device_type.value = "styrene"
-        mock_device.status.value = "active"
-        mock_device.is_styrene_node = True
-        mock_device.lxmf_destination_hash = "lxmf789"
-        mock_device.last_announce = 1234567890.0
-        mock_device.announce_count = 5
-        mock_device.short_name = None
-        mock_device.system_fingerprint = None
-        mock_device.system_fingerprint = None
+        mock_device = SimpleNamespace(
+            destination_hash="dest123",
+            identity_hash="id456",
+            name="test-node",
+            device_type=SimpleNamespace(value="styrene"),
+            status=SimpleNamespace(value="active"),
+            is_styrene_node=True,
+            lxmf_destination_hash="lxmf789",
+            last_announce=1234567890.0,
+            announce_count=5,
+            short_name=None,
+            system_fingerprint=None,
+        )
 
         with (
             patch("styrened.services.reticulum.discover_devices", return_value=[mock_device]),
@@ -258,31 +251,33 @@ class TestQueryDevices:
     async def test_query_devices_styrene_only(self, mock_daemon, socket_path):
         """Query devices with styrene_only filter."""
         # Create mock devices - one styrene, one not
-        styrene_device = MagicMock()
-        styrene_device.destination_hash = "styrene1"
-        styrene_device.identity_hash = "id1"
-        styrene_device.name = "styrene-node"
-        styrene_device.device_type.value = "styrene"
-        styrene_device.status.value = "active"
-        styrene_device.is_styrene_node = True
-        styrene_device.lxmf_destination_hash = "lxmf1"
-        styrene_device.last_announce = 1234567890.0
-        styrene_device.announce_count = 1
-        styrene_device.short_name = None
-        styrene_device.system_fingerprint = None
+        styrene_device = SimpleNamespace(
+            destination_hash="styrene1",
+            identity_hash="id1",
+            name="styrene-node",
+            device_type=SimpleNamespace(value="styrene"),
+            status=SimpleNamespace(value="active"),
+            is_styrene_node=True,
+            lxmf_destination_hash="lxmf1",
+            last_announce=1234567890.0,
+            announce_count=1,
+            short_name=None,
+            system_fingerprint=None,
+        )
 
-        other_device = MagicMock()
-        other_device.destination_hash = "other1"
-        other_device.identity_hash = "id2"
-        other_device.name = "other-node"
-        other_device.device_type.value = "nomadnet"
-        other_device.status.value = "active"
-        other_device.is_styrene_node = False
-        other_device.lxmf_destination_hash = "lxmf2"
-        other_device.last_announce = 1234567890.0
-        other_device.announce_count = 1
-        other_device.short_name = None
-        other_device.system_fingerprint = None
+        other_device = SimpleNamespace(
+            destination_hash="other1",
+            identity_hash="id2",
+            name="other-node",
+            device_type=SimpleNamespace(value="nomadnet"),
+            status=SimpleNamespace(value="active"),
+            is_styrene_node=False,
+            lxmf_destination_hash="lxmf2",
+            last_announce=1234567890.0,
+            announce_count=1,
+            short_name=None,
+            system_fingerprint=None,
+        )
 
         with (
             patch(

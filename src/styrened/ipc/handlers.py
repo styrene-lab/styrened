@@ -494,18 +494,18 @@ class IPCHandlers:
             return ErrorResponse.invalid_request("config_dict is required")
 
         try:
+            import tempfile
             import yaml
             from pathlib import Path
 
             from styrened import paths
-            from styrened.services.config import load_core_config, serialize_config
+            from styrened.services.config import load_core_config, save_core_config
+            from styrened.services.reticulum import generate_rns_config
 
             # Validate by round-tripping through CoreConfig.
             # Write to a temp file, parse with load_core_config (full validation),
-            # then re-serialize for a canonical representation. This ensures
+            # then persist the validated object canonically. This ensures
             # malformed dicts cannot corrupt the config file.
-            import tempfile
-
             try:
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".yaml", delete=False
@@ -517,17 +517,16 @@ class IPCHandlers:
                 finally:
                     tmp_path.unlink(missing_ok=True)
             except Exception as e:
-                return ErrorResponse.invalid_request(
-                    f"Invalid config: {e}"
-                )
-
-            # Re-serialize the validated config for a canonical write
-            validated_dict = serialize_config(parsed_config)
+                return ErrorResponse.invalid_request(f"Invalid config: {e}")
 
             config_path = paths.config_file()
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with config_path.open("w") as f:
-                yaml.dump(validated_dict, f, default_flow_style=False, sort_keys=False)
+            save_core_config(parsed_config, config_path)
+
+            # Keep Reticulum config generation daemon-side so TUI screens do not
+            # need to import transport internals just to persist network changes.
+            rns_config_path = Path.home() / ".reticulum" / "config"
+            rns_config_path.parent.mkdir(parents=True, exist_ok=True)
+            rns_config_path.write_text(generate_rns_config(parsed_config))
 
             return ResultResponse(data={"saved": True})
 
@@ -2346,21 +2345,28 @@ class IPCHandlers:
 
         req = request if isinstance(request, QueryPageRequest) else QueryPageRequest()
 
-        if not req.destination_hash:
+        using_url = bool(getattr(req, "url", ""))
+        if not using_url and not req.destination_hash:
             return ErrorResponse.invalid_request("destination_hash is required")
 
-        if not HASH_PATTERN.match(req.destination_hash):
+        if not using_url and not HASH_PATTERN.match(req.destination_hash):
             return ErrorResponse.invalid_request(
                 f"destination_hash must be 16-32 hex characters, got {len(req.destination_hash)} chars"
             )
 
         try:
-            response = await self.daemon._page_browser_service.fetch_page(
-                destination_hash=req.destination_hash,
-                path=req.path,
-                form_data=req.form_data,
-                timeout=req.timeout,
-            )
+            if using_url:
+                response = await self.daemon._page_browser_service.fetch_url(
+                    url=req.url,
+                    timeout=req.timeout,
+                )
+            else:
+                response = await self.daemon._page_browser_service.fetch_page(
+                    destination_hash=req.destination_hash,
+                    path=req.path,
+                    form_data=req.form_data,
+                    timeout=req.timeout,
+                )
 
             data: dict[str, object] = {
                 "content": response.content,
@@ -2391,13 +2397,20 @@ class IPCHandlers:
             # Write-through cache on success
             cache_svc = getattr(self.daemon, "_page_cache_service", None)
             if cache_svc and response.status.value == "ok" and response.content:
-                cache_svc.cache_page(
-                    req.destination_hash, req.path, response.content
-                )
+                if using_url:
+                    cache_svc.cache_url(req.url, response.content)
+                else:
+                    cache_svc.cache_page(req.destination_hash, req.path, response.content)
 
             # On failure, try cache fallback
             if response.status.value != "ok" and cache_svc:
-                cached = cache_svc.get_cached_page(req.destination_hash, req.path)
+                if using_url:
+                    cached = cache_svc.get_cached_url(
+                        req.url,
+                        max_age=cache_svc.get_cache_ttl_for_url(req.url),
+                    )
+                else:
+                    cached = cache_svc.get_cached_page(req.destination_hash, req.path)
                 if cached:
                     data["cached_content"] = cached["content"]
                     data["cached_at"] = cached["fetched_at"]
@@ -2410,7 +2423,13 @@ class IPCHandlers:
             # Try cache fallback even on exception
             cache_svc = getattr(self.daemon, "_page_cache_service", None)
             if cache_svc:
-                cached = cache_svc.get_cached_page(req.destination_hash, req.path)
+                if using_url:
+                    cached = cache_svc.get_cached_url(
+                        req.url,
+                        max_age=cache_svc.get_cache_ttl_for_url(req.url),
+                    )
+                else:
+                    cached = cache_svc.get_cached_page(req.destination_hash, req.path)
                 if cached:
                     return ResultResponse(data={
                         "content": "",

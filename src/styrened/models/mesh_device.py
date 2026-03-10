@@ -77,6 +77,7 @@ class MeshDevice:
     discovered_via: str | None = None  # Interface name that received this announce
     hops: int | None = None  # Number of hops from path table
     ygg_address: str | None = None  # Yggdrasil IPv6 address (fetched via /meta, not from announce)
+    b32_address: str | None = None  # I2P b32 address (fetched via /meta, not from announce)
 
     # Legacy alias for backwards compatibility
     @property

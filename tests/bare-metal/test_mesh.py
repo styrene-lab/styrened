@@ -11,8 +11,13 @@ import pytest
 from tests.harness.ssh import SSHHarness
 
 
+REQUIRED_DEVICES = {"styrene-node", "t100ta"}
+
+
 @pytest.fixture(scope="class")
 def running_daemons(harness: SSHHarness) -> None:
+    if not REQUIRED_DEVICES.issubset(harness.registry):
+        pytest.skip("Legacy bare-metal mesh pair is not available in this environment")
     """Ensure daemons are running on all devices."""
     for name in harness.registry:
         if not harness.is_daemon_running(name):

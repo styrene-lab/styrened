@@ -30,9 +30,13 @@ def mock_reticulum_for_tests(tmp_path):
 
     with (
         patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
+        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
+        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
+        mock_app_lifecycle.return_value.ipc_bridge = None
         yield
 
 
@@ -50,6 +54,15 @@ def _make_mock_lifecycle(messages=None):
     bridge.delete_message = AsyncMock(return_value=True)
     bridge.delete_conversation = AsyncMock(return_value=5)
     bridge.search_messages = AsyncMock(return_value=[])
+    bridge.get_status = AsyncMock(return_value={})
+    bridge.get_identity = AsyncMock(return_value={})
+    bridge.get_hub_status = AsyncMock(return_value={})
+    bridge.get_core_config = AsyncMock(return_value={})
+    bridge.get_devices = AsyncMock(return_value=[])
+    bridge.get_conversations = AsyncMock(return_value=[])
+    bridge.get_contacts = AsyncMock(return_value=[])
+    bridge.get_auto_reply = AsyncMock(return_value={})
+    bridge.subscribe_activity = AsyncMock(return_value=None)
 
     lifecycle = MagicMock()
     lifecycle.ipc_bridge = bridge
@@ -207,8 +220,10 @@ class TestEventSubscription:
             # Pop screen to trigger unmount
             app.pop_screen()
             await pilot.pause()
+            await pilot.pause()
 
             lifecycle.ipc_bridge.remove_event_handler.assert_called_once()
+            lifecycle.ipc_bridge.unsubscribe.assert_awaited_once_with("messages")
 
     @pytest.mark.asyncio
     async def test_incoming_message_event_appends_to_display(self):
@@ -514,15 +529,15 @@ class TestMessageRetry:
                     b.select()
                     break
 
-            # Retry should be a no-op
+            # Current behavior falls back to the most recent failed message.
             chat_widget.action_retry_message()
             await pilot.pause()
 
-            lifecycle.ipc_bridge.retry_message.assert_not_called()
+            lifecycle.ipc_bridge.retry_message.assert_awaited_once_with(3)
 
     @pytest.mark.asyncio
-    async def test_retry_no_selection_noop(self):
-        """Retry with no selection should be a no-op."""
+    async def test_retry_no_selection_retries_most_recent_failed(self):
+        """Retry with no selection should target the most recent failed message."""
         lifecycle = _make_mock_lifecycle(messages=_sample_messages())
 
         app = StyreneApp()
@@ -537,7 +552,7 @@ class TestMessageRetry:
             chat_widget.action_retry_message()
             await pilot.pause()
 
-            lifecycle.ipc_bridge.retry_message.assert_not_called()
+            lifecycle.ipc_bridge.retry_message.assert_awaited_once_with(3)
 
     @pytest.mark.asyncio
     async def test_retry_all_retries_multiple(self):
