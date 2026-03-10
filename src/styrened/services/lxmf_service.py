@@ -991,10 +991,11 @@ class LXMFService:
         """No-op — retained for API compatibility. Blocking is via RBAC."""
         pass
 
-    def block_peer(self, peer_hash: str) -> bool:
+    def block_peer(self, peer_hash: str, lxmf_dest_hash: str = "", alias: str = "") -> bool:
         """Block a peer — all future messages silently dropped.
 
         Creates a contact record if one doesn't exist. Returns True on success.
+        lxmf_dest_hash and alias are stored in the contact record when provided.
         """
         import time as _time
 
@@ -1021,12 +1022,13 @@ class LXMFService:
                         {"h": peer_hash, "t": now},
                     )
                 else:
+                    effective_alias = alias if alias else peer_hash[:8]
                     conn.execute(
                         text(
                             "INSERT INTO contacts (peer_hash, alias, blocked, blocked_at, created_at, updated_at) "
                             "VALUES (:h, :a, 1, :t, :t, :t)"
                         ),
-                        {"h": peer_hash, "a": peer_hash[:8], "t": now},
+                        {"h": peer_hash, "a": effective_alias, "t": now},
                     )
                 conn.commit()
             self.invalidate_blocklist()

@@ -39,8 +39,8 @@ class TestCmdBlockPeerRequestPayload:
 
     def test_from_payload_round_trip(self):
         original = CmdBlockPeerRequest(
-            identity_hash="aabbcc112233",
-            lxmf_dest_hash="ddeeff445566",
+            identity_hash="aabbcc112233ddeeff",
+            lxmf_dest_hash="ddeeff445566778899",
             alias="Alice",
         )
         restored = CmdBlockPeerRequest.from_payload(original.to_payload())
@@ -107,8 +107,8 @@ class TestHandleCmdBlockPeer:
     @pytest.mark.asyncio
     async def test_block_success(self, handler):
         req = CmdBlockPeerRequest(
-            identity_hash="aabbcc112233",
-            lxmf_dest_hash="ddeeff445566",
+            identity_hash="aabbcc112233ddeeff",
+            lxmf_dest_hash="ddeeff445566778899",
             alias="Bob",
         )
         mock_svc = MagicMock()
@@ -120,8 +120,10 @@ class TestHandleCmdBlockPeer:
 
         assert resp.success is True
         assert resp.data["blocked"] is True
-        assert resp.data["identity_hash"] == "aabbcc112233"
-        mock_svc.block_peer.assert_called_once_with("aabbcc112233")
+        assert resp.data["identity_hash"] == "aabbcc112233ddeeff"
+        mock_svc.block_peer.assert_called_once_with(
+            "aabbcc112233ddeeff", lxmf_dest_hash="ddeeff445566778899", alias="Bob"
+        )
 
     @pytest.mark.asyncio
     async def test_block_failure_returns_error(self, handler):
@@ -166,7 +168,7 @@ class TestHandleCmdUnblockPeer:
 
     @pytest.mark.asyncio
     async def test_unblock_success(self, handler):
-        req = CmdUnblockPeerRequest(identity_hash="aabbcc112233")
+        req = CmdUnblockPeerRequest(identity_hash="aabbcc112233ddeeff")
         mock_svc = MagicMock()
         mock_svc.unblock_peer.return_value = True
         with patch(
@@ -175,8 +177,8 @@ class TestHandleCmdUnblockPeer:
             resp = await handler.handle_cmd_unblock_peer(req)
 
         assert resp.success is True
-        assert resp.data["identity_hash"] == "aabbcc112233"
-        mock_svc.unblock_peer.assert_called_once_with("aabbcc112233")
+        assert resp.data["identity_hash"] == "aabbcc112233ddeeff"
+        mock_svc.unblock_peer.assert_called_once_with("aabbcc112233ddeeff")
 
     @pytest.mark.asyncio
     async def test_unblock_failure_returns_error(self, handler):
@@ -231,11 +233,11 @@ class TestIPCClientBlockPeer:
 
         client._request = fake_request
 
-        await client.unblock_peer("aabbcc112233")
+        await client.unblock_peer("aabbcc112233ddeeff")
         assert len(sent) == 1
         req = sent[0]
         assert isinstance(req, CmdUnblockPeerRequest)
-        assert req.identity_hash == "aabbcc112233"
+        assert req.identity_hash == "aabbcc112233ddeeff"
 
 
 # ---------------------------------------------------------------------------
