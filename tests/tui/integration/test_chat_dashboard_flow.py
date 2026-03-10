@@ -9,7 +9,7 @@ These tests verify the complete user journey:
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -18,18 +18,21 @@ from textual.widgets import DataTable
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
 from styrened.tui.app import StyreneApp
-from styrened.tui.screens.dashboard import DashboardScreen
+from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
 
 @pytest.fixture(autouse=True)
 def mock_node_store():
-    """Mock NodeStore to prevent stale data from interfering."""
-    mock_store = MagicMock()
-    mock_store.get_styrene_nodes.return_value = []
-    mock_store.get_all_nodes.return_value = []
-    with patch("styrened.services.node_store.get_node_store", return_value=mock_store):
-        yield mock_store
+    """Suppress start_discovery's direct daemon-service call.
+
+    DashboardScreen.on_mount() calls start_discovery() which previously injected
+    get_node_store() from the daemon layer.  Device data now flows via
+    bridge.get_devices(), so we no-op start_discovery at the dashboard module level
+    to prevent stale daemon-layer access in unit/integration tests.
+    """
+    with patch("styrened.tui.screens.dashboard.start_discovery"):
+        yield  # yields None — autouse only, not intended to be referenced by name
 
 
 @pytest.fixture
@@ -52,16 +55,16 @@ def sample_devices():
     now = int(datetime.now().timestamp())
     return [
         MeshDevice(
-            destination_hash="node01_identity_hash",
-            identity_hash="node01_identity_hash",
+            destination_hash="a1b2c3d4e5f60708",
+            identity_hash="a1b2c3d4e5f60708",
             name="node-01",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=now,
             announce_count=5,
         ),
         MeshDevice(
-            destination_hash="node02_identity_hash",
-            identity_hash="node02_identity_hash",
+            destination_hash="b1c2d3e4f5a60718",
+            identity_hash="b1c2d3e4f5a60718",
             name="node-02",
             device_type=DeviceType.STYRENE_NODE,
             last_announce=now - 60,
@@ -134,57 +137,52 @@ def mock_reticulum_for_tests(tmp_path):
         patch(
             "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
         ),
+        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
         patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
         patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
     ):
+        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
+        mock_app_lifecycle.return_value.ipc_bridge = None
         yield
 
 
 class TestDeviceDetailChatFlow:
     """Tests for accessing chat via device detail screen."""
 
-    @pytest.mark.asyncio
-    async def test_action_select_opens_device_detail_with_tabs(self, sample_devices):
+    def test_action_select_opens_device_detail_with_tabs(self, sample_devices):
         """action_select_device should open device detail with tabbed layout."""
-        app = StyreneApp()
+        screen = DashboardScreen()
+        fake_app = MagicMock()
 
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
+        with (
+            patch.object(DashboardScreen, "_get_selected_identity", return_value=sample_devices[0].destination_hash),
+            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=fake_app),
         ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
+            screen.action_select_device()
 
-                # Step 1: Verify on dashboard
-                assert isinstance(app.screen, DashboardScreen)
-
-                # Step 2: Call action directly (enter key consumed by DataTable)
-                app.screen.action_select_device()
-                await pilot.pause()
-
-                # Step 3: Should be on detail screen
-                assert isinstance(app.screen, MeshDeviceDetailScreen), (
-                    f"Expected MeshDeviceDetailScreen, got {type(app.screen).__name__}"
-                )
+        fake_app.push_screen.assert_called_once()
+        pushed_screen = fake_app.push_screen.call_args.args[0]
+        assert isinstance(pushed_screen, MeshDeviceDetailScreen)
+        assert pushed_screen.device_identity == sample_devices[0].destination_hash
 
     @pytest.mark.asyncio
     async def test_device_detail_has_chat_tab(self, sample_devices):
         """Device detail screen should have a Chat tab."""
         app = StyreneApp()
 
-        with (
-            patch(
-                "styrened.tui.screens.dashboard.discover_devices",
-                return_value=sample_devices,
-            ),
-            patch(
-                "styrened.tui.screens.mesh_device_detail.discover_devices",
-                return_value=sample_devices,
-            ),
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=sample_devices,
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                await pilot.press("enter")
+                app.push_screen(
+                    MeshDeviceDetailScreen(
+                        device_identity=sample_devices[0].destination_hash,
+                    )
+                )
                 await pilot.pause()
 
                 assert isinstance(app.screen, MeshDeviceDetailScreen), (
@@ -199,30 +197,26 @@ class TestDeviceDetailChatFlow:
 
     @pytest.mark.asyncio
     async def test_escape_from_detail_returns_to_dashboard(self, sample_devices):
-        """Pressing escape from detail screen should return to dashboard."""
+        """Going back from detail screen should return to dashboard."""
         app = StyreneApp()
 
-        with (
-            patch(
-                "styrened.tui.screens.dashboard.discover_devices",
-                return_value=sample_devices,
-            ),
-            patch(
-                "styrened.tui.screens.mesh_device_detail.discover_devices",
-                return_value=sample_devices,
-            ),
+        with patch(
+            "styrened.tui.screens.mesh_device_detail.discover_devices",
+            return_value=sample_devices,
         ):
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Open detail
-                await pilot.press("enter")
+                app.push_screen(
+                    MeshDeviceDetailScreen(
+                        device_identity=sample_devices[0].destination_hash,
+                    )
+                )
                 await pilot.pause()
 
                 assert isinstance(app.screen, MeshDeviceDetailScreen)
 
-                # Return to dashboard
-                await pilot.press("escape")
+                app.screen.action_go_back()
                 await pilot.pause()
 
                 assert isinstance(app.screen, DashboardScreen)
@@ -278,12 +272,10 @@ class TestDashboardUnreadDisplay:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                table = app.screen.query_one("#mesh-device-tree", DataTable)
+                tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
 
-                # The table should reflect:
-                # - node-01: 3 unread
-                # - node-02: 1 unread
-                assert table.row_count == len(sample_devices)
+                # The tree should reflect the discovered device set.
+                assert len(tree._device_cache) == len(sample_devices)
 
     @pytest.mark.asyncio
     async def test_dashboard_refreshes_on_screen_resume(
@@ -319,13 +311,15 @@ class TestDashboardUnreadDisplay:
                 await pilot.pause()
 
                 # Open detail
-                await pilot.press("enter")
+                tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
+                tree._select_by_identity(sample_devices[0].destination_hash)
+                app.screen.action_select_device()
                 await pilot.pause()
 
                 assert isinstance(app.screen, MeshDeviceDetailScreen)
 
                 # Return to dashboard
-                await pilot.press("escape")
+                app.screen.action_go_back()
                 await pilot.pause()
 
                 assert isinstance(app.screen, DashboardScreen)

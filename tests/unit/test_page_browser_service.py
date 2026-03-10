@@ -129,6 +129,90 @@ class TestFetchPage:
             await service.stop()
 
 
+class TestFetchUrl:
+    """Tests for explicit HTTP(S)/I2P URL fetching."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_url_rejects_unsupported_scheme(self, service):
+        await service.start()
+        try:
+            response = await service.fetch_url("nomadnet://example/index.mu")
+            assert response.status == PageStatus.ERROR
+            assert "Unsupported URL scheme" in (response.error_message or "")
+        finally:
+            await service.stop()
+
+    @pytest.mark.asyncio
+    async def test_fetch_i2p_requires_explicit_enablement(self, service):
+        await service.start()
+        try:
+            response = await service.fetch_url("http://docs.example.i2p/")
+            assert response.status == PageStatus.ERROR
+            assert response.error_message == "I2P not enabled — set i2p.mode: adopt or managed in config."
+        finally:
+            await service.stop()
+
+    @pytest.mark.asyncio
+    async def test_fetch_i2p_requires_ready_proxy(self):
+        service = PageBrowserService(i2p_adapter=MagicMock())
+        service._i2p_adapter.get_http_proxy_url.return_value = None
+        await service.start()
+        try:
+            response = await service.fetch_url("http://docs.example.i2p/")
+            assert response.status == PageStatus.ERROR
+            assert "proxy is not ready" in (response.error_message or "")
+        finally:
+            await service.stop()
+
+    @pytest.mark.asyncio
+    async def test_fetch_url_uses_proxy_for_i2p(self):
+        adapter = MagicMock()
+        adapter.get_http_proxy_url.return_value = "http://127.0.0.1:4445"
+        service = PageBrowserService(i2p_adapter=adapter)
+        await service.start()
+        try:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b"hello over i2p"
+            mock_response.headers.get_content_charset.return_value = "utf-8"
+            mock_response.__enter__.return_value = mock_response
+            mock_response.__exit__.return_value = None
+
+            mock_opener = MagicMock()
+            mock_opener.open.return_value = mock_response
+
+            with patch("urllib.request.build_opener", return_value=mock_opener) as mock_build:
+                response = await service.fetch_url("http://docs.example.i2p/")
+
+            assert response.status == PageStatus.OK
+            assert response.content == "hello over i2p"
+            assert mock_build.call_args is not None
+            proxy_handler = mock_build.call_args.args[0]
+            assert proxy_handler.proxies["http"] == "http://127.0.0.1:4445"
+        finally:
+            await service.stop()
+
+    @pytest.mark.asyncio
+    async def test_fetch_https_does_not_require_i2p(self, service):
+        await service.start()
+        try:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b"hello over https"
+            mock_response.headers.get_content_charset.return_value = "utf-8"
+            mock_response.__enter__.return_value = mock_response
+            mock_response.__exit__.return_value = None
+
+            mock_opener = MagicMock()
+            mock_opener.open.return_value = mock_response
+
+            with patch("urllib.request.build_opener", return_value=mock_opener):
+                response = await service.fetch_url("https://docs.styrene.io/")
+
+            assert response.status == PageStatus.OK
+            assert response.content == "hello over https"
+        finally:
+            await service.stop()
+
+
 class TestDisconnect:
     """Tests for disconnect() method."""
 

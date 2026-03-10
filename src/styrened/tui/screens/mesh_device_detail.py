@@ -6,15 +6,23 @@ fleet operations (structured RPC), and terminal (PTY-over-RNS).
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static, TabbedContent, TabPane
+from textual.worker import Worker
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.services.reticulum import discover_devices
 from styrened.tui.widgets.chat_widget import ChatWidget
+from styrened.ui_state import (
+    PeerWorkspaceContext,
+    PeerWorkspaceFocus,
+    WorkspaceId,
+    build_peer_workspace_context,
+)
 from styrened.tui.widgets.command_widget import CommandWidget
 from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
@@ -119,7 +127,7 @@ class MeshInfoWidget(Static):
         yield Static(f"[bold]Type:[/] {type_text}", classes="info-field")
 
         # Identity (full hash — not truncated)
-        yield Static(f"[bold]Identity:[/] {self.device.identity}", classes="info-field")
+        yield Static(f"[bold]Identity:[/] {self.device.identity_hash}", classes="info-field")
 
         # Last seen
         yield Static(f"[bold]Last Seen:[/] {self.device.last_seen_display}", classes="info-field")
@@ -155,7 +163,7 @@ class MeshDeviceDetailScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "app.pop_screen", "Back"),
+        Binding("escape", "go_back", "Back"),
         Binding("r", "refresh_status", "Refresh"),
         Binding("l", "establish_link", "Link"),
         Binding("t", "run_speedtest", "Speedtest"),
@@ -169,6 +177,8 @@ class MeshDeviceDetailScreen(Screen[None]):
         initial_status: "StatusResponse | None" = None,
         initial_tab: str | None = None,
         device: MeshDevice | None = None,
+        origin_workspace: WorkspaceId | str | None = None,
+        peer_context: PeerWorkspaceContext | None = None,
     ) -> None:
         """Initialize mesh device detail screen.
 
@@ -177,15 +187,35 @@ class MeshDeviceDetailScreen(Screen[None]):
             initial_status: Optional pre-fetched status response.
             initial_tab: Optional tab ID to open initially (e.g. "chat", "fleet-ops", "terminal").
             device: Optional pre-resolved MeshDevice (avoids re-query).
+            origin_workspace: Aggregate workspace that launched the peer workspace.
+            peer_context: Optional pre-built canonical peer workspace context.
         """
         super().__init__()
         self.device_identity = device_identity
         self.initial_status = initial_status
         self.initial_tab = initial_tab
         self.device: MeshDevice | None = device
-        # Load device only if not pre-supplied
-        if self.device is None:
-            self._load_device()
+        self.peer_context = peer_context or build_peer_workspace_context(
+            device_identity,
+            origin_workspace,
+            focus=initial_tab,
+        )
+        self._device_load_worker: Worker | None = None
+        self._status_worker: Worker | None = None
+        self._link_worker: Worker | None = None
+        self._speedtest_worker: Worker | None = None
+        self._contact_worker: Worker | None = None
+        self._device_lookup_complete = device is not None
+
+    @property
+    def origin_workspace(self) -> WorkspaceId:
+        """Aggregate workspace that launched this peer workspace."""
+        return self.peer_context.origin_workspace
+
+    @property
+    def requested_focus(self) -> PeerWorkspaceFocus:
+        """Requested initial focus within the peer workspace."""
+        return self.peer_context.focus
 
     @property
     def _dest_hash(self) -> str:
@@ -199,38 +229,30 @@ class MeshDeviceDetailScreen(Screen[None]):
             return self.device.destination_hash
         return self.device_identity
 
-    def _load_device(self) -> None:
-        """Load device from mesh discovery.
-
-        Only has live-discovered devices in sync context.  Stored nodes
-        are fetched asynchronously in ``on_mount`` via IPC if needed.
-        """
+    def _find_live_device(self) -> MeshDevice | None:
+        """Find the device in current live discovery, if present."""
         live_nodes = discover_devices()
 
-        # Find by identity in live data
         for device in live_nodes:
-            if device.identity == self.device_identity:
-                self.device = device
-                return
+            if device.identity_hash == self.device_identity:
+                return device
 
-        self.notify(
-            f"Device {self.device_identity[:8]}... not found in mesh",
-            title="Error",
-            severity="error",
-        )
+        return None
 
     def compose(self) -> ComposeResult:
         """Compose screen layout with persistent header and tabbed content."""
         yield Header()
 
         if not self.device:
-            # Device not found
+            message = (
+                f"[yellow]Loading device {self.device_identity[:8]}...[/]"
+                if not self._device_lookup_complete
+                else f"[red]Device {self.device_identity[:8]}... not found[/]"
+            )
+            title = "LOADING" if not self._device_lookup_complete else "ERROR"
             yield HighlightedPanel(
-                Static(
-                    f"[red]Device {self.device_identity[:8]}... not found[/]",
-                    classes="error-message",
-                ),
-                title="ERROR",
+                Static(message, classes="error-message"),
+                title=title,
             )
         else:
             with Container(id="mesh-device-detail-container"):
@@ -346,31 +368,122 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         return None
 
+    def _start_device_load(self) -> Worker:
+        """Start or replace the device-resolution worker."""
+        self._device_load_worker = self.run_worker(
+            self._async_load_device(),
+            group="device-load",
+            exclusive=True,
+        )
+        return self._device_load_worker
+
+    def _start_status_refresh(self) -> Worker:
+        """Start or replace the status-refresh worker."""
+        self._status_worker = self.run_worker(
+            self._auto_fetch_status(),
+            group="device-status",
+            exclusive=True,
+        )
+        return self._status_worker
+
     def on_mount(self) -> None:
         """Auto-fetch status when the screen mounts if no initial data."""
         if self.device is None:
             # Device not found in live discovery — try stored nodes via IPC
-            self.run_worker(self._async_load_device(), name="load-device")
+            self._start_device_load()
         elif self.initial_status is None:
-            self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
+            self._start_status_refresh()
+
+    def _cancel_inflight_workers(self) -> None:
+        """Cancel and clear any tracked screen-owned workers."""
+        for attr in (
+            "_device_load_worker",
+            "_status_worker",
+            "_link_worker",
+            "_speedtest_worker",
+            "_contact_worker",
+        ):
+            worker = getattr(self, attr)
+            if worker is not None:
+                worker.cancel()
+                setattr(self, attr, None)
+
+    def _start_link_establish(self, bridge: Any) -> Worker:
+        """Start or replace the direct-link worker."""
+        self._link_worker = self.run_worker(
+            self._do_establish_link(bridge),
+            group="device-link",
+            exclusive=True,
+        )
+        return self._link_worker
+
+    def _start_speedtest(self, bridge: Any) -> Worker:
+        """Start or replace the speedtest worker."""
+        self._speedtest_worker = self.run_worker(
+            self._do_speedtest(bridge),
+            group="device-speedtest",
+            exclusive=True,
+        )
+        return self._speedtest_worker
+
+    def _start_contact_save(self, bridge: Any, default_name: str) -> Worker:
+        """Start or replace the contact-save worker."""
+        self._contact_worker = self.run_worker(
+            self._save_contact(bridge, default_name),
+            group="device-contact-save",
+            exclusive=True,
+        )
+        return self._contact_worker
+
+    def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
+        """Cancel in-flight detail workers while the peer workspace is inactive."""
+        self._cancel_inflight_workers()
+
+    def on_screen_resume(self, event: events.ScreenResume) -> None:
+        """Refresh peer detail when returning to this workspace."""
+        if self.device is None:
+            self._start_device_load()
+        else:
+            self._start_status_refresh()
+
+    def on_unmount(self) -> None:
+        """Cancel in-flight detail workers when the peer workspace is removed."""
+        self._cancel_inflight_workers()
 
     async def _async_load_device(self) -> None:
-        """Try to find the device in stored nodes via IPC bridge."""
+        """Resolve the device from live discovery first, then stored IPC nodes."""
         try:
-            bridge = getattr(getattr(self.app, "services", None), "bridge", None)
-            if bridge is None:
+            live_device = self._find_live_device()
+            if live_device is not None:
+                self.device = live_device
+                self._device_lookup_complete = True
+                self.refresh(recompose=True)
+                self.call_after_refresh(self._start_status_refresh)
                 return
-            stored_raw = await bridge.get_nodes(styrene_only=False)
-            from styrened.tui.utils import device_info_to_mesh
-            for info in stored_raw:
-                device = device_info_to_mesh(info)
-                if device.identity == self.device_identity:
-                    self.device = device
-                    # Now trigger status fetch
-                    self.run_worker(self._auto_fetch_status(), name="auto-fetch-status")
-                    return
+
+            bridge = getattr(getattr(self.app, "services", None), "bridge", None)
+            if bridge is not None:
+                stored_raw = await bridge.get_nodes(styrene_only=False)
+                from styrened.tui.utils import device_info_to_mesh
+
+                for info in stored_raw:
+                    device = device_info_to_mesh(info)
+                    if device.identity_hash == self.device_identity:
+                        self.device = device
+                        self._device_lookup_complete = True
+                        self.refresh(recompose=True)
+                        self.call_after_refresh(self._start_status_refresh)
+                        return
         except Exception:
             pass
+
+        self._device_lookup_complete = True
+        self.refresh(recompose=True)
+        self.notify(
+            f"Device {self.device_identity[:8]}... not found in mesh",
+            title="Error",
+            severity="error",
+        )
 
     async def _auto_fetch_status(self) -> None:
         """Silently fetch status on mount — tries datalink first, then RPC.
@@ -468,11 +581,15 @@ class MeshDeviceDetailScreen(Screen[None]):
             self.action_copy_hash()
 
 
+    def action_go_back(self) -> None:
+        """Leave peer workspace and return to the originating screen stack context."""
+        self.app.pop_screen()
+
     async def action_refresh_status(self) -> None:
         """Refresh device status — tries datalink, falls back to RPC."""
         if not self.device:
             return
-        self.run_worker(self._auto_fetch_status(), name="refresh-status")
+        self._start_status_refresh()
         self.notify("Refreshing...", severity="information")
 
     async def action_establish_link(self) -> None:
@@ -495,7 +612,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             return
 
         self.notify("Establishing direct link...", severity="information")
-        self.run_worker(self._do_establish_link(bridge), name="establish-link")
+        self._start_link_establish(bridge)
 
     async def _do_establish_link(self, bridge: Any) -> None:
         """Background worker: establish datalink and refresh status."""
@@ -517,7 +634,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             if status == "active":
                 self.notify("Direct link established ●", severity="information")
                 # Auto-query status over the new link
-                self.run_worker(self._auto_fetch_status(), name="post-link-status")
+                self._start_status_refresh()
             else:
                 self.notify(f"Link status: {status}", severity="warning")
 
@@ -551,7 +668,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             return
 
         self.notify("Running speedtest... (adaptive payload sizes)", severity="information")
-        self.run_worker(self._do_speedtest(bridge), name="speedtest")
+        self._start_speedtest(bridge)
 
     async def _do_speedtest(self, bridge: Any) -> None:
         """Background worker: run speedtest and display results."""
@@ -629,7 +746,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             return
 
         name = self.device.name or self.device_identity[:8]
-        self.run_worker(self._save_contact(bridge, name))
+        self._start_contact_save(bridge, name)
 
     async def _save_contact(self, bridge: Any, default_name: str) -> None:
         """Save device as contact via IPCBridge."""

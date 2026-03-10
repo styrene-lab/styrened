@@ -76,12 +76,8 @@ class MeshDevice:
     nomadnet_destination_hash: str | None = None  # NomadNet page destination (from announce)
     discovered_via: str | None = None  # Interface name that received this announce
     hops: int | None = None  # Number of hops from path table
-
-    # Legacy alias for backwards compatibility
-    @property
-    def identity(self) -> str:
-        """Legacy alias for destination_hash."""
-        return self.destination_hash
+    ygg_address: str | None = None  # Yggdrasil IPv6 address (fetched via /meta, not from announce)
+    b32_address: str | None = None  # I2P b32 address (fetched via /meta, not from announce)
 
     @property
     def status(self) -> NodeStatus:
@@ -173,7 +169,7 @@ def _sanitize_fingerprint(raw: str | None) -> str | None:
 def _try_lxmf_parse(
     app_data: bytes,
     aspect_hint: DeviceType | None = None,
-) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None] | None:
+) -> tuple[str, DeviceType, list[str] | None, str | None, str | None, str | None, str | None, str | None] | None:
     """Try to parse app_data using LXMF library helpers.
 
     Handles msgpack-encoded LXMF delivery announces (v0.5.0+) and

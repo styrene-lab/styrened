@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SendChatRequest(BaseModel):
@@ -33,6 +33,8 @@ class ExecCommandRequest(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     """Partial config update. Only provided sections/fields are changed."""
+
+    model_config = ConfigDict(extra="forbid")
 
     profile: str | None = None
     reticulum: dict[str, Any] | None = None

@@ -11,19 +11,26 @@ from styrened.models.contacts import Contact
 
 @pytest.fixture
 def db_engine(tmp_path):
-    """Create a test DB with contacts table including blocked columns."""
+    """Create a test DB with identity_hash-based contacts + peer_blocks tables."""
     db_path = tmp_path / "test.db"
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as conn:
         conn.execute(text(
             "CREATE TABLE contacts ("
-            "peer_hash VARCHAR(32) PRIMARY KEY, "
+            "identity_hash TEXT PRIMARY KEY, "
             "alias VARCHAR(100) NOT NULL, "
             "notes VARCHAR(500), "
             "blocked BOOLEAN NOT NULL DEFAULT 0, "
             "blocked_at REAL, "
             "created_at REAL NOT NULL, "
             "updated_at REAL NOT NULL"
+            ")"
+        ))
+        conn.execute(text(
+            "CREATE TABLE peer_blocks ("
+            "identity_hash TEXT PRIMARY KEY, "
+            "blocked_at REAL NOT NULL, "
+            "reason TEXT"
             ")"
         ))
         conn.commit()
@@ -34,12 +41,12 @@ class TestContactBlockedField:
     """Contact model has blocked flag."""
 
     def test_contact_default_not_blocked(self):
-        c = Contact(peer_hash="abc123", alias="test")
+        c = Contact(identity_hash="abc123", alias="test")
         assert c.blocked is False
         assert c.blocked_at is None
 
     def test_contact_blocked(self):
-        c = Contact(peer_hash="abc123", alias="test", blocked=True, blocked_at=time.time())
+        c = Contact(identity_hash="abc123", alias="test", blocked=True, blocked_at=time.time())
         assert c.blocked is True
         assert c.blocked_at is not None
 
@@ -60,29 +67,30 @@ class TestLXMFServiceBlocklist:
         engine, db_path = db_engine
         from styrened.services.lxmf_service import LXMFService
 
+        ih = "de" * 32  # 64 hex chars
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            result = svc.block_peer("deadbeef12345678")
+            result = svc.block_peer(ih)
             assert result is True
 
-            # Verify in DB
+            # Verify in peer_blocks
             with engine.connect() as conn:
                 row = conn.execute(
-                    text("SELECT blocked, alias FROM contacts WHERE peer_hash = 'deadbeef12345678'")
+                    text("SELECT identity_hash FROM peer_blocks WHERE identity_hash = :h"),
+                    {"h": ih},
                 ).fetchone()
                 assert row is not None
-                assert row[0] == 1  # blocked
-                assert row[1] == "deadbeef"  # default alias = first 8 chars
 
     def test_block_existing_contact(self, db_engine):
         engine, db_path = db_engine
+        ih = "de" * 32
         # Create existing contact
         with engine.connect() as conn:
             conn.execute(
-                text("INSERT INTO contacts (peer_hash, alias, blocked, created_at, updated_at) "
-                     "VALUES ('deadbeef12345678', 'Friendly', 0, :t, :t)"),
-                {"t": time.time()},
+                text("INSERT INTO contacts (identity_hash, alias, blocked, created_at, updated_at) "
+                     "VALUES (:h, 'Friendly', 0, :t, :t)"),
+                {"h": ih, "t": time.time()},
             )
             conn.commit()
 
@@ -91,82 +99,90 @@ class TestLXMFServiceBlocklist:
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            result = svc.block_peer("deadbeef12345678")
+            result = svc.block_peer(ih)
             assert result is True
 
             # Alias preserved, blocked set
             with engine.connect() as conn:
                 row = conn.execute(
-                    text("SELECT blocked, alias FROM contacts WHERE peer_hash = 'deadbeef12345678'")
+                    text("SELECT blocked, alias FROM contacts WHERE identity_hash = :h"),
+                    {"h": ih},
                 ).fetchone()
                 assert row[0] == 1
                 assert row[1] == "Friendly"
 
     def test_unblock_peer(self, db_engine):
         engine, db_path = db_engine
+        ih = "de" * 32
         from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            svc.block_peer("deadbeef12345678")
-            result = svc.unblock_peer("deadbeef12345678")
+            svc.block_peer(ih)
+            result = svc.unblock_peer(ih)
             assert result is True
 
+            # Removed from peer_blocks
             with engine.connect() as conn:
                 row = conn.execute(
-                    text("SELECT blocked, blocked_at FROM contacts WHERE peer_hash = 'deadbeef12345678'")
+                    text("SELECT identity_hash FROM peer_blocks WHERE identity_hash = :h"),
+                    {"h": ih},
                 ).fetchone()
-                assert row[0] == 0
-                assert row[1] is None
+                assert row is None
 
     def test_block_peer_syncs_to_rbac(self, db_engine):
-        """block_peer adds identity to RBAC blocked set."""
+        """block_peer adds identity_hash to RBAC blocked set."""
         _, db_path = db_engine
+        ih = "de" * 32
         from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            svc.block_peer("deadbeef12345678")
-            assert "deadbeef12345678" in svc._rbac_policy.blocked
+            svc.block_peer(ih)
+            assert ih in svc._rbac_policy.blocked
 
     def test_unblock_peer_removes_from_rbac(self, db_engine):
-        """unblock_peer removes identity from RBAC blocked set."""
+        """unblock_peer removes identity_hash from RBAC blocked set."""
         _, db_path = db_engine
+        ih = "de" * 32
         from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            svc.block_peer("deadbeef12345678")
-            svc.unblock_peer("deadbeef12345678")
-            assert "deadbeef12345678" not in svc._rbac_policy.blocked
+            svc.block_peer(ih)
+            svc.unblock_peer(ih)
+            assert ih not in svc._rbac_policy.blocked
 
     def test_get_blocked_peers(self, db_engine):
         _, db_path = db_engine
+        ih1 = "aa" * 32
+        ih2 = "bb" * 32
         from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            svc.block_peer("aaaa1111")
-            svc.block_peer("bbbb2222")
+            svc.block_peer(ih1)
+            svc.block_peer(ih2)
             blocked = svc.get_blocked_peers()
             assert len(blocked) == 2
-            hashes = {b["peer_hash"] for b in blocked}
-            assert "aaaa1111" in hashes
-            assert "bbbb2222" in hashes
+            hashes = {b["identity_hash"] for b in blocked}
+            assert ih1 in hashes
+            assert ih2 in hashes
 
     def test_block_idempotent(self, db_engine):
         _, db_path = db_engine
+        ih = "de" * 32
         from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            assert svc.block_peer("deadbeef12345678") is True
-            assert svc.block_peer("deadbeef12345678") is True
+            assert svc.block_peer(ih) is True
+            assert svc.block_peer(ih) is True
             blocked = svc.get_blocked_peers()
             assert len(blocked) == 1
 
@@ -178,19 +194,27 @@ class TestLXMFMessageDropped:
         _, db_path = db_engine
         from styrened.services.lxmf_service import LXMFService
 
+        ih = "de" * 32  # 64-char identity hash used in RBAC
+        dest_hash = "ab" * 16  # 32-char LXMF dest hash
+
         svc = LXMFService()
         with patch("styrened.paths") as mock_paths:
             mock_paths.messages_db.return_value = db_path
-            svc.block_peer("deadbeef12345678")
+            svc.block_peer(ih)
 
-            # Create a fake LXMF message
+            # Create a fake LXMF message with the dest hash as source
             msg = MagicMock()
-            msg.source_hash = bytes.fromhex("deadbeef12345678")
+            msg.source_hash = bytes.fromhex(dest_hash)
 
             callback = MagicMock()
             svc._message_callbacks = [(callback, False)]
 
-            svc._handle_lxmf_message(msg)
+            # NodeStore resolves dest_hash → identity_hash
+            mock_store = MagicMock()
+            mock_store.get_identity_for_lxmf_destination.return_value = ih
+
+            with patch("styrened.services.node_store.get_node_store", return_value=mock_store):
+                svc._handle_lxmf_message(msg)
 
             # Callback should NOT have been called
             callback.assert_not_called()
@@ -212,7 +236,11 @@ class TestLXMFMessageDropped:
             callback = MagicMock()
             svc._message_callbacks = [(callback, True)]
 
-            svc._handle_lxmf_message(msg)
+            null_store = MagicMock()
+            null_store.get_identity_for_lxmf_destination.return_value = None
+            null_store.get_identity_for_destination.return_value = None
+            with patch("styrened.services.node_store.get_node_store", return_value=null_store):
+                svc._handle_lxmf_message(msg)
 
             # Raw callback receives the message
             callback.assert_called_once_with(msg)
@@ -220,6 +248,13 @@ class TestLXMFMessageDropped:
 
 class TestRBACPrefixBlocking:
     """RBAC blocked list supports prefix matching for short hashes."""
+
+    def _null_node_store(self):
+        """Return a mock NodeStore that resolves nothing."""
+        mock = MagicMock()
+        mock.get_identity_for_lxmf_destination.return_value = None
+        mock.get_identity_for_destination.return_value = None
+        return mock
 
     def test_short_hash_blocks_full_hash_via_rbac(self, db_engine):
         """Blocking 'ca3e9813' drops messages from 'ca3e981348d3bb48...' via RBAC."""
@@ -235,7 +270,8 @@ class TestRBACPrefixBlocking:
             msg.source_hash = bytes.fromhex("ca3e981348d3bb48")
             callback = MagicMock()
             svc._message_callbacks = [(callback, False)]
-            svc._handle_lxmf_message(msg)
+            with patch("styrened.services.node_store.get_node_store", return_value=self._null_node_store()):
+                svc._handle_lxmf_message(msg)
             callback.assert_not_called()
 
     def test_exact_hash_blocks_via_rbac(self, db_engine):
@@ -252,7 +288,8 @@ class TestRBACPrefixBlocking:
         msg.source_hash = bytes.fromhex(source)
         callback = MagicMock()
         svc._message_callbacks = [(callback, False)]
-        svc._handle_lxmf_message(msg)
+        with patch("styrened.services.node_store.get_node_store", return_value=self._null_node_store()):
+            svc._handle_lxmf_message(msg)
         callback.assert_not_called()
 
     def test_short_hash_does_not_block_different_prefix(self, db_engine):
@@ -271,7 +308,8 @@ class TestRBACPrefixBlocking:
             msg.fields = {}
             callback = MagicMock()
             svc._message_callbacks = [(callback, True)]
-            svc._handle_lxmf_message(msg)
+            with patch("styrened.services.node_store.get_node_store", return_value=self._null_node_store()):
+                svc._handle_lxmf_message(msg)
             callback.assert_called_once_with(msg)
 
 
@@ -294,7 +332,11 @@ class TestRBACBlockedConfig:
         callback = MagicMock()
         svc._message_callbacks = [(callback, False)]
 
-        svc._handle_lxmf_message(msg)
+        null_store = MagicMock()
+        null_store.get_identity_for_lxmf_destination.return_value = None
+        null_store.get_identity_for_destination.return_value = None
+        with patch("styrened.services.node_store.get_node_store", return_value=null_store):
+            svc._handle_lxmf_message(msg)
         callback.assert_not_called()
 
 
@@ -304,19 +346,19 @@ class TestIPCMessages:
     def test_block_request_roundtrip(self):
         from styrened.ipc.messages import CmdBlockPeerRequest
 
-        req = CmdBlockPeerRequest(peer_hash="deadbeef12345678")
+        req = CmdBlockPeerRequest(identity_hash="deadbeef12345678")
         payload = req.to_payload()
-        assert payload == {"peer_hash": "deadbeef12345678"}
+        assert payload["identity_hash"] == "deadbeef12345678"
         restored = CmdBlockPeerRequest.from_payload(payload)
-        assert restored.peer_hash == "deadbeef12345678"
+        assert restored.identity_hash == "deadbeef12345678"
 
     def test_unblock_request_roundtrip(self):
         from styrened.ipc.messages import CmdUnblockPeerRequest
 
-        req = CmdUnblockPeerRequest(peer_hash="deadbeef12345678")
+        req = CmdUnblockPeerRequest(identity_hash="deadbeef12345678")
         payload = req.to_payload()
         restored = CmdUnblockPeerRequest.from_payload(payload)
-        assert restored.peer_hash == "deadbeef12345678"
+        assert restored.identity_hash == "deadbeef12345678"
 
     def test_query_blocked_roundtrip(self):
         from styrened.ipc.messages import QueryBlockedPeersRequest

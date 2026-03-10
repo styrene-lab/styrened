@@ -5,6 +5,11 @@ All notable changes to styrened will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.5] - 2026-03-09
+
+### Fixed
+- **TUI: Provision disk detection null model crash** — Linux `lsblk --json` entries with `model: null` or whitespace no longer crash `ProvisionScreen` disk detection workers; removable disks now fall back to the display name `Unknown`
+
 ## [0.15.1] - 2026-03-07
 
 ### Fixed

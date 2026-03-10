@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import time
+import urllib.parse
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
@@ -76,14 +77,17 @@ def extract_page_links(content: str) -> list[str]:
 
 
 class PageCacheService:
-    """Manages NomadNet page caching and background site crawling.
+    """Manages page caching and background site crawling.
 
     Works alongside PageBrowserService — receives fetch results for
     write-through caching and provides cached fallbacks on failure.
+    NomadNet crawling remains destination-based; explicit HTTP(S)/I2P
+    URLs use direct cache entries keyed by URL.
     """
 
-    def __init__(self, engine: "Engine") -> None:
+    def __init__(self, engine: "Engine", i2p_cache_ttl: int = 3600) -> None:
         self._engine = engine
+        self._i2p_cache_ttl = i2p_cache_ttl
         self._crawl_task: asyncio.Task | None = None
         self._started = False
         self._page_browser: PageBrowserService | None = None
@@ -111,6 +115,17 @@ class PageCacheService:
                 pass
             self._crawl_task = None
         logger.info("PageCacheService stopped")
+
+    def _cache_key_for_url(self, url: str) -> tuple[str, str]:
+        parsed = urllib.parse.urlparse(url)
+        transport = "i2p" if (parsed.hostname or "").lower().endswith(".i2p") else (parsed.scheme or "http")
+        return (f"url:{transport}", url)
+
+    def get_cache_ttl_for_url(self, url: str) -> int | None:
+        parsed = urllib.parse.urlparse(url)
+        if (parsed.hostname or "").lower().endswith(".i2p"):
+            return self._i2p_cache_ttl
+        return None
 
     def cache_page(self, destination_hash: str, path: str, content: str) -> None:
         """Write-through cache a page after successful fetch.
@@ -147,6 +162,11 @@ class PageCacheService:
         except Exception as e:
             logger.warning(f"Failed to cache page {path}: {e}")
 
+    def cache_url(self, url: str, content: str) -> None:
+        """Write-through cache an explicit HTTP(S)/I2P URL fetch."""
+        destination_hash, path = self._cache_key_for_url(url)
+        self.cache_page(destination_hash, path, content)
+
     def get_cached_page(
         self, destination_hash: str, path: str
     ) -> dict[str, Any] | None:
@@ -177,6 +197,21 @@ class PageCacheService:
         except Exception as e:
             logger.warning(f"Failed to read cached page {path}: {e}")
         return None
+
+    def get_cached_url(self, url: str, max_age: int | None = None) -> dict[str, Any] | None:
+        """Retrieve a cached HTTP(S)/I2P URL entry.
+
+        Args:
+            url: Explicit URL key.
+            max_age: Optional freshness limit in seconds.
+        """
+        destination_hash, path = self._cache_key_for_url(url)
+        cached = self.get_cached_page(destination_hash, path)
+        if not cached:
+            return None
+        if max_age is not None and (time.time() - cached["fetched_at"]) > max_age:
+            return None
+        return cached
 
     def get_cached_pages_for_site(
         self, destination_hash: str

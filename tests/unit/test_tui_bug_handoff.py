@@ -24,7 +24,7 @@ def _make_device(
     d.announce_count = announce_count
     type(d).last_seen_display = PropertyMock(return_value=last_seen_display)
     d.status = status
-    d.identity = "abc123"
+    d.identity_hash = "abc123"
     d.device_type = DeviceType.STYRENE_NODE
     return d
 

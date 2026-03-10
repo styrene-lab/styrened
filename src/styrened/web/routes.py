@@ -133,6 +133,13 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         # Check for protected fields
         updates = body.model_dump(exclude_none=True)
         for section_key, section_val in updates.items():
+            for protected in protected_fields:
+                if len(protected) == 1 and protected[0] == section_key:
+                    raise HTTPException(
+                        403,
+                        detail=f"Field '{section_key}' cannot be set via API",
+                    )
+
             if isinstance(section_val, dict):
                 for field_key, field_val in section_val.items():
                     for protected in protected_fields:

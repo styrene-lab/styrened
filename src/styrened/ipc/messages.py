@@ -434,11 +434,12 @@ class QueryPathInfoRequest(IPCRequest):
 
 @dataclass
 class QueryPageRequest(IPCRequest):
-    """Fetch a page from a NomadNet node."""
+    """Fetch a page from a NomadNet node or an explicit URL."""
 
     MSG_TYPE = IPCMessageType.QUERY_PAGE
     destination_hash: str = ""
     path: str = "/page/index.mu"
+    url: str = ""
     form_data: dict[str, Any] | None = None
     timeout: float = 30.0
 
@@ -448,6 +449,8 @@ class QueryPageRequest(IPCRequest):
             "path": self.path,
             "timeout": self.timeout,
         }
+        if self.url:
+            payload["url"] = self.url
         if self.form_data is not None:
             payload["form_data"] = self.form_data
         return payload
@@ -624,14 +627,24 @@ class CmdBlockPeerRequest(IPCRequest):
     """Block a peer — silently drop all future messages from them."""
 
     MSG_TYPE = IPCMessageType.CMD_BLOCK_PEER
-    peer_hash: str = ""
+    identity_hash: str = ""
+    lxmf_dest_hash: str = ""
+    alias: str = ""
 
     def to_payload(self) -> dict:
-        return {"peer_hash": self.peer_hash}
+        return {
+            "identity_hash": self.identity_hash,
+            "lxmf_dest_hash": self.lxmf_dest_hash,
+            "alias": self.alias,
+        }
 
     @classmethod
     def from_payload(cls, data: dict) -> "CmdBlockPeerRequest":
-        return cls(peer_hash=data.get("peer_hash", ""))
+        return cls(
+            identity_hash=data.get("identity_hash", ""),
+            lxmf_dest_hash=data.get("lxmf_dest_hash", ""),
+            alias=data.get("alias", ""),
+        )
 
 
 @dataclass
@@ -639,14 +652,14 @@ class CmdUnblockPeerRequest(IPCRequest):
     """Unblock a previously blocked peer."""
 
     MSG_TYPE = IPCMessageType.CMD_UNBLOCK_PEER
-    peer_hash: str = ""
+    identity_hash: str = ""
 
     def to_payload(self) -> dict:
-        return {"peer_hash": self.peer_hash}
+        return {"identity_hash": self.identity_hash}
 
     @classmethod
     def from_payload(cls, data: dict) -> "CmdUnblockPeerRequest":
-        return cls(peer_hash=data.get("peer_hash", ""))
+        return cls(identity_hash=data.get("identity_hash", ""))
 
 
 @dataclass

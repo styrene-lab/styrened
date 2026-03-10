@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -59,15 +60,25 @@ class SSHHarness(TestHarness):
         self._load_devices(devices_file)
 
     def _load_devices(self, devices_file: Path) -> None:
-        """Load device registry from YAML."""
+        """Load device registry from YAML.
+
+        Unresolvable lab hosts are excluded so generic full-suite runs on
+        non-lab machines degrade to skips instead of hard SSH failures.
+        """
         with open(devices_file) as f:
             data = yaml.safe_load(f)
 
         for name, info in data.get("devices", {}).items():
+            host = info["host"]
+            try:
+                socket.gethostbyname(host)
+            except OSError:
+                continue
+
             self._devices[name] = SSHDeviceConfig(name=name, **info)
             self._nodes[name] = NodeInfo(
                 name=name,
-                address=info["host"],
+                address=host,
                 identity_hash=info.get("identity_hash"),
                 backend=ExecutionBackend.SSH,
                 capabilities=info.get("capabilities", []),
@@ -276,8 +287,17 @@ class SSHHarness(TestHarness):
         self,
         node: str | NodeInfo,
         wait_seconds: int = 10,
+        *,
+        wait: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Discover mesh devices from node's perspective."""
+        """Discover mesh devices from node's perspective.
+
+        ``wait`` is kept as a backward-compatible alias for older bare-metal
+        tests that still call this helper with the previous keyword name.
+        """
+        if wait is not None:
+            wait_seconds = wait
+
         result = self.run_styrened(
             node,
             f"devices -w {wait_seconds} --json",

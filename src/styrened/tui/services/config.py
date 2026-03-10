@@ -15,13 +15,15 @@ Typical usage:
 """
 
 import contextlib
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from styrened import paths
-from styrened.models.config import ConfigFieldError
+from styrened.models.config import ConfigFieldError, GroupThreadFeatureTierConfig
+from styrened.services.group_threads import HardwareFootprintInputs, choose_group_thread_feature_tier
 from styrened.tui.models.config import (
     ConfigLoadError,
     ConfigValidationError,
@@ -97,6 +99,65 @@ def ensure_directories() -> None:
 # -----------------------------------------------------------------------------
 
 
+def _detect_group_thread_hardware_inputs() -> HardwareFootprintInputs:
+    """Collect coarse local hardware signals for first-run defaults."""
+    memory_mb: int | None = None
+    storage_gb: int | None = None
+    device_profile: str | None = None
+
+    with contextlib.suppress(Exception):
+        from styrened.services.hardware import get_disks, get_system_info
+
+        system_info = get_system_info()
+        if system_info.ram_total_bytes > 0:
+            memory_mb = int(system_info.ram_total_bytes / (1024 * 1024))
+
+        disks = [disk for disk in get_disks() if not getattr(disk, "is_removable", False)]
+        if disks:
+            storage_gb = int(max(disk.size_gb for disk in disks))
+
+    with contextlib.suppress(Exception):
+        if os.environ.get("STYRENE_DEVICE_PROFILE"):
+            device_profile = os.environ["STYRENE_DEVICE_PROFILE"].strip().lower() or None
+
+    return HardwareFootprintInputs(
+        memory_mb=memory_mb,
+        storage_gb=storage_gb,
+        device_profile=device_profile,
+    )
+
+
+def apply_group_thread_first_run_defaults(
+    config: StyreneConfig,
+    inputs: HardwareFootprintInputs | None = None,
+) -> StyreneConfig:
+    """Apply first-run group-thread defaults when auto-tiering is enabled."""
+    if not config.core.group_threads.first_run_auto_tier:
+        return config
+
+    inputs = inputs or _detect_group_thread_hardware_inputs()
+    tier = choose_group_thread_feature_tier(inputs)
+    config.core.group_threads.feature_tier = tier
+
+    if tier is GroupThreadFeatureTierConfig.MINIMAL:
+        config.core.group_threads.bounded_retention = True
+        config.core.group_threads.metadata_first_sync = True
+        config.core.group_threads.auto_media_fetch = False
+        config.core.group_threads.background_catchup = False
+    elif tier is GroupThreadFeatureTierConfig.BALANCED:
+        config.core.group_threads.bounded_retention = True
+        config.core.group_threads.metadata_first_sync = False
+        config.core.group_threads.auto_media_fetch = False
+        config.core.group_threads.background_catchup = True
+    else:
+        config.core.group_threads.bounded_retention = False
+        config.core.group_threads.metadata_first_sync = False
+        config.core.group_threads.auto_media_fetch = True
+        config.core.group_threads.background_catchup = True
+
+    return config
+
+
 def get_default_config() -> StyreneConfig:
     """Return a StyreneConfig with all default values.
 
@@ -127,7 +188,7 @@ def get_default_config() -> StyreneConfig:
     from styrened.models.config import WELL_KNOWN_HUBS  # noqa: I001
     config.reticulum.interfaces.peers = copy.deepcopy(WELL_KNOWN_HUBS)
 
-    return config
+    return apply_group_thread_first_run_defaults(config)
 
 
 # -----------------------------------------------------------------------------
@@ -524,6 +585,15 @@ def validate_config(config: StyreneConfig) -> list[ConfigFieldError]:
 # -----------------------------------------------------------------------------
 
 
+def _overlay_core_identity(config: StyreneConfig) -> None:
+    """Backward-compatible alias for legacy tests/callers.
+
+    Historically this helper only overlaid identity fields. It now overlays the
+    full core config, but callers/tests still use the old name.
+    """
+    _overlay_core_config(config)
+
+
 def _overlay_core_config(config: StyreneConfig) -> None:
     """Overlay the full CoreConfig from the daemon's core config file.
 
@@ -581,7 +651,9 @@ def _overlay_core_config(config: StyreneConfig) -> None:
     except Exception as e:
         import logging
 
-        logging.getLogger(__name__).debug("Failed to overlay core config: %s", e)
+        logging.getLogger(__name__).debug(
+            "Failed to overlay core identity/core config: %s", e
+        )
 
 
 def load_config() -> StyreneConfig:

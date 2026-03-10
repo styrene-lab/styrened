@@ -1,5 +1,7 @@
 """Tests for ForgeLog widget."""
 
+from unittest.mock import Mock
+
 from styrened.tui.forge.models import MediaEvent, StageKey
 from styrened.tui.widgets.forge_log import ForgeLog
 
@@ -120,6 +122,30 @@ def test_forge_log_reset_clears_state():
     assert len(widget._log_lines) == 0
     assert not widget.is_complete
     assert not widget.is_error
+
+
+def test_forge_log_reset_stops_mesh_watch_timer():
+    """reset() should stop any active mesh-watch timer."""
+    widget = ForgeLog()
+    timer = Mock()
+    widget._mesh_watch_timer = timer
+
+    widget.reset()
+
+    timer.stop.assert_called_once_with()
+    assert widget._mesh_watch_timer is None
+
+
+def test_forge_log_mesh_node_found_stops_mesh_watch_timer():
+    """mesh_node_found() should stop the elapsed watch timer."""
+    widget = ForgeLog()
+    timer = Mock()
+    widget._mesh_watch_timer = timer
+
+    widget.mesh_node_found("rpi4-01")
+
+    timer.stop.assert_called_once_with()
+    assert widget._mesh_watch_timer is None
 
 
 def test_forge_log_full_pipeline_simulation():

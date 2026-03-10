@@ -1,18 +1,20 @@
-"""Page browser widget for NomadNet node page viewing.
+"""Page browser widget for NomadNet, HTTPS, and I2P page viewing.
 
-Embeddable widget that fetches and displays NomadNet pages via IPCBridge.
-Used in MeshDeviceDetailScreen's Pages tab for NomadNet nodes.
+Embeddable widget that fetches and displays pages via IPCBridge.
+Used primarily for NomadNet today, with explicit external URL support for
+HTTPS and I2P eepsites.
 
 Features:
-- URL bar showing current destination:path
+- URL bar showing current destination:path or explicit URL
 - Scrollable content area with rendered micron markup
 - Back navigation with history stack
 - Reload current page
-- Link click navigation (same-node page links)
+- Link click navigation
 - Status bar with transfer time and content size
 """
 
 import logging
+import urllib.parse
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -97,8 +99,9 @@ class PageBrowserWidget(Widget):
 
     def __init__(
         self,
-        destination_hash: str,
+        destination_hash: str = "",
         initial_path: str = "/page/index.mu",
+        external_url: str = "",
         **kwargs: Any,
     ) -> None:
         """Initialize page browser widget.
@@ -106,11 +109,13 @@ class PageBrowserWidget(Widget):
         Args:
             destination_hash: Hex-encoded destination hash of the NomadNet node.
             initial_path: Initial page path to load.
+            external_url: Optional explicit HTTP(S)/I2P URL.
             **kwargs: Additional widget arguments.
         """
         super().__init__(**kwargs)
         self.destination_hash = destination_hash
         self._initial_path = initial_path
+        self._external_url = external_url
         self._history: list[str] = []
         self._page_content: str = ""
         self._form_fields: dict[str, str] = {}  # field_name -> current_value
@@ -123,11 +128,21 @@ class PageBrowserWidget(Widget):
         except Exception:
             return None
 
+    @property
+    def _is_external_mode(self) -> bool:
+        return bool(self._external_url)
+
+    def _display_location(self, path_or_url: str | None = None) -> str:
+        target = path_or_url or self._external_url or self._initial_path
+        if self._is_external_mode:
+            return f"  {target}"
+        return f"  {self.destination_hash[:16]}...:{target}"
+
     def compose(self) -> ComposeResult:
         """Compose widget layout."""
         with Vertical():
             yield Static(
-                f"  {self.destination_hash[:16]}...:{self._initial_path}",
+                self._display_location(),
                 id="page-url-bar",
             )
             with VerticalScroll(id="page-content"):
@@ -136,7 +151,8 @@ class PageBrowserWidget(Widget):
 
     def on_mount(self) -> None:
         """Load initial page on mount."""
-        self.run_worker(self._load_page(self._initial_path), exclusive=True)
+        target = self._external_url or self._initial_path
+        self.run_worker(self._load_page(target), exclusive=True)
 
     async def _load_page(self, path: str) -> None:
         """Fetch and render a page.
@@ -154,11 +170,17 @@ class PageBrowserWidget(Widget):
         self._set_status("Loading...")
 
         try:
-            result = await bridge.fetch_page(
-                destination_hash=self.destination_hash,
-                path=path,
-                timeout=30.0,
-            )
+            if self._is_external_mode:
+                result = await bridge.fetch_page_url(
+                    url=path,
+                    timeout=30.0,
+                )
+            else:
+                result = await bridge.fetch_page(
+                    destination_hash=self.destination_hash,
+                    path=path,
+                    timeout=30.0,
+                )
 
             status = result.get("status", "error")
 
@@ -234,8 +256,8 @@ class PageBrowserWidget(Widget):
 
         except Exception as e:
             logger.error(f"Failed to load page: {e}")
-            # Try cache fallback on IPC-level failures too
-            if bridge is not None:
+            # Try cache fallback on IPC-level failures too (NomadNet cache only)
+            if bridge is not None and not self._is_external_mode:
                 try:
                     cached = await bridge.page_get_cached(
                         destination_hash=self.destination_hash,
@@ -260,7 +282,7 @@ class PageBrowserWidget(Widget):
         """Update the URL bar display."""
         try:
             url_bar = self.query_one("#page-url-bar", Static)
-            url_bar.update(f"  {self.destination_hash[:16]}...:{path}")
+            url_bar.update(self._display_location(path))
         except Exception:
             pass
 
@@ -351,6 +373,9 @@ class PageBrowserWidget(Widget):
 
     def action_save_site(self) -> None:
         """Save this node for periodic background crawling and caching."""
+        if self._is_external_mode:
+            self.notify("Save Site is only available for NomadNet nodes", severity="warning")
+            return
         self.run_worker(self._do_save_site(), exclusive=True, group="page-save")
 
     async def _do_save_site(self) -> None:
@@ -372,6 +397,9 @@ class PageBrowserWidget(Widget):
 
     def action_crawl_site(self) -> None:
         """Crawl and cache all reachable pages from this node."""
+        if self._is_external_mode:
+            self.notify("Crawl is only available for NomadNet nodes", severity="warning")
+            return
         self.run_worker(self._do_crawl_site(), exclusive=True, group="page-crawl")
 
     async def _do_crawl_site(self) -> None:
@@ -480,6 +508,13 @@ class PageBrowserWidget(Widget):
                 if field_name:
                     form_data[field_name] = self._form_fields.get(field_name, "")
 
+        if self._is_external_mode:
+            if message.link_fields:
+                self.notify("Form submission is only supported for NomadNet pages", severity="warning")
+                return
+            self.navigate(urllib.parse.urljoin(self.current_path, url))
+            return
+
         if url.startswith(":"):
             path = url[1:]
             if path:
@@ -501,6 +536,10 @@ class PageBrowserWidget(Widget):
 
     async def _load_page_with_form(self, path: str, form_data: dict[str, str]) -> None:
         """Fetch a page with form data submission."""
+        if self._is_external_mode:
+            self._set_error("Form submission is only supported for NomadNet pages")
+            return
+
         bridge = self._ipc_bridge
         if bridge is None:
             self._set_error("Page browsing requires daemon mode")
@@ -559,9 +598,18 @@ class PageBrowserWidget(Widget):
             destination_hash: Hex-encoded destination hash of the new NomadNet node.
         """
         self.destination_hash = destination_hash
+        self._external_url = ""
         self._history.clear()
         self.current_path = "/page/index.mu"
         self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
+
+    def set_external_url(self, url: str) -> None:
+        """Change target to an explicit external URL and reload it."""
+        self.destination_hash = ""
+        self._external_url = url
+        self._history.clear()
+        self.current_path = url
+        self.run_worker(self._load_page(url), exclusive=True)
 
     def navigate(self, path: str) -> None:
         """Navigate to a new page path.

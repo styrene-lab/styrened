@@ -38,6 +38,11 @@ class TestInitDb:
             "lxmf_destination_hash",
             "short_name",
             "system_fingerprint",
+            "discovered_via",
+            "hops",
+            "nomadnet_destination_hash",
+            "ygg_address",
+            "b32_address",
             "created_at",
             "updated_at",
         }

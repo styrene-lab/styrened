@@ -25,7 +25,10 @@ from enum import Enum
 from typing import Any
 
 from styrened import __version__, paths
+from styrened.models.daemon_mode import DaemonMode
 from styrened.services.config import load_core_config
+from styrened.services.i2p import I2PAdapter
+from styrened.services.yggdrasil import YggdrasilAdapter
 from styrened.services.reticulum import (
     _resolve_identity_path,
     detect_existing_lxmf_identity,
@@ -61,6 +64,8 @@ class CheckCategory(Enum):
     RETICULUM = "reticulum"
     DAEMON = "daemon"
     PATHS = "paths"
+    YGGDRASIL = "yggdrasil"
+    I2P = "i2p"
 
 
 # -----------------------------------------------------------------------------
@@ -567,6 +572,197 @@ def check_paths() -> list[Finding]:
 
 
 # -----------------------------------------------------------------------------
+# Optional daemon checks (Yggdrasil / I2P)
+# -----------------------------------------------------------------------------
+
+
+async def check_yggdrasil(config: "Any | None" = None) -> list[Finding]:
+    """Check Yggdrasil integration status.
+
+    Args:
+        config: Pre-loaded CoreConfig; loads from disk if None.
+
+    Returns:
+        List of findings.  Empty list when mode=DISABLED.
+    """
+    import shutil
+
+    if config is None:
+        try:
+            config = load_core_config()
+        except Exception:
+            return []
+
+    ygg_cfg = config.yggdrasil
+
+    if ygg_cfg.mode == DaemonMode.DISABLED:
+        return []
+
+    findings: list[Finding] = []
+
+    # MANAGED — fail fast if binary is missing.
+    if ygg_cfg.mode == DaemonMode.MANAGED:
+        binary = shutil.which(ygg_cfg.binary_path)
+        if binary is None:
+            findings.append(
+                Finding(
+                    category=CheckCategory.YGGDRASIL,
+                    severity=Severity.ERROR,
+                    message="yggdrasil binary not found in PATH",
+                    fix_hint="styrened setup --enable yggdrasil",
+                )
+            )
+            return findings
+
+    adapter = YggdrasilAdapter(ygg_cfg)  # type: ignore[arg-type]
+    try:
+        status = await adapter.status()
+    except Exception as exc:
+        logger.debug("Yggdrasil status check failed: %s", exc)
+        findings.append(
+            Finding(
+                category=CheckCategory.YGGDRASIL,
+                severity=Severity.WARN,
+                message=f"Yggdrasil status check error: {exc}",
+            )
+        )
+        return findings
+
+    if not status.running:
+        if ygg_cfg.mode == DaemonMode.ADOPT:
+            findings.append(
+                Finding(
+                    category=CheckCategory.YGGDRASIL,
+                    severity=Severity.WARN,
+                    message="yggdrasil not detected at expected socket paths — is it running?",
+                )
+            )
+        else:
+            # MANAGED but not running (binary exists, process not up yet)
+            findings.append(
+                Finding(
+                    category=CheckCategory.YGGDRASIL,
+                    severity=Severity.WARN,
+                    message="Managed yggdrasil process is not responding",
+                    fix_hint="styrened setup --enable yggdrasil",
+                )
+            )
+        return findings
+
+    # Running — report details.
+    address = status.details.get("address", "unknown")
+    peer_count = status.details.get("peer_count", 0)
+    findings.append(
+        Finding(
+            category=CheckCategory.YGGDRASIL,
+            severity=Severity.OK,
+            message=f"Yggdrasil running — address: {address}, peers: {peer_count}",
+        )
+    )
+    return findings
+
+
+async def check_i2p(config: "Any | None" = None) -> list[Finding]:
+    """Check I2P (i2pd) integration status.
+
+    Args:
+        config: Pre-loaded CoreConfig; loads from disk if None.
+
+    Returns:
+        List of findings.  Empty list when mode=DISABLED.
+    """
+    import math
+    import shutil
+
+    if config is None:
+        try:
+            config = load_core_config()
+        except Exception:
+            return []
+
+    i2p_cfg = config.i2p
+
+    if i2p_cfg.mode == DaemonMode.DISABLED:
+        return []
+
+    findings: list[Finding] = []
+
+    # MANAGED — fail fast if binary is missing.
+    if i2p_cfg.mode == DaemonMode.MANAGED:
+        binary = shutil.which("i2pd")
+        if binary is None:
+            findings.append(
+                Finding(
+                    category=CheckCategory.I2P,
+                    severity=Severity.ERROR,
+                    message="i2pd binary not found in PATH",
+                    fix_hint="styrened setup --enable i2p",
+                )
+            )
+            return findings
+
+    adapter = I2PAdapter(i2p_cfg)
+    try:
+        status = await adapter.status()
+    except Exception as exc:
+        logger.debug("I2P status check failed: %s", exc)
+        findings.append(
+            Finding(
+                category=CheckCategory.I2P,
+                severity=Severity.WARN,
+                message=f"I2P status check error: {exc}",
+            )
+        )
+        return findings
+
+    if not status.running:
+        if i2p_cfg.mode == DaemonMode.ADOPT:
+            host = i2p_cfg.http_proxy_host
+            port = i2p_cfg.http_proxy_port
+            findings.append(
+                Finding(
+                    category=CheckCategory.I2P,
+                    severity=Severity.WARN,
+                    message=f"i2pd not detected at {host}:{port}",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    category=CheckCategory.I2P,
+                    severity=Severity.WARN,
+                    message="Managed i2pd process is not responding",
+                    fix_hint="styrened setup --enable i2p",
+                )
+            )
+        return findings
+
+    # Running but still warming up (MANAGED mode).
+    if status.warming_up and i2p_cfg.mode == DaemonMode.MANAGED:
+        remaining = max(0.0, status.warm_up_expected - status.warm_up_elapsed)
+        mins = math.ceil(remaining / 60)
+        findings.append(
+            Finding(
+                category=CheckCategory.I2P,
+                severity=Severity.OK,
+                message=f"i2pd warming up (~{mins} min remaining)",
+            )
+        )
+        return findings
+
+    # Running and ready.
+    proxy_port = status.details.get("proxy_port", i2p_cfg.http_proxy_port)
+    findings.append(
+        Finding(
+            category=CheckCategory.I2P,
+            severity=Severity.OK,
+            message=f"i2pd running — HTTP proxy on port {proxy_port}",
+        )
+    )
+    return findings
+
+
+# -----------------------------------------------------------------------------
 # Orchestrator
 # -----------------------------------------------------------------------------
 
@@ -584,6 +780,12 @@ async def run_doctor(offline: bool = False) -> DoctorReport:
         checked_at=datetime.now(UTC).isoformat(),
     )
 
+    # Load config once for all checks that need it.
+    try:
+        _loaded_config = load_core_config()
+    except Exception:
+        _loaded_config = None
+
     # Run synchronous checks
     report.findings.extend(check_version(offline=offline))
     report.findings.extend(check_identity())
@@ -593,6 +795,8 @@ async def run_doctor(offline: bool = False) -> DoctorReport:
 
     # Run async checks
     report.findings.extend(await check_daemon())
+    report.findings.extend(await check_yggdrasil(config=_loaded_config))
+    report.findings.extend(await check_i2p(config=_loaded_config))
 
     # Populate summary info
     report.version_info = {"installed": __version__}

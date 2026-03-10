@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tui-structural-refactor",
+  "assessmentKind": "cleave",
+  "outcome": "pass",
+  "timestamp": "2026-03-10T17:32:09.209Z",
+  "summary": "Three consolidation scaffolds completed: (1) StyreneScreen base class with full lifecycle contract, retry logic, loading indicator, bridge property, and 11 tests. (2) app.py workspace nav hardened — action_open_admin() added, grave_accent→open_admin, action_open_mail uses services.bridge. (3) 6 test files updated to patch bridge.get_nodes() instead of daemon-layer get_node_store(). Also fixed app_lifecycle.py __future__ import placement (merge artifact). All scaffolding needed before the screen overhaul is now in place.\"",
+  "snapshot": {
+    "gitHead": "8ca007022a6cad78c74fbec914b41c3c470057da",
+    "fingerprint": "fd78517c0473f4311dcd3e04ca3c695195c36a8ad1071c9e3d85b19ffc5f539a",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/tui-structural-refactor/design.md",
+        "exists": true,
+        "size": 5247,
+        "sha256": "8bfb30b3cdcefebd9d0014a7b59c903e2095c562c8bc7c4ff0cd93acda283004"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/proposal.md",
+        "exists": true,
+        "size": 616,
+        "sha256": "4e5032f56eb0411c8754c20566a6e8b552428cff1d337dc2ef02147dab709885"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/specs/ipc-expansion.md",
+        "exists": true,
+        "size": 3249,
+        "sha256": "7f4619e55cf068227de5171d68a51bbcbf85c6e09dad262665ae5eb3e9bd6791"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/specs/keymap.md",
+        "exists": true,
+        "size": 2323,
+        "sha256": "d2471b8d13b6d4cd231e9292ecb1386fa7ecb6ea0f919b1eee480b9a0167d54b"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/specs/legacy-removal.md",
+        "exists": true,
+        "size": 1742,
+        "sha256": "ee8ca45b4d1c7b542709fb68dd2c506e75d0e08b9f2f3b6be644ef7f1db97476"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/specs/tui-services.md",
+        "exists": true,
+        "size": 4038,
+        "sha256": "8d43c8ac327d0eb26cdc0d863c430a5f9df2d6b94975528e5f651f7afdfaacba"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/specs/ui-state-model.md",
+        "exists": true,
+        "size": 8276,
+        "sha256": "7b9a8c85b0f8c88ead402ff5e0e5b39e6e0d0c62098e67bf7bc6d6882dcc82de"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/specs/workspace-architecture.md",
+        "exists": true,
+        "size": 5646,
+        "sha256": "f597377affc823f16bcfb6643a9c43e94a0b707bf81c9a8b1b55b223ea5ef7e3"
+      },
+      {
+        "path": "openspec/changes/tui-structural-refactor/tasks.md",
+        "exists": true,
+        "size": 12770,
+        "sha256": "f40ada0aad66eb41c95f7cae6b7733527b799a30a40ac498f923aedffd47d46e"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/tui/screens/base.py",
+      "src/styrened/tui/screens/__init__.py",
+      "tests/tui/screens/test_screen_base.py",
+      "src/styrened/tui/app.py",
+      "tests/tui/widgets/test_page_browser.py",
+      "tests/tui/integration/test_ipc_lifecycle.py",
+      "tests/tui/integration/test_chat_dashboard_flow.py",
+      "tests/tui/screens/test_dashboard_chat_integration.py",
+      "tests/tui/screens/test_dashboard_tui.py",
+      "tests/tui/screens/test_chat_edge_cases.py",
+      "tests/tui/test_navigation_workflows.py",
+      "src/styrened/tui/services/app_lifecycle.py"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

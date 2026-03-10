@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import sys
 from pathlib import Path
 
@@ -35,20 +36,40 @@ def _load_devices_yaml() -> dict:
         return yaml.safe_load(f)
 
 
-def _load_device_names() -> list[str]:
-    """Load all device names from the registry.
+def _is_host_resolvable(host: str) -> bool:
+    """Return True when the configured bare-metal host resolves locally.
 
-    Returns every device defined in devices.yaml regardless of configuration
-    completeness. Suitable for smoke tests (SSH, venv, install).
+    Full-suite runs often happen on laptops without the test-lab mDNS/SSH
+    environment. In that case, unresolved hosts should be treated as an
+    unavailable lab and skipped at collection time rather than failing the
+    whole suite immediately.
+    """
+    try:
+        socket.gethostbyname(host)
+    except OSError:
+        return False
+    return True
+
+
+def _load_device_names() -> list[str]:
+    """Load device names from the registry that are resolvable here.
+
+    When lab hostnames are unavailable, exclude them up front so bare-metal
+    suites degrade to skips instead of hard failures during generic full-suite
+    runs on non-lab machines.
     """
     data = _load_devices_yaml()
-    return list(data.get("devices", {}).keys())
+    return [
+        name
+        for name, info in data.get("devices", {}).items()
+        if _is_host_resolvable(info.get("host", ""))
+    ]
 
 
 def _load_device_names_with_identity() -> list[str]:
-    """Load device names that have identity_hash configured.
+    """Load resolvable device names that have identity_hash configured.
 
-    Only devices with a non-empty identity_hash are returned.  Tests that
+    Only devices with a non-empty identity_hash are returned. Tests that
     require identity verification (identity checks, mesh discovery, RPC)
     should parametrize against this list.
     """
@@ -56,7 +77,7 @@ def _load_device_names_with_identity() -> list[str]:
     return [
         name
         for name, info in data.get("devices", {}).items()
-        if info.get("identity_hash")
+        if info.get("identity_hash") and _is_host_resolvable(info.get("host", ""))
     ]
 
 
@@ -160,8 +181,8 @@ def harness() -> SSHHarness:
 
 @pytest.fixture(scope="session")
 def all_devices(harness: SSHHarness) -> list[str]:
-    """List of all registered device names."""
-    return [node.name for node in harness.get_nodes()]
+    """List of all registered device names that resolve in this environment."""
+    return [node.name for node in harness.get_nodes() if _is_host_resolvable(node.address)]
 
 
 @pytest.fixture

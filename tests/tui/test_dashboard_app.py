@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -31,6 +31,8 @@ class TestDashboardFlag:
                 remote=None,
                 dashboard=True,
                 reset=False,
+                upgrade=False,
+                restart_daemon=False,
             )
             mock_parse.return_value = mock_args
 
@@ -155,3 +157,40 @@ class TestLocalDashboardScreen:
         binding_keys = [b.key for b in LocalDashboardScreen.BINDINGS]
         assert "q" in binding_keys
         assert "r" in binding_keys
+
+    def test_screen_suspend_pauses_refresh_timer(self) -> None:
+        """Suspending the local dashboard should pause refresh."""
+        from styrened.tui.screens.dashboard_local import LocalDashboardScreen
+
+        screen = LocalDashboardScreen()
+        screen._refresh_timer = Mock()
+
+        screen.on_screen_suspend(Mock())
+
+        screen._refresh_timer.pause.assert_called_once_with()
+
+    def test_screen_resume_resumes_refresh_timer(self) -> None:
+        """Resuming the local dashboard should resume refresh and repaint."""
+        from styrened.tui.screens.dashboard_local import LocalDashboardScreen
+
+        screen = LocalDashboardScreen()
+        screen._refresh_timer = Mock()
+        screen._refresh_all = Mock()
+
+        screen.on_screen_resume(Mock())
+
+        screen._refresh_timer.resume.assert_called_once_with()
+        screen._refresh_all.assert_called_once_with()
+
+    def test_on_unmount_stops_refresh_timer(self) -> None:
+        """Unmounting the local dashboard should stop refresh."""
+        from styrened.tui.screens.dashboard_local import LocalDashboardScreen
+
+        screen = LocalDashboardScreen()
+        timer = Mock()
+        screen._refresh_timer = timer
+
+        screen.on_unmount()
+
+        timer.stop.assert_called_once_with()
+        assert screen._refresh_timer is None

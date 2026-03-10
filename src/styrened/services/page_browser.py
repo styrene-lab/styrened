@@ -22,6 +22,9 @@ Usage:
 import asyncio
 import logging
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -87,12 +90,13 @@ class PageBrowserService:
     event loop via run_coroutine_threadsafe().
     """
 
-    def __init__(self) -> None:
+    def __init__(self, i2p_adapter: Any | None = None) -> None:
         self._links: dict[str, _LinkEntry] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._cleanup_task: asyncio.Task | None = None
         self._started = False
         self._force_path_rediscovery = False
+        self._i2p_adapter = i2p_adapter
 
     async def start(self) -> None:
         """Start the page browser service.
@@ -367,6 +371,111 @@ class PageBrowserService:
             cache_ttl=cache_ttl,
             structured_data=structured_data,
             page_metadata=page_metadata,
+        )
+
+    async def fetch_url(
+        self,
+        url: str,
+        timeout: float = REQUEST_TIMEOUT,
+    ) -> PageResponse:
+        """Fetch an HTTP(S) or I2P URL.
+
+        This is the graceful-degradation path for content that may exist on
+        parallel endpoints such as NomadNet, HTTPS, and I2P. The caller chooses
+        the transport explicitly; this method never falls back across schemes.
+        """
+        start_time = time.time()
+        parsed = urllib.parse.urlparse(url)
+
+        if parsed.scheme not in {"http", "https"}:
+            return PageResponse(
+                content="",
+                status=PageStatus.ERROR,
+                destination_hash=url,
+                path=parsed.path or url,
+                transfer_time=0.0,
+                content_length=0,
+                error_message=f"Unsupported URL scheme: {parsed.scheme or 'unknown'}",
+            )
+
+        hostname = (parsed.hostname or "").lower()
+        is_i2p = hostname.endswith(".i2p")
+        proxy_url: str | None = None
+
+        if is_i2p:
+            if self._i2p_adapter is None:
+                return PageResponse(
+                    content="",
+                    status=PageStatus.ERROR,
+                    destination_hash=url,
+                    path=parsed.path or "/",
+                    transfer_time=0.0,
+                    content_length=0,
+                    error_message="I2P not enabled — set i2p.mode: adopt or managed in config.",
+                )
+            proxy_url = self._i2p_adapter.get_http_proxy_url()
+            if not proxy_url:
+                return PageResponse(
+                    content="",
+                    status=PageStatus.ERROR,
+                    destination_hash=url,
+                    path=parsed.path or "/",
+                    transfer_time=0.0,
+                    content_length=0,
+                    error_message="I2P is enabled but the HTTP proxy is not ready yet.",
+                )
+
+        def _fetch() -> tuple[bytes, str]:
+            handlers: list[urllib.request.BaseHandler] = []
+            if proxy_url is not None:
+                handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+            opener = urllib.request.build_opener(*handlers)
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "styrened-page-browser/1"},
+            )
+            with opener.open(req, timeout=timeout) as resp:
+                charset = resp.headers.get_content_charset() or "utf-8"
+                return resp.read(), charset
+
+        try:
+            response_data, charset = await asyncio.to_thread(_fetch)
+        except urllib.error.HTTPError as e:
+            return PageResponse(
+                content="",
+                status=PageStatus.NOT_FOUND if e.code == 404 else PageStatus.ERROR,
+                destination_hash=url,
+                path=parsed.path or "/",
+                transfer_time=time.time() - start_time,
+                content_length=0,
+                error_message=f"HTTP error {e.code}: {e.reason}",
+            )
+        except Exception as e:
+            return PageResponse(
+                content="",
+                status=PageStatus.ERROR,
+                destination_hash=url,
+                path=parsed.path or "/",
+                transfer_time=time.time() - start_time,
+                content_length=0,
+                error_message=str(e),
+            )
+
+        try:
+            content = response_data.decode(charset)
+        except Exception:
+            try:
+                content = response_data.decode("utf-8")
+            except Exception:
+                content = response_data.decode("utf-8", errors="replace")
+
+        return PageResponse(
+            content=content,
+            status=PageStatus.OK,
+            destination_hash=url,
+            path=parsed.path or "/",
+            transfer_time=time.time() - start_time,
+            content_length=len(response_data),
         )
 
     async def disconnect(self, destination_hash: str) -> bool:

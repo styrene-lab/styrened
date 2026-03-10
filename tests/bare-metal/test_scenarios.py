@@ -12,6 +12,8 @@ from itertools import permutations
 
 import pytest
 from conftest import ALL_DEVICES, DEVICES_WITH_IDENTITY, BareMetalHarness
+
+REQUIRED_MESH_PAIR = {"styrene-node", "t100ta"}
 from primitives import (
     check_bidirectional_discovery,
     check_bidirectional_rpc,
@@ -47,6 +49,9 @@ def running_daemons(harness: BareMetalHarness, all_devices: list[str]):
 
     Starts daemons if not running, stops them after tests complete.
     """
+    if not all_devices:
+        pytest.skip("No resolvable bare-metal lab devices in this environment")
+
     started = []
     for device in all_devices:
         if not check_daemon_running(harness, device).success:
@@ -187,6 +192,10 @@ class TestDaemonLifecycleScenario:
 @pytest.mark.mesh
 @pytest.mark.usefixtures("running_daemons")
 class TestMeshDiscoveryScenario:
+    @pytest.fixture(autouse=True)
+    def _require_legacy_mesh_pair(self, harness: BareMetalHarness) -> None:
+        if not REQUIRED_MESH_PAIR.issubset(harness.registry):
+            pytest.skip("Legacy bare-metal mesh pair is not available in this environment")
     """Validate mesh device discovery.
 
     Prerequisites: Daemons running on all devices
@@ -224,6 +233,10 @@ class TestMeshDiscoveryScenario:
 @pytest.mark.rpc
 @pytest.mark.usefixtures("running_daemons")
 class TestRPCScenario:
+    @pytest.fixture(autouse=True)
+    def _require_legacy_mesh_pair(self, harness: BareMetalHarness) -> None:
+        if not REQUIRED_MESH_PAIR.issubset(harness.registry):
+            pytest.skip("Legacy bare-metal mesh pair is not available in this environment")
     """Validate RPC communication between devices.
 
     Prerequisites: Daemons running, devices discovered
@@ -275,6 +288,10 @@ class TestRPCScenario:
 @pytest.mark.mesh
 @pytest.mark.usefixtures("running_daemons")
 class TestChatScenario:
+    @pytest.fixture(autouse=True)
+    def _require_legacy_mesh_pair(self, harness: BareMetalHarness) -> None:
+        if not REQUIRED_MESH_PAIR.issubset(harness.registry):
+            pytest.skip("Legacy bare-metal mesh pair is not available in this environment")
     """Validate LXMF chat messaging between devices.
 
     Prerequisites: Daemons running, devices discovered
@@ -314,6 +331,10 @@ class TestChatScenario:
 @pytest.mark.mesh
 @pytest.mark.usefixtures("running_daemons")
 class TestEndToEndScenario:
+    @pytest.fixture(autouse=True)
+    def _require_legacy_mesh_pair(self, harness: BareMetalHarness) -> None:
+        if not REQUIRED_MESH_PAIR.issubset(harness.registry):
+            pytest.skip("Legacy bare-metal mesh pair is not available in this environment")
     """Full end-to-end validation of mesh functionality.
 
     Prerequisites: Daemons running
