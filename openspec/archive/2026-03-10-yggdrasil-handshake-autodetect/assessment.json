@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "changeName": "yggdrasil-handshake-autodetect",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-10T21:37:09.431Z",
+  "summary": "Yggdrasil handshake autodetect shipped in v0.16.0. 19/19 tasks complete. 481 yggdrasil adapter tests + 345 announce integration + 228 capability tests all pass.",
+  "snapshot": {
+    "gitHead": "8216b8f3d03ade3c76ce216970ac765be4fd8408",
+    "fingerprint": "499bb6186f2c72f20a3bf5e7a3fe460782886bc616b7e18d1eaa781a08965bc9",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/yggdrasil-handshake-autodetect/design.md",
+        "exists": true,
+        "size": 10040,
+        "sha256": "10e449aad64b8fb2768a11f4412d766b2a3120a2cf1a5970e8a34e50ce2c4346"
+      },
+      {
+        "path": "openspec/changes/yggdrasil-handshake-autodetect/proposal.md",
+        "exists": true,
+        "size": 333,
+        "sha256": "5d55c6b1c0828a651ef2e1744313f1e32a467f2d5d2b73e268c0793454317fab"
+      },
+      {
+        "path": "openspec/changes/yggdrasil-handshake-autodetect/tasks.md",
+        "exists": true,
+        "size": 4312,
+        "sha256": "23c5619197f2548af7e4ae6d76345090b996cb869e1ad1fe3409d0eae17daeff"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
