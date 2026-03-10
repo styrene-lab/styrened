@@ -28,14 +28,14 @@ class TestContactInfoSerialization:
     def test_to_dict_includes_all_fields(self):
         """to_dict returns all contact fields."""
         info = ContactInfo(
-            peer_hash="abcd1234abcd1234",
+            identity_hash="abcd1234abcd1234",
             alias="Alice",
             notes="Friend",
             created_at=1000.0,
             updated_at=2000.0,
         )
         d = info.to_dict()
-        assert d["peer_hash"] == "abcd1234abcd1234"
+        assert d["identity_hash"] == "abcd1234abcd1234"
         assert d["alias"] == "Alice"
         assert d["notes"] == "Friend"
         assert d["created_at"] == 1000.0
@@ -44,21 +44,21 @@ class TestContactInfoSerialization:
     def test_from_dict_reconstructs_contact(self):
         """from_dict reconstructs ContactInfo from dict."""
         data = {
-            "peer_hash": "abcd1234abcd1234",
+            "identity_hash": "abcd1234abcd1234",
             "alias": "Bob",
             "notes": None,
             "created_at": 1000.0,
             "updated_at": 2000.0,
         }
         info = ContactInfo.from_dict(data)
-        assert info.peer_hash == "abcd1234abcd1234"
+        assert info.identity_hash == "abcd1234abcd1234"
         assert info.alias == "Bob"
         assert info.notes is None
 
     def test_from_dict_handles_missing_fields(self):
         """from_dict uses defaults for missing fields."""
         info = ContactInfo.from_dict({})
-        assert info.peer_hash == ""
+        assert info.identity_hash == ""
         assert info.alias == ""
         assert info.notes is None
 
@@ -69,7 +69,7 @@ class TestContactServiceCRUD:
     def test_set_alias_creates_new_contact(self, contact_service):
         """set_alias creates a new contact when none exists."""
         result = contact_service.set_alias("abcd1234abcd1234", "Alice")
-        assert result.peer_hash == "abcd1234abcd1234"
+        assert result.identity_hash == "abcd1234abcd1234"
         assert result.alias == "Alice"
         assert result.notes is None
         assert result.created_at > 0
@@ -79,7 +79,7 @@ class TestContactServiceCRUD:
         contact_service.set_alias("abcd1234abcd1234", "Alice")
         result = contact_service.set_alias("abcd1234abcd1234", "Alice B.")
         assert result.alias == "Alice B."
-        assert result.peer_hash == "abcd1234abcd1234"
+        assert result.identity_hash == "abcd1234abcd1234"
 
     def test_set_alias_with_notes(self, contact_service):
         """set_alias stores notes alongside alias."""
