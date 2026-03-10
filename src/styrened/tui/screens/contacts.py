@@ -215,7 +215,7 @@ class ContactsScreen(Screen[None]):
             return
 
         for contact in contacts:
-            peer_hash = contact.get("peer_hash", "")
+            peer_hash = contact.get("identity_hash", "") or contact.get("peer_hash", "")
             alias = contact.get("alias", "")
             hash_display = peer_hash[:16] + "..." if len(peer_hash) > 16 else peer_hash
 

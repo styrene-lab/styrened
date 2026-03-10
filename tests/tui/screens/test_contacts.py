@@ -94,8 +94,8 @@ class TestContactsScreenIPCMode:
     async def test_loads_contacts(self):
         """Screen should load contacts from bridge."""
         contacts = [
-            {"peer_hash": "abcdef1234567890", "alias": "Alice", "notes": "Test node"},
-            {"peer_hash": "1234567890abcdef", "alias": "Bob", "notes": ""},
+            {"identity_hash": "abcdef1234567890", "alias": "Alice", "notes": "Test node"},
+            {"identity_hash": "1234567890abcdef", "alias": "Bob", "notes": ""},
         ]
         lifecycle = _make_mock_lifecycle(contacts=contacts)
 
@@ -130,7 +130,7 @@ class TestContactsConversationRouting:
 
     @pytest.mark.asyncio
     async def test_open_chat_sets_contacts_origin_on_conversation(self):
-        contacts = [{"peer_hash": "abcdef1234567890", "alias": "Alice", "notes": ""}]
+        contacts = [{"identity_hash": "abcdef1234567890", "alias": "Alice", "notes": ""}]
         lifecycle = _make_mock_lifecycle(contacts=contacts)
 
         app = StyreneApp()
@@ -241,7 +241,7 @@ class TestContactsLayeringAndForms:
 
     @pytest.mark.asyncio
     async def test_edit_contact_prefills_selected_contact(self):
-        contacts = [{"peer_hash": "abcdef1234567890", "alias": "Alice", "notes": ""}]
+        contacts = [{"identity_hash": "abcdef1234567890", "alias": "Alice", "notes": ""}]
         lifecycle = _make_mock_lifecycle(contacts=contacts)
         app = StyreneApp()
         app._lifecycle = lifecycle
