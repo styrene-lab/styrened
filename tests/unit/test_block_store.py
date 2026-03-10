@@ -458,8 +458,8 @@ class TestHandleLxmfMessageRbac:
         policy.resolve_role.assert_called_with(identity_hash)
         callback.assert_not_called()
 
-    def test_falls_back_to_dest_hash_when_nodestore_unavailable(self, tmp_path):
-        """When NodeStore raises, falls back to source_hash for RBAC check."""
+    def test_falls_back_to_source_hash_when_nodestore_unavailable(self, tmp_path):
+        """When NodeStore raises, falls back to source_hash (hex) for RBAC check."""
         from styrened.services.lxmf_service import LXMFService
         from styrened.models.rbac import Role
 
@@ -471,15 +471,18 @@ class TestHandleLxmfMessageRbac:
         callback = MagicMock()
         svc.register_callback(callback)
 
-        dest_hash = "ab" * 16
+        # source_hash_hex is used as the message source — it's a 32-char
+        # hex string (16 bytes), the LXMF destination hash of the sender.
+        source_hash_hex = "ab" * 16  # 32 hex chars
 
         with patch(
             "styrened.services.node_store.get_node_store",
             side_effect=Exception("unavailable"),
         ):
-            svc._handle_lxmf_message(self._make_message(dest_hash))
+            svc._handle_lxmf_message(self._make_message(source_hash_hex))
 
-        policy.resolve_role.assert_called_with(dest_hash)
+        # Falls back to the raw source_hash hex when NodeStore is unavailable
+        policy.resolve_role.assert_called_with(source_hash_hex)
         callback.assert_not_called()
 
     def test_passes_message_when_not_blocked(self, tmp_path):
