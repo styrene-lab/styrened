@@ -3,11 +3,11 @@
   "changeName": "block-store-canonicalization",
   "assessmentKind": "spec",
   "outcome": "pass",
-  "timestamp": "2026-03-10T21:15:46.468Z",
-  "summary": "All specs satisfied and design-tree binding added (styrene-distrust-model). All 3105 unit + TUI tests green. v0.16.0 tagged and pushed.\"",
+  "timestamp": "2026-03-10T21:16:28.248Z",
+  "summary": "All specs satisfied. All 3105 unit tests + TUI screen tests green. v0.16.0 tagged and pushed. Design node styrene-distrust-model bound. All tasks complete.",
   "snapshot": {
-    "gitHead": "a5d269dfb5f3fdb2d0f8521ecd8399bdd9ea190e",
-    "fingerprint": "029633d34bd1b9fb036c1be1e91880ee22250fca52d46ff276bf4055fde82a00",
+    "gitHead": "dc1b44e7f4b7ab778a67301f88e63affe465e0b8",
+    "fingerprint": "ab6040474b3da71ca0c3408b07ef569e457d54db02f56baa9463406fac00e816",
     "dirty": false,
     "scopedPaths": [],
     "files": [
@@ -58,11 +58,11 @@
   "reconciliation": {
     "reopen": false,
     "changedFiles": [
-      "openspec/changes/block-store-canonicalization/proposal.md",
-      "openspec/changes/block-store-canonicalization/tasks.md"
+      "openspec/changes/block-store-canonicalization/assessment.json",
+      "openspec/changes/block-store-canonicalization/tasks.md",
+      "openspec/changes/block-store-canonicalization/proposal.md"
     ],
     "constraints": [],
     "recommendedAction": null
-  },
-  "designNode": "styrene-distrust-model"
+  }
 }
