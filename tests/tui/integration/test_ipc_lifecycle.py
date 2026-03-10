@@ -95,7 +95,7 @@ async def running_server(mock_daemon, socket_path):
 
     patches = (
         patch("styrened.services.reticulum.discover_devices", return_value=[]),
-        patch("styrened.services.node_store.get_node_store", return_value=None),
+        patch("styrened.services.node_store.get_node_store", return_value=None),  # daemon-side: not yet migrated (ControlServer IPC handler calls get_node_store directly)
         patch("styrened.services.lxmf_service.get_lxmf_service", return_value=None),
         patch("styrened.services.reticulum.get_operator_identity", return_value="test_identity"),
         patch.dict("sys.modules", {"RNS": MagicMock(Transport=mock_rns_transport)}),
@@ -298,7 +298,7 @@ class TestBridgeReconnection:
         mock_daemon._lxmf_service.router.propagation_enabled = False
         with (
             patch("styrened.services.reticulum.discover_devices", return_value=[]),
-            patch("styrened.services.node_store.get_node_store", return_value=None),
+            patch("styrened.services.node_store.get_node_store", return_value=None),  # daemon-side: not yet migrated (ControlServer IPC handler calls get_node_store directly)
             patch("styrened.services.lxmf_service.get_lxmf_service", return_value=None),
             patch("styrened.services.reticulum.get_operator_identity", return_value="test_identity"),
             patch.dict("sys.modules", {"RNS": MagicMock(Transport=mock_rns_transport)}),
