@@ -33,7 +33,18 @@ class BridgeUnavailableError(Exception):
 
 
 class StyreneLoadingIndicator(LoadingIndicator):
-    """LoadingIndicator with Styrene theming."""
+    """LoadingIndicator with Styrene theming and a visible message label.
+
+    The ``message`` string is passed as the ``name`` kwarg to Textual's
+    LoadingIndicator and stored as ``_message`` for direct access.  Subclasses
+    of StyreneScreen retrieve it via the ``message`` property to confirm the
+    correct label was applied.
+
+    NOTE: LoadingIndicator renders only a spinner; the message string is
+    intentionally stored for programmatic access (e.g. screen lifecycle
+    assertions) but is not visually rendered inline with the spinner.
+    Override ``render()`` in a subclass if you need the text to appear.
+    """
 
     DEFAULT_CSS = """
     StyreneLoadingIndicator {
@@ -89,7 +100,15 @@ class StyreneScreen(Screen[T], Generic[T]):
         """
 
     def _cleanup(self) -> None:
-        """Called on suspend and unmount. Override to cancel timers/resources."""
+        """Called on suspend and unmount. Override to cancel timers/resources.
+
+        WARNING: This method is called on *both* on_screen_suspend() and
+        on_unmount().  A screen that is suspended and then unmounted (the normal
+        navigation flow) will therefore receive two _cleanup() calls.
+        Subclasses must implement this method idempotently — closing an already-
+        closed socket, cancelling an already-cancelled timer, or clearing an
+        already-empty reference must all be no-ops.
+        """
 
     async def _on_error(self, error: Exception, attempt: int) -> None:
         """Called after retry exhaustion. Default notifies the user."""
@@ -117,11 +136,11 @@ class StyreneScreen(Screen[T], Generic[T]):
         b = getattr(services, "bridge", None)
         if b is None:
             raise BridgeUnavailableError("IPC bridge is not connected")
-        # b is IPCBridge at this point; cast to satisfy mypy
-        from styrened.ipc.bridge import IPCBridge as _IPCBridge
+        # b satisfies the IPCBridge duck-typing contract.  cast() narrows the
+        # type for mypy without asserting isinstance(), preserving duck-typing.
+        from typing import cast
 
-        assert isinstance(b, _IPCBridge)
-        return b
+        return cast("IPCBridge", b)
 
     # ------------------------------------------------------------------
     # Internal lifecycle
@@ -134,8 +153,12 @@ class StyreneScreen(Screen[T], Generic[T]):
             log.debug("%s: cancelling previous load worker", screen_name)
             self._load_worker.cancel()
         log.debug("%s: starting load worker", screen_name)
+        # Pass the coroutine *function* (not a pre-created coroutine object) so
+        # Textual creates the coroutine only when the worker actually starts.
+        # Passing a pre-created coroutine to run_worker() risks leaving it
+        # un-awaited if the worker is cancelled before it begins.
         self._load_worker = self.run_worker(
-            self._run_load(), exclusive=True, group="screen-load"
+            self._run_load, exclusive=True, group="screen-load"
         )
 
     async def _run_load(self) -> None:
@@ -159,10 +182,11 @@ class StyreneScreen(Screen[T], Generic[T]):
                 log.debug(
                     "%s: attempt %d failed: %s", screen_name, attempt, exc
                 )
-                if attempt < _MAX_ATTEMPTS:
-                    delay = _RETRY_DELAYS[attempt - 1]
-                    log.debug("%s: retrying in %.1fs", screen_name, delay)
-                    await asyncio.sleep(delay)
+                # Sleep after every failed attempt (including the last) so all
+                # three backoff delays in _RETRY_DELAYS are exercised.
+                delay = _RETRY_DELAYS[attempt - 1]
+                log.debug("%s: retrying in %.1fs (attempt %d)", screen_name, delay, attempt)
+                await asyncio.sleep(delay)
 
         # Exhausted all attempts
         if last_error is not None:
