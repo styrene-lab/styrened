@@ -12,9 +12,9 @@ Design decisions:
 
 import json
 import logging
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -423,8 +423,8 @@ def init_db(db_path: str | None = None) -> Engine:
             )
             conn.commit()
             logger.debug("Contacts table initialized")
-    except Exception:
-        pass  # Table already exists or was created by create_all
+    except Exception as exc:
+        logger.debug("Contacts table creation skipped (likely already exists): %s", exc)
 
     # Migrate contacts table: PK from peer_hash → identity_hash
     # Detect old schema by checking if peer_hash column exists
@@ -454,11 +454,12 @@ def init_db(db_path: str | None = None) -> Engine:
             old_cols = {row[1] for row in old_result}
             blocked_expr = "COALESCE(blocked, 0)" if "blocked" in old_cols else "0"
             blocked_at_expr = "blocked_at" if "blocked_at" in old_cols else "NULL"
+            notes_expr = "notes" if "notes" in old_cols else "NULL"
             conn.execute(
                 text(
                     "INSERT INTO contacts_new "
                     "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at) "
-                    f"SELECT peer_hash, alias, notes, "
+                    f"SELECT peer_hash, alias, {notes_expr}, "
                     f"{blocked_expr}, {blocked_at_expr}, created_at, updated_at "
                     "FROM contacts"
                 )
@@ -500,8 +501,8 @@ def init_db(db_path: str | None = None) -> Engine:
             )
             conn.commit()
             logger.debug("peer_blocks table initialized")
-    except Exception:
-        pass  # Table already exists
+    except Exception as exc:
+        logger.debug("peer_blocks table creation skipped (likely already exists): %s", exc)
 
     # Add performance indexes for conversation queries (idempotent)
     perf_indexes = [
@@ -576,6 +577,51 @@ def init_db(db_path: str | None = None) -> Engine:
         logger.debug("FTS5 virtual table and triggers initialized")
 
     return engine
+
+
+@runtime_checkable
+class _NodeStoreProtocol(Protocol):
+    def get_identity_hash_for_destination(self, dest_hash: str) -> str | None: ...
+
+
+def backfill_contacts_identity_hash(engine: Engine, node_store: _NodeStoreProtocol) -> int:
+    """Resolve 32-char dest-hashes in contacts.identity_hash to full 64-char identity hashes.
+
+    Called at daemon startup after NodeStore is populated.  Rows whose
+    ``identity_hash`` is exactly 32 characters long are assumed to be old
+    destination-hash values copied verbatim from the pre-v0.16 ``peer_hash``
+    column.  For each such row we ask *node_store* for the real identity hash;
+    if the mapping is known and no row with the full identity already exists,
+    the row is updated in-place.
+
+    Returns the number of rows updated.
+    """
+
+    updated = 0
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT identity_hash FROM contacts WHERE LENGTH(identity_hash) = 32")
+        ).fetchall()
+        for (ih,) in rows:
+            resolved = node_store.get_identity_hash_for_destination(ih)
+            if resolved and resolved != ih:
+                existing = conn.execute(
+                    text("SELECT 1 FROM contacts WHERE identity_hash = :ih"),
+                    {"ih": resolved},
+                ).fetchone()
+                if not existing:
+                    conn.execute(
+                        text(
+                            "UPDATE contacts SET identity_hash = :new "
+                            "WHERE identity_hash = :old"
+                        ),
+                        {"new": resolved, "old": ih},
+                    )
+                    updated += 1
+        conn.commit()
+    if updated:
+        logger.info("Backfilled %d contacts row(s) with full identity hashes", updated)
+    return updated
 
 
 def get_session(db_path: str | None = None) -> Session:
