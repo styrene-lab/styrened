@@ -79,12 +79,6 @@ class MeshDevice:
     ygg_address: str | None = None  # Yggdrasil IPv6 address (fetched via /meta, not from announce)
     b32_address: str | None = None  # I2P b32 address (fetched via /meta, not from announce)
 
-    # Legacy alias for backwards compatibility
-    @property
-    def identity(self) -> str:
-        """Legacy alias for destination_hash."""
-        return self.destination_hash
-
     @property
     def status(self) -> NodeStatus:
         """Get node status based on last announce time."""

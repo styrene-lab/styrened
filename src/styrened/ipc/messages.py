@@ -627,14 +627,24 @@ class CmdBlockPeerRequest(IPCRequest):
     """Block a peer — silently drop all future messages from them."""
 
     MSG_TYPE = IPCMessageType.CMD_BLOCK_PEER
-    peer_hash: str = ""
+    identity_hash: str = ""
+    lxmf_dest_hash: str = ""
+    alias: str = ""
 
     def to_payload(self) -> dict:
-        return {"peer_hash": self.peer_hash}
+        return {
+            "identity_hash": self.identity_hash,
+            "lxmf_dest_hash": self.lxmf_dest_hash,
+            "alias": self.alias,
+        }
 
     @classmethod
     def from_payload(cls, data: dict) -> "CmdBlockPeerRequest":
-        return cls(peer_hash=data.get("peer_hash", ""))
+        return cls(
+            identity_hash=data.get("identity_hash", ""),
+            lxmf_dest_hash=data.get("lxmf_dest_hash", ""),
+            alias=data.get("alias", ""),
+        )
 
 
 @dataclass
@@ -642,14 +652,14 @@ class CmdUnblockPeerRequest(IPCRequest):
     """Unblock a previously blocked peer."""
 
     MSG_TYPE = IPCMessageType.CMD_UNBLOCK_PEER
-    peer_hash: str = ""
+    identity_hash: str = ""
 
     def to_payload(self) -> dict:
-        return {"peer_hash": self.peer_hash}
+        return {"identity_hash": self.identity_hash}
 
     @classmethod
     def from_payload(cls, data: dict) -> "CmdUnblockPeerRequest":
-        return cls(peer_hash=data.get("peer_hash", ""))
+        return cls(identity_hash=data.get("identity_hash", ""))
 
 
 @dataclass
