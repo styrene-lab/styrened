@@ -50,20 +50,20 @@ install:
 
 # Run all tests (unit + integration, no k8s)
 test:
-    pytest tests/ --ignore=tests/k8s/
+    .venv/bin/python -m pytest tests/ --ignore=tests/k8s/
 
 # Run unit tests only (parallel, ~4s)
 test-unit:
-    pytest tests/unit/ -n auto -q --tb=short
+    .venv/bin/python -m pytest tests/unit/ -n auto -q --tb=short
 
 # Run TUI tests only (parallel, ~2min)
 test-tui:
-    pytest tests/tui/ -n auto -q --tb=short
+    .venv/bin/python -m pytest tests/tui/ -n auto -q --tb=short
 
 # Fast smoke: unit + TUI widgets/services/models (~36s, 3200+ tests)
 # Skips slow Textual run_test() screen tests and navigation workflows
 test-fast:
-    pytest tests/unit/ tests/tui/ -n auto -q --tb=short \
+    .venv/bin/python -m pytest tests/unit/ tests/tui/ -n auto -q --tb=short \
         --ignore=tests/tui/screens \
         --ignore=tests/tui/test_navigation_workflows.py \
         --ignore=tests/tui/integration \
@@ -72,7 +72,7 @@ test-fast:
 
 # Run local integration tests (no k8s)
 test-integration:
-    pytest tests/integration/ -v
+    .venv/bin/python -m pytest tests/integration/ -v
 
 # Run linter (ruff)
 lint:
@@ -376,15 +376,15 @@ helm-logs-follow:
 
 # Run k8s tests (requires cluster)
 test-k8s:
-    pytest tests/k8s/
+    .venv/bin/python -m pytest tests/k8s/
 
 # Run k8s smoke tests only (fast)
 test-k8s-smoke:
-    pytest tests/k8s/scenarios/ -m smoke -v
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -m smoke -v
 
 # Run full k8s test suite including slow tests
 test-k8s-full:
-    pytest tests/k8s/scenarios/ --run-slow -v
+    .venv/bin/python -m pytest tests/k8s/scenarios/ --run-slow -v
 
 # Build, load image, and deploy test stack
 test-k8s-deploy: load-k8s-image helm-install
@@ -392,18 +392,18 @@ test-k8s-deploy: load-k8s-image helm-install
 
 # Run k8s tests (assumes image already deployed)
 test-k8s-run:
-    pytest tests/k8s/scenarios/ -v -m smoke --tb=short
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -v -m smoke --tb=short
 
 # Complete local k8s test workflow: build, load, test
 test-k8s-local: load-k8s-image
     @echo "=== K8s Local Test Workflow ==="
-    pytest tests/k8s/scenarios/ -v -m smoke --tb=short
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -v -m smoke --tb=short
     @echo "=== Complete ==="
 
 # Complete remote k8s test workflow: create secret, deploy from GHCR, test
 test-k8s-remote: create-ghcr-secret helm-install-ghcr
     @echo "=== K8s Remote Test Workflow (GHCR) ==="
-    pytest tests/k8s/scenarios/ -v -m smoke --tb=short
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -v -m smoke --tb=short
     @echo "=== Complete ==="
 
 # List k8s test namespaces and resources
@@ -471,8 +471,16 @@ tag-release:
     git tag -a "v$ver" -m "Release v$ver"
     echo "Tag created. Push with: git push origin v$ver"
 
-# Full release workflow: validate, bump, commit, tag
-release new_version: validate
+# Full release workflow: validate, QA gate, bump, commit, tag
+# Use `just release X.Y.Z --skip-qa` to bypass visual QA (hotfixes only)
+release new_version *flags: validate
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{ flags }}" == *"--skip-qa"* ]]; then
+        bash scripts/qa_gate.sh --skip
+    else
+        bash scripts/qa_gate.sh
+    fi
     just bump-version {{ new_version }}
     git add src/styrened/__init__.py VERSION
     git commit -m "chore: bump version to {{ new_version }}"
@@ -551,19 +559,19 @@ bare-metal-status:
 # Quick smoke tests on all bare-metal devices
 test-bare-metal-smoke:
     @echo "Running bare-metal smoke tests..."
-    pytest tests/bare-metal/test_smoke.py -v
+    .venv/bin/python -m pytest tests/bare-metal/test_smoke.py -v
 
 # Deploy wheel to bare-metal devices and verify
 test-bare-metal-deploy:
     @echo "Building wheel..."
     python -m build --wheel
     @echo "Running bare-metal deployment tests..."
-    pytest tests/bare-metal/test_deployment.py -v
+    .venv/bin/python -m pytest tests/bare-metal/test_deployment.py -v
 
 # Mesh integration tests (requires running daemons)
 test-bare-metal-mesh:
     @echo "Running bare-metal mesh tests..."
-    pytest tests/bare-metal/test_mesh.py -v
+    .venv/bin/python -m pytest tests/bare-metal/test_mesh.py -v
 
 # Run all bare-metal tests (smoke + mesh)
 test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
@@ -572,7 +580,7 @@ test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
 # Run bare-metal tests on specific device
 test-bare-metal-device device:
     @echo "Running tests on {{ device }}..."
-    pytest tests/bare-metal/ -v -k "{{ device }}"
+    .venv/bin/python -m pytest tests/bare-metal/ -v -k "{{ device }}"
 
 # Start daemons on all bare-metal devices (reads from devices.yaml)
 bare-metal-start:
@@ -630,32 +638,32 @@ bare-metal-deploy device="":
 # Run cross-platform scenarios on SSH backend (bare-metal devices)
 test-scenarios-ssh:
     @echo "Running cross-platform scenarios on SSH backend..."
-    pytest tests/scenarios/ --backend=ssh -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend=ssh -v
 
 # Run cross-platform scenarios on K8s backend
 test-scenarios-k8s namespace="styrene-test":
     @echo "Running cross-platform scenarios on K8s backend..."
-    pytest tests/scenarios/ --backend=k8s --k8s-namespace={{ namespace }} -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend=k8s --k8s-namespace={{ namespace }} -v
 
 # Run cross-platform scenarios on both backends
 test-scenarios-both namespace="styrene-test":
     @echo "Running cross-platform scenarios on both backends..."
-    pytest tests/scenarios/ --backend=both --k8s-namespace={{ namespace }} -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend=both --k8s-namespace={{ namespace }} -v
 
 # Run smoke-tier cross-platform tests (fast validation)
 test-scenarios-smoke backend="ssh":
     @echo "Running smoke scenarios on {{ backend }} backend..."
-    pytest tests/scenarios/ --backend={{ backend }} -m smoke -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend={{ backend }} -m smoke -v
 
 # Run integration-tier cross-platform tests
 test-scenarios-integration backend="ssh":
     @echo "Running integration scenarios on {{ backend }} backend..."
-    pytest tests/scenarios/ --backend={{ backend }} -m integration -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend={{ backend }} -m integration -v
 
 # Run comprehensive cross-platform tests
 test-scenarios-comprehensive backend="ssh":
     @echo "Running comprehensive scenarios on {{ backend }} backend..."
-    pytest tests/scenarios/ --backend={{ backend }} -m comprehensive -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend={{ backend }} -m comprehensive -v
 
 # ─── Installation Testing ───────────────────────────────────────────────────
 #
@@ -665,22 +673,22 @@ test-scenarios-comprehensive backend="ssh":
 # Run installation smoke tests (validate existing installation)
 test-install-smoke:
     @echo "Running installation smoke tests..."
-    pytest tests/scenarios/test_installation.py --backend=ssh -m smoke -v
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py --backend=ssh -m smoke -v
 
 # Run full installation tests (install/upgrade cycles)
 test-install:
     @echo "Running installation tests..."
-    pytest tests/scenarios/test_installation.py --backend=ssh -m installation -v
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py --backend=ssh -m installation -v
 
 # Run provisioning tests (install + systemd setup)
 test-provision:
     @echo "Running provisioning tests..."
-    pytest tests/scenarios/test_installation.py --backend=ssh -m provisioning -v
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py --backend=ssh -m provisioning -v
 
 # Install from specific git tag on all devices
 test-install-tag tag:
     @echo "Installing tag {{ tag }} on all devices..."
-    pytest tests/scenarios/test_installation.py::TestPipGitInstallation::test_install_from_tag \
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py::TestPipGitInstallation::test_install_from_tag \
         --backend=ssh --install-tag={{ tag }} -v
 
 # Install from wheel on all devices
@@ -696,13 +704,13 @@ test-install-wheel wheel_path="":
         wheel="{{ wheel_path }}"
     fi
     echo "Installing wheel: $wheel"
-    pytest tests/scenarios/test_installation.py::TestWheelInstallation::test_install_from_wheel \
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py::TestWheelInstallation::test_install_from_wheel \
         --backend=ssh --wheel-path="$wheel" -v
 
 # Full provisioning workflow on all devices
 test-provision-all:
     @echo "Provisioning all devices..."
-    pytest tests/scenarios/test_installation.py::TestFullProvisioning::test_provision_all_nodes \
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py::TestFullProvisioning::test_provision_all_nodes \
         --backend=ssh -v
 
 # ─── Test Matrix ────────────────────────────────────────────────────────────
@@ -712,17 +720,17 @@ test-provision-all:
 # Run full test matrix (smoke + integration)
 test-matrix:
     @echo "Running test matrix..."
-    pytest tests/scenarios/test_matrix.py --backend=ssh -v -s 2>&1 | tee test-results/matrix-$(date +%Y%m%d_%H%M%S).log
+    .venv/bin/python -m pytest tests/scenarios/test_matrix.py --backend=ssh -v -s 2>&1 | tee test-results/matrix-$(date +%Y%m%d_%H%M%S).log
 
 # Run smoke test matrix only
 test-matrix-smoke:
     @echo "Running smoke test matrix..."
-    pytest tests/scenarios/test_matrix.py --backend=ssh -m smoke -v -s
+    .venv/bin/python -m pytest tests/scenarios/test_matrix.py --backend=ssh -m smoke -v -s
 
 # Run integration test matrix (requires running daemons)
 test-matrix-integration:
     @echo "Running integration test matrix..."
-    pytest tests/scenarios/test_matrix.py --backend=ssh -m integration -v -s
+    .venv/bin/python -m pytest tests/scenarios/test_matrix.py --backend=ssh -m integration -v -s
 
 # Analyze test matrix results
 test-matrix-analyze:
