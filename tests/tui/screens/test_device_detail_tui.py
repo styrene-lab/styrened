@@ -75,7 +75,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -97,7 +97,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -118,7 +118,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -146,7 +146,7 @@ class TestDeviceDetailComposition:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -168,7 +168,7 @@ class TestDeviceDetailComposition:
             async with app.run_test() as pilot:
                 await app.push_screen(
                     MeshDeviceDetailScreen(
-                        device_identity=test_device.identity,
+                        device_identity=test_device.identity_hash,
                         initial_tab="chat",
                     )
                 )
@@ -185,7 +185,7 @@ class TestDeviceDetailRPCActions:
     @pytest.mark.asyncio
     async def test_auto_fetch_status_uses_bridge_status_query(self, test_device):
         """Status refresh should use the IPC bridge status query contract."""
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         mock_bridge = MagicMock()
         mock_response = StatusResponse(
             uptime=3600,
@@ -224,7 +224,7 @@ class TestDeviceDetailRPCActions:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -256,7 +256,7 @@ class TestDeviceDetailLifecycle:
         screen._start_device_load.assert_called_once_with()
 
     def test_on_mount_starts_status_refresh_when_device_present_without_status(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         screen._start_status_refresh = Mock()
         screen.initial_status = None
 
@@ -265,7 +265,7 @@ class TestDeviceDetailLifecycle:
         screen._start_status_refresh.assert_called_once_with()
 
     def test_screen_suspend_cancels_inflight_workers(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         load_worker = Mock()
         status_worker = Mock()
         link_worker = Mock()
@@ -291,7 +291,7 @@ class TestDeviceDetailLifecycle:
         assert screen._contact_worker is None
 
     def test_screen_resume_refreshes_loaded_device_status(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         screen._start_status_refresh = Mock()
 
         screen.on_screen_resume(Mock())
@@ -308,7 +308,7 @@ class TestDeviceDetailLifecycle:
         screen._start_device_load.assert_called_once_with()
 
     def test_on_unmount_cancels_inflight_workers(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         load_worker = Mock()
         status_worker = Mock()
         link_worker = Mock()
@@ -334,7 +334,7 @@ class TestDeviceDetailLifecycle:
         assert screen._contact_worker is None
 
     def test_action_refresh_status_uses_status_worker_helper(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         screen._start_status_refresh = Mock()
         screen.notify = Mock()
 
@@ -345,7 +345,7 @@ class TestDeviceDetailLifecycle:
         screen.notify.assert_called_once()
 
     def test_action_establish_link_uses_worker_helper(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         bridge = Mock()
         app = Mock()
         app.services.bridge = bridge
@@ -359,7 +359,7 @@ class TestDeviceDetailLifecycle:
         screen._start_link_establish.assert_called_once_with(bridge)
 
     def test_action_run_speedtest_uses_worker_helper(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         bridge = Mock()
         bridge.datalink_status = AsyncMock(return_value={"connected": True})
         app = Mock()
@@ -374,7 +374,7 @@ class TestDeviceDetailLifecycle:
         screen._start_speedtest.assert_called_once_with(bridge)
 
     def test_action_add_contact_uses_worker_helper(self, test_device):
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         bridge = Mock()
         app = Mock()
         app.services.bridge = bridge
@@ -391,7 +391,7 @@ class TestDeviceDetailRoutingContext:
 
     def test_screen_builds_canonical_peer_workspace_context(self, test_device):
         screen = MeshDeviceDetailScreen(
-            device_identity=test_device.identity,
+            device_identity=test_device.identity_hash,
             initial_tab="chat",
             device=test_device,
             origin_workspace=WorkspaceId.NODES,
@@ -399,7 +399,7 @@ class TestDeviceDetailRoutingContext:
 
         assert screen.origin_workspace == WorkspaceId.NODES
         assert screen.requested_focus == PeerWorkspaceFocus.COMMS
-        assert screen.peer_context.peer_identity_hash == test_device.identity
+        assert screen.peer_context.peer_identity_hash == test_device.identity_hash
 
     @pytest.mark.asyncio
     async def test_escape_returns_to_originating_dashboard_screen(self, test_device):
@@ -413,7 +413,7 @@ class TestDeviceDetailRoutingContext:
                 await app.push_screen(DummyOriginScreen("dashboard-root"))
                 await app.push_screen(
                     MeshDeviceDetailScreen(
-                        device_identity=test_device.identity,
+                        device_identity=test_device.identity_hash,
                         device=test_device,
                         origin_workspace=WorkspaceId.HOME,
                     )
@@ -438,7 +438,7 @@ class TestDeviceDetailRoutingContext:
                 await app.push_screen(DummyOriginScreen("nodes-root"))
                 await app.push_screen(
                     MeshDeviceDetailScreen(
-                        device_identity=test_device.identity,
+                        device_identity=test_device.identity_hash,
                         device=test_device,
                         origin_workspace=WorkspaceId.NODES,
                     )
@@ -466,7 +466,7 @@ class TestDeviceDetailKeyboardBindings:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -478,7 +478,7 @@ class TestDeviceDetailKeyboardBindings:
 
     def test_r_refreshes_device_status_via_helper(self, test_device):
         """Pressing 'r' should route through the status refresh helper."""
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity, device=test_device)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash, device=test_device)
         screen._start_status_refresh = Mock()
         screen.notify = Mock()
 
@@ -513,7 +513,7 @@ class TestDeviceDetailRealTimeUpdates:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -547,7 +547,7 @@ class TestDeviceDetailRealTimeUpdates:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -582,7 +582,7 @@ class TestDeviceDetailErrorHandling:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -607,7 +607,7 @@ class TestDeviceDetailErrorHandling:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -638,7 +638,7 @@ class TestDeviceDetailErrorHandling:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=offline_device.identity)
+                    MeshDeviceDetailScreen(device_identity=offline_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -668,7 +668,7 @@ class TestDeviceDetailExecCommand:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -694,7 +694,7 @@ class TestDeviceDetailExecCommand:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -715,7 +715,7 @@ class TestDeviceDetailNavigation:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=test_device.identity)
+                    MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 )
                 await pilot.pause()
 
@@ -748,7 +748,7 @@ class TestDeviceDetailNodeStoreFallback:
     @pytest.mark.asyncio
     async def test_device_loaded_from_ipc_nodes_when_discover_empty(self, test_device):
         """Device should load from IPC bridge node inventory when live discovery is empty."""
-        screen = MeshDeviceDetailScreen(device_identity=test_device.identity)
+        screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
         bridge = MagicMock()
         bridge.get_nodes = AsyncMock(
             return_value=[
@@ -778,7 +778,7 @@ class TestDeviceDetailNodeStoreFallback:
             await screen._async_load_device()
 
         assert screen.device is not None
-        assert screen.device.identity == test_device.identity
+        assert screen.device.identity_hash == test_device.identity_hash
         screen.call_after_refresh.assert_called_once_with(screen._start_status_refresh)
 
     @pytest.mark.asyncio
@@ -810,7 +810,7 @@ class TestDeviceDetailNodeStoreFallback:
             ),
         ):
             async with app.run_test() as pilot:
-                screen = MeshDeviceDetailScreen(device_identity=test_device.identity)
+                screen = MeshDeviceDetailScreen(device_identity=test_device.identity_hash)
                 await app.push_screen(screen)
                 await pilot.pause()
 
