@@ -13,13 +13,13 @@ from typing import Any
 
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Input, Label, Static, TabbedContent, TabPane
+from textual.widgets import Button, DataTable, Input, Label, Static
 
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
-from styrened.ui_state import CommsMode, CommsWorkspaceInputs, build_comms_workspace_state
+from styrened.ui_state import CommsMode
 
 logger = logging.getLogger(__name__)
 
@@ -55,60 +55,39 @@ class ExchangeDirectTab(Widget):
             return None
 
     def compose(self) -> ComposeResult:
-        state = build_comms_workspace_state(CommsWorkspaceInputs())
-        with Container(id="comms-container"):
-            yield Static("COMMS", id="comms-title")
-            with TabbedContent(initial=state.active_mode.value, id="comms-tabs"):
-                # Direct — active direct-link sessions
-                with TabPane("Direct", id=CommsMode.DIRECT.value):
-                    with Vertical(id="comms-direct-content"):
-                        yield Static(
-                            "No active direct sessions.",
-                            id="comms-direct-placeholder",
-                        )
+        with Vertical(id="comms-container"):
+            # Active direct-link sessions
+            with Vertical(id="comms-direct-content"):
+                yield Static(
+                    "No active direct sessions.",
+                    id="comms-direct-placeholder",
+                )
 
-                # Active — live session list
-                with TabPane("Active", id=CommsMode.ACTIVE.value):
+            # Bridges — capability-gated (Yggdrasil, I2P)
+            with Vertical(id="comms-bridges-content"):
+                with Vertical(id="comms-yggdrasil-section", classes="hidden"):
+                    yield Label("Yggdrasil", id="comms-yggdrasil-label")
                     yield Static(
-                        "No active sessions.",
-                        id="comms-active-placeholder",
+                        "Yggdrasil overlay network is active.",
+                        id="comms-yggdrasil-status",
                     )
-
-                # Bridges — capability-gated bridge surfaces
-                with TabPane("Bridges", id=CommsMode.BRIDGES.value):
-                    with Vertical(id="comms-bridges-content"):
-                        # Yggdrasil section — hidden until caps loaded
-                        with Vertical(id="comms-yggdrasil-section", classes="hidden"):
-                            yield Label("Yggdrasil", id="comms-yggdrasil-label")
-                            yield Static(
-                                "Yggdrasil overlay network is active.",
-                                id="comms-yggdrasil-status",
-                            )
-
-                        # I2P section — hidden until caps loaded
-                        with Vertical(id="comms-i2p-section", classes="hidden"):
-                            yield Label("I2P", id="comms-i2p-label")
-                            yield Static(
-                                "I2P network is active.",
-                                id="comms-i2p-status",
-                            )
-                            yield Input(
-                                placeholder="Enter .i2p address…",
-                                id="comms-i2p-url-input",
-                            )
-
-                        # Shown when no bridges are available
-                        yield Static(
-                            "No bridge capabilities active. Enable Yggdrasil or I2P in config.",
-                            id="comms-bridges-placeholder",
-                        )
-
-                # Presence — live reachability
-                with TabPane("Presence", id=CommsMode.PRESENCE.value):
-                    yield Static(
-                        "Live presence and reachability will appear here.",
-                        id="comms-presence-placeholder",
+                with Vertical(id="comms-i2p-section", classes="hidden"):
+                    yield Label("I2P", id="comms-i2p-label")
+                    yield Static("I2P network is active.", id="comms-i2p-status")
+                    yield Input(
+                        placeholder="Enter .i2p address…",
+                        id="comms-i2p-url-input",
                     )
+                yield Static(
+                    "No bridge capabilities active. Enable Yggdrasil or I2P in config.",
+                    id="comms-bridges-placeholder",
+                )
+
+            # Presence
+            yield Static(
+                "Live presence and reachability will appear here.",
+                id="comms-presence-placeholder",
+            )
 
     def on_mount(self) -> None:
         """Fetch daemon capabilities and update capability-gated sections."""
