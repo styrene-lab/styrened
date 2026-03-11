@@ -13,7 +13,7 @@ from typing import Any
 
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Label, Static
