@@ -438,26 +438,34 @@ Header {
 /* Base styles defined in widget DEFAULT_CSS, only overrides here */
 
 /* === Dashboard Layout === */
-/* Dashboard outer container — NEVER grows beyond its 1fr budget.
-   overflow: hidden here is intentional: it guarantees the Footer widget
-   always renders. Individual inner panels handle their own scrolling. */
+/* Dashboard outer container.
+   height: 1fr fills the space between the docked Header and Footer.
+   overflow: hidden ensures this container NEVER grows past its allocation —
+   the Footer is therefore always visible regardless of terminal size. */
 #dashboard-container {
     height: 1fr;
     overflow: hidden;
     background: $background;
 }
 
-/* Node info: fixed portion of the available height; scrolls if content
-   somehow exceeds it rather than pushing the comms panel off-screen. */
+/* Node info panel: explicit fractional height, not auto.
+   HighlightedPanel DEFAULT_CSS uses height:auto which would defeat the
+   container's overflow:hidden. We override to 40% of the container so
+   it never pushes the comms panel off-screen on small terminals. */
 #node-info-panel {
-    height: auto;
-    max-height: 22;
+    height: 40%;
+    min-height: 8;
     overflow-y: auto;
 }
 
-/* Comms summary: takes all remaining space; scrolls its own content. */
-#comms-summary-panel {
+#node-info-panel > .hp-content {
     height: 1fr;
+    overflow-y: auto;
+}
+
+/* Comms summary: takes remaining 60%; scrolls internally. */
+#comms-summary-panel {
+    height: 60%;
     min-height: 4;
     overflow-y: auto;
 }
