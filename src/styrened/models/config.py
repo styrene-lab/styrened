@@ -786,6 +786,20 @@ class GroupThreadsConfig:
 
 
 @dataclass
+class LoggingConfig:
+    """Logging subsystem configuration.
+
+    Attributes:
+        boundary_sink: When True, boundary-tagged log records are also written
+            as NDJSON lines to ~/.local/share/styrene/boundary.log
+            (size-rotated, 1 MB max, 3 backups).  Defaults to False so the
+            ring-buffer-only mode is used out of the box.
+    """
+
+    boundary_sink: bool = False
+
+
+@dataclass
 class CoreConfig:
     """Core Styrene configuration for headless applications.
 
@@ -831,6 +845,7 @@ class CoreConfig:
     yggdrasil: YggdrasilConfig = field(default_factory=YggdrasilConfig)
     i2p: I2PConfig = field(default_factory=I2PConfig)
     group_threads: GroupThreadsConfig = field(default_factory=GroupThreadsConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize CoreConfig to a dictionary suitable for YAML output.
