@@ -10,7 +10,7 @@ Categorized tabbed interface for current network discovery:
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual import events
@@ -29,9 +29,11 @@ from textual.widgets import (
     TabPane,
 )
 
+from styrened.ipc.protocol import IPCMessageType
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.screens.exploration_projection import build_styrene_fleet_projection
+from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import WorkspaceId
 
@@ -617,6 +619,7 @@ class ExplorationScreen(Screen[None]):
         self._refresh_timer: Timer | None = None
         self._node_refresh_worker = None
         self._stored_nodes_worker = None
+        self._diagnostics_subscribed: bool = False
 
     CSS = """
     #exploration-container {
@@ -861,6 +864,8 @@ class ExplorationScreen(Screen[None]):
                         device_types=_OTHER_TYPES,
                         classes="explore-tab-table",
                     )
+                with TabPane("Diagnostics", id="tab-diagnostics"):
+                    yield ActivityFeedWidget(id="explore-activity-feed")
             yield Static("", id="explore-count")
         yield Footer()
 
@@ -989,6 +994,11 @@ class ExplorationScreen(Screen[None]):
                     table.set_filter("")
         except Exception:
             pass
+        # Start activity subscription when Diagnostics tab is first activated
+        if getattr(event.tab, "id", None) == "tab-diagnostics":
+            if not self._diagnostics_subscribed:
+                self._diagnostics_subscribed = True
+                self.run_worker(self._subscribe_activity(), exclusive=False)
         self._update_status_bar()
 
     def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
@@ -1180,3 +1190,29 @@ class ExplorationScreen(Screen[None]):
         """Refresh all data on the exploration screen."""
         self.notify("Refreshing...", title="Refresh")
         self._refresh_announce_tables()
+
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge via typed services protocol."""
+        try:
+            return self.app.services.bridge  # type: ignore[union-attr,attr-defined]
+        except Exception:
+            return None
+
+    async def _subscribe_activity(self) -> None:
+        """Subscribe to activity events via IPC and push into ActivityFeedWidget."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            await bridge.subscribe_activity()
+            async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
+                if event_type != IPCMessageType.EVENT_ACTIVITY:
+                    continue
+                try:
+                    activity_widget = self.query_one("#explore-activity-feed", ActivityFeedWidget)
+                    activity_widget.add_event(event.get("event_type", "unknown"), event)
+                except Exception:
+                    pass
+        except Exception:
+            pass
