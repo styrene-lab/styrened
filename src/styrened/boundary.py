@@ -72,7 +72,16 @@ class BoundaryLogHandler(logging.Handler):
         self._file_handler: logging.handlers.RotatingFileHandler | None = None
 
         if sink_path is not None:
-            sink_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                sink_path.parent.mkdir(parents=True, exist_ok=True)
+            except PermissionError as exc:
+                logging.getLogger(__name__).warning(
+                    "boundary: cannot create sink directory %s: %s — file sink disabled",
+                    sink_path.parent,
+                    exc,
+                )
+                sink_path = None
+        if sink_path is not None:
             self._file_handler = logging.handlers.RotatingFileHandler(
                 str(sink_path),
                 maxBytes=1 * 1024 * 1024,  # 1 MB
@@ -104,16 +113,22 @@ class BoundaryLogHandler(logging.Handler):
             retryable=bool(getattr(record, "retryable", False)),
             stack_name=str(getattr(record, "stack_name", record.name)),
             operation=str(getattr(record, "operation", "")),
-            message=self.format(record) if self.formatter else record.getMessage(),
+            message=self.format(record),
         )
         self._records.append(br)
 
         if self._file_handler is not None:
-            # Write NDJSON line
-            ndjson_record = logging.makeLogRecord(
-                {"msg": json.dumps(br.to_dict()), "levelno": record.levelno}
-            )
-            self._file_handler.emit(ndjson_record)
+            # Write NDJSON line directly to avoid double-encoding risks that
+            # arise when using makeLogRecord + emit() with an arbitrary formatter.
+            try:
+                line = json.dumps(br.to_dict()) + "\n"
+                fh = self._file_handler
+                if fh.shouldRollover(record):
+                    fh.doRollover()
+                fh.stream.write(line)
+                fh.stream.flush()
+            except Exception:
+                self.handleError(record)
 
     # ------------------------------------------------------------------
     # Public API

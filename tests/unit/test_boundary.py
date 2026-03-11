@@ -48,7 +48,10 @@ def test_enum_is_str_subclass():
 def _make_logger(name: str = "test.boundary") -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    # Remove any pre-existing handlers to keep tests isolated
+    # Remove any pre-existing handlers to keep tests isolated, closing each
+    # one first to release any underlying file handles.
+    for h in list(logger.handlers):
+        h.close()
     logger.handlers.clear()
     return logger
 
