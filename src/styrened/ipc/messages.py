@@ -1102,6 +1102,7 @@ class DeviceInfo:
     short_name: str | None = None
     system_fingerprint: str | None = None
     discovered_via: str | None = None
+    hops: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1117,6 +1118,7 @@ class DeviceInfo:
             "short_name": self.short_name,
             "system_fingerprint": self.system_fingerprint,
             "discovered_via": self.discovered_via,
+            "hops": self.hops,
         }
 
     @classmethod
@@ -1134,6 +1136,7 @@ class DeviceInfo:
             short_name=data.get("short_name"),
             system_fingerprint=data.get("system_fingerprint"),
             discovered_via=data.get("discovered_via"),
+            hops=data.get("hops"),
         )
 
     @classmethod
@@ -1159,6 +1162,7 @@ class DeviceInfo:
             short_name=getattr(device, "short_name", None),
             system_fingerprint=getattr(device, "system_fingerprint", None),
             discovered_via=getattr(device, "discovered_via", None),
+            hops=getattr(device, "hops", None),
         )
 
 

@@ -110,6 +110,7 @@ class TUIConfig:
     log_level: LogLevel = LogLevel.INFO
     show_hardware_panel: bool = True
     confirm_destructive: bool = True
+    identity_nudge_dismissed: bool = False
 
 
 @dataclass
