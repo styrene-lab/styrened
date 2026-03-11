@@ -48,6 +48,9 @@ class HighlightedPanel(Vertical):
         max-height: 100%;
         margin-bottom: 1;
         padding: 0;
+        /* IMPORTANT: do NOT use overflow:auto here — callers must set explicit
+           height (%, fr, or fixed) on the panel ID/class to get scrolling.
+           height:auto is intentional as the safe default; override per use-site. */
     }
 
     HighlightedPanel > .hp-top-border {
@@ -65,6 +68,9 @@ class HighlightedPanel(Vertical):
     }
 
     HighlightedPanel > .hp-content {
+        /* height:auto — content drives panel size by default.
+           When a parent constrains the panel with an explicit height,
+           override .hp-content to height:1fr so it fills the panel. */
         height: auto;
         width: 100%;
         padding: 0 1;

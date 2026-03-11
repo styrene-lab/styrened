@@ -239,11 +239,13 @@ class DashboardScreen(Screen[None]):
                 NodeInfoPanel(id="node-info-panel-widget"),
                 title="HOME STATUS",
                 id="node-info-panel",
+                classes="constrained",
             )
             yield HighlightedPanel(
                 CommsSummaryWidget(id="comms-summary-widget"),
                 title="COMMS",
                 id="comms-summary-panel",
+                classes="constrained",
             )
         yield Footer()
 

@@ -435,7 +435,18 @@ Header {
 }
 
 /* === HighlightedPanel Widget === */
-/* Base styles defined in widget DEFAULT_CSS, only overrides here */
+/* Base styles defined in widget DEFAULT_CSS.
+   Cross-cutting rule: when a HighlightedPanel is given an explicit height
+   (% or fr) by its parent context, its .hp-content must fill that height
+   and scroll rather than overflow. Apply this class to panels in constrained
+   layouts (e.g. dashboard, settings panes). */
+HighlightedPanel.constrained {
+    overflow-y: auto;
+}
+HighlightedPanel.constrained > .hp-content {
+    height: 1fr;
+    overflow-y: auto;
+}
 
 /* === Dashboard Layout === */
 /* Dashboard outer container.
@@ -458,21 +469,10 @@ Header {
     overflow-y: auto;
 }
 
-#node-info-panel > .hp-content {
-    height: 1fr;
-    overflow-y: auto;
-}
-
-/* Comms summary: takes remaining 60%; scrolls internally. */
+/* Comms summary: takes remaining 60%; scrolls internally via .constrained */
 #comms-summary-panel {
     height: 60%;
     min-height: 4;
-    overflow-y: auto;
-}
-
-#comms-summary-panel > .hp-content {
-    height: 1fr;
-    overflow-y: auto;
 }
 
 /* === Local Dashboard Layout === */
