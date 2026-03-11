@@ -1,0 +1,55 @@
+# Full profile — maximum surface area.
+# All interfaces up, all well-known hubs enabled, API on, boundary sink on.
+# Use for: full-exposure failure testing, validating new features end-to-end.
+
+reticulum:
+  mode: standalone
+  enable_transport: true
+  announce_interval: 60
+  interfaces:
+    auto: true
+    server:
+      enabled: true
+      listen_ip: "0.0.0.0"
+      port: 4242
+    peers:
+      - host: rns.styrene.io
+        port: 4242
+        name: "Styrene Community Hub"
+        enabled: true
+      - host: dublin.connect.reticulum.network
+        port: 4965
+        name: "RNS Dublin"
+        enabled: true
+      - host: reticulum.betweentheborders.com
+        port: 4242
+        name: "BetweenTheBorders"
+        enabled: true
+      - host: istanbul.reserve.network
+        port: 9034
+        name: "Istanbul Reserve"
+        enabled: true
+      - host: sydney.reticulum.au
+        port: 4242
+        name: "RNS Sydney"
+        enabled: true
+
+lxmf:
+  autopeer: true
+  propagation_node:
+    enabled: false    # not a propagation node, but peered with all hubs
+
+api:
+  enabled: true
+  host: "127.0.0.1"  # local only in dev
+  port: 8000
+  public_mode: false
+
+i2p:
+  mode: disabled      # enable manually when testing i2p path
+
+yggdrasil:
+  mode: disabled      # enable manually when testing yggdrasil path
+
+mesh_vpn:
+  enable: false       # enable manually when testing vpn path

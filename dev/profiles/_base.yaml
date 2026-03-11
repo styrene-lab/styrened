@@ -1,0 +1,28 @@
+# Base dev profile — shared across all profiles.
+# Keys here are overridden by per-profile overlays.
+# Identity: uses ~/.styrene-dev/config/ for persistence (QA identity).
+# Do NOT set reticulum.operator_identity_path here — let the daemon
+# auto-create and persist a QA identity in the dev home on first run.
+
+identity:
+  display_name: "Styrene Dev"
+  icon: "🧪"
+
+logging:
+  boundary_sink: true        # always capture boundary events in dev
+
+chat:
+  enabled: true
+  auto_reply_mode: disabled
+
+ipc:
+  enabled: true
+
+discovery:
+  enabled: true
+  auto_announce: true
+  info_respond: true         # respond to /info probes in dev
+
+rpc:
+  enabled: true
+  allow_command_execution: true

@@ -1,0 +1,34 @@
+# Standard profile — typical end-user install.
+# AutoInterface on for local discovery, single hub (Styrene), no extras.
+# Good default for TUI feature walkthroughs.
+
+reticulum:
+  mode: standalone
+  enable_transport: true
+  announce_interval: 60
+  interfaces:
+    auto: true
+    server:
+      enabled: false
+    peers:
+      - host: rns.styrene.io
+        port: 4242
+        name: "Styrene Community Hub"
+        enabled: true
+
+lxmf:
+  autopeer: true
+  propagation_node:
+    enabled: false
+
+api:
+  enabled: false
+
+i2p:
+  mode: disabled
+
+yggdrasil:
+  mode: disabled
+
+mesh_vpn:
+  enable: false

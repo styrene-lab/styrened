@@ -97,34 +97,62 @@ build-frontend:
 
 # ── Dev workflow ────────────────────────────────────────────────────────────
 
+# Dev home — isolated from production config/data.
+# Override with STYRENE_HOME env var if you want a different location.
+_dev_home := env_var_or_default("STYRENE_HOME", env_var("HOME") + "/.styrene-dev")
+
 # Stop the system service and run the venv daemon in the foreground (Ctrl-C to stop).
-# Use this when you want the TUI (also launched from the venv) to talk to the
-# dev-built daemon instead of the installed system daemon.
-dev-daemon:
+# Merges dev/profiles/_base.yaml + dev/profiles/<profile>.yaml into the dev home
+# before launching. Use profile= to select a profile (default: standard).
+# Use ephemeral=true to run with a temp identity discarded on exit.
+#
+# Examples:
+#   just dev-daemon                    # standard profile, persistent QA identity
+#   just dev-daemon profile=full       # all interfaces up
+#   just dev-daemon profile=minimal    # RNS + LXMF only
+#   just dev-daemon ephemeral=true     # throwaway identity, standard profile
+dev-daemon profile="standard" ephemeral="false":
     #!/usr/bin/env bash
     set -euo pipefail
+
+    PROFILE="{{ profile }}"
+    EPHEMERAL="{{ ephemeral }}"
+    DEV_HOME="{{ _dev_home }}"
+
+    # Ephemeral: use a temp dir, cleaned up on exit
+    if [[ "$EPHEMERAL" == "true" ]]; then
+        DEV_HOME="$(mktemp -d)"
+        trap "rm -rf '$DEV_HOME'" EXIT
+        echo "→ Ephemeral mode: dev home at $DEV_HOME (discarded on exit)"
+    fi
+
+    CONFIG_OUT="$DEV_HOME/config/core-config.yaml"
+
     echo "→ Stopping system service (if any)..."
     if [[ "$(uname)" == "Darwin" ]]; then
         launchctl unload ~/Library/LaunchAgents/com.styrene.styrened.plist 2>/dev/null || true
     else
         systemctl --user stop styrened.service 2>/dev/null || true
     fi
-    echo "→ Removing stale socket..."
-    rm -f "${XDG_RUNTIME_DIR:-/tmp}/styrened.sock" ~/.styrene/styrened.sock 2>/dev/null || true
-    echo "→ Starting dev daemon from venv ($(python -c 'import styrened; print(styrened.__version__)'))..."
-    .venv/bin/styrened daemon
 
-# Stop the system service, kill any stale socket, and launch the dev daemon.
+    echo "→ Merging profile '$PROFILE' → $CONFIG_OUT"
+    .venv/bin/python dev/merge_profile.py "$PROFILE" "$CONFIG_OUT"
+
+    echo "→ Starting dev daemon ($(STYRENE_HOME="$DEV_HOME" .venv/bin/python -c 'import styrened; print(styrened.__version__)'), profile=$PROFILE)..."
+    echo "   STYRENE_HOME=$DEV_HOME"
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon
+
 # Alias for dev-daemon — use when you just want a clean slate.
-dev-reset: dev-daemon
+dev-reset profile="standard": (dev-daemon profile)
 
-# Launch the TUI from the venv (assumes dev daemon is already running via dev-daemon).
+# Launch the TUI from the venv against the dev daemon's home.
+# Assumes dev daemon is already running via dev-daemon.
 dev-tui:
-    .venv/bin/styrene
+    STYRENE_HOME="{{ _dev_home }}" .venv/bin/styrene
 
-# Launch the compact dashboard from the venv.
+# Launch the compact dashboard from the venv against the dev daemon's home.
 dev-dashboard:
-    .venv/bin/styrene --dashboard
+    STYRENE_HOME="{{ _dev_home }}" .venv/bin/styrene --dashboard
 
 # Restore the system service after dev work.
 dev-restore:
