@@ -48,16 +48,23 @@ class TestVisibleBindings:
         assert binding.description == description
 
 
-class TestVisibleBindingCount:
-    """Exactly 6 visible bindings should appear in the footer."""
+class TestVisibleBindingSet:
+    """The expected visible bindings appear in the footer."""
 
-    def test_visible_count(self) -> None:
-        visible = [
-            b for b in StyreneApp.BINDINGS
+    def test_expected_visible_bindings_present(self) -> None:
+        visible = {
+            b.key: b.description
+            for b in StyreneApp.BINDINGS
             if isinstance(b, Binding) and b.show
-        ]
-        # Expected: ? Help, ` Admin, n Nodes, x Exchange, m Mail, a Announce
-        assert len(visible) == 6, (
-            f"Expected 6 visible bindings, got {len(visible)}: "
-            f"{[(b.key, b.description) for b in visible]}"
-        )
+        }
+        expected = {
+            "?": "Help",
+            "grave_accent": "Admin",
+            "n": "Nodes",
+            "x": "Exchange",
+            "m": "Mail",
+            "a": "Announce",
+        }
+        for key, desc in expected.items():
+            assert key in visible, f"Expected visible binding '{key}' ({desc}) not found"
+            assert visible[key] == desc

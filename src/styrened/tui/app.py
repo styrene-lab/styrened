@@ -71,7 +71,7 @@ class StyreneApp(App[None]):
         # Priority bindings (always work regardless of focus)
         Binding("ctrl+c", "interrupt", "Quit", show=False, priority=True),
         # Global navigation
-        Binding("?", "toggle_help", "Help"),
+        Binding("?", "toggle_help", "Help", show=True),
         Binding("grave_accent", "open_admin", "Admin", show=True),
         Binding("n", "open_nodes", "Nodes", show=True),
         Binding("x", "open_exchange", "Exchange", show=True),
