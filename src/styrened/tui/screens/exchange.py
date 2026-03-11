@@ -6,9 +6,6 @@ Tabs:
   direct   — Direct/live comms  (lifted from CommsScreen)
   pages    — NomadNet page browser (lifted from ExplorationScreen pages pane)
   contacts — Contact directory   (lifted from ContactsScreen)
-
-Only the Mail tab is implemented in this task.  The remaining tabs render
-a placeholder so the TabbedContent scaffold is usable end-to-end.
 """
 
 import datetime
@@ -33,6 +30,8 @@ from textual.widgets import (
     TabPane,
 )
 
+from styrened.models.mesh_device import DeviceType
+from styrened.tui.screens.exploration import ReticumAnnounceTable
 from styrened.ui_state import (
     ConversationScopeKind,
     MailIndexInputs,
@@ -40,6 +39,8 @@ from styrened.ui_state import (
     MailThreadRecord,
     build_mail_index,
 )
+
+_PAGES_TYPES = frozenset({DeviceType.NOMADNET_NODE})
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,8 @@ class ExchangeScreen(Screen[None]):
         Binding("slash", "search_messages", "Search", show=True),
         Binding("s", "sync_messages", "Sync", show=True),
         Binding("o", "cycle_sort", "Sort", show=True),
+        # Pages-tab bindings
+        Binding("v", "preview_page", "View Page", show=True),
     ]
 
     SORT_MODES = ["time", "unread", "name"]
@@ -156,6 +159,34 @@ class ExchangeScreen(Screen[None]):
         color: $primary;
         background: $background;
     }
+
+    ExchangeScreen #pages-pane-content {
+        width: 100%;
+        height: 100%;
+    }
+
+    ExchangeScreen #pages-table-section {
+        height: 1fr;
+        min-height: 5;
+    }
+
+    ExchangeScreen #pages-browser-section {
+        height: 2fr;
+    }
+
+    ExchangeScreen #pages-browser-section.hidden {
+        display: none;
+    }
+
+    ExchangeScreen #pages-browser-placeholder {
+        height: 1;
+        padding: 0 1;
+        color: $primary-darken-2;
+    }
+
+    ExchangeScreen #pages-browser-placeholder.hidden {
+        display: none;
+    }
     """
 
     def __init__(self, initial_tab: str = TAB_MAIL) -> None:
@@ -220,7 +251,19 @@ class ExchangeScreen(Screen[None]):
             with TabPane("Direct", id=TAB_DIRECT):
                 yield Label("Direct (live comms) — coming soon", classes="placeholder-pane")
             with TabPane("Pages", id=TAB_PAGES):
-                yield Label("Pages (NomadNet browser) — coming soon", classes="placeholder-pane")
+                with Vertical(id="pages-pane-content"):
+                    with Vertical(id="pages-table-section"):
+                        yield ReticumAnnounceTable(
+                            id="table-pages",
+                            device_types=_PAGES_TYPES,
+                            classes="explore-tab-table",
+                        )
+                    yield Static(
+                        "Press [bold]v[/bold] on a node to preview pages",
+                        id="pages-browser-placeholder",
+                    )
+                    with Vertical(id="pages-browser-section", classes="hidden"):
+                        pass  # PageBrowserWidget mounted dynamically
             with TabPane("Contacts", id=TAB_CONTACTS):
                 yield Label("Contacts — coming soon", classes="placeholder-pane")
         yield Footer()
@@ -443,6 +486,50 @@ class ExchangeScreen(Screen[None]):
             self._close_search()
             return
         self.app.switch_screen("dashboard")
+
+    def action_preview_page(self) -> None:
+        """Load selected NomadNet node's index page in the inline browser (Pages tab only)."""
+        try:
+            tabs = self.query_one("#exchange-tabs", TabbedContent)
+            if tabs.active != TAB_PAGES:
+                return
+        except Exception:
+            return
+
+        # Find selected row in pages table
+        try:
+            table = self.query_one("#table-pages", ReticumAnnounceTable)
+            if table.cursor_row < 0 or table.row_count == 0:
+                return
+            row_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key
+            dest_hash = str(row_key.value) if row_key.value is not None else None
+        except Exception:
+            dest_hash = None
+
+        if not dest_hash:
+            self.notify("Select a NomadNet node first", severity="warning")
+            return
+
+        from styrened.tui.widgets.page_browser import PageBrowserWidget
+
+        try:
+            placeholder = self.query_one("#pages-browser-placeholder", Static)
+            placeholder.add_class("hidden")
+
+            browser_section = self.query_one("#pages-browser-section", Vertical)
+            browser_section.remove_class("hidden")
+
+            existing = browser_section.query(PageBrowserWidget)
+            if existing:
+                existing.first().set_destination(dest_hash)
+            else:
+                browser = PageBrowserWidget(
+                    destination_hash=dest_hash,
+                    classes="explore-inline-browser",
+                )
+                browser_section.mount(browser)
+        except Exception as exc:
+            logger.warning("action_preview_page failed: %s", exc)
 
     def action_cycle_sort(self) -> None:
         idx = self.SORT_MODES.index(self._sort_mode)

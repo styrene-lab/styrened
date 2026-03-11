@@ -20,6 +20,7 @@ from textual.widgets import Footer, Header
 from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
 from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
+from styrened.tui.screens.exchange import ExchangeScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
 from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.exploration import ExplorationScreen
@@ -73,6 +74,7 @@ class StyreneApp(App[None]):
         Binding("?", "toggle_help", "Help"),
         Binding("grave_accent", "open_admin", "Admin", show=True),
         Binding("n", "open_nodes", "Nodes", show=True),
+        Binding("x", "open_exchange", "Exchange", show=True),
         Binding("m", "open_mail", "Mail", show=True),
         Binding("c", "open_comms", "Comms", show=True),
         Binding("b", "open_contacts", "Contacts", show=True),
@@ -88,6 +90,7 @@ class StyreneApp(App[None]):
         "comms": CommsScreen,
         "contacts": ContactsScreen,
         "dashboard": DashboardScreen,
+        "exchange": ExchangeScreen,
         "exploration": ExplorationScreen,
         "provision": ProvisionScreen,
     }
@@ -131,30 +134,40 @@ class StyreneApp(App[None]):
         """Open the canonical Nodes workspace."""
         self.switch_screen("exploration")
 
+    def action_open_exchange(self) -> None:
+        """Open the Exchange workspace (default: Mail tab)."""
+        self.switch_screen("exchange")
+
     def action_open_mail(self) -> None:
-        """Open the Mail workspace showing async conversations."""
-        if self.services.bridge is None:
-            self.notify("Chat requires daemon mode", severity="warning")
-            return
+        """Open Exchange workspace with Mail tab focused (fast-path)."""
+        from styrened.tui.screens.exchange import ExchangeScreen, TAB_MAIL
 
-        from styrened.tui.screens.inbox import MailScreen
-
-        self.switch_screen(MailScreen())
+        screen = self.get_screen("exchange")
+        if isinstance(screen, ExchangeScreen):
+            screen._initial_tab = TAB_MAIL
+        self.switch_screen("exchange")
 
     def action_open_inbox(self) -> None:
         """Backward-compatible alias for opening the Mail workspace."""
         self.action_open_mail()
 
     def action_open_comms(self) -> None:
-        """Open the aggregate Comms workspace."""
-        if self.services.bridge is None:
-            self.notify("Comms requires daemon mode", severity="warning")
-            return
-        self.switch_screen("comms")
+        """Open Exchange workspace with Direct tab focused."""
+        from styrened.tui.screens.exchange import ExchangeScreen, TAB_DIRECT
+
+        screen = self.get_screen("exchange")
+        if isinstance(screen, ExchangeScreen):
+            screen._initial_tab = TAB_DIRECT
+        self.switch_screen("exchange")
 
     def action_open_contacts(self) -> None:
-        """Switch to contacts screen."""
-        self.switch_screen("contacts")
+        """Open Exchange workspace with Contacts tab focused."""
+        from styrened.tui.screens.exchange import ExchangeScreen, TAB_CONTACTS
+
+        screen = self.get_screen("exchange")
+        if isinstance(screen, ExchangeScreen):
+            screen._initial_tab = TAB_CONTACTS
+        self.switch_screen("exchange")
 
     def action_open_provision(self) -> None:
         """Switch to device provisioning screen."""

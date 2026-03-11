@@ -697,7 +697,7 @@ class ExplorationScreen(Screen[None]):
         Binding("h", "toggle_hide_lost", "Hide Lost"),
         Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),
-        Binding("v", "preview_page", "Preview", show=True),
+
     ]
 
     # Debounce settings for discovery callbacks
@@ -849,20 +849,6 @@ class ExplorationScreen(Screen[None]):
                         device_types=_LXMF_TYPES,
                         classes="explore-tab-table",
                     )
-                with TabPane("Pages", id="tab-pages"):
-                    with Vertical(id="pages-pane-content"):
-                        with Vertical(id="pages-table-section"):
-                            yield ReticumAnnounceTable(
-                                id="table-pages",
-                                device_types=_PAGES_TYPES,
-                                classes="explore-tab-table",
-                            )
-                        yield Static(
-                            "Press [bold]v[/bold] on a node to preview pages",
-                            id="pages-browser-placeholder",
-                        )
-                        with Vertical(id="pages-browser-section", classes="hidden"):
-                            pass  # PageBrowserWidget mounted dynamically
                 with TabPane("Infra", id="tab-infra"):
                     yield ReticumAnnounceTable(
                         id="table-infra",
@@ -880,7 +866,7 @@ class ExplorationScreen(Screen[None]):
 
     def _get_all_tables(self) -> list[DataTable]:
         """Get all announce tables across tabs (both ReticumAnnounceTable and StyreneFleetTable)."""
-        table_ids = ["#table-styrene", "#table-lxmf", "#table-pages", "#table-infra", "#table-other"]
+        table_ids = ["#table-styrene", "#table-lxmf", "#table-infra", "#table-other"]
         tables = []
         for tid in table_ids:
             try:
@@ -897,7 +883,6 @@ class ExplorationScreen(Screen[None]):
             table_map = {
                 "tab-styrene": "#table-styrene",
                 "tab-lxmf": "#table-lxmf",
-                "tab-pages": "#table-pages",
                 "tab-infra": "#table-infra",
                 "tab-other": "#table-other",
             }
@@ -964,7 +949,6 @@ class ExplorationScreen(Screen[None]):
         label_map = {
             "#table-styrene": ("tab-styrene", "Styrene"),
             "#table-lxmf": ("tab-lxmf", "LXMF"),
-            "#table-pages": ("tab-pages", "Pages"),
             "#table-infra": ("tab-infra", "Infra"),
             "#table-other": ("tab-other", "Other"),
         }
@@ -1135,42 +1119,6 @@ class ExplorationScreen(Screen[None]):
                     origin_workspace=WorkspaceId.NODES,
                 )
             )
-
-    def action_preview_page(self) -> None:
-        """Load selected NomadNet node's index page in the inline browser."""
-        try:
-            tabs = self.query_one("#explore-tabs", TabbedContent)
-            if tabs.active != "tab-pages":
-                return
-        except Exception:
-            return
-
-        dest_hash = self._get_selected_identity()
-        if not dest_hash:
-            return
-
-        from styrened.tui.widgets.page_browser import PageBrowserWidget
-
-        try:
-            # Hide placeholder, show browser section
-            placeholder = self.query_one("#pages-browser-placeholder", Static)
-            placeholder.add_class("hidden")
-
-            browser_section = self.query_one("#pages-browser-section", Vertical)
-            browser_section.remove_class("hidden")
-
-            # Check if browser already exists
-            existing = browser_section.query(PageBrowserWidget)
-            if existing:
-                existing.first().set_destination(dest_hash)
-            else:
-                browser = PageBrowserWidget(
-                    destination_hash=dest_hash,
-                    classes="explore-inline-browser",
-                )
-                browser_section.mount(browser)
-        except Exception:
-            pass
 
     def action_toggle_hide_lost(self) -> None:
         """Toggle visibility of LOST nodes."""
