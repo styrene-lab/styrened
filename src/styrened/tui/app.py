@@ -62,7 +62,7 @@ class StyreneApp(App[None]):
     TITLE = "STYRENE"
     SUB_TITLE = "Management"
 
-    CSS_PATH = Path(__file__).parent / "styles" / "imperial_crt.tcss"
+    CSS_PATH = Path(__file__).parent / "styles" / "styrene.tcss"
 
     # Keybinding hierarchy - see docs/KEYMAP.md for design rationale
     # Priority bindings bypass widget focus and always work
