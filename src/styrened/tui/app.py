@@ -387,6 +387,39 @@ class StyreneApp(App[None]):
             self.log.warning(f"Config validation failed: {e}")
             self.config = get_default_config()
 
+        self._apply_saved_theme()
+
+    def _apply_saved_theme(self) -> None:
+        """Register and apply the theme saved in tui.yaml.
+
+        If a custom_theme_url is configured, fetch it (blocking, at startup).
+        Falls back to the built-in Styrene theme on any error.
+        """
+        theme_name = self.config.tui.theme or STYRENE_THEME_KEY
+        custom_url = self.config.tui.custom_theme_url
+
+        if custom_url:
+            try:
+                from styrened.tui.themes.tweakcn import TweakcnProfile
+
+                profile = TweakcnProfile.from_url(custom_url, timeout=8)
+                theme = profile.to_textual_theme("dark")
+                self.register_theme(theme)
+                # Use the fetched theme name (may differ from stored name if
+                # the profile was renamed upstream)
+                theme_name = theme.name
+            except Exception as e:
+                self.log.warning(f"Failed to fetch custom theme {custom_url!r}: {e}")
+                theme_name = STYRENE_THEME_KEY
+
+        if theme_name != STYRENE_THEME_KEY and theme_name not in self._registered_themes:
+            # Unknown name — fall back gracefully
+            self.log.warning(f"Saved theme {theme_name!r} not registered; using default")
+            theme_name = STYRENE_THEME_KEY
+
+        if theme_name != self.theme:
+            self.theme = theme_name
+
     async def _initialize_services(self) -> None:
         """Initialize all services asynchronously via IPC.
 

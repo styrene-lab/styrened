@@ -42,7 +42,8 @@ class CommsSummaryWidget(Static):
     DEFAULT_CSS = """
     CommsSummaryWidget {
         height: auto;
-        padding: 0 1;
+        width: 1fr;
+        padding: 0;
     }
     """
 

@@ -214,8 +214,9 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
     if "tui" in data and isinstance(data["tui"], dict):
         tui_data = data["tui"]
         if "theme" in tui_data:
-            with contextlib.suppress(ValueError):
-                config.tui.theme = ThemeMode(tui_data["theme"])
+            config.tui.theme = str(tui_data["theme"])
+        if "custom_theme_url" in tui_data:
+            config.tui.custom_theme_url = str(tui_data["custom_theme_url"])
         if "log_level" in tui_data:
             with contextlib.suppress(ValueError):
                 config.tui.log_level = LogLevel(tui_data["log_level"])
@@ -404,7 +405,8 @@ def _config_to_dict(config: StyreneConfig) -> dict[str, Any]:
     """
     return {
         "tui": {
-            "theme": config.tui.theme.value,
+            "theme": config.tui.theme,
+            "custom_theme_url": config.tui.custom_theme_url,
             "log_level": config.tui.log_level.value,
             "show_hardware_panel": config.tui.show_hardware_panel,
             "confirm_destructive": config.tui.confirm_destructive,

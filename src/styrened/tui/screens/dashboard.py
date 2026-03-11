@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
@@ -239,13 +239,14 @@ class DashboardScreen(Screen[None]):
                 NodeInfoPanel(id="node-info-panel-widget"),
                 title="HOME STATUS",
                 id="node-info-panel",
-                classes="constrained",
             )
             yield HighlightedPanel(
-                CommsSummaryWidget(id="comms-summary-widget"),
+                VerticalScroll(
+                    CommsSummaryWidget(id="comms-summary-widget"),
+                    id="comms-summary-scroll",
+                ),
                 title="COMMS",
                 id="comms-summary-panel",
-                classes="constrained",
             )
         yield Footer()
 

@@ -115,7 +115,8 @@ class NodeInfoPanel(Static):
     DEFAULT_CSS = """
     NodeInfoPanel {
         height: auto;
-        padding: 0 1;
+        width: 1fr;
+        padding: 0;
     }
     """
 
@@ -365,7 +366,7 @@ class NodeInfoPanel(Static):
         while len(right) < max_lines:
             right.append("")
 
-        table = Table.grid(padding=(0, 2))
+        table = Table.grid(padding=(0, 2), expand=True)
         table.add_column(min_width=42, no_wrap=False)
         table.add_column(no_wrap=False)
 

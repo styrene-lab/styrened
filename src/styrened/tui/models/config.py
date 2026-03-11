@@ -79,7 +79,7 @@ __all__ = [
 
 
 class ThemeMode(Enum):
-    """Available visual themes."""
+    """Built-in visual themes (names match Textual theme registration keys)."""
 
     STYRENE = "styrene"
 
@@ -100,7 +100,13 @@ class TUIConfig:
         confirm_destructive: Require confirmation for destructive operations.
     """
 
-    theme: ThemeMode = ThemeMode.STYRENE
+    theme: str = ThemeMode.STYRENE.value
+    """Active theme name (matches Textual registration key).  Built-in values
+    correspond to ThemeMode enum values; custom tweakcn themes get a
+    slugified name derived from the profile name."""
+    custom_theme_url: str = ""
+    """Optional tweakcn URL for a user-supplied custom theme.
+    When set, the theme is fetched, registered, and applied at startup."""
     log_level: LogLevel = LogLevel.INFO
     show_hardware_panel: bool = True
     confirm_destructive: bool = True

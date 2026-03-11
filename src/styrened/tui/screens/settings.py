@@ -672,6 +672,56 @@ class SettingsScreen(Screen[None]):
                             title="PAGES",
                         )
 
+                # ── Tab 6: Appearance ────────────────────────────────────
+                with TabPane("Appearance", id="tab-appearance"):
+                    with VerticalScroll(classes="settings-tab-scroll"):
+                        yield HighlightedPanel(
+                            Label("Built-in Themes", classes="setting-label"),
+                            Horizontal(
+                                Button(
+                                    f"● styrene" if self.config.tui.theme == "styrene" else "○ styrene",
+                                    id="theme-btn-styrene",
+                                    classes="theme-preset-btn",
+                                    variant="primary" if self.config.tui.theme == "styrene" else "default",
+                                ),
+                                classes="setting-row",
+                            ),
+                            title="THEME",
+                        )
+                        yield HighlightedPanel(
+                            Static(
+                                "Paste a tweakcn theme URL to apply a custom palette. "
+                                "Example: https://tweakcn.com/themes/cmly8fsie000204l8fqt54s1p",
+                                classes="setting-description",
+                            ),
+                            Horizontal(
+                                Label("tweakcn URL:", classes="setting-label"),
+                                Input(
+                                    value=self.config.tui.custom_theme_url,
+                                    placeholder="https://tweakcn.com/themes/...",
+                                    id="custom-theme-url",
+                                    classes="setting-input",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Button(
+                                    "Fetch & Apply",
+                                    id="fetch-theme-btn",
+                                    classes="setting-btn",
+                                    variant="primary",
+                                ),
+                                Button(
+                                    "Clear",
+                                    id="clear-theme-btn",
+                                    classes="setting-btn",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static("", id="theme-status"),
+                            title="CUSTOM TWEAKCN THEME",
+                        )
+
             # Action bar — outside tabs, always visible
             with Horizontal(id="settings-actions"):
                 yield Button("Save", variant="primary", id="save-btn")
@@ -1374,6 +1424,64 @@ class SettingsScreen(Screen[None]):
             self._show_error(f"Validation failed: {'; '.join(error_msgs[:3])}")
         except Exception as e:
             self._show_error(f"Failed to save config: {e}")
+
+    # ------------------------------------------------------------------
+    # Appearance tab handlers
+    # ------------------------------------------------------------------
+
+    @on(Button.Pressed, "#fetch-theme-btn")
+    def on_fetch_theme(self) -> None:
+        """Fetch a custom tweakcn theme and apply it live."""
+        self.run_worker(self._fetch_and_apply_theme())
+
+    @on(Button.Pressed, "#clear-theme-btn")
+    def on_clear_theme(self) -> None:
+        """Remove the custom theme and revert to the built-in Styrene theme."""
+        self.config.tui.custom_theme_url = ""
+        self.config.tui.theme = "styrene"
+        self.app.theme = "styrene"
+        self._set_theme_status("[green]Reverted to Styrene theme.[/green]")
+
+    @work
+    async def _fetch_and_apply_theme(self) -> None:
+        """Worker: fetch tweakcn URL, register, and switch theme."""
+        import asyncio
+
+        from styrened.tui.themes.tweakcn import TweakcnProfile
+
+        url_input = self.query_one("#custom-theme-url", Input)
+        url = url_input.value.strip()
+
+        if not url:
+            self._set_theme_status("[red]Enter a tweakcn URL first.[/red]")
+            return
+
+        self._set_theme_status("[dim]Fetching theme…[/dim]")
+        try:
+            # Run blocking HTTP fetch in executor so the TUI stays responsive
+            profile = await asyncio.get_event_loop().run_in_executor(
+                None, TweakcnProfile.from_url, url
+            )
+            theme = profile.to_textual_theme("dark")
+            self.app.register_theme(theme)
+            self.app.theme = theme.name
+            self.config.tui.custom_theme_url = url
+            self.config.tui.theme = theme.name
+            self._set_theme_status(
+                f"[green]Theme \"{theme.name}\" applied. "
+                "Save settings to persist.[/green]"
+            )
+        except ValueError as e:
+            self._set_theme_status(f"[red]Invalid URL: {e}[/red]")
+        except Exception as e:
+            self._set_theme_status(f"[red]Fetch failed: {e}[/red]")
+
+    def _set_theme_status(self, markup: str) -> None:
+        """Update the theme status label (safe to call from worker)."""
+        try:
+            self.query_one("#theme-status", Static).update(markup)
+        except Exception:
+            pass
 
     def _show_error(self, message: str) -> None:
         """Display error message.
