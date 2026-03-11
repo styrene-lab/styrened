@@ -118,6 +118,14 @@ dev-daemon:
 # Alias for dev-daemon — use when you just want a clean slate.
 dev-reset: dev-daemon
 
+# Launch the TUI from the venv (assumes dev daemon is already running via dev-daemon).
+dev-tui:
+    .venv/bin/styrene
+
+# Launch the compact dashboard from the venv.
+dev-dashboard:
+    .venv/bin/styrene --dashboard
+
 # Restore the system service after dev work.
 dev-restore:
     #!/usr/bin/env bash
