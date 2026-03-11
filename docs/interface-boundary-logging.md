@@ -1,7 +1,7 @@
 ---
 id: interface-boundary-logging
 title: Interface Boundary Logging — Differentiated Error Telemetry Across Tech Stacks
-status: implementing
+status: implemented
 tags: [logging, observability, rns, lxmf, yggdrasil, i2p, wireguard, diagnostics, dx]
 open_questions: []
 branches: ["feature/interface-boundary-logging"]
@@ -49,6 +49,10 @@ Motivating example: the RNS ratchet persist race (d246a39 / b405828) required re
 *No open questions.*
 
 ## Implementation Notes
+
+### File Scope
+
+- `src/styrened/daemon.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 

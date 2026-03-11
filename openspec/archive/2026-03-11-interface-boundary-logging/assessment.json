@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "changeName": "interface-boundary-logging",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-11T01:59:33.414Z",
+  "summary": "13/13 spec scenarios satisfied after fixing config.logging.boundary_sink wiring gap in daemon.py. All 3105 unit tests pass.",
+  "snapshot": {
+    "gitHead": "5a433591df2fc3cd24396086db93831fd820c338",
+    "fingerprint": "b0c36b47699c550131e7c2109b50a386532e7c959082e20def05495935f0e13c",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/interface-boundary-logging/design.md",
+        "exists": true,
+        "size": 162,
+        "sha256": "120e181ce32c015b97bff1bebf107bc1c098aa397b849e98d74f11bc1e793e38"
+      },
+      {
+        "path": "openspec/changes/interface-boundary-logging/proposal.md",
+        "exists": true,
+        "size": 1019,
+        "sha256": "9d515a8d0a9094e417fe668130fbb17d17c9754f5eb32a61c29ef7ba0683dc75"
+      },
+      {
+        "path": "openspec/changes/interface-boundary-logging/specs/boundary.md",
+        "exists": true,
+        "size": 3248,
+        "sha256": "c91167d7fc8828c3c56d5a3307046895ae24ee0b9878c9cf9fe5317fc0cfa642"
+      },
+      {
+        "path": "openspec/changes/interface-boundary-logging/tasks.md",
+        "exists": true,
+        "size": 1509,
+        "sha256": "559d7414a85952abf1063d064e170b65009b89c8a82e8f699da684965eeeb180"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/daemon.py"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
