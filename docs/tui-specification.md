@@ -2,6 +2,7 @@
 id: tui-specification
 title: Styrene TUI Specification
 status: exploring
+related: [pre-release-qa-gate]
 tags: [tui, ux, specification, textual]
 open_questions: []
 ---

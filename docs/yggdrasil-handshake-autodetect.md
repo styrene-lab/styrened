@@ -1,7 +1,7 @@
 ---
 id: yggdrasil-handshake-autodetect
 title: Yggdrasil auto-detection in VPN handshake
-status: decided
+status: implemented
 parent: overlay-network-integration
 open_questions:
   - Does styrened need a YggdrasilInterfaceHelper that auto-generates RNS TCP config from detected Yggdrasil peers, or is a doc + doctor check sufficient?
