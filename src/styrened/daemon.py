@@ -2478,18 +2478,20 @@ class StyreneDaemon:
         logger.info("Daemon stopped")
 
 
-async def run_daemon(config: CoreConfig) -> None:
+async def run_daemon(
+    config: CoreConfig,
+    boundary_handler: BoundaryLogHandler | None = None,
+) -> None:
     """Run the Styrene daemon.
 
     Args:
         config: Core configuration.
+        boundary_handler: Optional BoundaryLogHandler installed by the caller.
+            Stored on the daemon for explicit teardown during shutdown.
     """
     daemon = StyreneDaemon(config)
-    # Attach any boundary handler already installed on the styrened logger
-    for _h in logging.getLogger("styrened").handlers:
-        if isinstance(_h, BoundaryLogHandler):
-            daemon._boundary_handler = _h
-            break
+    if boundary_handler is not None:
+        daemon._boundary_handler = boundary_handler
     _shutdown_task: asyncio.Task[None] | None = None
 
     # Setup signal handlers
@@ -2549,8 +2551,9 @@ def _install_thread_excepthook() -> None:
                 exc.filename,
                 exc.filename2 or exc.filename.removesuffix(".out"),
             )
-            # Also emit a boundary record for observability
-            logger.error(
+            # Also emit a boundary record for observability (warning level — benign/transient,
+            # not ERROR so naive error-rate monitors don't fire false alarms)
+            logger.warning(
                 "RNS ratchet persist race (thread hook)",
                 extra={
                     "boundary": InterfaceBoundary.RNS,
@@ -2565,7 +2568,7 @@ def _install_thread_excepthook() -> None:
         thread_name = getattr(args.thread, "name", "") or ""
         if args.thread is not None and getattr(args.thread, "daemon", False):
             boundary: InterfaceBoundary | None = None
-            if "lxmf" in thread_name.lower() or isinstance(exc, (OSError,)) and "lxmf" in str(exc).lower():
+            if ("lxmf" in thread_name.lower()) or (isinstance(exc, (OSError,)) and "lxmf" in str(exc).lower()):
                 boundary = InterfaceBoundary.LXMF
             elif "rns" in thread_name.lower() or "reticulum" in thread_name.lower():
                 boundary = InterfaceBoundary.RNS
@@ -2608,8 +2611,9 @@ def _install_unraisable_hook() -> None:
                 "RNS ratchet persist race (unraisable, benign): %s",
                 exc.filename,
             )
-            # Emit boundary record for observability
-            logger.error(
+            # Emit boundary record for observability (warning level — benign/transient,
+            # not ERROR so naive error-rate monitors don't fire false alarms)
+            logger.warning(
                 "RNS ratchet persist race (unraisable hook)",
                 extra={
                     "boundary": InterfaceBoundary.RNS,
@@ -2636,9 +2640,11 @@ def main() -> None:
     _install_thread_excepthook()
     _install_unraisable_hook()
 
-    # Install boundary log handler on the styrened logger
-    _boundary_handler = make_boundary_handler()
-    logging.getLogger("styrened").addHandler(_boundary_handler)
+    # Install boundary log handler on the styrened logger.
+    # Keep an explicit reference so the daemon can use it for teardown and so
+    # the handler isn't silently lost if the logger is reconfigured later.
+    boundary_handler = make_boundary_handler()
+    logging.getLogger("styrened").addHandler(boundary_handler)
 
     # Load config (try core config, fallback to default)
     try:
@@ -2650,8 +2656,9 @@ def main() -> None:
         logger.error(f"Failed to load config: {e}")
         sys.exit(1)
 
-    # Run daemon
-    asyncio.run(run_daemon(config))
+    # Run daemon — pass the handler explicitly so daemon._boundary_handler is
+    # set regardless of the call path (tests, embedders, etc.)
+    asyncio.run(run_daemon(config, boundary_handler=boundary_handler))
 
 
 if __name__ == "__main__":
