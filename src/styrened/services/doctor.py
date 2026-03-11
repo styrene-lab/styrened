@@ -849,24 +849,21 @@ async def check_boundary_log() -> list[Finding]:
         logger.debug("CMD_BOUNDARY_SNAPSHOT not available in this build — skipping boundary log check")
         return findings
 
-    # Build a minimal inline request object compatible with ControlClient._request().
-    # The full CmdBoundarySnapshotRequest lives in ipc/messages.py (added by the
-    # ipc-command sibling task).  We try to import it; if absent, we fall back to
-    # a lightweight dataclass that implements the same to_wire() protocol.
+    # CmdBoundarySnapshotRequest lives in ipc/messages.py (added by the
+    # ipc-command sibling task).  If it is absent the build is incomplete;
+    # surface a WARN rather than sending garbage via a silent fallback shim.
     try:
         from styrened.ipc.messages import CmdBoundarySnapshotRequest as _BoundaryReq  # type: ignore[attr-defined]
-    except ImportError:
-        from dataclasses import dataclass as _dc
-
-        @_dc  # type: ignore[misc]
-        class _BoundaryReq:  # type: ignore[no-redef]
-            MSG_TYPE = snapshot_cmd
-
-            def to_payload(self) -> dict:
-                return {}
-
-            def to_wire(self) -> tuple:
-                return self.MSG_TYPE, self.to_payload()
+    except ImportError as exc:
+        findings.append(
+            Finding(
+                category=CheckCategory.BOUNDARY_LOG,
+                severity=Severity.WARN,
+                message=f"CmdBoundarySnapshotRequest not available — ipc-command build may be incomplete ({exc})",
+                fix_hint="Ensure all sibling tasks (ipc-command) have been merged and the package rebuilt.",
+            )
+        )
+        return findings
 
     try:
         client = ControlClient(socket_path=socket_path, timeout=5.0)
@@ -895,8 +892,22 @@ async def check_boundary_log() -> list[Finding]:
         count = len(tag_records)
 
         # Determine last-seen timestamp (most recent ts field).
-        timestamps: list[str] = [str(r["ts"]) for r in tag_records if r.get("ts")]
-        last_seen_str = max(timestamps) if timestamps else "unknown"
+        # Normalize to UTC before comparing so mixed timezone offsets sort correctly.
+        def _to_utc(ts: str) -> datetime:
+            try:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                return dt.astimezone(UTC)
+            except ValueError:
+                return datetime.min.replace(tzinfo=UTC)
+
+        ts_values = [str(r["ts"]) for r in tag_records if r.get("ts")]
+        last_seen_str: str
+        if ts_values:
+            last_seen_str = max(ts_values, key=_to_utc)
+        else:
+            last_seen_str = "unknown"
 
         # Determine whether all records are transient.
         severities = {r.get("severity", "transient") for r in tag_records}

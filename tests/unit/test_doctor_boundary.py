@@ -100,7 +100,7 @@ def _patch_ipc(monkeypatch: pytest.MonkeyPatch, client: AsyncMock) -> None:
     """
     # doctor.py does: from styrened.ipc import ControlClient, ...
     # Patching the styrened.ipc namespace means the local import picks up the mock.
-    monkeypatch.setattr("styrened.ipc.ControlClient", lambda **_: client)
+    monkeypatch.setattr("styrened.ipc.ControlClient", MagicMock(return_value=client))
     monkeypatch.setattr("styrened.ipc.get_default_socket_path", lambda: "/tmp/test.sock")
 
     # Ensure CMD_BOUNDARY_SNAPSHOT is present on IPCMessageType.
@@ -113,6 +113,16 @@ def _patch_ipc(monkeypatch: pytest.MonkeyPatch, client: AsyncMock) -> None:
         stub = types.SimpleNamespace(**{m.name: m for m in IPCMessageType})
         stub.CMD_BOUNDARY_SNAPSHOT = 0x70  # type: ignore[attr-defined]
         monkeypatch.setattr("styrened.ipc.IPCMessageType", stub)
+
+    # Stub CmdBoundarySnapshotRequest if the ipc-command sibling task hasn't
+    # been merged yet — prevents the ImportError WARN path from firing in tests
+    # that want to exercise the normal IPC flow.
+    import styrened.ipc.messages as _ipc_msgs
+    if not hasattr(_ipc_msgs, "CmdBoundarySnapshotRequest"):
+        class _StubReq:
+            def to_wire(self) -> tuple:
+                return (0x70, {})
+        monkeypatch.setattr(_ipc_msgs, "CmdBoundarySnapshotRequest", _StubReq, raising=False)
 
 
 # ---------------------------------------------------------------------------
