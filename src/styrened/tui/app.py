@@ -144,7 +144,7 @@ class StyreneApp(App[None]):
 
         screen = self.get_screen("exchange")
         if isinstance(screen, ExchangeScreen):
-            screen._initial_tab = TAB_MAIL
+            screen.focus_tab(TAB_MAIL)
         self.switch_screen("exchange")
 
     def action_open_inbox(self) -> None:
@@ -157,7 +157,7 @@ class StyreneApp(App[None]):
 
         screen = self.get_screen("exchange")
         if isinstance(screen, ExchangeScreen):
-            screen._initial_tab = TAB_DIRECT
+            screen.focus_tab(TAB_DIRECT)
         self.switch_screen("exchange")
 
     def action_open_contacts(self) -> None:
@@ -166,7 +166,7 @@ class StyreneApp(App[None]):
 
         screen = self.get_screen("exchange")
         if isinstance(screen, ExchangeScreen):
-            screen._initial_tab = TAB_CONTACTS
+            screen.focus_tab(TAB_CONTACTS)
         self.switch_screen("exchange")
 
     def action_open_provision(self) -> None:

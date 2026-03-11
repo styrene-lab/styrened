@@ -31,6 +31,7 @@ from textual.widgets import (
 )
 
 from styrened.models.mesh_device import DeviceType
+from styrened.tui.screens.exchange_tabs import ExchangeContactsTab, ExchangeDirectTab
 from styrened.tui.screens.exploration import ReticumAnnounceTable
 from styrened.ui_state import (
     ConversationScopeKind,
@@ -189,6 +190,15 @@ class ExchangeScreen(Screen[None]):
     }
     """
 
+    def focus_tab(self, tab_id: str) -> None:
+        """Switch to the given tab, even if screen is already mounted."""
+        self._initial_tab = tab_id
+        try:
+            tabs = self.query_one("#exchange-tabs", TabbedContent)
+            tabs.active = tab_id
+        except Exception:
+            pass  # Screen not yet mounted — _initial_tab will be used at compose
+
     def __init__(self, initial_tab: str = TAB_MAIL) -> None:
         super().__init__()
         self._initial_tab = initial_tab
@@ -249,7 +259,7 @@ class ExchangeScreen(Screen[None]):
                     ),
                 )
             with TabPane("Direct", id=TAB_DIRECT):
-                yield Label("Direct (live comms) — coming soon", classes="placeholder-pane")
+                yield ExchangeDirectTab()
             with TabPane("Pages", id=TAB_PAGES):
                 with Vertical(id="pages-pane-content"):
                     with Vertical(id="pages-table-section"):
@@ -265,7 +275,7 @@ class ExchangeScreen(Screen[None]):
                     with Vertical(id="pages-browser-section", classes="hidden"):
                         pass  # PageBrowserWidget mounted dynamically
             with TabPane("Contacts", id=TAB_CONTACTS):
-                yield Label("Contacts — coming soon", classes="placeholder-pane")
+                yield ExchangeContactsTab()
         yield Footer()
 
     # -------------------------------------------------------------------------
