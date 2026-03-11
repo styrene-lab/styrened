@@ -69,7 +69,7 @@ class InboxScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "go_back", "Back"),
+        Binding("escape", "go_back", "Home"),
         Binding("enter", "open_conversation", "Open"),
         Binding("n", "compose_new", "New", show=True),
         Binding("d", "delete_conversation", "Delete", show=True),
@@ -411,7 +411,7 @@ class InboxScreen(Screen[None]):
         if self._search_active:
             self._close_search()
             return
-        self.app.pop_screen()
+        self.app.switch_screen("dashboard")
 
     # -------------------------------------------------------------------------
     # Compose new conversation

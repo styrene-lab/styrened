@@ -129,9 +129,7 @@ class StyreneApp(App[None]):
 
     def action_open_nodes(self) -> None:
         """Open the canonical Nodes workspace."""
-        if self._screen_in_stack(ExplorationScreen):
-            return
-        self.push_screen("exploration")
+        self.switch_screen("exploration")
 
     def action_open_mail(self) -> None:
         """Open the Mail workspace showing async conversations."""
@@ -141,9 +139,7 @@ class StyreneApp(App[None]):
 
         from styrened.tui.screens.inbox import MailScreen
 
-        if self._screen_in_stack(MailScreen):
-            return
-        self.push_screen(MailScreen())
+        self.switch_screen(MailScreen())
 
     def action_open_inbox(self) -> None:
         """Backward-compatible alias for opening the Mail workspace."""
@@ -154,21 +150,15 @@ class StyreneApp(App[None]):
         if self.services.bridge is None:
             self.notify("Comms requires daemon mode", severity="warning")
             return
-        if self._screen_in_stack(CommsScreen):
-            return
-        self.push_screen("comms")
+        self.switch_screen("comms")
 
     def action_open_contacts(self) -> None:
-        """Push contacts screen (no-op if already in stack)."""
-        if self._screen_in_stack(ContactsScreen):
-            return
-        self.push_screen("contacts")
+        """Switch to contacts screen."""
+        self.switch_screen("contacts")
 
     def action_open_provision(self) -> None:
-        """Push provision screen (no-op if already in stack)."""
-        if self._screen_in_stack(ProvisionScreen):
-            return
-        self.push_screen("provision")
+        """Switch to device provisioning screen."""
+        self.switch_screen("provision")
 
     def get_unread_count(self) -> int:
         """Get total unread message count.

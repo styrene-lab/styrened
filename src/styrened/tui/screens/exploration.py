@@ -693,7 +693,7 @@ class ExplorationScreen(Screen[None]):
         Binding("enter", "select_device", "Select"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
-        Binding("n", "app.pop_screen", "Home", show=True),
+        Binding("n", "go_home", "Home", show=True),
         Binding("h", "toggle_hide_lost", "Hide Lost"),
         Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),
@@ -1070,6 +1070,10 @@ class ExplorationScreen(Screen[None]):
         search.remove_class("hidden")
         search.focus()
 
+    def action_go_home(self) -> None:
+        """Return to the dashboard."""
+        self.app.switch_screen("dashboard")
+
     def action_dismiss_search(self) -> None:
         """Dismiss search or pop screen."""
         search = self.query_one("#explore-search-bar", Input)
@@ -1080,7 +1084,7 @@ class ExplorationScreen(Screen[None]):
             if table:
                 table.set_filter("")
         else:
-            self.app.pop_screen()
+            self.app.switch_screen("dashboard")
 
     def _hide_search(self) -> None:
         """Hide the search input and return focus to the active tab's table."""
