@@ -66,6 +66,7 @@ class CheckCategory(Enum):
     PATHS = "paths"
     YGGDRASIL = "yggdrasil"
     I2P = "i2p"
+    BOUNDARY_LOG = "boundary_log"
 
 
 # -----------------------------------------------------------------------------
@@ -809,6 +810,143 @@ async def check_i2p(config: "Any | None" = None) -> list[Finding]:
 
 
 # -----------------------------------------------------------------------------
+# Boundary log check
+# -----------------------------------------------------------------------------
+
+# Number of records per boundary tag above which we emit a WARN instead of INFO.
+_BOUNDARY_WARN_THRESHOLD = 5
+
+
+async def check_boundary_log() -> list[Finding]:
+    """Check boundary log snapshot from the running daemon.
+
+    Connects to the daemon via IPC, requests ``CMD_BOUNDARY_SNAPSHOT``, and
+    groups the returned records by their ``boundary`` tag.  Per-tag results:
+
+    * **>5 records** → WARN finding (count + last-seen timestamp + fix_hint)
+    * **≤5 transient-only records** → INFO finding
+    * Daemon not running → skip silently (no error findings)
+
+    Returns:
+        List of findings about boundary log status.  Empty list when the
+        daemon is unreachable.
+    """
+    from styrened import paths
+    from styrened.ipc import ControlClient, IPCConnectionError, IPCMessageType, get_default_socket_path
+
+    findings: list[Finding] = []
+
+    socket_path = paths.control_socket()
+    if not socket_path.exists():
+        # Daemon not running — skip gracefully.
+        return findings
+
+    # CMD_BOUNDARY_SNAPSHOT is added by the ipc-command sibling task.
+    # If this attribute is missing (e.g. running against an older build before
+    # the merge), bail out without surfacing an error.
+    snapshot_cmd = getattr(IPCMessageType, "CMD_BOUNDARY_SNAPSHOT", None)
+    if snapshot_cmd is None:
+        logger.debug("CMD_BOUNDARY_SNAPSHOT not available in this build — skipping boundary log check")
+        return findings
+
+    # Build a minimal inline request object compatible with ControlClient._request().
+    # The full CmdBoundarySnapshotRequest lives in ipc/messages.py (added by the
+    # ipc-command sibling task).  We try to import it; if absent, we fall back to
+    # a lightweight dataclass that implements the same to_wire() protocol.
+    try:
+        from styrened.ipc.messages import CmdBoundarySnapshotRequest as _BoundaryReq  # type: ignore[attr-defined]
+    except ImportError:
+        from dataclasses import dataclass as _dc
+
+        @_dc  # type: ignore[misc]
+        class _BoundaryReq:  # type: ignore[no-redef]
+            MSG_TYPE = snapshot_cmd
+
+            def to_payload(self) -> dict:
+                return {}
+
+            def to_wire(self) -> tuple:
+                return self.MSG_TYPE, self.to_payload()
+
+    try:
+        client = ControlClient(socket_path=get_default_socket_path(), timeout=5.0)
+        await client.connect()
+        try:
+            raw = await client._request(_BoundaryReq(), timeout=5.0)
+            records: list[dict[str, Any]] = raw if isinstance(raw, list) else []
+        finally:
+            await client.disconnect()
+    except (IPCConnectionError, OSError, Exception) as exc:
+        logger.debug("Boundary log check skipped: %s", exc)
+        return findings
+
+    if not records:
+        return findings
+
+    # Group records by boundary tag.
+    from collections import defaultdict
+
+    by_tag: dict[str, list[dict]] = defaultdict(list)
+    for rec in records:
+        tag = rec.get("boundary", "UNKNOWN")
+        by_tag[tag].append(rec)
+
+    for tag, tag_records in sorted(by_tag.items()):
+        count = len(tag_records)
+
+        # Determine last-seen timestamp (most recent ts field).
+        timestamps: list[str] = [str(r["ts"]) for r in tag_records if r.get("ts")]
+        last_seen_str = max(timestamps) if timestamps else "unknown"
+
+        # Determine whether all records are transient.
+        severities = {r.get("severity", "transient") for r in tag_records}
+        all_transient = severities <= {"transient"}
+
+        if count > _BOUNDARY_WARN_THRESHOLD:
+            findings.append(
+                Finding(
+                    category=CheckCategory.BOUNDARY_LOG,
+                    severity=Severity.WARN,
+                    message=(
+                        f"Boundary [{tag}]: {count} error records"
+                        f" (last seen: {last_seen_str})"
+                    ),
+                    fix_hint=(
+                        f"Check logs for repeated {tag} failures. "
+                        "Run 'styrened doctor --offline' for offline diagnostics "
+                        "or 'journalctl -u styrened' for full service logs."
+                    ),
+                )
+            )
+        elif all_transient:
+            findings.append(
+                Finding(
+                    category=CheckCategory.BOUNDARY_LOG,
+                    severity=Severity.OK,
+                    message=(
+                        f"Boundary [{tag}]: {count} transient record(s)"
+                        f" (last seen: {last_seen_str})"
+                    ),
+                )
+            )
+        else:
+            # Non-transient records but count ≤ threshold — still INFO.
+            findings.append(
+                Finding(
+                    category=CheckCategory.BOUNDARY_LOG,
+                    severity=Severity.OK,
+                    message=(
+                        f"Boundary [{tag}]: {count} record(s)"
+                        f" (severities: {', '.join(sorted(severities))},"
+                        f" last seen: {last_seen_str})"
+                    ),
+                )
+            )
+
+    return findings
+
+
+# -----------------------------------------------------------------------------
 # Orchestrator
 # -----------------------------------------------------------------------------
 
@@ -841,6 +979,7 @@ async def run_doctor(offline: bool = False) -> DoctorReport:
 
     # Run async checks
     report.findings.extend(await check_daemon())
+    report.findings.extend(await check_boundary_log())
     report.findings.extend(await check_yggdrasil(config=_loaded_config))
     report.findings.extend(await check_i2p(config=_loaded_config))
 
