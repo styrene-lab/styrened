@@ -95,6 +95,41 @@ validate: lint typecheck test
 build-frontend:
     cd frontend && npm ci && npx vite build
 
+# ── Dev workflow ────────────────────────────────────────────────────────────
+
+# Stop the system service and run the venv daemon in the foreground (Ctrl-C to stop).
+# Use this when you want the TUI (also launched from the venv) to talk to the
+# dev-built daemon instead of the installed system daemon.
+dev-daemon:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ Stopping system service (if any)..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        launchctl unload ~/Library/LaunchAgents/com.styrene.styrened.plist 2>/dev/null || true
+    else
+        systemctl --user stop styrened.service 2>/dev/null || true
+    fi
+    echo "→ Removing stale socket..."
+    rm -f "${XDG_RUNTIME_DIR:-/tmp}/styrened.sock" ~/.styrene/styrened.sock 2>/dev/null || true
+    echo "→ Starting dev daemon from venv ($(python -c 'import styrened; print(styrened.__version__)'))..."
+    .venv/bin/styrened daemon
+
+# Stop the system service, kill any stale socket, and launch the dev daemon.
+# Alias for dev-daemon — use when you just want a clean slate.
+dev-reset: dev-daemon
+
+# Restore the system service after dev work.
+dev-restore:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "$(uname)" == "Darwin" ]]; then
+        launchctl load ~/Library/LaunchAgents/com.styrene.styrened.plist
+        echo "✓ launchd service restored"
+    else
+        systemctl --user start styrened.service
+        echo "✓ systemd service restored"
+    fi
+
 # Start frontend dev server (proxies /api to localhost:8080)
 dev-frontend:
     cd frontend && npm run dev

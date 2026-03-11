@@ -161,14 +161,48 @@ class DaemonManager:
             self._running = False
 
     async def restart(self) -> bool:
-        """Restart the daemon (shutdown then start).
+        """Restart the daemon.
+
+        In MANAGED mode: shutdown subprocess then re-spawn.
+        In EXTERNAL mode: delegate to the platform service manager
+        (restart_service) so launchd/systemd handles the lifecycle,
+        then wait for the socket to reappear.
 
         Returns:
             True if daemon restarted successfully, False otherwise.
         """
-        logger.info("Restarting daemon...")
+        logger.info("Restarting daemon (mode=%s)...", self._mode.value)
+
+        if self._mode == DaemonMode.EXTERNAL:
+            from styrened.tui.services.service_installer import (
+                ServiceStatus,
+                restart_service,
+            )
+
+            self._stop_health_monitor()
+            self._running = False
+
+            info = await restart_service()
+            if info.status == ServiceStatus.ERROR:
+                logger.error("Service restart failed: %s", info.error)
+                return False
+
+            # Wait for socket to come back (same logic as _spawn)
+            elapsed = 0.0
+            while elapsed < _SOCKET_POLL_TIMEOUT:
+                if await self._ping():
+                    logger.info("External daemon ready after restart (%.1fs)", elapsed)
+                    self._running = True
+                    self._start_health_monitor()
+                    return True
+                await asyncio.sleep(_SOCKET_POLL_INTERVAL)
+                elapsed += _SOCKET_POLL_INTERVAL
+
+            logger.error("External daemon did not reappear within %.0fs", _SOCKET_POLL_TIMEOUT)
+            return False
+
+        # MANAGED mode — subprocess lifecycle
         await self.shutdown()
-        # Brief pause for socket cleanup
         await asyncio.sleep(0.5)
         return await self.ensure_running()
 

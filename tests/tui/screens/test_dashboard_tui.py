@@ -384,3 +384,86 @@ class TestDashboardActivitySubscription:
             "announce_sent",
             {"event_type": "announce_sent"},
         )
+
+
+class TestVersionMismatchBanner:
+    """Test the version mismatch banner on DashboardScreen."""
+
+    def test_banner_hidden_by_default(self):
+        """Banner should not have 'visible' class until show_mismatch() is called."""
+        from styrened.tui.screens.dashboard import VersionMismatchBanner
+        banner = VersionMismatchBanner()
+        assert not banner.has_class("visible")
+
+    def test_show_mismatch_adds_visible_class(self):
+        """show_mismatch() should add 'visible' CSS class and set daemon_version."""
+        from styrened.tui.screens.dashboard import VersionMismatchBanner
+        banner = VersionMismatchBanner()
+        banner.show_mismatch("0.15.5")
+        assert banner.has_class("visible")
+        assert banner.daemon_version == "0.15.5"
+
+    def test_hide_removes_visible_class(self):
+        """hide() should remove 'visible' class."""
+        from styrened.tui.screens.dashboard import VersionMismatchBanner
+        banner = VersionMismatchBanner()
+        banner.show_mismatch("0.15.5")
+        banner.hide()
+        assert not banner.has_class("visible")
+
+    def test_set_restarting_updates_message_and_stays_visible(self):
+        """set_restarting(True) should show a restart-in-progress message."""
+        from styrened.tui.screens.dashboard import VersionMismatchBanner
+        banner = VersionMismatchBanner()
+        banner.set_restarting(True)
+        assert banner.is_restarting
+        assert banner.has_class("visible")
+
+    def test_show_mismatch_no_op_while_restarting(self):
+        """show_mismatch() should be a no-op when a restart is in progress."""
+        from styrened.tui.screens.dashboard import VersionMismatchBanner
+        banner = VersionMismatchBanner()
+        banner.set_restarting(True)
+        original_version = banner.daemon_version
+        banner.show_mismatch("0.99.0")
+        assert banner.daemon_version == original_version  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_fetch_daemon_status_shows_banner_on_mismatch(self):
+        """_fetch_daemon_status() should call banner.show_mismatch when versions differ."""
+        from unittest.mock import patch, PropertyMock, MagicMock, AsyncMock
+        from styrened.tui.screens.dashboard import VersionMismatchBanner, DashboardScreen
+
+        screen = DashboardScreen()
+        bridge = MagicMock()
+
+        # Return a status with a different daemon_version
+        mock_status = MagicMock()
+        mock_status.daemon_version = "0.15.5"
+
+        bridge.get_status = AsyncMock(return_value=mock_status)
+        bridge.get_identity = AsyncMock(return_value=MagicMock())
+        bridge.get_hub_status = AsyncMock(return_value={})
+        bridge.get_core_config = AsyncMock(return_value={})
+        bridge.get_devices = AsyncMock(return_value=[])
+        bridge.get_conversations = AsyncMock(return_value=[])
+        bridge.get_contacts = AsyncMock(return_value=[])
+        bridge.get_auto_reply = AsyncMock(return_value={})
+
+        banner = VersionMismatchBanner()
+        panel = MagicMock()
+        panel.daemon_connected = True
+
+        def _query_one(widget_type, *args, **kwargs):
+            if widget_type is VersionMismatchBanner:
+                return banner
+            return panel
+
+        with (
+            patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
+            patch.object(screen, "query_one", side_effect=_query_one),
+        ):
+            await screen._fetch_daemon_status()
+
+        assert banner.has_class("visible")
+        assert banner.daemon_version == "0.15.5"

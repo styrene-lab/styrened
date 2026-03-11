@@ -12,9 +12,10 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, Header, Static
 from textual.worker import Worker
 
+from styrened import __version__ as _TUI_VERSION
 from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hardware import (
     PlatformNotSupportedError,
@@ -35,6 +36,61 @@ from styrened.ui_state.daemon import (
 )
 
 
+class VersionMismatchBanner(Static):
+    """Dismissible warning banner shown when daemon and TUI versions differ."""
+
+    DEFAULT_CSS = """
+    VersionMismatchBanner {
+        background: $warning 30%;
+        color: $warning-lighten-2;
+        border: tall $warning;
+        padding: 0 1;
+        height: 3;
+        margin: 0 0 1 0;
+        display: none;
+    }
+    VersionMismatchBanner.visible {
+        display: block;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__("", id="version-mismatch-banner")
+        self._daemon_version: str = ""
+        self._restarting: bool = False
+
+    def show_mismatch(self, daemon_version: str) -> None:
+        """Display the banner with the mismatched daemon version."""
+        if self._restarting:
+            return
+        self._daemon_version = daemon_version
+        self.update(
+            f"⚠  Daemon v{daemon_version} ≠ TUI v{_TUI_VERSION} — "
+            f"press [bold]R[/bold] to restart service, [bold]D[/bold] to dismiss"
+        )
+        self.add_class("visible")
+
+    def hide(self) -> None:
+        """Hide the banner."""
+        self.remove_class("visible")
+
+    @property
+    def daemon_version(self) -> str:
+        return self._daemon_version
+
+    @property
+    def is_restarting(self) -> bool:
+        return self._restarting
+
+    def set_restarting(self, value: bool) -> None:
+        self._restarting = value
+        if value:
+            self.update(
+                f"⟳  Restarting daemon service… (TUI v{_TUI_VERSION})"
+            )
+            self.add_class("visible")
+
+
 class DashboardScreen(Screen[None]):
     """Home workspace — local status, unread summary, and recent activity.
 
@@ -44,7 +100,8 @@ class DashboardScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("r", "refresh_or_restart", "Refresh/Restart", priority=True),
+        Binding("d", "dismiss_banner", "Dismiss", show=False),
         Binding("n", "open_exploration", "Nodes", show=True),
         Binding("e", "open_exploration", "Nodes", show=False),
     ]
@@ -196,6 +253,7 @@ class DashboardScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield VersionMismatchBanner()
         with Container(id="dashboard-container"):
             yield HighlightedPanel(
                 NodeInfoPanel(id="node-info-panel-widget"),
@@ -212,6 +270,52 @@ class DashboardScreen(Screen[None]):
     def action_open_exploration(self) -> None:
         """Open the canonical Nodes workspace."""
         self.app.action_open_nodes()  # type: ignore[union-attr]
+
+    def action_refresh_or_restart(self) -> None:
+        """R: restart service if banner is visible, otherwise refresh."""
+        try:
+            banner = self.query_one(VersionMismatchBanner)
+            if banner.has_class("visible") and not banner.is_restarting:
+                self.run_worker(self._restart_daemon_service(), group="daemon-restart")
+                return
+        except Exception:
+            pass
+        self.action_refresh()
+
+    def action_dismiss_banner(self) -> None:
+        """D: dismiss the version mismatch banner."""
+        try:
+            self.query_one(VersionMismatchBanner).hide()
+        except Exception:
+            pass
+
+    async def _restart_daemon_service(self) -> None:
+        """Restart the external service and wait for daemon to come back."""
+        try:
+            banner = self.query_one(VersionMismatchBanner)
+        except Exception:
+            return
+
+        banner.set_restarting(True)
+
+        try:
+            # Ask DaemonManager to handle the restart
+            daemon_manager = getattr(self.app, "_daemon_manager", None)  # type: ignore[union-attr]
+            if daemon_manager is None:
+                # Fallback: call service_installer directly
+                from styrened.tui.services.service_installer import restart_service
+                await restart_service()
+            else:
+                await daemon_manager.restart()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Daemon restart failed: %s", exc)
+        finally:
+            banner.set_restarting(False)
+            banner.hide()
+
+        # Trigger fresh status fetch after restart
+        self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
 
     def action_refresh(self) -> None:
         """Refresh Home status panels."""
@@ -273,6 +377,18 @@ class DashboardScreen(Screen[None]):
             except Exception:
                 panel.daemon_connected = False
                 return
+
+            # Check for version mismatch and show/hide banner
+            try:
+                banner = self.query_one(VersionMismatchBanner)
+                daemon_ver = str(getattr(status, "daemon_version", "") or "")
+                if daemon_ver and daemon_ver != _TUI_VERSION and not banner.is_restarting:
+                    banner.show_mismatch(daemon_ver)
+                elif not daemon_ver or daemon_ver == _TUI_VERSION:
+                    if not banner.is_restarting:
+                        banner.hide()
+            except Exception:
+                pass
 
             daemon_state = build_local_daemon_state(
                 LocalDaemonInputs(

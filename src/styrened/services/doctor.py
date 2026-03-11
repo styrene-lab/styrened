@@ -475,51 +475,97 @@ async def check_daemon() -> list[Finding]:
         )
         return findings
 
-    # Try to ping the daemon
+    # Try to ping the daemon and check version
     try:
-        from styrened.ipc import get_daemon_client
+        from styrened.ipc import ControlClient, get_default_socket_path
 
-        client = await get_daemon_client()
-        if client:
-            try:
-                pong = await client.ping(timeout=2.0)
-                if pong:
-                    findings.append(
-                        Finding(
-                            category=CheckCategory.DAEMON,
-                            severity=Severity.OK,
-                            message="Daemon is running and responsive",
-                        )
+        client = ControlClient(socket_path=get_default_socket_path(), timeout=3.0)
+        try:
+            await client.connect()
+            pong = await client.ping(timeout=2.0)
+            if pong:
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.OK,
+                        message="Daemon is running and responsive",
                     )
-                else:
+                )
+                # Version mismatch check
+                daemon_ver = getattr(pong, "daemon_version", None) if not isinstance(pong, bool) else None
+                if daemon_ver and daemon_ver != __version__:
                     findings.append(
                         Finding(
                             category=CheckCategory.DAEMON,
                             severity=Severity.WARN,
-                            message="Daemon socket exists but did not respond to ping",
+                            message=(
+                                f"Version mismatch: running daemon is v{daemon_ver}, "
+                                f"installed binary is v{__version__}"
+                            ),
+                            fix_hint=(
+                                "Restart the service to pick up the new binary: "
+                                "'systemctl --user restart styrened' (Linux) or "
+                                "'launchctl unload/load ~/Library/LaunchAgents/com.styrene.styrened.plist' (macOS). "
+                                "Or run: just dev-daemon"
+                            ),
                         )
                     )
-            finally:
-                await client.disconnect()
-        else:
+                elif daemon_ver:
+                    findings.append(
+                        Finding(
+                            category=CheckCategory.DAEMON,
+                            severity=Severity.OK,
+                            message=f"Daemon version matches: v{daemon_ver}",
+                        )
+                    )
+            else:
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.WARN,
+                        message="Daemon socket exists but did not respond to ping",
+                    )
+                )
+        finally:
+            await client.disconnect()
+    except Exception as e:
+        logger.debug(f"Daemon ping failed: {e}")
+        # Fall back to legacy get_daemon_client path
+        try:
+            from styrened.ipc import get_daemon_client
+
+            client2 = await get_daemon_client()
+            if client2:
+                try:
+                    pong = await client2.ping(timeout=2.0)
+                    if pong:
+                        findings.append(
+                            Finding(
+                                category=CheckCategory.DAEMON,
+                                severity=Severity.OK,
+                                message="Daemon is running and responsive",
+                            )
+                        )
+                finally:
+                    await client2.disconnect()
+            else:
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.WARN,
+                        message="Could not connect to daemon (socket exists but connection failed)",
+                        fix_hint="Check if daemon process is running",
+                    )
+                )
+        except Exception as e2:
             findings.append(
                 Finding(
                     category=CheckCategory.DAEMON,
                     severity=Severity.WARN,
-                    message="Could not connect to daemon (socket exists but connection failed)",
-                    fix_hint="Check if daemon process is running",
+                    message=f"Daemon connection error: {e2}",
+                    fix_hint="Try restarting the daemon",
                 )
             )
-    except Exception as e:
-        logger.debug(f"Daemon ping failed: {e}")
-        findings.append(
-            Finding(
-                category=CheckCategory.DAEMON,
-                severity=Severity.WARN,
-                message=f"Daemon connection error: {e}",
-                fix_hint="Try restarting the daemon",
-            )
-        )
 
     return findings
 
