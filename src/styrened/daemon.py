@@ -49,6 +49,7 @@ try:
     from styrened.crypto.pqc_crypto import pqc_available
 except ImportError:
     pqc_available = lambda: False  # noqa: E731
+from styrened.boundary import BoundaryLogHandler, InterfaceBoundary, make_boundary_handler
 from styrened.models.config import CoreConfig
 from styrened.models.mesh_device import DeviceType
 from styrened.services.auto_reply import AutoReplyHandler
@@ -195,6 +196,7 @@ class StyreneDaemon:
         self._relay_service: Any = None  # TURN-style relay service
         self._i2p_adapter: Any = None  # Optional I2P adapter
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
+        self._boundary_handler: BoundaryLogHandler | None = None  # Set in main()
 
     async def start(self) -> None:
         """Start the daemon services."""
@@ -2483,6 +2485,11 @@ async def run_daemon(config: CoreConfig) -> None:
         config: Core configuration.
     """
     daemon = StyreneDaemon(config)
+    # Attach any boundary handler already installed on the styrened logger
+    for _h in logging.getLogger("styrened").handlers:
+        if isinstance(_h, BoundaryLogHandler):
+            daemon._boundary_handler = _h
+            break
     _shutdown_task: asyncio.Task[None] | None = None
 
     # Setup signal handlers
@@ -2542,10 +2549,80 @@ def _install_thread_excepthook() -> None:
                 exc.filename,
                 exc.filename2 or exc.filename.removesuffix(".out"),
             )
+            # Also emit a boundary record for observability
+            logger.error(
+                "RNS ratchet persist race (thread hook)",
+                extra={
+                    "boundary": InterfaceBoundary.RNS,
+                    "severity": "transient",
+                    "retryable": True,
+                    "stack_name": "RNS",
+                    "operation": "ratchet_persist",
+                },
+            )
             return
+        # Classify other daemon-thread exceptions by heuristics
+        thread_name = getattr(args.thread, "name", "") or ""
+        if args.thread is not None and getattr(args.thread, "daemon", False):
+            boundary: InterfaceBoundary | None = None
+            if "lxmf" in thread_name.lower() or isinstance(exc, (OSError,)) and "lxmf" in str(exc).lower():
+                boundary = InterfaceBoundary.LXMF
+            elif "rns" in thread_name.lower() or "reticulum" in thread_name.lower():
+                boundary = InterfaceBoundary.RNS
+            if boundary is not None:
+                logger.error(
+                    "Daemon thread exception: %s",
+                    exc,
+                    extra={
+                        "boundary": boundary,
+                        "severity": "degraded",
+                        "retryable": False,
+                        "stack_name": thread_name or boundary.value,
+                        "operation": "thread_exception",
+                    },
+                )
         _default_hook(args)
 
     threading.excepthook = _hook
+
+
+def _install_unraisable_hook() -> None:
+    """Install a sys.unraisablehook that handles the RNS ratchet persist race.
+
+    Some Python versions surface unraisable exceptions (e.g. from __del__)
+    through sys.unraisablehook rather than threading.excepthook.  This hook
+    handles the same ratchet-persist FileNotFoundError pattern and emits a
+    boundary record.
+    """
+    _default_unraisable = sys.unraisablehook
+
+    def _hook(unraisable: sys.UnraisableHookArgs) -> None:
+        exc = unraisable.exc_value
+        if (
+            isinstance(exc, FileNotFoundError)
+            and exc.filename is not None
+            and exc.filename.endswith(".out")
+            and "/ratchets/" in exc.filename
+        ):
+            logger.debug(
+                "RNS ratchet persist race (unraisable, benign): %s",
+                exc.filename,
+            )
+            # Emit boundary record for observability
+            logger.error(
+                "RNS ratchet persist race (unraisable hook)",
+                extra={
+                    "boundary": InterfaceBoundary.RNS,
+                    "severity": "transient",
+                    "retryable": True,
+                    "stack_name": "RNS",
+                    "operation": "ratchet_persist",
+                },
+            )
+            return
+        _default_unraisable(unraisable)
+
+    sys.unraisablehook = _hook
 
 
 def main() -> None:
@@ -2557,6 +2634,11 @@ def main() -> None:
     )
 
     _install_thread_excepthook()
+    _install_unraisable_hook()
+
+    # Install boundary log handler on the styrened logger
+    _boundary_handler = make_boundary_handler()
+    logging.getLogger("styrened").addHandler(_boundary_handler)
 
     # Load config (try core config, fallback to default)
     try:
