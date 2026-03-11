@@ -694,9 +694,10 @@ class IPCBridge:
         Returns empty list if handler is not initialised or on error.
         """
         try:
-            result = await self._call("boundary_snapshot")
+            result: Any = await self._call("boundary_snapshot")
             if isinstance(result, dict):
-                return result.get("records", [])
+                records = result.get("records", [])
+                return list(records) if isinstance(records, list) else []
             return []
         except Exception:
             return []

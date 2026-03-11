@@ -167,3 +167,74 @@ async def test_handle_boundary_snapshot_exception_returns_error():
     handlers = IPCHandlers(daemon)
     resp = await handlers.handle_cmd_boundary_snapshot(CmdBoundarySnapshotRequest())
     assert isinstance(resp, ErrorResponse)
+
+
+# ---------------------------------------------------------------------------
+# IPCBridge.boundary_snapshot() tests
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock, patch
+from styrened.ipc.bridge import IPCBridge
+
+
+def _make_bridge() -> IPCBridge:
+    """Create an IPCBridge with _call patched out."""
+    bridge = IPCBridge.__new__(IPCBridge)
+    return bridge
+
+
+@pytest.mark.asyncio
+async def test_bridge_boundary_snapshot_empty_buffer():
+    """boundary_snapshot() returns [] when daemon has no records."""
+    bridge = _make_bridge()
+    with patch.object(bridge, "_call", new=AsyncMock(return_value={"records": []})):
+        result = await bridge.boundary_snapshot()
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_bridge_boundary_snapshot_returns_three_records():
+    """boundary_snapshot() returns all 3 records from daemon response."""
+    bridge = _make_bridge()
+    with patch.object(bridge, "_call", new=AsyncMock(return_value={"records": SAMPLE_RECORDS})):
+        result = await bridge.boundary_snapshot()
+    assert len(result) == 3
+
+
+@pytest.mark.asyncio
+async def test_bridge_boundary_snapshot_record_keys():
+    """boundary_snapshot() records have all required keys."""
+    required = {"ts", "boundary", "severity", "retryable", "stack_name", "operation", "message"}
+    bridge = _make_bridge()
+    with patch.object(bridge, "_call", new=AsyncMock(return_value={"records": SAMPLE_RECORDS})):
+        result = await bridge.boundary_snapshot()
+    for record in result:
+        assert required.issubset(record.keys())
+
+
+@pytest.mark.asyncio
+async def test_bridge_boundary_snapshot_non_dict_response_returns_empty():
+    """boundary_snapshot() returns [] when _call returns unexpected type."""
+    bridge = _make_bridge()
+    with patch.object(bridge, "_call", new=AsyncMock(return_value=None)):
+        result = await bridge.boundary_snapshot()
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_bridge_boundary_snapshot_exception_returns_empty():
+    """boundary_snapshot() returns [] when _call raises."""
+    bridge = _make_bridge()
+    with patch.object(bridge, "_call", new=AsyncMock(side_effect=RuntimeError("socket gone"))):
+        result = await bridge.boundary_snapshot()
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_bridge_boundary_snapshot_calls_correct_method():
+    """boundary_snapshot() calls _call with 'boundary_snapshot'."""
+    bridge = _make_bridge()
+    mock_call = AsyncMock(return_value={"records": []})
+    with patch.object(bridge, "_call", new=mock_call):
+        await bridge.boundary_snapshot()
+    mock_call.assert_called_once_with("boundary_snapshot")

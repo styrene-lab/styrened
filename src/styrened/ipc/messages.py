@@ -768,16 +768,6 @@ class CmdBoundarySnapshotRequest(IPCRequest):
 
 
 @dataclass
-class CmdBoundarySnapshotResponse(IPCResponse):
-    """Response containing boundary log records."""
-
-    records: list[dict[str, Any]] = field(default_factory=list)
-
-    def to_wire(self) -> tuple["IPCMessageType", dict[str, Any]]:
-        return IPCMessageType.RESULT, {"records": self.records}
-
-
-@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
