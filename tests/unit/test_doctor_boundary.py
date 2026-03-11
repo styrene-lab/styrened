@@ -103,19 +103,16 @@ def _patch_ipc(monkeypatch: pytest.MonkeyPatch, client: AsyncMock) -> None:
     monkeypatch.setattr("styrened.ipc.ControlClient", lambda **_: client)
     monkeypatch.setattr("styrened.ipc.get_default_socket_path", lambda: "/tmp/test.sock")
 
-    # Inject CMD_BOUNDARY_SNAPSHOT into IPCMessageType if absent.
+    # Ensure CMD_BOUNDARY_SNAPSHOT is present on IPCMessageType.
+    # The real attribute is added by the ipc-command sibling task.  When tests
+    # run in isolation (before that task merges) we patch at the module level
+    # using a plain object so getattr() in check_boundary_log() returns a value.
     from styrened.ipc import IPCMessageType
     if not hasattr(IPCMessageType, "CMD_BOUNDARY_SNAPSHOT"):
-        monkeypatch.setattr("styrened.ipc.IPCMessageType.CMD_BOUNDARY_SNAPSHOT", 0x70, raising=False)
-        # setattr on Enum doesn't work — use a wrapper class instead.
-        class _WrappedType:
-            CMD_BOUNDARY_SNAPSHOT = 0x70
-            # Proxy all other attributes
-            def __class_getitem__(cls, item):  # type: ignore[override]
-                return getattr(IPCMessageType, item)
-        for member in IPCMessageType:
-            setattr(_WrappedType, member.name, member)
-        monkeypatch.setattr("styrened.ipc.IPCMessageType", _WrappedType)
+        import types
+        stub = types.SimpleNamespace(**{m.name: m for m in IPCMessageType})
+        stub.CMD_BOUNDARY_SNAPSHOT = 0x70  # type: ignore[attr-defined]
+        monkeypatch.setattr("styrened.ipc.IPCMessageType", stub)
 
 
 # ---------------------------------------------------------------------------

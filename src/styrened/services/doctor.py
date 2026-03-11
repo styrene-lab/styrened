@@ -832,7 +832,7 @@ async def check_boundary_log() -> list[Finding]:
         daemon is unreachable.
     """
     from styrened import paths
-    from styrened.ipc import ControlClient, IPCConnectionError, IPCMessageType, get_default_socket_path
+    from styrened.ipc import ControlClient, IPCMessageType
 
     findings: list[Finding] = []
 
@@ -869,14 +869,14 @@ async def check_boundary_log() -> list[Finding]:
                 return self.MSG_TYPE, self.to_payload()
 
     try:
-        client = ControlClient(socket_path=get_default_socket_path(), timeout=5.0)
+        client = ControlClient(socket_path=socket_path, timeout=5.0)
         await client.connect()
         try:
             raw = await client._request(_BoundaryReq(), timeout=5.0)
             records: list[dict[str, Any]] = raw if isinstance(raw, list) else []
         finally:
             await client.disconnect()
-    except (IPCConnectionError, OSError, Exception) as exc:
+    except Exception as exc:
         logger.debug("Boundary log check skipped: %s", exc)
         return findings
 
