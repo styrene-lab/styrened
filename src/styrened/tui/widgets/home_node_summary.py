@@ -5,18 +5,25 @@ from __future__ import annotations
 import time
 
 from textual.message import Message
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
 from styrened.models.mesh_device import MeshDevice, NodeStatus
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
+__all__ = ["HomeNodeSummaryTable", "format_relative_time"]
 
-# Abnormal-first sort order: LOST > STALE > ACTIVE (PENDING mapped to STALE)
+# Abnormal-first sort order: LOST > STALE > PENDING > ONLINE
+# Unknown/future statuses sort between STALE and ACTIVE (abnormal-first).
 _STATUS_SORT_ORDER: dict[NodeStatus, int] = {
     NodeStatus.LOST: 0,
     NodeStatus.STALE: 1,
-    NodeStatus.ACTIVE: 2,
+    # PENDING (if added) would be 2
+    NodeStatus.ACTIVE: 3,
 }
+
+# Unknown statuses sort at priority 2 (between STALE and ACTIVE)
+# so any future abnormal status sorts before ACTIVE by default.
+_UNKNOWN_STATUS_SORT_KEY = 2
 
 _STATUS_SYMBOLS: dict[NodeStatus, str] = {
     NodeStatus.ACTIVE: "●",
@@ -25,11 +32,18 @@ _STATUS_SYMBOLS: dict[NodeStatus, str] = {
 }
 
 
-def format_relative_time(timestamp: float | None) -> str:
-    """Format a unix timestamp as a human-readable relative time string."""
+def format_relative_time(timestamp: float | None, *, now: float | None = None) -> str:
+    """Format a unix timestamp as a human-readable relative time string.
+
+    Args:
+        timestamp: Unix timestamp to format.
+        now: Current time (defaults to time.time()). Pass explicitly for deterministic tests.
+    """
     if timestamp is None:
         return "never"
-    delta = time.time() - timestamp
+    if now is None:
+        now = time.time()
+    delta = now - timestamp
     if delta < 0:
         return "just now"
     if delta < 60:
@@ -52,6 +66,12 @@ class HomeNodeSummaryTable(DataTable[str]):
     Posts NodeSelected on row selection.
     """
 
+    DEFAULT_CSS = """
+    HomeNodeSummaryTable {
+        height: auto;
+    }
+    """
+
     class NodeSelected(Message):
         """Posted when a node row is selected."""
 
@@ -67,13 +87,11 @@ class HomeNodeSummaryTable(DataTable[str]):
 
     def on_mount(self) -> None:
         """Set up columns on mount."""
-        self.add_columns(
-            ("name", "NAME"),
-            ("status", "STATUS"),
-            ("last_seen", "LAST SEEN"),
-            ("unread", "UNREAD"),
-            ("link", "LINK"),
-        )
+        self.add_column("NAME", key="name")
+        self.add_column("STATUS", key="status")
+        self.add_column("LAST SEEN", key="last_seen")
+        self.add_column("UNREAD", key="unread")
+        self.add_column("LINK", key="link")
 
     def update_nodes(
         self,
@@ -93,19 +111,27 @@ class HomeNodeSummaryTable(DataTable[str]):
         if not nodes:
             self._empty = True
             cascade = get_color_cascade()
+            # Add a single placeholder row with key to prevent duplication
             self.add_row(
                 f"[{cascade.dim}]No mesh nodes discovered[/]",
-                "", "", "", "",
+                "",
+                "",
+                "",
+                "",
+                key="__empty__",
             )
             return
 
         self._empty = False
         cascade = get_color_cascade()
 
-        # Sort abnormal-first
+        # Sort abnormal-first; unknown statuses sort between STALE and ACTIVE
         sorted_nodes = sorted(
             nodes,
-            key=lambda d: (_STATUS_SORT_ORDER.get(d.status, 99), d.name or ""),
+            key=lambda d: (
+                _STATUS_SORT_ORDER.get(d.status, _UNKNOWN_STATUS_SORT_KEY),
+                d.name or "",
+            ),
         )
 
         for device in sorted_nodes:
@@ -127,7 +153,11 @@ class HomeNodeSummaryTable(DataTable[str]):
 
             # Link quality placeholder
             hops = device.hops if device.hops is not None else "?"
-            link_text = f"{hops} hop{'s' if hops != 1 else ''}" if isinstance(hops, int) else str(hops)
+            link_text = (
+                f"{hops} hop{'s' if hops != 1 else ''}"
+                if isinstance(hops, int)
+                else str(hops)
+            )
 
             self.add_row(
                 device.name or device.identity_hash[:8],

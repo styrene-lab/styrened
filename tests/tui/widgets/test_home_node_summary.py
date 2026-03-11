@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import patch
 
 import pytest
+from textual.app import App, ComposeResult
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.widgets.home_node_summary import (
     HomeNodeSummaryTable,
-    _STATUS_SORT_ORDER,
+    _UNKNOWN_STATUS_SORT_KEY,
     format_relative_time,
 )
 
@@ -18,11 +18,12 @@ from styrened.tui.widgets.home_node_summary import (
 def _make_device(
     name: str,
     identity_hash: str,
+    status: NodeStatus = NodeStatus.ACTIVE,
     last_announce: float | None = None,
     hops: int | None = None,
 ) -> MeshDevice:
-    """Create a MeshDevice for testing."""
-    return MeshDevice(
+    """Create a MeshDevice for testing with explicit status control."""
+    device = MeshDevice(
         destination_hash=f"dest_{identity_hash}",
         identity_hash=identity_hash,
         name=name,
@@ -31,6 +32,21 @@ def _make_device(
         announce_count=1,
         hops=hops,
     )
+    # Override the computed status property for test determinism
+    object.__setattr__(device, "_test_status", status)
+    return device
+
+
+class _TestApp(App[None]):
+    """Minimal app for mounting HomeNodeSummaryTable in tests."""
+
+    def compose(self) -> ComposeResult:
+        yield HomeNodeSummaryTable()
+
+
+# ---------------------------------------------------------------------------
+# format_relative_time (pure function, deterministic via `now` param)
+# ---------------------------------------------------------------------------
 
 
 class TestFormatRelativeTime:
@@ -40,40 +56,59 @@ class TestFormatRelativeTime:
         assert format_relative_time(None) == "never"
 
     def test_future_returns_just_now(self) -> None:
-        assert format_relative_time(time.time() + 100) == "just now"
+        assert format_relative_time(1000.0, now=900.0) == "just now"
 
     def test_seconds_ago(self) -> None:
-        result = format_relative_time(time.time() - 12)
-        assert result == "12s ago"
+        assert format_relative_time(988.0, now=1000.0) == "12s ago"
 
     def test_minutes_ago(self) -> None:
-        result = format_relative_time(time.time() - 180)
-        assert result == "3m ago"
+        assert format_relative_time(820.0, now=1000.0) == "3m ago"
 
     def test_hours_ago(self) -> None:
-        result = format_relative_time(time.time() - 7200)
-        assert result == "2h ago"
+        assert format_relative_time(0.0, now=7200.0) == "2h ago"
 
     def test_days_ago(self) -> None:
-        result = format_relative_time(time.time() - 172800)
-        assert result == "2d ago"
+        assert format_relative_time(0.0, now=172800.0) == "2d ago"
 
     def test_zero_seconds(self) -> None:
-        result = format_relative_time(time.time())
-        assert result == "0s ago"
+        assert format_relative_time(1000.0, now=1000.0) == "0s ago"
+
+    def test_boundary_59s(self) -> None:
+        assert format_relative_time(941.0, now=1000.0) == "59s ago"
+
+    def test_boundary_60s(self) -> None:
+        assert format_relative_time(940.0, now=1000.0) == "1m ago"
+
+
+# ---------------------------------------------------------------------------
+# Sort order
+# ---------------------------------------------------------------------------
 
 
 class TestStatusSortOrder:
     """Tests for abnormal-first sort ordering."""
 
-    def test_lost_sorts_before_stale(self) -> None:
+    def test_lost_before_stale(self) -> None:
+        from styrened.tui.widgets.home_node_summary import _STATUS_SORT_ORDER
+
         assert _STATUS_SORT_ORDER[NodeStatus.LOST] < _STATUS_SORT_ORDER[NodeStatus.STALE]
 
-    def test_stale_sorts_before_active(self) -> None:
+    def test_stale_before_active(self) -> None:
+        from styrened.tui.widgets.home_node_summary import _STATUS_SORT_ORDER
+
         assert _STATUS_SORT_ORDER[NodeStatus.STALE] < _STATUS_SORT_ORDER[NodeStatus.ACTIVE]
 
-    def test_lost_sorts_before_active(self) -> None:
-        assert _STATUS_SORT_ORDER[NodeStatus.LOST] < _STATUS_SORT_ORDER[NodeStatus.ACTIVE]
+    def test_unknown_status_sorts_between_stale_and_active(self) -> None:
+        """Unknown/future statuses (e.g. PENDING) sort abnormal-first, before ACTIVE."""
+        from styrened.tui.widgets.home_node_summary import _STATUS_SORT_ORDER
+
+        assert _STATUS_SORT_ORDER[NodeStatus.STALE] < _UNKNOWN_STATUS_SORT_KEY
+        assert _UNKNOWN_STATUS_SORT_KEY < _STATUS_SORT_ORDER[NodeStatus.ACTIVE]
+
+
+# ---------------------------------------------------------------------------
+# NodeSelected message
+# ---------------------------------------------------------------------------
 
 
 class TestNodeSelectedMessage:
@@ -84,102 +119,205 @@ class TestNodeSelectedMessage:
         assert msg.identity_hash == "abc123"
 
 
-class TestUpdateNodesLogic:
-    """Tests for update_nodes sorting and data logic (no Textual app needed)."""
+# ---------------------------------------------------------------------------
+# Widget tests (mounted in a real Textual app)
+# ---------------------------------------------------------------------------
 
-    def test_sort_order_abnormal_first(self) -> None:
-        """Nodes are sorted LOST > STALE > ACTIVE."""
-        now = time.time()
-        devices = [
-            _make_device("online-node", "aaa", last_announce=now - 10),       # ACTIVE
-            _make_device("lost-node", "bbb", last_announce=now - 7200),       # LOST
-            _make_device("stale-node", "ccc", last_announce=now - 600),       # STALE
-        ]
 
-        # Verify status assignments
-        assert devices[0].status == NodeStatus.ACTIVE
-        assert devices[1].status == NodeStatus.LOST
-        assert devices[2].status == NodeStatus.STALE
+class TestHomeNodeSummaryTableWidget:
+    """Tests that mount the widget and exercise update_nodes()."""
 
-        # Sort using same logic as widget
-        sorted_devices = sorted(
-            devices,
-            key=lambda d: (_STATUS_SORT_ORDER.get(d.status, 99), d.name or ""),
-        )
-        assert sorted_devices[0].name == "lost-node"
-        assert sorted_devices[1].name == "stale-node"
-        assert sorted_devices[2].name == "online-node"
+    @pytest.mark.asyncio
+    async def test_columns_created_on_mount(self) -> None:
+        """Widget creates the expected columns on mount."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            col_keys = [col.label.plain for col in table.columns.values()]
+            assert col_keys == ["NAME", "STATUS", "LAST SEEN", "UNREAD", "LINK"]
 
-    def test_unread_map_values(self) -> None:
-        """Unread count is correctly looked up from the map."""
-        unread_map = {"hash1": 2, "hash2": 0}
-        assert unread_map.get("hash1", 0) == 2
-        assert unread_map.get("hash2", 0) == 0
-        assert unread_map.get("hash3", 0) == 0  # missing = 0
+    @pytest.mark.asyncio
+    async def test_empty_state_placeholder(self) -> None:
+        """Empty node list shows a placeholder row."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            table.update_nodes([])
+            assert table._empty is True
+            assert table.row_count == 1
+            # The placeholder row has key "__empty__"
+            cell = table.get_cell_at((0, 0))
+            assert "No mesh nodes discovered" in str(cell)
 
-    def test_unread_display_logic(self) -> None:
-        """Unread > 0 shows count, 0 shows dash."""
-        for count, expected in [(2, "2"), (0, "—"), (10, "10")]:
-            text = str(count) if count > 0 else "—"
-            assert text == expected
+    @pytest.mark.asyncio
+    async def test_nodes_populate_rows(self) -> None:
+        """Nodes are added as rows with correct keys."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices = [
+                _make_device("alpha", "aaa", NodeStatus.ACTIVE, now - 10),
+                _make_device("bravo", "bbb", NodeStatus.LOST, now - 7200),
+            ]
+            table.update_nodes(devices)
+            assert table._empty is False
+            assert table.row_count == 2
 
-    def test_empty_nodes_sets_empty_flag(self) -> None:
-        """Empty node list should produce empty-state behavior."""
-        # Widget._empty should be True when no nodes
-        # Testing the logic without mounting
-        nodes: list[MeshDevice] = []
-        assert len(nodes) == 0
+    @pytest.mark.asyncio
+    async def test_sort_order_abnormal_first(self) -> None:
+        """Rows are sorted LOST > STALE > ACTIVE."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices = [
+                _make_device("online", "aaa", NodeStatus.ACTIVE, now - 10),
+                _make_device("lost", "bbb", NodeStatus.LOST, now - 7200),
+                _make_device("stale", "ccc", NodeStatus.STALE, now - 600),
+            ]
+            table.update_nodes(devices)
+            # First row should be the LOST node, last should be ACTIVE
+            first_name = str(table.get_cell_at((0, 0)))
+            last_name = str(table.get_cell_at((2, 0)))
+            assert first_name == "lost"
+            assert last_name == "online"
 
-    def test_row_key_is_identity_hash(self) -> None:
-        """Row key should be the device's identity_hash."""
-        device = _make_device("test", "deadbeef")
-        assert device.identity_hash == "deadbeef"
+    @pytest.mark.asyncio
+    async def test_unread_count_displayed(self) -> None:
+        """Unread column shows count or dash."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices = [
+                _make_device("relay-east", "r1", NodeStatus.ACTIVE, now - 10),
+                _make_device("casbah", "c1", NodeStatus.ACTIVE, now - 10),
+            ]
+            table.update_nodes(devices, unread_map={"r1": 2, "c1": 0})
+            # Find rows by key
+            r1_unread = str(table.get_cell("r1", "unread"))
+            c1_unread = str(table.get_cell("c1", "unread"))
+            assert r1_unread == "2"
+            assert c1_unread == "—"
 
-    def test_link_text_with_hops(self) -> None:
-        """Link column shows hop count."""
-        device = _make_device("test", "aaa", hops=2)
-        hops = device.hops
-        assert isinstance(hops, int)
-        link_text = f"{hops} hop{'s' if hops != 1 else ''}"
-        assert link_text == "2 hops"
+    @pytest.mark.asyncio
+    async def test_row_key_is_identity_hash(self) -> None:
+        """Each row's key is the device's identity_hash."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices = [_make_device("test", "deadbeef", NodeStatus.ACTIVE, now - 5)]
+            table.update_nodes(devices)
+            # Row key should be accessible
+            row_keys = [rk.value for rk in table.rows.keys()]
+            assert "deadbeef" in row_keys
 
-    def test_link_text_single_hop(self) -> None:
-        """Single hop shows singular form."""
-        device = _make_device("test", "aaa", hops=1)
-        hops = device.hops
-        assert isinstance(hops, int)
-        link_text = f"{hops} hop{'s' if hops != 1 else ''}"
-        assert link_text == "1 hop"
+    @pytest.mark.asyncio
+    async def test_update_replaces_previous_data(self) -> None:
+        """Calling update_nodes again clears old rows."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices1 = [_make_device("first", "aaa", NodeStatus.ACTIVE, now - 5)]
+            devices2 = [
+                _make_device("second", "bbb", NodeStatus.ACTIVE, now - 5),
+                _make_device("third", "ccc", NodeStatus.STALE, now - 600),
+            ]
+            table.update_nodes(devices1)
+            assert table.row_count == 1
+            table.update_nodes(devices2)
+            assert table.row_count == 2
+            first_name = str(table.get_cell_at((0, 0)))
+            assert first_name != "first"
 
-    def test_link_text_unknown_hops(self) -> None:
-        """Unknown hops shows question mark."""
-        device = _make_device("test", "aaa", hops=None)
-        hops = device.hops if device.hops is not None else "?"
-        assert hops == "?"
+    @pytest.mark.asyncio
+    async def test_empty_to_populated_transition(self) -> None:
+        """Transitioning from empty state to populated clears placeholder."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            table.update_nodes([])
+            assert table._empty is True
+            assert table.row_count == 1
 
-    def test_name_fallback_to_identity_hash(self) -> None:
-        """When name is None, falls back to identity_hash prefix."""
-        device = MeshDevice(
-            destination_hash="dest_abc",
-            identity_hash="abcdef1234567890",
-            name=None,
-            device_type=DeviceType.STYRENE_NODE,
-            last_announce=time.time(),
-            announce_count=1,
-        )
-        display_name = device.name or device.identity_hash[:8]
-        assert display_name == "abcdef12"
+            now = time.time()
+            table.update_nodes([_make_device("new", "nnn", NodeStatus.ACTIVE, now - 5)])
+            assert table._empty is False
+            assert table.row_count == 1
+            first_name = str(table.get_cell_at((0, 0)))
+            assert first_name == "new"
 
-    def test_sort_stability_same_status(self) -> None:
-        """Nodes with same status are sorted alphabetically by name."""
-        now = time.time()
-        devices = [
-            _make_device("zebra", "z", last_announce=now - 10),
-            _make_device("alpha", "a", last_announce=now - 10),
-            _make_device("middle", "m", last_announce=now - 10),
-        ]
-        sorted_devices = sorted(
-            devices,
-            key=lambda d: (_STATUS_SORT_ORDER.get(d.status, 99), d.name or ""),
-        )
-        assert [d.name for d in sorted_devices] == ["alpha", "middle", "zebra"]
+    @pytest.mark.asyncio
+    async def test_node_selected_message_on_row_select(self) -> None:
+        """Selecting a row posts NodeSelected with the identity hash."""
+        messages: list[HomeNodeSummaryTable.NodeSelected] = []
+
+        class _CaptureApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield HomeNodeSummaryTable()
+
+            def on_home_node_summary_table_node_selected(
+                self, event: HomeNodeSummaryTable.NodeSelected
+            ) -> None:
+                messages.append(event)
+
+        async with _CaptureApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            table.update_nodes([_make_device("test", "abc123", NodeStatus.ACTIVE, now - 5)])
+            # Move cursor to row and select
+            table.move_cursor(row=0)
+            table.action_select_cursor()
+            await pilot.pause()
+            assert len(messages) == 1
+            assert messages[0].identity_hash == "abc123"
+
+    @pytest.mark.asyncio
+    async def test_empty_row_select_suppressed(self) -> None:
+        """Selecting the placeholder row does not post NodeSelected."""
+        messages: list[HomeNodeSummaryTable.NodeSelected] = []
+
+        class _CaptureApp(App[None]):
+            def compose(self) -> ComposeResult:
+                yield HomeNodeSummaryTable()
+
+            def on_home_node_summary_table_node_selected(
+                self, event: HomeNodeSummaryTable.NodeSelected
+            ) -> None:
+                messages.append(event)
+
+        async with _CaptureApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            table.update_nodes([])
+            table.move_cursor(row=0)
+            table.action_select_cursor()
+            await pilot.pause()
+            assert len(messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_name_fallback_to_hash_prefix(self) -> None:
+        """When name is None, display falls back to identity_hash[:8]."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            device = MeshDevice(
+                destination_hash="dest_abc",
+                identity_hash="abcdef1234567890",
+                name=None,
+                device_type=DeviceType.STYRENE_NODE,
+                last_announce=now - 10,
+                announce_count=1,
+            )
+            table.update_nodes([device])
+            name_cell = str(table.get_cell_at((0, 0)))
+            assert name_cell == "abcdef12"
+
+    @pytest.mark.asyncio
+    async def test_alphabetical_sort_within_same_status(self) -> None:
+        """Nodes with same status sort alphabetically by name."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices = [
+                _make_device("zebra", "z", NodeStatus.ACTIVE, now - 10),
+                _make_device("alpha", "a", NodeStatus.ACTIVE, now - 10),
+                _make_device("middle", "m", NodeStatus.ACTIVE, now - 10),
+            ]
+            table.update_nodes(devices)
+            names = [str(table.get_cell_at((i, 0))) for i in range(3)]
+            assert names == ["alpha", "middle", "zebra"]
