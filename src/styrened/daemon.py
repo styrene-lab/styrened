@@ -2640,12 +2640,6 @@ def main() -> None:
     _install_thread_excepthook()
     _install_unraisable_hook()
 
-    # Install boundary log handler on the styrened logger.
-    # Keep an explicit reference so the daemon can use it for teardown and so
-    # the handler isn't silently lost if the logger is reconfigured later.
-    boundary_handler = make_boundary_handler()
-    logging.getLogger("styrened").addHandler(boundary_handler)
-
     # Load config (try core config, fallback to default)
     try:
         config = load_core_config()
@@ -2655,6 +2649,14 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
         sys.exit(1)
+
+    # Install boundary log handler on the styrened logger after config is
+    # loaded so the boundary_sink flag is honoured.  Keep an explicit
+    # reference so the daemon can use it for teardown and so the handler
+    # isn't silently lost if the logger is reconfigured later.
+    boundary_sink = getattr(getattr(config, "logging", None), "boundary_sink", False)
+    boundary_handler = make_boundary_handler(boundary_sink=boundary_sink)
+    logging.getLogger("styrened").addHandler(boundary_handler)
 
     # Run daemon — pass the handler explicitly so daemon._boundary_handler is
     # set regardless of the call path (tests, embedders, etc.)
