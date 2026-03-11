@@ -31,13 +31,14 @@ def mock_reticulum(tmp_path):
 
 
 class TestDashboardComposition:
-    """Test Home screen widget composition — no peer tree."""
+    """Test Home screen widget composition — COP layout."""
 
     @pytest.mark.asyncio
-    async def test_home_compose_creates_status_and_activity_widgets(self):
-        """Home compose() should create NodeInfoPanel and ActivityFeedWidget."""
+    async def test_home_compose_creates_cop_widget_tree(self):
+        """Home compose() should create STATUS, NODES, ACTIVITY panels in order."""
         from styrened.tui.widgets.activity_feed import ActivityFeedWidget
-        from styrened.tui.widgets.node_info_panel import NodeInfoPanel
+        from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
 
         app = StyreneApp()
         async with app.run_test() as pilot:
@@ -46,9 +47,14 @@ class TestDashboardComposition:
 
             screen = app.screen
             assert isinstance(screen, DashboardScreen)
-            # Status and activity panels are present
-            assert screen.query_one("#node-info-panel") is not None
-            assert screen.query_one("#activity-feed-panel") is not None
+            # COP layout panels
+            assert screen.query_one("#status-bar-panel") is not None
+            assert screen.query_one("#nodes-panel") is not None
+            assert screen.query_one("#activity-panel") is not None
+            # Widgets inside panels
+            assert screen.query_one(HomeStatusBar) is not None
+            assert screen.query_one(HomeNodeSummaryTable) is not None
+            assert screen.query_one(ActivityFeedWidget) is not None
 
     @pytest.mark.asyncio
     async def test_home_has_no_peer_tree(self):
@@ -65,21 +71,52 @@ class TestDashboardComposition:
                 screen.query_one("#mesh-device-tree")
 
     @pytest.mark.asyncio
-    async def test_home_panels_have_correct_titles(self):
-        """Home panels should use Home-scope titles (no CURRENT NODES panel)."""
+    async def test_home_has_no_comms_summary(self):
+        """Home should not contain CommsSummaryWidget (replaced by COP layout)."""
+        from textual.css.query import NoMatches
+
         app = StyreneApp()
         async with app.run_test() as pilot:
             await app.push_screen(DashboardScreen())
             await pilot.pause()
 
-            info_panel = app.screen.query_one("#node-info-panel")
-            activity_panel = app.screen.query_one("#activity-feed-panel")
-            assert getattr(info_panel, "_panel_title", None) == "HOME STATUS"
-            assert getattr(activity_panel, "_panel_title", None) == "RECENT ACTIVITY"
-            # CURRENT NODES panel must not be present
-            from textual.css.query import NoMatches
+            screen = app.screen
             with pytest.raises(NoMatches):
-                app.screen.query_one("#mesh-devices-panel")
+                screen.query_one("#comms-summary-panel")
+            with pytest.raises(NoMatches):
+                screen.query_one("#comms-summary-widget")
+
+    @pytest.mark.asyncio
+    async def test_home_panels_have_correct_cop_titles(self):
+        """Home panels should use COP titles: STATUS, NODES, ACTIVITY."""
+        app = StyreneApp()
+        async with app.run_test() as pilot:
+            await app.push_screen(DashboardScreen())
+            await pilot.pause()
+
+            status_panel = app.screen.query_one("#status-bar-panel")
+            nodes_panel = app.screen.query_one("#nodes-panel")
+            activity_panel = app.screen.query_one("#activity-panel")
+            assert status_panel.border_title == "STATUS"
+            assert nodes_panel.border_title == "NODES"
+            assert activity_panel.border_title == "ACTIVITY"
+
+    @pytest.mark.asyncio
+    async def test_cop_layout_order_in_dashboard_container(self):
+        """Panels should appear in COP order: STATUS, NODES, ACTIVITY."""
+        from styrened.tui.widgets.highlighted_panel import HighlightedPanel
+
+        app = StyreneApp()
+        async with app.run_test() as pilot:
+            await app.push_screen(DashboardScreen())
+            await pilot.pause()
+
+            container = app.screen.query_one("#dashboard-container")
+            panels = list(container.query(HighlightedPanel))
+            assert len(panels) == 3
+            assert panels[0].id == "status-bar-panel"
+            assert panels[1].id == "nodes-panel"
+            assert panels[2].id == "activity-panel"
 
 
 class TestDashboardKeyboardBindings:
@@ -292,7 +329,7 @@ class TestDashboardPanelStateOwnership:
         panel = MagicMock()
         panel.hub_status = MagicMock(CONNECTED="connected", DISCONNECTED="disconnected")
 
-        bridge.get_status = AsyncMock(return_value=MagicMock(rns_initialized=True))
+        bridge.get_status = AsyncMock(return_value=MagicMock(rns_initialized=True, interface_count=3, uptime=120.0))
         bridge.get_identity = AsyncMock(return_value=MagicMock(identity_hash="abc123"))
         bridge.get_hub_status = AsyncMock(return_value={"is_connected": True})
         bridge.get_core_config = AsyncMock(return_value={"group_threads": {"feature_tier": "balanced"}})
@@ -301,9 +338,24 @@ class TestDashboardPanelStateOwnership:
         bridge.get_contacts = AsyncMock(return_value=[{"name": "Alice"}])
         bridge.get_auto_reply = AsyncMock(return_value={"enabled": True})
 
+        status_bar = MagicMock()
+        node_table = MagicMock()
+
+        def _query_one(selector, *args, **kwargs):
+            from styrened.tui.screens.dashboard import VersionMismatchBanner
+            from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+            from styrened.tui.widgets.home_status_bar import HomeStatusBar
+            if selector is HomeStatusBar or selector == HomeStatusBar:
+                return status_bar
+            if selector is HomeNodeSummaryTable or selector == HomeNodeSummaryTable:
+                return node_table
+            if selector is VersionMismatchBanner:
+                return MagicMock()
+            return panel
+
         with (
             patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
-            patch.object(screen, "query_one", return_value=panel),
+            patch.object(screen, "query_one", side_effect=_query_one),
             patch("styrened.tui.screens.dashboard.build_local_daemon_state", return_value=MagicMock()),
             patch.object(screen, "_apply_local_daemon_snapshot") as apply_snapshot,
             patch(
@@ -386,6 +438,32 @@ class TestDashboardActivitySubscription:
         )
 
 
+class TestDashboardNodeSelection:
+    """Test node selection from HomeNodeSummaryTable."""
+
+    def test_node_selected_pushes_detail_screen(self):
+        """Selecting a node should push MeshDeviceDetailScreen."""
+        screen = DashboardScreen()
+        mock_app = MagicMock()
+
+        from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+
+        message = HomeNodeSummaryTable.NodeSelected(identity_hash="abc123def456")
+
+        with (
+            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=mock_app),
+            patch(
+                "styrened.tui.screens.mesh_device_detail.MeshDeviceDetailScreen"
+            ) as mock_cls,
+        ):
+            screen.on_home_node_summary_table_node_selected(message)
+
+        mock_app.push_screen.assert_called_once()
+        call_args = mock_app.push_screen.call_args
+        detail_screen = call_args[0][0]
+        assert isinstance(detail_screen, mock_cls.return_value.__class__) or mock_cls.called
+
+
 class TestVersionMismatchBanner:
     """Test the version mismatch banner on DashboardScreen."""
 
@@ -431,13 +509,11 @@ class TestVersionMismatchBanner:
     @pytest.mark.asyncio
     async def test_fetch_daemon_status_shows_banner_on_mismatch(self):
         """_fetch_daemon_status() should call banner.show_mismatch when versions differ."""
-        from unittest.mock import patch, PropertyMock, MagicMock, AsyncMock
         from styrened.tui.screens.dashboard import VersionMismatchBanner, DashboardScreen
 
         screen = DashboardScreen()
         bridge = MagicMock()
 
-        # Return a status with a different daemon_version
         mock_status = MagicMock()
         mock_status.daemon_version = "0.15.5"
 
@@ -452,7 +528,6 @@ class TestVersionMismatchBanner:
 
         banner = VersionMismatchBanner()
         panel = MagicMock()
-        panel.daemon_connected = True
 
         def _query_one(widget_type, *args, **kwargs):
             if widget_type is VersionMismatchBanner:

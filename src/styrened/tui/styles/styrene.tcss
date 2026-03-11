@@ -461,31 +461,21 @@ Header {
     background: $background;
 }
 
-/* Node info panel: auto-height so it fits its content exactly — no scrollbars.
-   overflow-y: auto or overflow: auto BOTH trigger overflow-x: auto (CSS spec),
-   which is why the horizontal scrollbar kept reappearing. overflow: hidden
-   kills all scrollbars unconditionally. */
-#node-info-panel {
+/* Status bar panel: auto-height, no scrollbars — fits HomeStatusBar + NodeInfoPanel. */
+#status-bar-panel {
     height: auto;
     overflow: hidden;
 }
 
-/* Comms panel itself should NOT scroll — the inner VerticalScroll owns that.
-   Scrolling the bordered panel makes Textual render scrollbar chrome at the
-   panel edge/bottom, which is the blue bar you've been seeing. */
-#comms-summary-panel {
+/* Nodes panel: takes majority of vertical space for the node summary table. */
+#nodes-panel {
     height: 1fr;
-    overflow: hidden;
 }
 
-#comms-summary-scroll {
-    height: 1fr;
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-
-#comms-summary-inner {
-    width: 1fr;
+/* Activity panel: compact, capped height for the feed. */
+#activity-panel {
+    height: auto;
+    max-height: 8;
 }
 
 /* === Local Dashboard Layout === */

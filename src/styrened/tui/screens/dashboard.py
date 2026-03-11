@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, VerticalScroll
+from textual.containers import Container
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
@@ -22,8 +22,10 @@ from styrened.services.hardware import (
 )
 from styrened.tui.services.config import load_config
 from styrened.tui.services.reticulum import start_discovery
-from styrened.tui.widgets.comms_summary import CommsSummaryWidget
+from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
+from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+from styrened.tui.widgets.home_status_bar import HomeStatusBar
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 from styrened.ui_state.daemon import (
     LocalDaemonInputs,
@@ -106,6 +108,7 @@ class DashboardScreen(Screen[None]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._hub_retry_timer: Timer | None = None
+        self._activity_worker: Any | None = None
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -134,11 +137,17 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self._activity_worker = self.run_worker(
+                self._subscribe_activity(), group="activity-feed"
+            )
 
     def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
         """Pause periodic refresh while Home is not the active screen."""
         if self._hub_retry_timer is not None:
             self._hub_retry_timer.pause()
+        if self._activity_worker is not None:
+            self._activity_worker.cancel()
+            self._activity_worker = None
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
         """Refresh Home panels when the operator returns from another workspace."""
@@ -155,12 +164,18 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self._activity_worker = self.run_worker(
+                self._subscribe_activity(), group="activity-feed"
+            )
 
     def on_unmount(self) -> None:
         """Stop timers when Home is removed from the screen stack."""
         if self._hub_retry_timer is not None:
             self._hub_retry_timer.stop()
             self._hub_retry_timer = None
+        if self._activity_worker is not None:
+            self._activity_worker.cancel()
+            self._activity_worker = None
 
     def _retry_hub_connection(self) -> None:
         """Periodically poll hub status via IPC."""
@@ -236,17 +251,20 @@ class DashboardScreen(Screen[None]):
         yield VersionMismatchBanner()
         with Container(id="dashboard-container"):
             yield HighlightedPanel(
+                HomeStatusBar(id="home-status-bar"),
                 NodeInfoPanel(id="node-info-panel-widget"),
-                title="HOME STATUS",
-                id="node-info-panel",
+                title="STATUS",
+                id="status-bar-panel",
             )
             yield HighlightedPanel(
-                VerticalScroll(
-                    CommsSummaryWidget(id="comms-summary-widget"),
-                    id="comms-summary-scroll",
-                ),
-                title="COMMS",
-                id="comms-summary-panel",
+                HomeNodeSummaryTable(id="home-node-summary"),
+                title="NODES",
+                id="nodes-panel",
+            )
+            yield HighlightedPanel(
+                ActivityFeedWidget(id="activity-feed-widget"),
+                title="ACTIVITY",
+                id="activity-panel",
             )
         yield Footer()
 
@@ -382,6 +400,34 @@ class DashboardScreen(Screen[None]):
                 raw_status=status,
             )
 
+            # Update HomeStatusBar reactive props from daemon state
+            try:
+                status_bar = self.query_one(HomeStatusBar)
+                status_bar.rns_online = getattr(status, "rns_initialized", False)
+                status_bar.daemon_connected = True
+                status_bar.styrene_mesh_count = len(mesh_devices)
+                status_bar.daemon_uptime = getattr(status, "uptime", 0.0) or 0.0
+                # Hub status
+                if isinstance(hub_data, dict):
+                    from styrened.services.hub_connection import HubStatus
+                    is_connected = hub_data.get("is_connected", False)
+                    status_bar.hub_status = (
+                        HubStatus.CONNECTED if is_connected else HubStatus.DISCONNECTED
+                    )
+                # Interface count from status
+                iface_count = getattr(status, "interface_count", 0) or 0
+                status_bar.interface_count = iface_count
+            except Exception:
+                pass
+
+            # Update HomeNodeSummaryTable with mesh devices
+            try:
+                node_table = self.query_one(HomeNodeSummaryTable)
+                # mesh_devices are dicts or MeshDevice-like objects from IPC
+                node_table.update_nodes(list(mesh_devices))
+            except Exception:
+                pass
+
             convs: list[dict[str, Any]] = []
             contacts: list[dict[str, Any]] = []
             auto_reply: dict[str, Any] = {}
@@ -396,6 +442,16 @@ class DashboardScreen(Screen[None]):
                 pass
             try:
                 auto_reply = await tasks["auto_reply"]
+            except Exception:
+                pass
+
+            # Update unread count on status bar
+            try:
+                status_bar = self.query_one(HomeStatusBar)
+                total_unread = sum(
+                    c.get("unread_count", 0) for c in convs if isinstance(c, dict)
+                )
+                status_bar.unread_count = total_unread
             except Exception:
                 pass
 
@@ -415,5 +471,35 @@ class DashboardScreen(Screen[None]):
                 t.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+
+    def on_home_node_summary_table_node_selected(
+        self, message: HomeNodeSummaryTable.NodeSelected
+    ) -> None:
+        """Handle node selection from the summary table — push detail screen."""
+        from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+        self.app.push_screen(
+            MeshDeviceDetailScreen(device_identity=message.identity_hash)
+        )
+
+    async def _subscribe_activity(self) -> None:
+        """Subscribe to daemon activity events and feed them to ActivityFeedWidget."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+
+        from styrened.ipc.protocol import IPCMessageType
+
+        await bridge.subscribe_activity()
+
+        try:
+            activity_widget = self.query_one(ActivityFeedWidget)
+        except Exception:
+            return
+
+        async for event_type, payload in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
+            if event_type == IPCMessageType.EVENT_ACTIVITY and isinstance(payload, dict):
+                evt = payload.get("event_type", "unknown")
+                activity_widget.add_event(evt, payload)
 
 
