@@ -559,7 +559,11 @@ class TestRatchetPersistHook:
                 threading.excepthook(args)
 
             assert any("ratchet persist race" in r.message for r in caplog.records)
-            assert all(r.levelno == logging.DEBUG for r in caplog.records if "ratchet" in r.message)
+            # Suppression message is at DEBUG; boundary record emitted at ERROR is also acceptable
+            assert any(
+                r.levelno == logging.DEBUG and "ratchet persist race" in r.message
+                for r in caplog.records
+            )
         finally:
             threading.excepthook = original
 
@@ -599,3 +603,126 @@ class TestRatchetPersistHook:
             assert len(calls) == 1
         finally:
             threading.excepthook = original
+
+    def test_ratchet_thread_hook_emits_boundary_record(self):
+        """Ratchet-persist FileNotFoundError in daemon thread → boundary record emitted."""
+        import logging
+        import threading
+        from styrened.boundary import BoundaryLogHandler, InterfaceBoundary
+        from styrened.daemon import _install_thread_excepthook
+
+        handler = BoundaryLogHandler()
+        styrened_logger = logging.getLogger("styrened")
+        styrened_logger.addHandler(handler)
+        original = threading.excepthook
+        try:
+            _install_thread_excepthook()
+            args = self._make_args(
+                "/home/user/.config/reticulum/storage/ratchets/d3a3c380.out",
+                "/home/user/.config/reticulum/storage/ratchets/d3a3c380",
+            )
+            threading.excepthook(args)
+            records = handler.snapshot()
+            assert len(records) == 1
+            r = records[0]
+            assert r["boundary"] == InterfaceBoundary.RNS.value
+            assert r["severity"] == "transient"
+            assert r["retryable"] is True
+            assert r["operation"] == "ratchet_persist"
+        finally:
+            threading.excepthook = original
+            styrened_logger.removeHandler(handler)
+
+    def test_non_ratchet_thread_hook_does_not_emit_boundary_record(self):
+        """Non-ratchet FileNotFoundError from daemon thread → no boundary record emitted."""
+        import threading
+        from styrened.boundary import BoundaryLogHandler
+        from styrened.daemon import _install_thread_excepthook
+
+        handler = BoundaryLogHandler()
+        import logging
+        styrened_logger = logging.getLogger("styrened")
+        styrened_logger.addHandler(handler)
+        calls = []
+        sentinel = lambda a: calls.append(a)  # noqa: E731
+        original = threading.excepthook
+        threading.excepthook = sentinel
+        try:
+            _install_thread_excepthook()
+            args = self._make_args("/tmp/some_other_file.out")
+            threading.excepthook(args)
+            # Non-matching error → no boundary record
+            assert len(handler.snapshot()) == 0
+            # But the default hook should have been called
+            assert len(calls) == 1
+        finally:
+            threading.excepthook = original
+            styrened_logger.removeHandler(handler)
+
+
+class TestUnraisableHook:
+    """_install_unraisable_hook handles RNS ratchet-persist via sys.unraisablehook."""
+
+    def _make_unraisable(self, filename: str) -> object:
+        from types import SimpleNamespace
+        exc = FileNotFoundError(2, "No such file or directory")
+        exc.filename = filename
+        return SimpleNamespace(
+            exc_type=FileNotFoundError,
+            exc_value=exc,
+            exc_traceback=None,
+            err_msg=None,
+            object=None,
+        )
+
+    def test_ratchet_unraisable_emits_boundary_record(self):
+        """ratchet-persist unraisable → DEBUG suppressed + boundary record emitted."""
+        import logging
+        import sys
+        from styrened.boundary import BoundaryLogHandler, InterfaceBoundary
+        from styrened.daemon import _install_unraisable_hook
+
+        handler = BoundaryLogHandler()
+        styrened_logger = logging.getLogger("styrened")
+        styrened_logger.addHandler(handler)
+        original = sys.unraisablehook
+        try:
+            _install_unraisable_hook()
+            args = self._make_unraisable(
+                "/home/user/.config/reticulum/storage/ratchets/abc123.out"
+            )
+            sys.unraisablehook(args)
+            records = handler.snapshot()
+            assert len(records) == 1
+            r = records[0]
+            assert r["boundary"] == InterfaceBoundary.RNS.value
+            assert r["severity"] == "transient"
+            assert r["retryable"] is True
+            assert r["operation"] == "ratchet_persist"
+        finally:
+            sys.unraisablehook = original
+            styrened_logger.removeHandler(handler)
+
+    def test_non_ratchet_unraisable_does_not_emit_boundary_record(self):
+        """Non-ratchet unraisable → forwarded to default, no boundary record."""
+        import sys
+        from styrened.boundary import BoundaryLogHandler
+        from styrened.daemon import _install_unraisable_hook
+
+        handler = BoundaryLogHandler()
+        import logging
+        styrened_logger = logging.getLogger("styrened")
+        styrened_logger.addHandler(handler)
+        calls = []
+        sentinel = lambda a: calls.append(a)  # noqa: E731
+        original = sys.unraisablehook
+        sys.unraisablehook = sentinel
+        try:
+            _install_unraisable_hook()
+            args = self._make_unraisable("/tmp/some_other_file.txt")
+            sys.unraisablehook(args)
+            assert len(handler.snapshot()) == 0
+            assert len(calls) == 1
+        finally:
+            sys.unraisablehook = original
+            styrened_logger.removeHandler(handler)
