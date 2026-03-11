@@ -120,28 +120,43 @@ class StyreneApp(App[None]):
         """Return True if any screen in the current stack is an instance of screen_type."""
         return any(isinstance(s, screen_type) for s in self.screen_stack)
 
+    def _current_screen_name(self) -> str:
+        """Return the name/id of the current top-of-stack screen."""
+        return getattr(self.screen, "name", "") or ""
+
+    def _toggle_screen(self, name: str) -> None:
+        """Switch to named screen, or return to dashboard if already there."""
+        if self._current_screen_name() == name:
+            self.switch_screen("dashboard")
+        else:
+            self.switch_screen(name)
+
     def action_open_admin(self) -> None:
-        """Open the Admin workspace (settings and diagnostics)."""
+        """Toggle the Admin/Settings overlay."""
         if self._screen_in_stack(SettingsScreen):
-            return
-        self.push_screen(SettingsScreen(self.config))
+            self.pop_screen()
+        else:
+            self.push_screen(SettingsScreen(self.config))
 
     def action_push_screen_settings(self) -> None:
         """Backward-compatible alias for action_open_admin."""
         self.action_open_admin()
 
     def action_open_nodes(self) -> None:
-        """Open the canonical Nodes workspace."""
-        self.switch_screen("exploration")
+        """Toggle the Mesh/Nodes workspace."""
+        self._toggle_screen("exploration")
 
     def action_open_exchange(self) -> None:
-        """Open the Exchange workspace (default: Mail tab)."""
-        self.switch_screen("exchange")
+        """Toggle the Exchange workspace."""
+        self._toggle_screen("exchange")
 
     def action_open_mail(self) -> None:
-        """Open Exchange workspace with Mail tab focused (fast-path)."""
+        """Open Exchange on Mail tab, or return to dashboard if already on Exchange."""
         from styrened.tui.screens.exchange import ExchangeScreen, TAB_MAIL
 
+        if self._current_screen_name() == "exchange":
+            self.switch_screen("dashboard")
+            return
         screen = self.get_screen("exchange")
         if isinstance(screen, ExchangeScreen):
             screen.focus_tab(TAB_MAIL)
@@ -152,26 +167,32 @@ class StyreneApp(App[None]):
         self.action_open_mail()
 
     def action_open_comms(self) -> None:
-        """Open Exchange workspace with Direct tab focused."""
+        """Open Exchange on Direct tab, or return to dashboard if already on Exchange."""
         from styrened.tui.screens.exchange import ExchangeScreen, TAB_DIRECT
 
+        if self._current_screen_name() == "exchange":
+            self.switch_screen("dashboard")
+            return
         screen = self.get_screen("exchange")
         if isinstance(screen, ExchangeScreen):
             screen.focus_tab(TAB_DIRECT)
         self.switch_screen("exchange")
 
     def action_open_contacts(self) -> None:
-        """Open Exchange workspace with Contacts tab focused."""
+        """Open Exchange on Contacts tab, or return to dashboard if already on Exchange."""
         from styrened.tui.screens.exchange import ExchangeScreen, TAB_CONTACTS
 
+        if self._current_screen_name() == "exchange":
+            self.switch_screen("dashboard")
+            return
         screen = self.get_screen("exchange")
         if isinstance(screen, ExchangeScreen):
             screen.focus_tab(TAB_CONTACTS)
         self.switch_screen("exchange")
 
     def action_open_provision(self) -> None:
-        """Switch to device provisioning screen."""
-        self.switch_screen("provision")
+        """Toggle the device provisioning workspace."""
+        self._toggle_screen("provision")
 
     def get_unread_count(self) -> int:
         """Get total unread message count.

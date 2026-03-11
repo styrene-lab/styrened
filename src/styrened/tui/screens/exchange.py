@@ -292,6 +292,8 @@ class ExchangeScreen(Screen[None]):
             table.add_row("-", "[dim]Chat requires daemon mode[/]", "-", "-", "-")
             return
 
+        # Show loading placeholder immediately so the screen feels responsive
+        table.add_row("…", "[dim]loading…[/]", "-", "-", "-")
         self.run_worker(self._load_conversations())
         self.run_worker(self._load_auto_reply_state())
         table.focus()
