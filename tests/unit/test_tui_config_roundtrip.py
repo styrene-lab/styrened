@@ -3,6 +3,8 @@
 O3: Verify _parse_config_dict ↔ _config_to_dict preserve all fields.
 """
 
+from pathlib import Path
+
 import pytest
 
 from styrened.tui.models.config import LogLevel, StyreneConfig, TUIConfig
@@ -145,3 +147,140 @@ class TestConfigToDict:
         d = _config_to_dict(config)
         for section in ("tui", "fleet", "provisioning", "mesh"):
             assert section in d, f"Missing section: {section}"
+
+
+# =========================================================================
+# W2: File I/O roundtrip (load_config / save_config)
+# =========================================================================
+
+
+class TestFileIORoundtrip:
+    """Test actual YAML file serialization via load_config/save_config."""
+
+    @staticmethod
+    def _patch_config_path(monkeypatch: pytest.MonkeyPatch, config_file: Path) -> None:
+        """Patch config path and disable core config overlay for isolated tests."""
+        monkeypatch.setattr(
+            "styrened.tui.services.config.get_config_path",
+            lambda: config_file,
+        )
+        monkeypatch.setattr(
+            "styrened.tui.services.config._overlay_core_config",
+            lambda config: None,
+        )
+
+    def test_save_and_load_preserves_theme(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Theme survives save_config → load_config via actual YAML file."""
+        from styrened.tui.services.config import load_config, save_config
+
+        config_file = tmp_path / "tui.yaml"
+        self._patch_config_path(monkeypatch, config_file)
+
+        config = get_default_config()
+        config.tui.theme = "stygies"
+        config.tui.custom_theme_url = "https://example.com/theme.json"
+        save_config(config)
+
+        assert config_file.exists()
+        loaded = load_config()
+        assert loaded.tui.theme == "stygies"
+        assert loaded.tui.custom_theme_url == "https://example.com/theme.json"
+
+    def test_save_and_load_preserves_booleans(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Boolean fields survive YAML file roundtrip."""
+        from styrened.tui.services.config import load_config, save_config
+
+        config_file = tmp_path / "tui.yaml"
+        self._patch_config_path(monkeypatch, config_file)
+
+        config = get_default_config()
+        config.tui.show_hardware_panel = False
+        config.tui.confirm_destructive = False
+        save_config(config)
+
+        loaded = load_config()
+        assert loaded.tui.show_hardware_panel is False
+        assert loaded.tui.confirm_destructive is False
+
+    def test_yaml_file_is_valid_yaml(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Saved config file is valid YAML."""
+        import yaml
+
+        from styrened.tui.services.config import save_config
+
+        config_file = tmp_path / "tui.yaml"
+        self._patch_config_path(monkeypatch, config_file)
+
+        save_config(get_default_config())
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert isinstance(data, dict)
+        assert "tui" in data
+
+
+# =========================================================================
+# C3/C4: Placeholder tests for fields from sibling tasks
+# =========================================================================
+
+
+@pytest.mark.skip(reason="custom_theme_colors field not yet in TUIConfig — spec references future sibling work")
+class TestCustomThemeColorsRoundtrip:
+    """Tests for custom_theme_colors dict serialization.
+
+    These tests are skipped because the custom_theme_colors field does not
+    exist in TUIConfig. The spec (O3) references it but it was never added
+    to the data model. Enable these tests when the field is implemented.
+    """
+
+    def test_dict_roundtrip(self) -> None:
+        config = get_default_config()
+        config.tui.custom_theme_colors = {"phosphex": "#ff0000", "bg": "#000000"}  # type: ignore[attr-defined]
+        result = _roundtrip(config)
+        assert result.tui.custom_theme_colors == {"phosphex": "#ff0000", "bg": "#000000"}  # type: ignore[attr-defined]
+
+    def test_empty_dict_roundtrip(self) -> None:
+        config = get_default_config()
+        config.tui.custom_theme_colors = {}  # type: ignore[attr-defined]
+        result = _roundtrip(config)
+        assert result.tui.custom_theme_colors == {}  # type: ignore[attr-defined]
+
+    def test_dict_values_survive_as_strings(self) -> None:
+        config = get_default_config()
+        config.tui.custom_theme_colors = {"key": "#aabbcc"}  # type: ignore[attr-defined]
+        result = _roundtrip(config)
+        assert isinstance(result.tui.custom_theme_colors["key"], str)  # type: ignore[attr-defined]
+
+    def test_non_dict_value_handled_gracefully(self) -> None:
+        config = _parse_config_dict({"tui": {"custom_theme_colors": "not-a-dict"}})
+        # Should either be empty dict or ignored, not crash
+        colors = getattr(config.tui, "custom_theme_colors", {})
+        assert isinstance(colors, dict)
+
+    def test_coexists_with_custom_theme_url(self) -> None:
+        config = get_default_config()
+        config.tui.custom_theme_url = "https://example.com/theme.json"
+        config.tui.custom_theme_colors = {"phosphex": "#ff0000"}  # type: ignore[attr-defined]
+        result = _roundtrip(config)
+        assert result.tui.custom_theme_url == "https://example.com/theme.json"
+        assert result.tui.custom_theme_colors == {"phosphex": "#ff0000"}  # type: ignore[attr-defined]
+
+
+@pytest.mark.skip(reason="identity_nudge_dismissed field not yet in TUIConfig — depends on sibling task warning-fixes")
+class TestIdentityNudgeDismissedRoundtrip:
+    """Tests for identity_nudge_dismissed bool roundtrip.
+
+    Skipped because the field was expected to be added by the warning-fixes
+    sibling task but does not exist in the current TUIConfig model.
+    """
+
+    def test_bool_roundtrip_true(self) -> None:
+        config = get_default_config()
+        config.tui.identity_nudge_dismissed = True  # type: ignore[attr-defined]
+        result = _roundtrip(config)
+        assert result.tui.identity_nudge_dismissed is True  # type: ignore[attr-defined]
+
+    def test_bool_roundtrip_false(self) -> None:
+        config = get_default_config()
+        config.tui.identity_nudge_dismissed = False  # type: ignore[attr-defined]
+        result = _roundtrip(config)
+        assert result.tui.identity_nudge_dismissed is False  # type: ignore[attr-defined]

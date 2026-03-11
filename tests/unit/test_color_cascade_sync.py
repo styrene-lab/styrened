@@ -193,3 +193,82 @@ class TestGenerateAllThemes:
         themes = generate_all_themes()
         for key, theme in themes.items():
             assert isinstance(theme, Theme), f"{key} is not a Theme"
+
+
+# =========================================================================
+# O1 (extended): Cascade → Theme → Cascade roundtrip verification
+# =========================================================================
+
+
+class TestCascadeThemeRoundtrip:
+    """Verify cascade colors survive the to_textual_theme() mapping.
+
+    Note: from_textual_theme() does not exist in the codebase — the spec
+    referenced a non-existent API. These tests verify the cascade→theme
+    direction preserves all semantic relationships, which is the testable
+    half of the bidirectional mapping.
+    """
+
+    def test_theme_accent_equals_cascade_bright(self) -> None:
+        """Theme accent should be the cascade's bright (phosphex) color."""
+        c = ColorCascade(phosphex="#ff0000", preset_name="Red")
+        theme = c.to_textual_theme(name="red")
+        assert theme.accent == c.bright
+
+    def test_theme_primary_equals_cascade_medium(self) -> None:
+        """Theme primary should be the cascade's medium shade."""
+        c = ColorCascade(phosphex="#00ff00", preset_name="Green")
+        theme = c.to_textual_theme(name="green")
+        assert theme.primary == c.medium
+
+    def test_theme_success_warning_error_map_semantic_colors(self) -> None:
+        """Theme success/warning/error map to cascade semantic colors."""
+        c = ColorCascade(phosphex="#0088ff", preset_name="Blue")
+        theme = c.to_textual_theme(name="blue")
+        assert theme.success == c.color_success
+        assert theme.warning == c.color_warning
+        assert theme.error == c.color_danger
+
+    def test_theme_background_equals_cascade_bg_screen(self) -> None:
+        """Theme background is cascade's bg_screen."""
+        c = ColorCascade(phosphex="#ff8800")
+        theme = c.to_textual_theme(name="orange")
+        assert theme.background == c.bg_screen
+
+    def test_different_phosphex_produces_different_theme_accent(self) -> None:
+        """Themes from different phosphex values have different accents."""
+        t1 = ColorCascade(phosphex="#ff0000").to_textual_theme(name="r")
+        t2 = ColorCascade(phosphex="#0000ff").to_textual_theme(name="b")
+        assert t1.accent != t2.accent
+
+    def test_all_forge_presets_produce_valid_themes(self) -> None:
+        """Every forge world preset produces a theme with non-empty accent."""
+        for key in FORGE_WORLD_PRESETS:
+            cascade = ColorCascade.from_preset(key)
+            theme = cascade.to_textual_theme(name=key)
+            assert theme.accent, f"Empty accent for {key}"
+            assert theme.primary, f"Empty primary for {key}"
+
+
+# =========================================================================
+# W1: Defensive exception handling in theme/cascade construction
+# =========================================================================
+
+
+class TestCascadeDefensiveErrors:
+    """Verify error paths don't crash silently."""
+
+    def test_invalid_phosphex_color_propagates_error(self) -> None:
+        """Invalid hex color in phosphex should raise during palette calc."""
+        with pytest.raises((ValueError, KeyError)):
+            ColorCascade(phosphex="not-a-color")
+
+    def test_empty_preset_key_raises(self) -> None:
+        """Empty string preset key raises ValueError."""
+        with pytest.raises(ValueError):
+            ColorCascade.from_preset("")
+
+    def test_none_phosphex_raises(self) -> None:
+        """None as phosphex should raise TypeError."""
+        with pytest.raises((TypeError, AttributeError)):
+            ColorCascade(phosphex=None)  # type: ignore[arg-type]
