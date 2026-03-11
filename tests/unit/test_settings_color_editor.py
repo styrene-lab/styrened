@@ -429,8 +429,9 @@ class TestTcssStatusClasses:
     def test_status_info_class_exists(self, tcss_content: str) -> None:
         assert ".status-info" in tcss_content
 
-    def test_no_undefined_status_classes_in_settings(self) -> None:
-        """Check that _set_theme_status doesn't use CSS classes not in the TCSS."""
+    def test_no_undefined_status_classes_in_settings(self, tcss_content: str) -> None:
+        """Check that add_class/remove_class calls in settings.py only use classes defined in TCSS."""
+        import re
         from pathlib import Path
 
         settings_path = (
@@ -439,9 +440,14 @@ class TestTcssStatusClasses:
         )
         settings_src = settings_path.read_text()
 
-        # _set_theme_status uses Rich markup [green], [red], [dim] — not CSS classes.
-        # Verify it doesn't add/remove CSS classes that don't exist.
-        # The method just calls Static.update() with Rich markup.
         assert "_set_theme_status" in settings_src
-        # Confirm it does NOT use add_class/remove_class with unknown classes
-        assert "status-success" not in settings_src or "status-error" not in settings_src
+
+        # Extract all class names passed to add_class/remove_class calls
+        class_refs = set(re.findall(r'(?:add_class|remove_class)\(\s*["\']([^"\']+)["\']', settings_src))
+
+        # Every referenced class must exist in the TCSS (as .classname selector)
+        for cls in class_refs:
+            assert f".{cls}" in tcss_content, (
+                f"settings.py references CSS class '{cls}' via add_class/remove_class "
+                f"but '.{cls}' not found in styrene.tcss"
+            )
