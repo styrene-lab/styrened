@@ -93,4 +93,5 @@ def device_info_to_mesh(info: Any) -> MeshDevice:
         lxmf_destination_hash=getattr(info, "lxmf_destination_hash", None),
         short_name=getattr(info, "short_name", None),
         system_fingerprint=getattr(info, "system_fingerprint", None),
+        hops=getattr(info, "hops", None),
     )
