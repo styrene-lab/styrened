@@ -460,14 +460,10 @@ Header {
     height: 1fr;
 }
 
-/* Comms summary panel */
+/* Comms summary panel — auto height so it never crowds the footer */
 #comms-summary-panel {
-    height: 1fr;
+    height: auto;
     min-height: 8;
-}
-
-#comms-summary-panel > .hp-content {
-    height: 1fr;
 }
 
 /* === Local Dashboard Layout === */

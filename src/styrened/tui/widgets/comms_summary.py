@@ -1,25 +1,25 @@
-"""CommsSummaryWidget — scannable communications summary panel.
+"""CommsSummaryWidget — rich communications summary panel for the dashboard.
 
-Polls IPC for conversation data and renders an at-a-glance summary of:
-  1. Unread message count + up to 3 preview lines (sender, snippet, age)
-  2. Active direct sessions count (from get_conversations)
-  3. Bookmarked pages count (stubbed at 0 — no bookmark IPC exists yet)
+Shows:
+  - Mail: unread count + per-conversation previews (sender, snippet, age)
+  - Conversations: recent threads even when no unread
+  - Direct: active direct-link session count
+  - Contacts: contact count
+  - Auto-reply: on/off
 """
 
 from __future__ import annotations
 
-import datetime
 import time
 from typing import Any
 
 from textual.app import ComposeResult
 from textual.widgets import Static
 
-_POLL_INTERVAL = 10.0  # seconds
+_POLL_INTERVAL = 10.0
 
 
 def _age(ts: float | int | None) -> str:
-    """Convert a Unix timestamp to a short human-readable age string."""
     if ts is None:
         return "?"
     delta = time.time() - float(ts)
@@ -32,14 +32,12 @@ def _age(ts: float | int | None) -> str:
     return f"{int(delta // 86400)}d"
 
 
-def _truncate(text: str, max_len: int = 40) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 1] + "…"
+def _trunc(text: str, n: int) -> str:
+    return text if len(text) <= n else text[: n - 1] + "…"
 
 
 class CommsSummaryWidget(Static):
-    """Compact comms summary: unread messages, active sessions, bookmarks."""
+    """Rich comms summary: mail previews, direct sessions, contacts."""
 
     DEFAULT_CSS = """
     CommsSummaryWidget {
@@ -51,7 +49,9 @@ class CommsSummaryWidget(Static):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._conversations: list[dict[str, Any]] = []
-        self._unread_count: int = 0
+        self._contact_count: int = 0
+        self._active_links: int = 0
+        self._auto_reply: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -61,28 +61,37 @@ class CommsSummaryWidget(Static):
         self._refresh()
         self.set_interval(_POLL_INTERVAL, self._refresh)
 
-    # ------------------------------------------------------------------
-    # Data fetching
-    # ------------------------------------------------------------------
-
     def _refresh(self) -> None:
-        """Schedule async data fetch then re-render."""
         self.run_worker(self._fetch_and_render(), exclusive=True)
+
+    # ------------------------------------------------------------------
+    # Data
+    # ------------------------------------------------------------------
 
     async def _fetch_and_render(self) -> None:
         bridge = self._bridge
         if bridge is not None:
             try:
-                self._conversations = await bridge.get_conversations()  # type: ignore[union-attr]
+                self._conversations = await bridge.get_conversations() or []
             except Exception:
                 self._conversations = []
+            try:
+                status = await bridge.get_status()
+                self._active_links = getattr(status, "active_links", 0) or 0
+                self._auto_reply = getattr(status, "auto_reply_enabled", False)
+            except Exception:
+                pass
+            try:
+                cfg = await bridge.get_core_config()
+                if isinstance(cfg, dict):
+                    contacts = cfg.get("contacts") or []
+                    self._contact_count = len(contacts)
+            except Exception:
+                pass
 
-        # Unread count from DB (same pattern as DashboardScreen.get_unread_count)
-        self._unread_count = self._count_unread_from_db()
         self.update(self._build_markup())
 
-    def _count_unread_from_db(self) -> int:
-        """Count unread messages using app.db_engine + app.local_identity_hash."""
+    def _unread_from_db(self) -> int:
         try:
             db_engine = getattr(self.app, "db_engine", None)
             identity_hash = getattr(self.app, "local_identity_hash", None)
@@ -118,70 +127,85 @@ class CommsSummaryWidget(Static):
 
     def _build_markup(self) -> str:
         lines: list[str] = []
+        dim = "dim"
+        hi = "#5f9ea0"
+        bright = "#a8d8d8"
+        warn = "#ffaf5f"
 
-        # Section header
-        lines.append("[bold #5f9ea0]◈ COMMS SUMMARY[/]")
+        unread_total = self._unread_from_db()
 
-        # --- Unread messages ---
-        unread = self._unread_count
-        if unread:
-            badge = f"[bold #ffaf5f]{unread}[/]"
-            lines.append(f"  [#5f9ea0]Unread[/] {badge}")
+        # ── MAIL ──────────────────────────────────────────────────────
+        lines.append(f"[bold {hi}]MAIL[/]")
+        if unread_total:
+            lines.append(f"  [{warn} bold]✉ {unread_total} unread[/]")
         else:
-            lines.append("  [#5f9ea0]Unread[/] [dim]0[/]")
+            lines.append(f"  [{dim}]no unread[/]")
 
-        # Up to 3 preview lines from most-recent conversations with pending messages
-        previews = self._build_previews(3)
-        for sender, snippet, ts in previews:
-            age = _age(ts)
-            lines.append(
-                f"    [bold #d7d7af]{_truncate(sender, 18)}[/]"
-                f"  [dim]{_truncate(snippet, 32)}[/]"
-                f"  [#5f9ea0]{age}[/]"
-            )
-
-        # --- Active direct sessions ---
-        sessions = len(self._conversations)
-        lines.append(f"  [#5f9ea0]Sessions[/] {sessions if sessions else '[dim]0[/]'}")
-
-        # --- Bookmarks (stub) ---
-        lines.append("  [#5f9ea0]Bookmarks[/] [dim]0[/]")
-
-        return "\n".join(lines)
-
-    def _build_previews(self, limit: int) -> list[tuple[str, str, float | None]]:
-        """Extract sender/snippet/timestamp tuples from unread conversations."""
-        previews: list[tuple[str, str, float | None]] = []
-        # Sort by latest message timestamp descending
-        candidates = sorted(
+        # Sort convos: unread first, then by recency
+        sorted_convos = sorted(
             self._conversations,
-            key=lambda c: c.get("latest_timestamp") or c.get("timestamp") or 0,
-            reverse=True,
+            key=lambda c: (
+                -(c.get("unread_count") or 0),
+                -(c.get("latest_timestamp") or c.get("timestamp") or 0),
+            ),
         )
-        for conv in candidates:
-            if len(previews) >= limit:
-                break
-            unread = conv.get("unread_count", 0)
-            if not unread:
-                continue
-            sender = (
+
+        shown = 0
+        for conv in sorted_convos[:8]:
+            name = (
                 conv.get("display_name")
                 or conv.get("sender_name")
-                or conv.get("peer_hash", "unknown")[:12]
+                or (conv.get("peer_hash") or "")[:10]
+                or "unknown"
             )
             snippet = conv.get("latest_snippet") or conv.get("preview") or ""
             ts = conv.get("latest_timestamp") or conv.get("timestamp")
-            previews.append((str(sender), str(snippet), float(ts) if ts is not None else None))
-        return previews
+            unread = conv.get("unread_count") or 0
+            age = _age(ts)
+
+            unread_badge = f"[{warn} bold]({unread})[/] " if unread else "  "
+            lines.append(
+                f"  {unread_badge}[{bright}]{_trunc(name, 20)}[/]"
+                f"  [{dim}]{_trunc(snippet, 36)}[/]"
+                f"  [{hi}]{age}[/]"
+            )
+            shown += 1
+
+        if not shown:
+            lines.append(f"  [{dim}]no conversations yet[/]")
+
+        lines.append("")
+
+        # ── DIRECT ────────────────────────────────────────────────────
+        lines.append(f"[bold {hi}]DIRECT[/]")
+        if self._active_links:
+            lines.append(f"  [{bright}]{self._active_links} active session(s)[/]")
+        else:
+            lines.append(f"  [{dim}]no active sessions[/]")
+
+        lines.append("")
+
+        # ── CONTACTS ──────────────────────────────────────────────────
+        lines.append(f"[bold {hi}]CONTACTS[/]")
+        if self._contact_count:
+            lines.append(f"  [{bright}]{self._contact_count} contact(s)[/]")
+        else:
+            lines.append(f"  [{dim}]none[/]")
+
+        if self._auto_reply:
+            lines.append(f"  [bold {hi}]auto-reply:[/] [{bright}]on[/]")
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Textual overrides
+    # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        # Initial placeholder — updated by _fetch_and_render
         yield Static(self._build_markup(), id="comms-summary-inner")
 
     def update(self, markup: str) -> None:  # type: ignore[override]
-        """Push fresh markup into the inner Static."""
         try:
-            inner = self.query_one("#comms-summary-inner", Static)
-            inner.update(markup)
+            self.query_one("#comms-summary-inner", Static).update(markup)
         except Exception:
             pass

@@ -248,24 +248,6 @@ class NodeInfoPanel(Static):
                 tier_color = cascade.bright if "PQC" in self.security_tier.upper() else cascade.medium
                 lines.append(f"  SEC: [{tier_color}]{self.security_tier}[/]")
 
-        # === COMMS ===
-        lines.append("")
-        lines.append(f"[{cascade.bright}]COMMS[/]")
-        if self.unread_count > 0:
-            lines.append(f"  INBOX: [{cascade.bright} bold]✉ {self.unread_count} unread[/]")
-        else:
-            lines.append(f"  INBOX: [{cascade.dim}]no unread[/]")
-        if self.conversation_count > 0:
-            lines.append(f"  CHATS: [{cascade.medium}]{self.conversation_count}[/]")
-        else:
-            lines.append(f"  CHATS: [{cascade.dim}]none[/]")
-        if self.contact_count > 0:
-            lines.append(f"  CONTACTS: [{cascade.medium}]{self.contact_count}[/]")
-        else:
-            lines.append(f"  CONTACTS: [{cascade.dim}]none[/]")
-        if self.auto_reply_enabled:
-            lines.append(f"  AUTO-REPLY: {SemanticSymbols.ONLINE} [{cascade.medium}]on[/]")
-
         return lines
 
     def _render_right_column(self, cascade: object) -> list[str]:
