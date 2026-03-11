@@ -4,12 +4,19 @@ Renders a single-line pipe-delimited bar showing daemon/mesh status.
 All-nominal state renders dim; anomalies promote to bright/warning colors.
 """
 
+import logging
+
 from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import Static
 
 from styrened.models.rns_error import RNSErrorState
 from styrened.services.hub_connection import HubStatus
+
+log = logging.getLogger(__name__)
+
+# Max chars for error message in the status bar to stay within 76-col budget.
+_MAX_ERROR_MSG_LEN = 20
 
 
 class HomeStatusBar(Static):
@@ -49,7 +56,10 @@ class HomeStatusBar(Static):
             label = "RNS ○ offline"
             seg = Text(label, style=style)
             if self.error_state and self.error_state.message:
-                seg.append(f" ({self.error_state.message})", style=style)
+                msg = self.error_state.message
+                if len(msg) > _MAX_ERROR_MSG_LEN:
+                    msg = msg[:_MAX_ERROR_MSG_LEN - 1] + "…"
+                seg.append(f" ({msg})", style=style)
             segments.append(seg)
 
         # Interfaces
@@ -110,14 +120,28 @@ class HomeStatusBar(Static):
         try:
             self.update(self.render())
         except Exception:
-            # Guard against NoActiveAppError during init or testing
-            pass
+            log.debug("HomeStatusBar._rerender failed", exc_info=True)
 
-    watch_rns_online = _rerender
-    watch_hub_status = _rerender
-    watch_interface_count = _rerender
-    watch_styrene_mesh_count = _rerender
-    watch_daemon_connected = _rerender
-    watch_daemon_uptime = _rerender
-    watch_unread_count = _rerender
-    watch_error_state = _rerender
+    def watch_rns_online(self) -> None:
+        self._rerender()
+
+    def watch_hub_status(self) -> None:
+        self._rerender()
+
+    def watch_interface_count(self) -> None:
+        self._rerender()
+
+    def watch_styrene_mesh_count(self) -> None:
+        self._rerender()
+
+    def watch_daemon_connected(self) -> None:
+        self._rerender()
+
+    def watch_daemon_uptime(self) -> None:
+        self._rerender()
+
+    def watch_unread_count(self) -> None:
+        self._rerender()
+
+    def watch_error_state(self) -> None:
+        self._rerender()

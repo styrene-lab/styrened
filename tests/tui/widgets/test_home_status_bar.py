@@ -29,9 +29,10 @@ def _make_bar(**kwargs) -> HomeStatusBar:
     """Create a HomeStatusBar with values set without triggering watchers.
 
     Textual reactive descriptors require an active app context when set
-    normally.  We bypass the descriptor by writing directly to the internal
-    ``_reactive_<name>`` attribute that Textual's ``reactive`` uses for storage.
-    All reactives are pre-initialized to prevent lazy-init cascade.
+    normally.  We bypass via ``_reactive_<name>`` — this is a Textual
+    internal and may break on upgrades.  If tests start failing after a
+    Textual version bump, check ``reactive.__set_name__`` for the current
+    storage attribute name.
     """
     bar = HomeStatusBar()
     merged = {**_DEFAULTS, **kwargs}
@@ -209,6 +210,31 @@ class TestWidthConstraint:
         text = _render_rich(bar)
         # plain text length should be <= 76 chars (max spec)
         assert len(text.plain) <= 76, f"Too wide: {len(text.plain)} chars: {text.plain!r}"
+
+
+class TestErrorMessageTruncation:
+    """Long error messages are truncated to stay within width budget."""
+
+    def test_long_error_message_truncated(self) -> None:
+        """A very long error_state message is capped to keep bar narrow."""
+        bar = _make_bar(
+            rns_online=False,
+            error_state=RNSErrorState(
+                category=RNSErrorCategory.INTERFACE_FAILURE,
+                message="A" * 80,
+            ),
+            daemon_connected=True,
+        )
+
+        text = _render_rich(bar)
+        plain = text.plain
+        assert "RNS ○ offline" in plain
+        # The full 80-char message must NOT appear
+        assert "A" * 80 not in plain
+        # Must end with ellipsis
+        assert "…)" in plain
+        # Total width must stay within budget
+        assert len(plain) <= 76, f"Too wide: {len(plain)} chars: {plain!r}"
 
 
 class TestHubVariants:
