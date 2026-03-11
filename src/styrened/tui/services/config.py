@@ -224,6 +224,8 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
             config.tui.show_hardware_panel = bool(tui_data["show_hardware_panel"])
         if "confirm_destructive" in tui_data:
             config.tui.confirm_destructive = bool(tui_data["confirm_destructive"])
+        if "identity_nudge_dismissed" in tui_data:
+            config.tui.identity_nudge_dismissed = bool(tui_data["identity_nudge_dismissed"])
         # use_ipc is silently ignored for backward compatibility with old configs
 
     # Fleet settings
@@ -410,6 +412,7 @@ def _config_to_dict(config: StyreneConfig) -> dict[str, Any]:
             "log_level": config.tui.log_level.value,
             "show_hardware_panel": config.tui.show_hardware_panel,
             "confirm_destructive": config.tui.confirm_destructive,
+            "identity_nudge_dismissed": config.tui.identity_nudge_dismissed,
         },
         "fleet": {
             "edge_fleet_path": (
