@@ -3136,3 +3136,30 @@ class IPCHandlers:
             return ResultResponse(data={"results": results})
         except Exception as e:
             return ErrorResponse.internal_error(f"Speedtest failed: {e}")
+
+    # -------------------------------------------------------------------------
+    # Boundary logging
+    # -------------------------------------------------------------------------
+
+    async def handle_cmd_boundary_snapshot(self, request: IPCRequest) -> IPCResponse:
+        """Return a snapshot of the boundary log ring buffer.
+
+        Returns up to 200 serialized boundary records with keys:
+        ts, boundary, severity, retryable, stack_name, operation, message.
+        Returns an empty list if the handler is not initialised.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        boundary_handler = getattr(self.daemon, "_boundary_handler", None)
+        if boundary_handler is None:
+            return ResultResponse(data={"records": []})
+
+        try:
+            records = boundary_handler.snapshot()
+            return ResultResponse(data={"records": records})
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Boundary snapshot failed: {e}")
+

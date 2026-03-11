@@ -758,6 +758,16 @@ class CmdDatalinkInfoRequest(IPCRequest):
 
 
 @dataclass
+class CmdBoundarySnapshotRequest(IPCRequest):
+    """Request a snapshot of the boundary log ring buffer."""
+
+    MSG_TYPE = IPCMessageType.CMD_BOUNDARY_SNAPSHOT
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -1659,6 +1669,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdDatalinkInfoRequest(
             destination_hash=payload.get("destination_hash", ""),
         )
+    elif msg_type == IPCMessageType.CMD_BOUNDARY_SNAPSHOT:
+        return CmdBoundarySnapshotRequest()
     elif msg_type == IPCMessageType.SUB_MESSAGES:
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))
     elif msg_type == IPCMessageType.SUB_DEVICES:
