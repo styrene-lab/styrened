@@ -686,6 +686,21 @@ class IPCBridge:
 
     # ── Subscriptions ──────────────────────────────────────────────
 
+    async def boundary_snapshot(self) -> list[dict[str, Any]]:
+        """Return a snapshot of the boundary log ring buffer from the daemon.
+
+        Returns up to 200 records with keys: ts, boundary, severity,
+        retryable, stack_name, operation, message.
+        Returns empty list if handler is not initialised or on error.
+        """
+        try:
+            result = await self._call("boundary_snapshot")
+            if isinstance(result, dict):
+                return result.get("records", [])
+            return []
+        except Exception:
+            return []
+
     async def subscribe_devices(self) -> bool:
         """Subscribe to real-time device events."""
         return await self._call("subscribe_devices")
