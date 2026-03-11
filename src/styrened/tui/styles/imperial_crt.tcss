@@ -460,14 +460,13 @@ Header {
     height: 1fr;
 }
 
-/* Activity feed: smaller portion, grows with content */
-#activity-feed-panel {
+/* Comms summary panel */
+#comms-summary-panel {
     height: 1fr;
-    min-height: 4;
-    max-height: 16;
+    min-height: 8;
 }
 
-#activity-feed-panel > .hp-content {
+#comms-summary-panel > .hp-content {
     height: 1fr;
 }
 

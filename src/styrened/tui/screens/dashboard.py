@@ -13,10 +13,7 @@ from textual.containers import Container
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
-from textual.worker import Worker
-
 from styrened import __version__ as _TUI_VERSION
-from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hardware import (
     PlatformNotSupportedError,
     get_disks,
@@ -25,7 +22,7 @@ from styrened.services.hardware import (
 )
 from styrened.tui.services.config import load_config
 from styrened.tui.services.reticulum import start_discovery
-from styrened.tui.widgets.activity_feed import ActivityFeedWidget
+from styrened.tui.widgets.comms_summary import CommsSummaryWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 from styrened.ui_state.daemon import (
@@ -109,7 +106,6 @@ class DashboardScreen(Screen[None]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._hub_retry_timer: Timer | None = None
-        self._activity_worker: Worker | None = None
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -138,19 +134,11 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
-            self._activity_worker = self.run_worker(
-                self._subscribe_activity(),
-                group="dashboard-activity",
-                exclusive=True,
-            )
 
     def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
         """Pause periodic refresh while Home is not the active screen."""
         if self._hub_retry_timer is not None:
             self._hub_retry_timer.pause()
-        if self._activity_worker is not None:
-            self._activity_worker.cancel()
-            self._activity_worker = None
 
     def on_screen_resume(self, event: events.ScreenResume) -> None:
         """Refresh Home panels when the operator returns from another workspace."""
@@ -167,20 +155,12 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
-            self._activity_worker = self.run_worker(
-                self._subscribe_activity(),
-                group="dashboard-activity",
-                exclusive=True,
-            )
 
     def on_unmount(self) -> None:
         """Stop timers when Home is removed from the screen stack."""
         if self._hub_retry_timer is not None:
             self._hub_retry_timer.stop()
             self._hub_retry_timer = None
-        if self._activity_worker is not None:
-            self._activity_worker.cancel()
-            self._activity_worker = None
 
     def _retry_hub_connection(self) -> None:
         """Periodically poll hub status via IPC."""
@@ -261,9 +241,9 @@ class DashboardScreen(Screen[None]):
                 id="node-info-panel",
             )
             yield HighlightedPanel(
-                ActivityFeedWidget(id="activity-feed-widget"),
-                title="RECENT ACTIVITY",
-                id="activity-feed-panel",
+                CommsSummaryWidget(id="comms-summary-widget"),
+                title="COMMS",
+                id="comms-summary-panel",
             )
         yield Footer()
 
@@ -324,12 +304,6 @@ class DashboardScreen(Screen[None]):
             self._apply_local_panel_snapshot(node_info)
             if self._ipc_bridge is None:
                 node_info.refresh_data()
-        except Exception:
-            pass
-
-        try:
-            activity = self.query_one(ActivityFeedWidget)
-            activity.clear()
         except Exception:
             pass
 
@@ -439,20 +413,4 @@ class DashboardScreen(Screen[None]):
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
-    async def _subscribe_activity(self) -> None:
-        """Subscribe to activity events via IPC and push into ActivityFeedWidget."""
-        bridge = self._ipc_bridge
-        if bridge is None:
-            return
-        try:
-            await bridge.subscribe_activity()
-            async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
-                if event_type != IPCMessageType.EVENT_ACTIVITY:
-                    continue
-                try:
-                    activity_widget = self.query_one(ActivityFeedWidget)
-                    activity_widget.add_event(event.get("event_type", "unknown"), event)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+
