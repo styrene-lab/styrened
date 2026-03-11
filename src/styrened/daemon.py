@@ -2505,6 +2505,49 @@ async def run_daemon(config: CoreConfig) -> None:
         sys.exit(1)
 
 
+def _install_thread_excepthook() -> None:
+    """Install a threading.excepthook that handles known benign RNS errors.
+
+    RNS spawns daemon threads for ratchet persistence.  If two daemon
+    instances share the same storagepath during a transition (e.g. the
+    system service stops mid-write while the dev daemon starts), the
+    ``os.replace(outpath, finalpath)`` in RNS's ``persist_job`` raises
+    ``FileNotFoundError`` because the ``.out`` temp file no longer exists.
+    RNS catches the error *outside* the thread (around the
+    ``threading.Thread(...).start()`` call) so the thread's own exception
+    escapes to ``threading.excepthook`` and prints an alarming traceback to
+    stderr.
+
+    This hook suppresses that specific, self-healing error at DEBUG level
+    and falls back to the default hook for everything else.
+    """
+    import threading
+
+    _default_hook = threading.excepthook
+
+    def _hook(args: threading.ExceptHookArgs) -> None:
+        exc = args.exc_value
+        if (
+            isinstance(exc, FileNotFoundError)
+            and args.exc_type is FileNotFoundError
+            and args.thread is not None
+            and getattr(args.thread, "daemon", False)
+            # Match the RNS persist_job signature: .out → final rename failure
+            and exc.filename is not None
+            and exc.filename.endswith(".out")
+            and "/ratchets/" in exc.filename
+        ):
+            logger.debug(
+                "RNS ratchet persist race (benign, auto-retried): %s → %s",
+                exc.filename,
+                exc.filename2 or exc.filename.removesuffix(".out"),
+            )
+            return
+        _default_hook(args)
+
+    threading.excepthook = _hook
+
+
 def main() -> None:
     """Entry point for headless daemon."""
     # Setup logging
@@ -2512,6 +2555,8 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+
+    _install_thread_excepthook()
 
     # Load config (try core config, fallback to default)
     try:

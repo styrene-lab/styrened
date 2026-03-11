@@ -522,3 +522,80 @@ class TestDaemonReconnection:
                 daemon._handle_rns_reconnection()
 
             mock_announce.assert_called_once()
+
+
+# ===================================================================
+# Thread excepthook — RNS ratchet persist race
+# ===================================================================
+
+class TestRatchetPersistHook:
+    """_install_thread_excepthook suppresses benign RNS ratchet FileNotFoundErrors."""
+
+    def _make_args(self, filename, filename2=None, is_daemon_thread=True):
+        import threading
+        exc = FileNotFoundError(2, "No such file or directory")
+        exc.filename = filename
+        exc.filename2 = filename2
+        thread = threading.Thread(target=lambda: None, daemon=is_daemon_thread)
+        # ExceptHookArgs is a structseq — positional only in Python 3.12+
+        return threading.ExceptHookArgs(
+            (FileNotFoundError, exc, None, thread)
+        )
+
+    def test_ratchet_out_file_suppressed(self, caplog):
+        """FileNotFoundError on a ratchet .out file in a daemon thread → DEBUG, not propagated."""
+        import logging
+        import threading
+        from styrened.daemon import _install_thread_excepthook
+
+        original = threading.excepthook
+        try:
+            _install_thread_excepthook()
+            args = self._make_args(
+                "/home/user/.config/reticulum/storage/ratchets/d3a3c380.out",
+                "/home/user/.config/reticulum/storage/ratchets/d3a3c380",
+            )
+            with caplog.at_level(logging.DEBUG, logger="styrened.daemon"):
+                threading.excepthook(args)
+
+            assert any("ratchet persist race" in r.message for r in caplog.records)
+            assert all(r.levelno == logging.DEBUG for r in caplog.records if "ratchet" in r.message)
+        finally:
+            threading.excepthook = original
+
+    def test_non_ratchet_error_delegates_to_default(self):
+        """Non-ratchet FileNotFoundError is forwarded to the original hook."""
+        import threading
+        from styrened.daemon import _install_thread_excepthook
+
+        calls = []
+        sentinel = lambda a: calls.append(a)  # noqa: E731
+        original = threading.excepthook
+        threading.excepthook = sentinel
+        try:
+            _install_thread_excepthook()
+            args = self._make_args("/tmp/some_other_file.out")
+            threading.excepthook(args)
+            assert len(calls) == 1
+        finally:
+            threading.excepthook = original
+
+    def test_non_daemon_thread_delegates_to_default(self):
+        """Same ratchet error from a non-daemon thread is still forwarded."""
+        import threading
+        from styrened.daemon import _install_thread_excepthook
+
+        calls = []
+        sentinel = lambda a: calls.append(a)  # noqa: E731
+        original = threading.excepthook
+        threading.excepthook = sentinel
+        try:
+            _install_thread_excepthook()
+            args = self._make_args(
+                "/home/user/.config/reticulum/storage/ratchets/abc123.out",
+                is_daemon_thread=False,
+            )
+            threading.excepthook(args)
+            assert len(calls) == 1
+        finally:
+            threading.excepthook = original
