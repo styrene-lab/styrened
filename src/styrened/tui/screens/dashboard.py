@@ -21,6 +21,37 @@ from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
 from styrened.tui.widgets.home_status_bar import HomeStatusBar
 
 
+class IdentityNudgeBanner(Static):
+    """Dismissible banner nudging the operator to set up their identity."""
+
+    DEFAULT_CSS = """
+    IdentityNudgeBanner {
+        background: $primary 20%;
+        color: $text;
+        border: tall $primary;
+        padding: 0 1;
+        height: 3;
+        margin: 0 0 1 0;
+        display: none;
+    }
+    IdentityNudgeBanner.visible {
+        display: block;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "👤  Set up your identity — press [bold]S[/bold] to open Settings",
+            id="identity-nudge-banner",
+        )
+
+    def show_nudge(self) -> None:
+        self.add_class("visible")
+
+    def hide(self) -> None:
+        self.remove_class("visible")
+
+
 class VersionMismatchBanner(Static):
     """Dismissible warning banner shown when daemon and TUI versions differ."""
 
@@ -89,6 +120,7 @@ class DashboardScreen(Screen[None]):
         Binding("d", "dismiss_banner", "Dismiss", show=False),
         Binding("n", "open_exploration", "Nodes", show=True),
         Binding("e", "open_exploration", "Nodes", show=False),
+        Binding("s", "open_settings", "Settings", show=False),
     ]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -105,10 +137,13 @@ class DashboardScreen(Screen[None]):
             return None
 
     def on_mount(self) -> None:
-        """Initialise Home: start discovery, then fetch daemon state."""
+        """Initialise Home: start discovery, then check identity nudge."""
         # Keep discovery running so ExplorationScreen has fresh data when
         # the operator switches to Nodes. Home itself doesn't render the tree.
         start_discovery()
+
+        # Show identity nudge if user hasn't configured their identity
+        self._check_identity_nudge()
 
         self._hub_retry_timer = self.set_interval(30.0, self._retry_hub_connection)
 
@@ -156,6 +191,7 @@ class DashboardScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield IdentityNudgeBanner()
         yield VersionMismatchBanner()
         with Container(id="dashboard-container"):
             yield HighlightedPanel(
@@ -191,9 +227,50 @@ class DashboardScreen(Screen[None]):
         self.action_refresh()
 
     def action_dismiss_banner(self) -> None:
-        """D: dismiss the version mismatch banner."""
+        """D: dismiss the version mismatch banner and/or identity nudge."""
         try:
             self.query_one(VersionMismatchBanner).hide()
+        except Exception:
+            pass
+        self._dismiss_identity_nudge()
+
+    def _check_identity_nudge(self) -> None:
+        """Show the identity nudge if the operator hasn't configured identity."""
+        try:
+            config = self.app.config  # type: ignore[attr-defined]
+            if config.tui.identity_nudge_dismissed:
+                return
+            # Check if identity is still at default
+            identity = getattr(config, "identity", None) or getattr(
+                getattr(config, "core", None), "identity", None
+            )
+            if identity is None:
+                return
+            display_name = getattr(identity, "display_name", "Anonymous Styrene")
+            if display_name in ("Anonymous Styrene", ""):
+                self.query_one(IdentityNudgeBanner).show_nudge()
+        except Exception:
+            pass
+
+    def _dismiss_identity_nudge(self) -> None:
+        """Dismiss the identity nudge and persist the dismissal to config."""
+        try:
+            banner = self.query_one(IdentityNudgeBanner)
+            if not banner.has_class("visible"):
+                return
+            banner.hide()
+            config = self.app.config  # type: ignore[attr-defined]
+            config.tui.identity_nudge_dismissed = True
+            from styrened.tui.services.config import save_config
+            save_config(config)
+        except Exception:
+            pass
+
+    def action_open_settings(self) -> None:
+        """S: open settings screen (also dismisses identity nudge)."""
+        self._dismiss_identity_nudge()
+        try:
+            self.app.action_open_settings()  # type: ignore[attr-defined]
         except Exception:
             pass
 
