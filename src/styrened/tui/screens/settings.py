@@ -249,6 +249,38 @@ class SettingsScreen(Screen[None]):
                                 "Peer: connects to shared RNS instance.",
                                 classes="setting-description",
                             ),
+                            Static(
+                                "[b]Overlay Adapters[/b]",
+                                classes="setting-description",
+                            ),
+                            Horizontal(
+                                Label("Yggdrasil:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.yggdrasil.mode.value != "disabled",
+                                    id="yggdrasil_enabled",
+                                    classes="setting-checkbox",
+                                ),
+                                Label(
+                                    self._adapter_status_label("yggdrasil"),
+                                    id="yggdrasil_status",
+                                    classes="setting-description",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Horizontal(
+                                Label("I2P:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.core.i2p.mode.value != "disabled",
+                                    id="i2p_enabled",
+                                    classes="setting-checkbox",
+                                ),
+                                Label(
+                                    self._adapter_status_label("i2p"),
+                                    id="i2p_status",
+                                    classes="setting-description",
+                                ),
+                                classes="setting-row",
+                            ),
                             title="TRANSPORT",
                             classes="panel-interactive",
                         )
@@ -837,6 +869,116 @@ class SettingsScreen(Screen[None]):
         return closest[1]
 
     # ------------------------------------------------------------------
+    # Adapter status
+    # ------------------------------------------------------------------
+
+    def _adapter_status_label(self, adapter_name: str) -> str:
+        """Return a status label for an adapter: Not installed / Disabled / Managed / Adopted."""
+        from styrened.models.daemon_mode import DaemonMode
+
+        if adapter_name == "yggdrasil":
+            mode = self.config.core.yggdrasil.mode
+        elif adapter_name == "i2p":
+            mode = self.config.core.i2p.mode
+        else:
+            return "Unknown"
+
+        if mode == DaemonMode.DISABLED:
+            # Check if binary is available
+            try:
+                if adapter_name == "yggdrasil":
+                    from styrened.services.yggdrasil import YggdrasilAdapter
+                    adapter = YggdrasilAdapter(self.config.core.yggdrasil)
+                    found = adapter._find_binary()
+                else:
+                    from styrened.services.i2p import I2PAdapter
+                    adapter = I2PAdapter(self.config.core.i2p)
+                    found = adapter._find_binary()
+                return "Disabled" if found else "Not installed"
+            except Exception:
+                return "Not installed"
+        elif mode == DaemonMode.MANAGED:
+            return "Managed"
+        elif mode == DaemonMode.ADOPT:
+            return "Adopted"
+        return mode.value.title()
+
+    def _on_adapter_toggle(self, adapter_name: str, enabled: bool) -> None:
+        """Handle an adapter toggle change."""
+        from styrened.models.daemon_mode import DaemonMode
+
+        if not enabled:
+            # Disable the adapter
+            if adapter_name == "yggdrasil":
+                self.config.core.yggdrasil.mode = DaemonMode.DISABLED
+            elif adapter_name == "i2p":
+                self.config.core.i2p.mode = DaemonMode.DISABLED
+            self._update_adapter_status(adapter_name)
+            return
+
+        # Check if binary exists
+        found = None
+        try:
+            if adapter_name == "yggdrasil":
+                from styrened.services.yggdrasil import YggdrasilAdapter
+                adapter = YggdrasilAdapter(self.config.core.yggdrasil)
+                found = adapter._find_binary()
+            else:
+                from styrened.services.i2p import I2PAdapter
+                adapter = I2PAdapter(self.config.core.i2p)
+                found = adapter._find_binary()
+        except Exception:
+            pass
+
+        if found:
+            # Binary exists — set to MANAGED
+            if adapter_name == "yggdrasil":
+                self.config.core.yggdrasil.mode = DaemonMode.MANAGED
+            elif adapter_name == "i2p":
+                self.config.core.i2p.mode = DaemonMode.MANAGED
+            self._update_adapter_status(adapter_name)
+        else:
+            # Binary missing — show provision modal
+            from styrened.services.binary_provisioner import BinaryProvisioner
+            from styrened.tui.screens.provision_modal import ProvisionModal
+
+            provisioner = BinaryProvisioner()
+            platform_key = provisioner.detect_platform()
+            manifest = provisioner._load_manifest()
+            adapters = manifest.get("adapters", {})
+            version = adapters.get(adapter_name, {}).get("version", "unknown")
+
+            def on_dismiss(result: Path | None) -> None:
+                if result is not None:
+                    # Success — set to MANAGED
+                    if adapter_name == "yggdrasil":
+                        self.config.core.yggdrasil.mode = DaemonMode.MANAGED
+                    elif adapter_name == "i2p":
+                        self.config.core.i2p.mode = DaemonMode.MANAGED
+                else:
+                    # Failed/cancelled — revert toggle
+                    toggle_id = f"{adapter_name}_enabled"
+                    try:
+                        switch = self.query_one(f"#{toggle_id}", Switch)
+                        switch.value = False
+                    except Exception:
+                        pass
+                self._update_adapter_status(adapter_name)
+
+            self.app.push_screen(
+                ProvisionModal(adapter_name, platform_key, version),
+                on_dismiss,
+            )
+
+    def _update_adapter_status(self, adapter_name: str) -> None:
+        """Update the status label for an adapter."""
+        try:
+            label = self.query_one(f"#{adapter_name}_status", Label)
+            label.update(self._adapter_status_label(adapter_name))
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Color editor
     # ------------------------------------------------------------------
 
@@ -1164,6 +1306,16 @@ class SettingsScreen(Screen[None]):
         if widget and "peer-row" in widget.classes:
             widget.remove()
 
+    @on(Switch.Changed, "#yggdrasil_enabled")
+    def on_yggdrasil_toggle(self, event: Switch.Changed) -> None:
+        """Handle Yggdrasil adapter toggle."""
+        self._on_adapter_toggle("yggdrasil", event.value)
+
+    @on(Switch.Changed, "#i2p_enabled")
+    def on_i2p_toggle(self, event: Switch.Changed) -> None:
+        """Handle I2P adapter toggle."""
+        self._on_adapter_toggle("i2p", event.value)
+
     @on(Switch.Changed, "#community_hub_enabled")
     def on_community_hub_toggle(self, event: Switch.Changed) -> None:
         """When Community Hub is toggled, sync the propagation destination field."""
@@ -1431,6 +1583,10 @@ class SettingsScreen(Screen[None]):
             else:
                 self._show_error("Invalid announce interval selection")
                 return
+
+            # Adapter modes — persist toggle state
+            draft_config.core.yggdrasil.mode = self.config.core.yggdrasil.mode
+            draft_config.core.i2p.mode = self.config.core.i2p.mode
 
             # Community Hub — ensure peer and propagation_destination are in sync
             community_hub_on = self.query_one("#community_hub_enabled", Switch).value
