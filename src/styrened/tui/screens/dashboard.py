@@ -140,11 +140,7 @@ class DashboardScreen(Screen[None]):
         """Refresh Home status panels."""
         try:
             cop_summary = self.query_one(CopActivitySummary)
-            cop_summary._unread.clear()
-            cop_summary._discoveries.clear()
-            cop_summary._anomalies.clear()
-            cop_summary._file_situations.clear()
-            cop_summary._security_situations.clear()
+            cop_summary._ephemeral_events.clear()
             cop_summary.refresh()
         except Exception:
             pass
@@ -257,6 +253,34 @@ class DashboardScreen(Screen[None]):
 
                 table.update_nodes(nodes, unread_map)
 
+                # Update COP activity summary from current state
+                try:
+                    cop_summary = self.query_one(CopActivitySummary)
+                    # Build identity_hash → name map for unread attribution
+                    name_map: dict[str, str] = {}
+                    for node in nodes:
+                        ih = getattr(node, "identity_hash", "")
+                        name = getattr(node, "name", "") or ""
+                        if ih and name:
+                            name_map[ih] = name
+
+                    # Hub status string
+                    hub_str = ""
+                    try:
+                        bar = self.query_one(HomeStatusBar)
+                        hub_str = bar.hub_status.value if bar.hub_status else ""
+                    except Exception:
+                        pass
+
+                    cop_summary.update_from_state(
+                        nodes=nodes,
+                        unread_map=unread_map,
+                        hub_status=hub_str,
+                        node_name_map=name_map,
+                    )
+                except Exception:
+                    pass
+
                 # Update unread count on status bar
                 try:
                     bar = self.query_one(HomeStatusBar)
@@ -274,7 +298,13 @@ class DashboardScreen(Screen[None]):
                 await asyncio.gather(*pending, return_exceptions=True)
 
     async def _subscribe_activity(self) -> None:
-        """Subscribe to activity events via IPC and push into CopActivitySummary."""
+        """Subscribe to activity events via IPC — ephemeral events only.
+
+        Store-backed situations (nodes, unread, hub) are handled by the
+        polling cycle in ``_fetch_daemon_status()``.  This subscription
+        only feeds ephemeral events (file transfers, PQC) that aren't
+        in the stores.
+        """
         bridge = self._ipc_bridge
         if bridge is None:
             return
@@ -285,7 +315,7 @@ class DashboardScreen(Screen[None]):
                     continue
                 try:
                     cop_summary = self.query_one(CopActivitySummary)
-                    cop_summary.ingest_event(event.get("type", "unknown"), event)
+                    cop_summary.add_ephemeral(event.get("type", "unknown"), event)
                 except Exception:
                     pass
         except Exception:

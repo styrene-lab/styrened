@@ -1,7 +1,7 @@
 ---
 id: cop-activity-summary
 title: COP Activity Summary Widget
-status: implementing
+status: implemented
 parent: tui-home-cop
 tags: [tui, cop, activity, dashboard]
 open_questions: []

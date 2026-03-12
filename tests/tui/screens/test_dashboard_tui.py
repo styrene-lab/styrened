@@ -346,7 +346,7 @@ class TestDashboardActivitySubscription:
             await screen._subscribe_activity()
 
         bridge.subscribe_activity.assert_awaited_once_with()
-        activity_widget.ingest_event.assert_called_once_with(
+        activity_widget.add_ephemeral.assert_called_once_with(
             "announce_sent",
             {"type": "announce_sent"},
         )

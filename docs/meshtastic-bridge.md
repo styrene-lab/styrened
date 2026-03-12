@@ -40,6 +40,11 @@ Optional bolt-on service bridging styrened to the Meshtastic mesh via local radi
 **Status:** decided
 **Rationale:** Meshtastic has no cryptographic identity model compatible with RNS/LXMF. PSK channels provide confidentiality (if non-default key) but zero authentication — any node with the key is indistinguishable. Styrened's security model (Ed25519 identity → RBAC role → PQC session → capability-gated RPC) cannot extend to Meshtastic without becoming meaningless. Therefore: Meshtastic nodes exist in a permanent UNTRUSTED tier below STRANGER. They appear in the COP with a distinct visual treatment (dimmed, different icon, [Mesh] tag) making the trust boundary immediately obvious. No RBAC promotion possible. No PQC handshake attempted. No RPC commands accepted from or sent to Meshtastic nodes.
 
+### Decision: Single [Mesh] transport label for all non-RNS LoRa mesh protocols
+
+**Status:** decided
+**Rationale:** Meshtastic, MeshCore, and future LoRa mesh protocols all present the same to the operator: nearby radio nodes with no RNS identity. Separate COP labels ([Mshtc], [MCore]) would be noise — the operator cares about 'LoRa nodes are visible' not which firmware they run. One [Mesh] tag, separate adapter classes internally (different serial protocols), shared UNTRUSTED presentation. The adapter class name (MeshtasticBridge, MeshCoreBridge) distinguishes them in config/logs, but the COP doesn't need to.
+
 ## Open Questions
 
 *No open questions.*

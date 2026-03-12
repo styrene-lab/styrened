@@ -1,7 +1,8 @@
-"""Tests for CopActivitySummary widget — coalesced COP situation lines."""
+"""Tests for CopActivitySummary widget — state-driven COP situation lines."""
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
@@ -9,9 +10,22 @@ import pytest
 from styrened.tui.widgets.cop_activity_summary import (
     CopActivitySummary,
     SituationPriority,
-    _RESOLVED_TTL,
     transport_label,
 )
+
+
+# ---------------------------------------------------------------------------
+# Fake node for testing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FakeNode:
+    name: str = "test-node"
+    destination_hash: str = "abcd1234"
+    identity_hash: str = "ih_abcd"
+    discovered_via: str | None = "TCPClientInterface"
+    status: str = "active"
+    device_type: str = "styrene_node"
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +49,7 @@ class TestTransportLabel:
         ("MeshtasticBridge", "Mesh"),
         (None, "—"),
         ("", "—"),
-        ("SomeNewInterface", "Some"),  # fallback: first 4 chars
+        ("SomeNewInterface", "Some"),
     ])
     def test_transport_label(self, via, expected):
         assert transport_label(via) == expected
@@ -45,125 +59,105 @@ class TestTransportLabel:
 
 
 # ---------------------------------------------------------------------------
-# Event coalescing
+# State-driven update
 # ---------------------------------------------------------------------------
 
-class TestUnreadCoalescing:
-
-    def test_groups_by_peer(self):
-        w = CopActivitySummary()
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": False})
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": False})
-        w.ingest_event("new_message", {"peer_name": "bravo", "is_outgoing": False})
-        assert w._unread == {"alpha": 2, "bravo": 1}
-
-    def test_ignores_outgoing(self):
-        w = CopActivitySummary()
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": True})
-        assert w._unread == {}
-
-    def test_render_contains_count_and_names(self):
-        w = CopActivitySummary()
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": False})
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": False})
-        w.ingest_event("new_message", {"peer_name": "bravo", "is_outgoing": False})
-        output = w.render()
-        assert "3 unread" in output
-        assert "alpha" in output
-        assert "bravo" in output
-
-    def test_clear_unread_specific_peer(self):
-        w = CopActivitySummary()
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": False})
-        w.ingest_event("new_message", {"peer_name": "bravo", "is_outgoing": False})
-        w.clear_unread("alpha")
-        assert "alpha" not in w._unread
-        assert "bravo" in w._unread
-
-    def test_clear_unread_all(self):
-        w = CopActivitySummary()
-        w.ingest_event("new_message", {"peer_name": "alpha", "is_outgoing": False})
-        w.clear_unread()
-        assert w._unread == {}
-
-
-class TestNodeDiscoveryCoalescing:
+class TestNodeDiscovery:
 
     def test_coalesces_per_transport(self):
         w = CopActivitySummary()
-        w.ingest_event("device_discovered", {
-            "peer_hash": "aaa", "metadata": {"discovered_via": "TCPClientInterface", "name": "n1", "status": "active"},
-        })
-        w.ingest_event("device_discovered", {
-            "peer_hash": "bbb", "metadata": {"discovered_via": "TCPClientInterface", "name": "n2", "status": "active"},
-        })
-        w.ingest_event("device_discovered", {
-            "peer_hash": "ccc", "metadata": {"discovered_via": "AutoInterface", "name": "n3", "status": "active"},
-        })
-        assert w._discoveries["TCP"][0] == 2
-        assert w._discoveries["Auto"][0] == 1
-
-    def test_render_shows_transport_tags(self):
-        w = CopActivitySummary()
-        w.ingest_event("device_discovered", {
-            "peer_hash": "aaa", "metadata": {"discovered_via": "AutoInterface", "name": "n1", "status": "active"},
-        })
+        nodes = [
+            FakeNode(name="n1", discovered_via="TCPClientInterface"),
+            FakeNode(name="n2", discovered_via="TCPClientInterface"),
+            FakeNode(name="n3", discovered_via="AutoInterface"),
+        ]
+        w.update_from_state(nodes)
         output = w.render()
+        assert "[TCP]" in output
         assert "[Auto]" in output
-        assert "1 node discovered" in output
+        assert "2 nodes [TCP]" in output
+        assert "1 node [Auto]" in output
 
-    def test_plural_nodes(self):
+    def test_no_transport_shows_dash(self):
         w = CopActivitySummary()
-        for i in range(3):
-            w.ingest_event("device_discovered", {
-                "peer_hash": f"h{i}", "metadata": {"discovered_via": "TCPClientInterface", "name": f"n{i}", "status": "active"},
-            })
+        nodes = [FakeNode(name="n1", discovered_via=None)]
+        w.update_from_state(nodes)
         output = w.render()
-        assert "3 nodes discovered" in output
+        assert "[—]" in output
+
+    def test_plural_singular(self):
+        w = CopActivitySummary()
+        w.update_from_state([FakeNode()])
+        assert "1 node" in w.render()
+        w.update_from_state([FakeNode(name="a"), FakeNode(name="b")])
+        assert "2 nodes" in w.render()
 
 
 class TestNodeAnomaly:
 
-    def test_offline_creates_anomaly(self):
+    def test_offline_shows_anomaly(self):
         w = CopActivitySummary()
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "offline"},
-        })
-        assert "relay-east" in w._anomalies
-        assert not w._anomalies["relay-east"].is_resolved
-
-    def test_online_resolves_anomaly(self):
-        w = CopActivitySummary()
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "offline"},
-        })
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "active"},
-        })
-        assert w._anomalies["relay-east"].is_resolved
-
-    def test_anomaly_includes_transport_tag(self):
-        w = CopActivitySummary()
-        # First discover via Ygg, then lose
-        w.ingest_event("device_discovered", {
-            "peer_hash": "aaa", "metadata": {"discovered_via": "YggdrasilInterface", "name": "relay-east", "status": "active"},
-        })
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "offline"},
-        })
+        nodes = [FakeNode(name="relay-east", status="offline", discovered_via="YggdrasilInterface")]
+        w.update_from_state(nodes)
         output = w.render()
-        assert "[Ygg]" in output
         assert "relay-east" in output
+        assert "lost" in output
+        assert "[Ygg]" in output
 
-    def test_rediscovery_resolves_anomaly(self):
+    def test_offline_not_in_discovery_count(self):
         w = CopActivitySummary()
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "offline"},
-        })
-        w.ingest_event("device_discovered", {
-            "peer_hash": "aaa", "metadata": {"discovered_via": "TCPClientInterface", "name": "relay-east", "status": "active"},
-        })
-        assert w._anomalies["relay-east"].is_resolved
+        nodes = [
+            FakeNode(name="good", status="active", discovered_via="TCPClientInterface"),
+            FakeNode(name="bad", status="offline", discovered_via="TCPClientInterface"),
+        ]
+        w.update_from_state(nodes)
+        output = w.render()
+        assert "1 node [TCP]" in output  # Only the active one
+        assert "bad" in output  # Anomaly line
+
+
+class TestUnread:
+
+    def test_shows_unread_count_and_names(self):
+        w = CopActivitySummary()
+        unread = {"ih_alice": 2, "ih_bob": 1}
+        name_map = {"ih_alice": "Alice", "ih_bob": "Bob"}
+        w.update_from_state([], unread_map=unread, node_name_map=name_map)
+        output = w.render()
+        assert "3 unread" in output
+        assert "Alice" in output
+        assert "Bob" in output
+
+    def test_truncates_at_3_names(self):
+        w = CopActivitySummary()
+        unread = {"a": 1, "b": 1, "c": 1, "d": 1}
+        name_map = {"a": "A", "b": "B", "c": "C", "d": "D"}
+        w.update_from_state([], unread_map=unread, node_name_map=name_map)
+        output = w.render()
+        assert "+1" in output
+
+    def test_zero_unread_no_line(self):
+        w = CopActivitySummary()
+        w.update_from_state([], unread_map={"a": 0})
+        assert "unread" not in w.render()
+
+
+class TestHubStatus:
+
+    def test_disconnected_shows_line(self):
+        w = CopActivitySummary()
+        w.update_from_state([], hub_status="disconnected")
+        assert "hub disconnected" in w.render()
+
+    def test_connected_no_line(self):
+        w = CopActivitySummary()
+        w.update_from_state([], hub_status="connected")
+        assert "hub" not in w.render()
+
+    def test_unknown_no_line(self):
+        w = CopActivitySummary()
+        w.update_from_state([], hub_status="unknown")
+        assert "hub" not in w.render()
 
 
 # ---------------------------------------------------------------------------
@@ -174,75 +168,52 @@ class TestPriorityOrdering:
 
     def test_anomaly_before_unread_before_discovery(self):
         w = CopActivitySummary()
-        # Add discovery first
-        w.ingest_event("device_discovered", {
-            "peer_hash": "aaa", "metadata": {"discovered_via": "AutoInterface", "name": "n1", "status": "active"},
-        })
-        # Add unread
-        w.ingest_event("new_message", {"peer_name": "alice", "is_outgoing": False})
-        # Add anomaly
-        w.ingest_event("device_updated", {
-            "peer_hash": "bbb", "metadata": {"name": "relay-east", "status": "offline"},
-        })
-
+        nodes = [
+            FakeNode(name="good", status="active", discovered_via="AutoInterface"),
+            FakeNode(name="bad", status="offline", discovered_via="TCPClientInterface"),
+        ]
+        unread = {"ih_alice": 1}
+        name_map = {"ih_alice": "Alice"}
+        w.update_from_state(nodes, unread_map=unread, node_name_map=name_map)
         output = w.render()
-        lines = output.strip().split("\n")
+        lines = [l for l in output.strip().split("\n") if l.strip()]
         assert len(lines) == 3
-        # Anomaly first (▲), then unread (✉), then discovery (●)
-        assert "▲" in lines[0]
-        assert "✉" in lines[1]
-        assert "discovered" in lines[2]
+        assert "▲" in lines[0]  # Anomaly
+        assert "✉" in lines[1]  # Unread
+        assert "[Auto]" in lines[2]  # Discovery
 
 
 # ---------------------------------------------------------------------------
-# Aging
+# Ephemeral events
 # ---------------------------------------------------------------------------
 
-class TestAging:
+class TestEphemeralEvents:
 
-    def test_resolved_anomaly_shows_checkmark(self):
+    def test_file_offer(self):
         w = CopActivitySummary()
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "offline"},
-        })
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "active"},
-        })
+        w.add_ephemeral("file_offer_received", {"peer_name": "Alice", "metadata": {"filename": "report.pdf"}})
+        w.update_from_state([])  # Trigger render with ephemeral
         output = w.render()
-        assert "✓" in output
+        assert "file from Alice" in output
+        assert "report.pdf" in output
 
-    def test_expired_situations_removed(self):
+    def test_pqc_established(self):
         w = CopActivitySummary()
-        w.ingest_event("device_updated", {
-            "peer_hash": "aaa", "metadata": {"name": "relay-east", "status": "offline"},
-        })
-        w._anomalies["relay-east"].resolved_at = time.monotonic() - _RESOLVED_TTL - 1
-        w._age_situations()
-        assert "relay-east" not in w._anomalies
+        w.add_ephemeral("pqc_established", {"peer_name": "relay-east"})
+        w.update_from_state([])
+        assert "PQC session with relay-east" in w.render()
 
-
-# ---------------------------------------------------------------------------
-# Ignored events
-# ---------------------------------------------------------------------------
-
-class TestIgnoredEvents:
-
-    @pytest.mark.parametrize("event_type", [
-        "delivery_status",
-        "announce_sent",
-        "rpc_received",
-        "contact_set",
-        "contact_removed",
-        "conversation_read",
-        "conversation_deleted",
-        "identity_changed",
-        "auto_reply_changed",
-    ])
-    def test_ignored_events_create_no_situations(self, event_type):
+    def test_ignored_ephemeral(self):
         w = CopActivitySummary()
-        w.ingest_event(event_type, {"peer_hash": "abc"})
-        output = w.render()
-        assert "no recent activity" in output
+        w.add_ephemeral("announce_sent", {})
+        w.update_from_state([])
+        assert "no recent activity" in w.render()
+
+    def test_ephemeral_caps_at_4(self):
+        w = CopActivitySummary()
+        for i in range(6):
+            w.add_ephemeral("pqc_established", {"peer_name": f"peer-{i}"})
+        assert len(w._ephemeral_events) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -253,13 +224,9 @@ class TestMaxSituations:
 
     def test_caps_at_6(self):
         w = CopActivitySummary()
-        # Create 8 anomalies
-        for i in range(8):
-            w.ingest_event("device_updated", {
-                "peer_hash": f"h{i}", "metadata": {"name": f"node-{i}", "status": "offline"},
-            })
-        output = w.render()
-        lines = [l for l in output.strip().split("\n") if l.strip()]
+        nodes = [FakeNode(name=f"node-{i}", status="offline") for i in range(8)]
+        w.update_from_state(nodes)
+        lines = [l for l in w.render().strip().split("\n") if l.strip()]
         assert len(lines) == 6
 
 
@@ -271,5 +238,73 @@ class TestEmptyState:
 
     def test_empty_shows_no_recent_activity(self):
         w = CopActivitySummary()
-        output = w.render()
-        assert "no recent activity" in output
+        w.update_from_state([])
+        assert "no recent activity" in w.render()
+
+    def test_no_update_shows_no_recent_activity(self):
+        w = CopActivitySummary()
+        assert "no recent activity" in w.render()
+
+
+# ---------------------------------------------------------------------------
+# State is re-derived each call (no stale shadow state)
+# ---------------------------------------------------------------------------
+
+class TestStateless:
+
+    def test_update_replaces_not_accumulates(self):
+        w = CopActivitySummary()
+        w.update_from_state([FakeNode(name="a"), FakeNode(name="b")])
+        assert "2 nodes" in w.render()
+        w.update_from_state([FakeNode(name="a")])
+        assert "1 node" in w.render()
+        assert "2 nodes" not in w.render()
+
+    def test_anomaly_clears_when_node_recovers(self):
+        w = CopActivitySummary()
+        w.update_from_state([FakeNode(name="x", status="offline")])
+        assert "x" in w.render()
+        assert "lost" in w.render()
+        w.update_from_state([FakeNode(name="x", status="active")])
+        assert "lost" not in w.render()
+
+
+# ---------------------------------------------------------------------------
+# Dashboard integration test
+# ---------------------------------------------------------------------------
+
+class TestDashboardActivitySubscription:
+
+    @pytest.mark.asyncio
+    async def test_activity_subscription_calls_add_ephemeral(self):
+        """Activity subscription should call add_ephemeral for COP events."""
+        from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
+        from styrened.ipc.protocol import IPCMessageType
+        from styrened.tui.screens.dashboard import DashboardScreen
+
+        screen = DashboardScreen()
+        bridge = MagicMock()
+        bridge.subscribe_activity = AsyncMock(return_value=True)
+
+        async def _iter_events(_event_type):
+            yield (IPCMessageType.EVENT_ACTIVITY, {"type": "pqc_established", "peer_name": "test"})
+
+        bridge.iter_events = _iter_events
+        cop_widget = MagicMock()
+
+        with (
+            patch.object(
+                DashboardScreen,
+                "_ipc_bridge",
+                new_callable=PropertyMock,
+                return_value=bridge,
+            ),
+            patch.object(screen, "query_one", return_value=cop_widget),
+        ):
+            await screen._subscribe_activity()
+
+        cop_widget.add_ephemeral.assert_called_once_with(
+            "pqc_established",
+            {"type": "pqc_established", "peer_name": "test"},
+        )
