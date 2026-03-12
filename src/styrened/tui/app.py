@@ -292,6 +292,45 @@ class StyreneApp(App[None]):
         """
         return self._lifecycle.ipc_bridge
 
+    def _print_error_renderables(self) -> None:
+        """Override Textual's default to dump full crash tracebacks to a file.
+
+        Textual renders Rich tracebacks with show_locals=True which can
+        produce thousands of lines.  We write the full output to a
+        timestamped crash file and print a short pointer to stderr.
+        """
+        if not self._exit_renderables:
+            return
+
+        from datetime import datetime
+
+        from rich.console import Console
+        from styrened import paths
+
+        crash_dir = paths.log_dir()
+        crash_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        crash_file = crash_dir / f"crash_{ts}.txt"
+
+        # Render to file via a plain console (no color codes in file)
+        file_console = Console(file=open(crash_file, "w"), width=120, no_color=True)  # noqa: SIM115
+        for renderable in self._exit_renderables:
+            file_console.print(renderable)
+        file_console.file.close()
+
+        # Print short summary to stderr — just the last exception line
+        # plus a pointer to the crash file
+        error_count = len(self._exit_renderables)
+        exc_summary = ""
+        if self._exception is not None:
+            exc_summary = f" {type(self._exception).__name__}: {self._exception}"
+        self.error_console.print(
+            f"\n[bold red]✗ TUI crashed[/] ({error_count} error{'s' if error_count > 1 else ''}):{exc_summary}"
+            f"\n  Full traceback → [bold]{crash_file}[/]\n",
+            markup=True,
+        )
+        self._exit_renderables.clear()
+
     def __init__(
         self,
         mode: "DeploymentMode | None" = None,
