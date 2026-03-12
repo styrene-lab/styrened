@@ -381,6 +381,7 @@ class StyreneDaemon:
                 "name": device.name,
                 "device_type": device.device_type.value,
                 "status": device.status.value,
+                "discovered_via": device.discovered_via,
             },
         )
 

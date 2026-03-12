@@ -15,6 +15,7 @@ __all__ = [
     "ChatWidget",
     "ColorPickerDialog",
     "CommsSummaryWidget",
+    "CopActivitySummary",
     "HardwarePanel",
     "MessageBubble",
 ]
