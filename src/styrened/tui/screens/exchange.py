@@ -32,6 +32,7 @@ from textual.widgets import (
 
 from styrened.models.mesh_device import DeviceType
 from styrened.tui.screens.exchange_tabs import ExchangeContactsTab, ExchangeDirectTab
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.tui.screens.exploration import ReticumAnnounceTable
 from styrened.ui_state import (
     ConversationScopeKind,
@@ -161,9 +162,24 @@ class ExchangeScreen(Screen[None]):
         background: $background;
     }
 
+    ExchangeScreen #mail-content {
+        border: round $border;
+        border-title-color: $primary;
+        border-title-style: bold;
+        border-title-align: left;
+        background: $background;
+        padding: 0 1;
+    }
+
     ExchangeScreen #pages-pane-content {
         width: 100%;
         height: 100%;
+        border: round $border;
+        border-title-color: $primary;
+        border-title-style: bold;
+        border-title-align: left;
+        background: $background;
+        padding: 0 1;
     }
 
     ExchangeScreen #pages-table-section {
@@ -234,7 +250,7 @@ class ExchangeScreen(Screen[None]):
             with TabPane("Mail", id=TAB_MAIL):
                 yield Container(
                     Horizontal(
-                        Static("MAIL - Async Conversations", id="inbox-title"),
+                        Static("", id="inbox-title"),
                         Static("Auto-Reply (OOO): ", id="ooo-label"),
                         Switch(value=False, id="ooo-switch"),
                         id="inbox-header-bar",
@@ -244,7 +260,7 @@ class ExchangeScreen(Screen[None]):
                             placeholder="Destination hash or contact name...",
                             id="compose-input",
                         ),
-                        Static("[dim]Enter hash or name, then press Enter[/]", id="compose-hint"),
+                        Static(f"[{get_color_cascade().dim}]Enter hash or name, then press Enter[/]", id="compose-hint"),
                         id="compose-bar",
                     ),
                     Horizontal(
@@ -257,6 +273,7 @@ class ExchangeScreen(Screen[None]):
                         DataTable(id="conversation-table"),
                         id="inbox-container",
                     ),
+                    id="mail-content",
                 )
             with TabPane("Direct", id=TAB_DIRECT):
                 yield ExchangeDirectTab()
@@ -284,16 +301,26 @@ class ExchangeScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Initialise the Mail tab on first mount."""
+        # Set border titles on content containers
+        try:
+            self.query_one("#mail-content", Container).border_title = "CONVERSATIONS"
+        except Exception:
+            pass
+        try:
+            self.query_one("#pages-pane-content", Vertical).border_title = "PAGES"
+        except Exception:
+            pass
+
         table = self.query_one("#conversation-table", DataTable)
         table.cursor_type = "row"
         table.add_columns("DESTINATION", "LAST MESSAGE", "UNREAD", "ATTACH", "TIMESTAMP")
 
         if self._ipc_bridge is None:
-            table.add_row("-", "[dim]Chat requires daemon mode[/]", "-", "-", "-")
+            table.add_row("-", f"[{get_color_cascade().dim}]Chat requires daemon mode[/]", "-", "-", "-")
             return
 
         # Show loading placeholder immediately so the screen feels responsive
-        table.add_row("…", "[dim]loading…[/]", "-", "-", "-")
+        table.add_row("…", f"[{get_color_cascade().dim}]loading…[/]", "-", "-", "-")
         self.run_worker(self._load_conversations())
         self.run_worker(self._load_auto_reply_state())
         table.focus()
@@ -342,7 +369,7 @@ class ExchangeScreen(Screen[None]):
         }
 
     def _render_conversations(self) -> None:
-        from styrened.tui.widgets.highlighted_panel import get_color_cascade
+
 
         table = self.query_one("#conversation-table", DataTable)
         table.clear()
@@ -350,7 +377,7 @@ class ExchangeScreen(Screen[None]):
         conversations = self._sorted_conversations()
 
         if not conversations:
-            table.add_row("-", "[dim]No conversations yet[/]", "-", "-", "-")
+            table.add_row("-", f"[{get_color_cascade().dim}]No conversations yet[/]", "-", "-", "-")
             return
 
         cascade = get_color_cascade()
@@ -770,12 +797,12 @@ class ExchangeScreen(Screen[None]):
         table.clear()
 
         if not results:
-            table.add_row("-", f"[dim]No results for '{query}'[/]", "-", "-", "-")
+            table.add_row("-", f"[{get_color_cascade().dim}]No results for '{query}'[/]", "-", "-", "-")
             return
 
         for msg in results:
             peer_hash = msg.get("source_hash", "") or msg.get("destination_hash", "")
-            content = msg.get("content", "") or "[dim]No content[/]"
+            content = msg.get("content", "") or f"[{get_color_cascade().dim}]No content[/]"
             if len(content) > 40:
                 content = content[:37] + "..."
             is_outgoing = msg.get("is_outgoing", False)

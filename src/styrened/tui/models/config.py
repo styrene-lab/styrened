@@ -107,6 +107,10 @@ class TUIConfig:
     custom_theme_url: str = ""
     """Optional tweakcn URL for a user-supplied custom theme.
     When set, the theme is fetched, registered, and applied at startup."""
+    custom_theme_colors: dict[str, str] = field(default_factory=dict)
+    """Manually edited color tokens (hex values keyed by tweakcn token name).
+    When non-empty, these are used to build a custom Textual theme on startup
+    without re-fetching the URL.  Populated by the Appearance color editor."""
     log_level: LogLevel = LogLevel.INFO
     show_hardware_panel: bool = True
     confirm_destructive: bool = True

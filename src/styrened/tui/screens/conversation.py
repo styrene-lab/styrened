@@ -16,6 +16,7 @@ from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 
 from styrened.tui.widgets.chat_widget import ChatWidget
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import (
     PeerWorkspaceContext,
     PeerWorkspaceFocus,
@@ -51,6 +52,12 @@ class ConversationScreen(Screen[None]):
 
     ConversationScreen #conv-content {
         height: 1fr;
+        border: round $border;
+        border-title-color: $primary;
+        border-title-style: bold;
+        border-title-align: left;
+        background: $background;
+        padding: 0 1;
     }
 
     ConversationScreen #conv-title {
@@ -58,14 +65,14 @@ class ConversationScreen(Screen[None]):
         padding: 0 1;
         color: $primary;
         text-style: bold;
-        background: $surface;
+        background: $background;
     }
 
     ConversationScreen #conv-path-info {
         height: 1;
         padding: 0 1;
         color: $panel;
-        background: $surface;
+        background: $background;
     }
     """
 
@@ -150,7 +157,7 @@ class ConversationScreen(Screen[None]):
         if not info.get("found"):
             try:
                 path_widget = self.query_one("#conv-path-info", Static)
-                path_widget.update("[dim]No path info available[/]")
+                path_widget.update(f"[{get_color_cascade().dim}]No path info available[/]")
             except Exception:
                 pass
             return
@@ -171,7 +178,7 @@ class ConversationScreen(Screen[None]):
 
         try:
             path_widget = self.query_one("#conv-path-info", Static)
-            path_widget.update(f"[dim]{' | '.join(parts)}[/]")
+            path_widget.update(f"[{get_color_cascade().dim}]{' | '.join(parts)}[/]")
         except Exception:
             pass
 

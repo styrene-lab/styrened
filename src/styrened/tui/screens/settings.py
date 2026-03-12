@@ -8,6 +8,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.events import Click
 from textual.screen import Screen
 from textual.widgets import Button, Input, Label, Select, Static, Switch, TabbedContent, TabPane
 
@@ -83,6 +84,12 @@ class SettingsScreen(Screen[None]):
             )
         )
         self._status_message = ""
+        # Appearance preview → commit state: snapshot the applied theme so
+        # we can revert if the operator leaves without applying.
+        self._applied_theme_name: str = config.tui.theme
+        self._applied_theme_url: str = config.tui.custom_theme_url
+        self._applied_theme_colors: dict[str, str] = dict(config.tui.custom_theme_colors)
+        self._theme_applied: bool = False  # True once the operator commits
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -160,6 +167,23 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="OPERATOR IDENTITY",
+                        )
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Label("Hide identity reminder:", classes="setting-label"),
+                                Switch(
+                                    value=self.config.tui.identity_nudge_dismissed,
+                                    id="identity_nudge_dismissed",
+                                ),
+                                classes="setting-row",
+                            ),
+                            Static(
+                                "Suppress the Home screen banner that reminds you "
+                                "to set a display name. Automatically enabled when "
+                                "you save a non-default name above.",
+                                classes="setting-description",
+                            ),
+                            title="NOTIFICATIONS",
                         )
 
                 # ── Tab 2: Network ───────────────────────────────────────
@@ -676,50 +700,97 @@ class SettingsScreen(Screen[None]):
                 with TabPane("Appearance", id="tab-appearance"):
                     with VerticalScroll(classes="settings-tab-scroll"):
                         yield HighlightedPanel(
-                            Label("Built-in Themes", classes="setting-label"),
+                            Static(
+                                "Select a built-in theme to preview it immediately. "
+                                "Or paste a tweakcn URL to fetch a custom palette.",
+                                classes="setting-description",
+                            ),
+                            Label("Built-in", classes="setting-label"),
                             Horizontal(
                                 Button(
-                                    f"● styrene" if self.config.tui.theme == "styrene" else "○ styrene",
+                                    "styrene",
                                     id="theme-btn-styrene",
                                     classes="theme-preset-btn",
                                     variant="primary" if self.config.tui.theme == "styrene" else "default",
                                 ),
                                 classes="setting-row",
                             ),
-                            title="THEME",
-                        )
-                        yield HighlightedPanel(
-                            Static(
-                                "Paste a tweakcn theme URL to apply a custom palette. "
-                                "Example: https://tweakcn.com/themes/cmly8fsie000204l8fqt54s1p",
-                                classes="setting-description",
-                            ),
+                            Label("Custom", classes="setting-label"),
                             Horizontal(
-                                Label("tweakcn URL:", classes="setting-label"),
                                 Input(
                                     value=self.config.tui.custom_theme_url,
                                     placeholder="https://tweakcn.com/themes/...",
                                     id="custom-theme-url",
                                     classes="setting-input",
                                 ),
-                                classes="setting-row",
-                            ),
-                            Horizontal(
                                 Button(
-                                    "Fetch & Apply",
+                                    "Fetch",
                                     id="fetch-theme-btn",
-                                    classes="setting-btn",
-                                    variant="primary",
-                                ),
-                                Button(
-                                    "Clear",
-                                    id="clear-theme-btn",
                                     classes="setting-btn",
                                 ),
                                 classes="setting-row",
                             ),
                             Static("", id="theme-status"),
-                            title="CUSTOM TWEAKCN THEME",
+                            title="THEME",
+                            classes="panel-interactive",
+                        )
+                        yield HighlightedPanel(
+                            Static(
+                                "Edit individual color tokens. "
+                                "Changes preview live on this page.",
+                                classes="setting-description",
+                            ),
+                            *self._compose_color_editor(),
+                            Horizontal(
+                                Button(
+                                    "Apply Theme",
+                                    id="apply-theme-btn",
+                                    variant="primary",
+                                    classes="setting-btn",
+                                ),
+                                Static("", id="apply-theme-hint", classes="setting-description"),
+                                classes="setting-row",
+                            ),
+                            title="COLOR EDITOR",
+                            classes="panel-interactive",
+                        )
+                        # --- Design system sampler (dev reference) ---
+                        yield HighlightedPanel(
+                            Horizontal(
+                                Button("Default", id="btn-sample-default"),
+                                Button("Primary", id="btn-sample-primary", variant="primary"),
+                                Button("Error", id="btn-sample-error", variant="error"),
+                                Button("Warning", id="btn-sample-warning", variant="warning"),
+                                Button("Success", id="btn-sample-success", variant="success"),
+                                classes="setting-row",
+                            ),
+                            title="BUTTONS",
+                            classes="panel-info",
+                        )
+                        yield HighlightedPanel(
+                            Static("Interactive — forms, inputs, workspaces"),
+                            title="panel-interactive",
+                            classes="panel-interactive",
+                        )
+                        yield HighlightedPanel(
+                            Static("Info — status readouts, read-only display"),
+                            title="panel-info",
+                            classes="panel-info",
+                        )
+                        yield HighlightedPanel(
+                            Static("Ambient — feeds, logs, background chrome"),
+                            title="panel-ambient",
+                            classes="panel-ambient",
+                        )
+                        yield HighlightedPanel(
+                            Static("Container — section grouping boundary"),
+                            title="panel-container",
+                            classes="panel-container",
+                        )
+                        yield HighlightedPanel(
+                            Static("Alert warning / error / focus"),
+                            title="panel-alert variants",
+                            classes="panel-alert",
                         )
 
             # Action bar — outside tabs, always visible
@@ -746,6 +817,106 @@ class SettingsScreen(Screen[None]):
         # Find closest preset
         closest = min(ANNOUNCE_INTERVALS, key=lambda x: abs(x[1] - seconds))
         return closest[1]
+
+    # ------------------------------------------------------------------
+    # Color editor
+    # ------------------------------------------------------------------
+
+    #: Tokens exposed in the editor, grouped for display.
+    _COLOR_GROUPS: ClassVar[list[tuple[str, list[str]]]] = [
+        ("Base", ["background", "foreground"]),
+        ("Brand", ["primary", "primary-foreground", "secondary", "accent", "destructive"]),
+        ("Surfaces", ["card", "card-foreground", "popover", "muted", "muted-foreground"]),
+        ("Chrome", ["border", "input", "ring"]),
+    ]
+
+    def _get_active_theme_colors(self) -> dict[str, str]:
+        """Return hex color dict for the currently active theme.
+
+        Prefers custom_theme_colors if set, otherwise extracts from the
+        active TweakcnProfile (built-in styrene or fetched).
+        """
+        from styrened.tui.themes.tweakcn import parse_color
+
+        if self.config.tui.custom_theme_colors:
+            return dict(self.config.tui.custom_theme_colors)
+
+        # Extract from the built-in styrene profile
+        from styrened.tui.themes.styrene_brand import get_styrene_profile
+        profile = get_styrene_profile()
+        return {k: parse_color(v) for k, v in profile.dark.items()}
+
+    def _compose_color_editor(self) -> list:
+        """Generate color editor rows — clickable swatches open a color picker."""
+        widgets: list = []
+        colors = self._get_active_theme_colors()
+        for group_name, tokens in self._COLOR_GROUPS:
+            widgets.append(Label(f"[bold]{group_name}[/bold]", classes="color-group-label"))
+            for token in tokens:
+                val = colors.get(token, "")
+                swatch_content = f"[on {val}]    [/]" if val else "    "
+                widgets.append(
+                    Horizontal(
+                        Static(
+                            swatch_content,
+                            id=f"swatch-btn-{token}",
+                            classes="color-swatch-btn",
+                        ),
+                        Label(token, classes="color-token-label"),
+                        Label(
+                            val or "—",
+                            id=f"color-hex-{token}",
+                            classes="color-hex-label",
+                        ),
+                        classes="color-row",
+                    )
+                )
+        return widgets
+
+    def _apply_color_editor_theme(self) -> None:
+        """Rebuild and apply theme from current color editor labels (ephemeral preview)."""
+        from styrened.tui.themes.tweakcn import TweakcnProfile
+
+        colors: dict[str, str] = {}
+        for _, tokens in self._COLOR_GROUPS:
+            for token in tokens:
+                try:
+                    lbl = self.query_one(f"#color-hex-{token}", Label)
+                    val = str(lbl.renderable).strip()
+                    if val and val.startswith("#"):
+                        colors[token] = val
+                except Exception:
+                    pass
+
+        if not colors:
+            return
+
+        # Ephemeral preview only — don't mutate config until Apply
+        profile = TweakcnProfile.from_color_dict(colors, name="custom-edited")
+        theme = profile.to_textual_theme("dark")
+        self.app.register_theme(theme)
+        self.app._registered_themes[theme.name] = theme
+        self.app.theme = theme.name
+
+    def _populate_color_editor(self, colors: dict[str, str]) -> None:
+        """Fill the color editor swatches and hex labels from a color dict."""
+        from styrened.tui.themes.tweakcn import parse_color
+
+        for _, tokens in self._COLOR_GROUPS:
+            for token in tokens:
+                raw = colors.get(token, "")
+                hex_val = parse_color(raw) if raw else ""
+                try:
+                    swatch = self.query_one(f"#swatch-btn-{token}", Static)
+                    lbl = self.query_one(f"#color-hex-{token}", Label)
+                    if hex_val:
+                        swatch.update(f"[on {hex_val}]    [/]")
+                        lbl.update(hex_val)
+                    else:
+                        swatch.update("    ")
+                        lbl.update("—")
+                except Exception:
+                    pass
 
     def _compose_peer_rows(self) -> list:
         """Generate peer input rows from current config."""
@@ -841,8 +1012,20 @@ class SettingsScreen(Screen[None]):
         self.run_worker(self._save_settings())
 
     def action_cancel(self) -> None:
-        """Cancel and return to previous screen."""
+        """Cancel and return to previous screen, reverting unapplied theme."""
+        self._revert_unapplied_theme()
         self.dismiss()
+
+    def _revert_unapplied_theme(self) -> None:
+        """If the operator previewed a theme but didn't Apply, revert."""
+        if self._theme_applied:
+            return  # Operator committed — nothing to revert
+        current = str(getattr(self.app, "theme", ""))
+        if current != self._applied_theme_name:
+            self.app.theme = self._applied_theme_name
+            self.config.tui.theme = self._applied_theme_name
+            self.config.tui.custom_theme_url = self._applied_theme_url
+            self.config.tui.custom_theme_colors = dict(self._applied_theme_colors)
 
     def action_previous_tab(self) -> None:
         """Switch to the previous settings tab."""
@@ -1051,12 +1234,14 @@ class SettingsScreen(Screen[None]):
 
     @on(Button.Pressed, "#save-btn")
     def on_save_button(self) -> None:
-        """Handle save button press."""
+        """Handle save button press — Save implicitly applies the theme."""
+        self._theme_applied = True  # Don't revert on subsequent dismiss
         self.run_worker(self._save_settings())
 
     @on(Button.Pressed, "#cancel-btn")
     def on_cancel_button(self) -> None:
-        """Handle cancel button press."""
+        """Handle cancel button press — reverts unapplied theme preview."""
+        self._revert_unapplied_theme()
         self.dismiss()
 
     @on(Button.Pressed, "#clear-nodes-btn")
@@ -1159,6 +1344,16 @@ class SettingsScreen(Screen[None]):
             draft_config.tui.log_level = log_level_select.value
             draft_config.tui.show_hardware_panel = show_hardware.value
             draft_config.tui.confirm_destructive = confirm_destructive.value
+
+            # Identity nudge: auto-dismiss if operator set a real name,
+            # otherwise honour the explicit switch state.
+            nudge_switch = self.query_one("#identity_nudge_dismissed", Switch)
+            if identity_display_name and identity_display_name not in (
+                "Anonymous Styrene", ""
+            ):
+                draft_config.tui.identity_nudge_dismissed = True
+            else:
+                draft_config.tui.identity_nudge_dismissed = nudge_switch.value
 
             # Read Fleet settings
             edge_fleet_path = self.query_one("#edge_fleet_path", Input).value.strip()
@@ -1429,22 +1624,122 @@ class SettingsScreen(Screen[None]):
     # Appearance tab handlers
     # ------------------------------------------------------------------
 
+    @on(Button.Pressed, "#theme-btn-styrene")
+    def on_select_styrene_theme(self) -> None:
+        """Select the built-in Styrene theme — ephemeral preview."""
+        from styrened.tui.themes.styrene_brand import (
+            STYRENE_TWEAKCN_URL,
+            get_styrene_profile,
+        )
+        from styrened.tui.themes.tweakcn import parse_color
+
+        profile = get_styrene_profile()
+        theme = profile.to_textual_theme("dark")
+        self.app.register_theme(theme)
+        self.app._registered_themes[theme.name] = theme
+        self.app.theme = theme.name
+        resolved = {k: parse_color(v) for k, v in profile.dark.items()}
+        self._populate_color_editor(resolved)
+        # Update URL field to match
+        try:
+            self.query_one("#custom-theme-url", Input).value = STYRENE_TWEAKCN_URL
+        except Exception:
+            pass
+        # Update button states
+        try:
+            btn = self.query_one("#theme-btn-styrene", Button)
+            btn.variant = "primary"
+        except Exception:
+            pass
+        self._set_theme_status("Previewing Styrene theme — Apply to keep.", "info")
+
     @on(Button.Pressed, "#fetch-theme-btn")
     def on_fetch_theme(self) -> None:
-        """Fetch a custom tweakcn theme and apply it live."""
-        self.run_worker(self._fetch_and_apply_theme())
+        """Fetch a custom tweakcn theme — ephemeral preview only."""
+        self._fetch_and_preview_theme()
 
-    @on(Button.Pressed, "#clear-theme-btn")
-    def on_clear_theme(self) -> None:
-        """Remove the custom theme and revert to the built-in Styrene theme."""
-        self.config.tui.custom_theme_url = ""
-        self.config.tui.theme = "styrene"
-        self.app.theme = "styrene"
-        self._set_theme_status("[green]Reverted to Styrene theme.[/green]")
+    @on(Button.Pressed, "#apply-theme-btn")
+    def on_apply_theme(self) -> None:
+        """Commit the previewed theme to config (persists across sessions)."""
+        from styrened.tui.themes.tweakcn import parse_color
+
+        # Read current editor state as the committed colors
+        colors: dict[str, str] = {}
+        for _, tokens in self._COLOR_GROUPS:
+            for token in tokens:
+                try:
+                    lbl = self.query_one(f"#color-hex-{token}", Label)
+                    val = str(lbl.renderable).strip()
+                    if val and val.startswith("#"):
+                        colors[token] = val
+                except Exception:
+                    pass
+
+        url = ""
+        try:
+            url = self.query_one("#custom-theme-url", Input).value.strip()
+        except Exception:
+            pass
+
+        # Snapshot as the new applied state
+        self._applied_theme_name = str(getattr(self.app, "theme", "styrene"))
+        self._applied_theme_url = url
+        self._applied_theme_colors = dict(colors)
+        self._theme_applied = True
+
+        # Update config for the main Save to persist
+        self.config.tui.theme = self._applied_theme_name
+        self.config.tui.custom_theme_url = url
+        self.config.tui.custom_theme_colors = colors
+
+        self._set_theme_status("Theme applied ✓", "success")
+        try:
+            self.query_one("#apply-theme-hint", Static).update(
+                "Theme will persist after Save."
+            )
+        except Exception:
+            pass
+
+    @on(Click, ".color-swatch-btn")
+    def _on_swatch_btn_pressed(self, event: Click) -> None:
+        """Open color picker when a swatch is clicked."""
+        widget = event.widget
+        if not widget.id or not widget.id.startswith("swatch-btn-"):
+            return
+        event.stop()
+        token = widget.id[len("swatch-btn-"):]
+        # Get current hex value
+        current = ""
+        try:
+            lbl = self.query_one(f"#color-hex-{token}", Label)
+            val = str(lbl.renderable).strip()
+            if val.startswith("#"):
+                current = val
+        except Exception:
+            pass
+
+        from styrened.tui.widgets.color_picker import ColorPickerDialog
+
+        def _on_picker_result(result: str | None) -> None:
+            if result is None:
+                return
+            try:
+                swatch = self.query_one(f"#swatch-btn-{token}", Static)
+                lbl = self.query_one(f"#color-hex-{token}", Label)
+                swatch.update(f"[on {result}]    [/]")
+                lbl.update(result)
+            except Exception:
+                pass
+            self._apply_color_editor_theme()
+
+        self.app.push_screen(
+            ColorPickerDialog(token_name=token, initial_color=current or "#000000"),
+            _on_picker_result,
+        )
 
     @work
-    async def _fetch_and_apply_theme(self) -> None:
-        """Worker: fetch tweakcn URL, register, and switch theme."""
+    async def _fetch_and_preview_theme(self) -> None:
+        """Worker: fetch tweakcn URL, register, and preview (ephemeral)."""
         import asyncio
 
         from styrened.tui.themes.tweakcn import TweakcnProfile
@@ -1453,50 +1748,64 @@ class SettingsScreen(Screen[None]):
         url = url_input.value.strip()
 
         if not url:
-            self._set_theme_status("[red]Enter a tweakcn URL first.[/red]")
+            self._set_theme_status("Enter a tweakcn URL first.", "error")
             return
 
-        self._set_theme_status("[dim]Fetching theme…[/dim]")
+        self._set_theme_status("Fetching theme…", "info")
         try:
-            # Run blocking HTTP fetch in executor so the TUI stays responsive
             profile = await asyncio.get_event_loop().run_in_executor(
                 None, TweakcnProfile.from_url, url
             )
             theme = profile.to_textual_theme("dark")
             self.app.register_theme(theme)
+            self.app._registered_themes[theme.name] = theme
             self.app.theme = theme.name
-            self.config.tui.custom_theme_url = url
-            self.config.tui.theme = theme.name
+            # Populate the color editor with the fetched palette
+            from styrened.tui.themes.tweakcn import parse_color
+            resolved = {
+                k: parse_color(v) for k, v in profile.dark.items()
+            }
+            self._populate_color_editor(resolved)
+            # De-select styrene button since we're previewing a custom theme
+            try:
+                self.query_one("#theme-btn-styrene", Button).variant = "default"
+            except Exception:
+                pass
             self._set_theme_status(
-                f"[green]Theme \"{theme.name}\" applied. "
-                "Save settings to persist.[/green]"
+                f'Previewing "{theme.name}" — Apply to keep.',
+                "success",
             )
         except ValueError as e:
-            self._set_theme_status(f"[red]Invalid URL: {e}[/red]")
+            self._set_theme_status(f"Invalid URL: {e}", "error")
         except Exception as e:
-            self._set_theme_status(f"[red]Fetch failed: {e}[/red]")
+            self._set_theme_status(f"Fetch failed: {e}", "error")
 
-    def _set_theme_status(self, markup: str) -> None:
-        """Update the theme status label (safe to call from worker)."""
+    def _set_theme_status(self, text: str, style: str = "info") -> None:
+        """Update the theme status label (safe to call from worker).
+
+        Args:
+            text: Plain text message.
+            style: One of 'success', 'error', 'info'.
+        """
         try:
-            self.query_one("#theme-status", Static).update(markup)
+            widget = self.query_one("#theme-status", Static)
+            widget.update(text)
+            for cls in ("status-success", "status-error", "status-info"):
+                widget.remove_class(cls)
+            widget.add_class(f"status-{style}")
         except Exception:
             pass
 
     def _show_error(self, message: str) -> None:
-        """Display error message.
-
-        Args:
-            message: Error message to display.
-        """
+        """Display error message."""
         status = self.query_one("#status-message", Static)
-        status.update(f"[red]ERROR: {message}[/red]")
+        status.update(f"ERROR: {message}")
+        status.remove_class("status-success")
+        status.add_class("status-error")
 
     def _show_success(self, message: str) -> None:
-        """Display success message.
-
-        Args:
-            message: Success message to display.
-        """
+        """Display success message."""
         status = self.query_one("#status-message", Static)
-        status.update(f"[green]{message}[/green]")
+        status.update(message)
+        status.remove_class("status-error")
+        status.add_class("status-success")

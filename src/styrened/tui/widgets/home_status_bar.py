@@ -12,6 +12,7 @@ from textual.widgets import Static
 
 from styrened.models.rns_error import RNSErrorState
 from styrened.services.hub_connection import HubStatus
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 log = logging.getLogger(__name__)
 
@@ -39,20 +40,25 @@ class HomeStatusBar(Static):
     hub_status: reactive[HubStatus] = reactive(HubStatus.CONNECTED)
     interface_count: reactive[int] = reactive(0)
     styrene_mesh_count: reactive[int] = reactive(0)
+    total_device_count: reactive[int] = reactive(0)
     daemon_connected: reactive[bool] = reactive(True)
     daemon_uptime: reactive[float] = reactive(0.0)
     unread_count: reactive[int] = reactive(0)
     error_state: reactive[RNSErrorState | None] = reactive(None)
+    transport_enabled: reactive[bool] = reactive(False)
+    propagation_enabled: reactive[bool] = reactive(False)
+    active_links: reactive[int] = reactive(0)
 
     def render(self) -> Text:
         """Render the status bar as a Rich Text object."""
+        c = get_color_cascade()
         segments: list[Text] = []
 
         # RNS status
         if self.rns_online:
-            segments.append(Text("RNS ● online", style="dim"))
+            segments.append(Text("RNS ● online", style=c.dim))
         else:
-            style = "bold red" if self.error_state else "bold yellow"
+            style = f"bold {c.color_danger}" if self.error_state else f"bold {c.color_warning}"
             label = "RNS ○ offline"
             seg = Text(label, style=style)
             if self.error_state and self.error_state.message:
@@ -63,37 +69,56 @@ class HomeStatusBar(Static):
             segments.append(seg)
 
         # Interfaces
-        segments.append(Text(f"IF {self.interface_count}", style="dim"))
+        segments.append(Text(f"IF {self.interface_count}", style=c.dim))
 
         # Hub status
         if self.hub_status == HubStatus.CONNECTED:
-            segments.append(Text("HUB ●", style="dim"))
+            segments.append(Text("HUB ●", style=c.dim))
         elif self.hub_status == HubStatus.DISABLED:
-            segments.append(Text("HUB —", style="dim"))
+            segments.append(Text("HUB —", style=c.dim))
         elif self.hub_status == HubStatus.DISCONNECTED:
-            segments.append(Text("HUB ○ lost", style="bold yellow"))
+            segments.append(Text("HUB ○ lost", style=f"bold {c.color_warning}"))
         elif self.hub_status == HubStatus.WAITING:
-            segments.append(Text("HUB ◐", style="dim"))
+            segments.append(Text("HUB ◐ connecting", style=c.medium))
 
-        # Mesh count
-        segments.append(Text(f"MESH {self.styrene_mesh_count}", style="dim"))
+        # Mesh count — show styrene/total if total differs
+        if self.total_device_count > self.styrene_mesh_count:
+            segments.append(Text(f"MESH {self.styrene_mesh_count}/{self.total_device_count}", style=c.dim))
+        else:
+            segments.append(Text(f"MESH {self.styrene_mesh_count}", style=c.dim))
 
-        # Daemon
+        # Transport/Propagation roles — only show when enabled (operator needs to know)
+        roles = []
+        if self.transport_enabled:
+            roles.append("T")
+        if self.propagation_enabled:
+            roles.append("P")
+        if roles:
+            segments.append(Text(f"{''.join(roles)}", style=c.medium))
+
+        # Active links — only show when non-zero
+        if self.active_links > 0:
+            segments.append(Text(f"LNK {self.active_links}", style=c.medium))
+
+        # Daemon — highlight recently-restarted (< 5 min) as a heads-up
         if self.daemon_connected:
             uptime_str = self._format_uptime(self.daemon_uptime)
-            segments.append(Text(f"IPC ● {uptime_str}", style="dim"))
+            if self.daemon_uptime > 0 and self.daemon_uptime < 300:
+                segments.append(Text(f"IPC ● {uptime_str}", style=f"bold {c.color_warning}"))
+            else:
+                segments.append(Text(f"IPC ● {uptime_str}", style=c.dim))
         else:
-            segments.append(Text("IPC ○", style="bold yellow"))
+            segments.append(Text("IPC ○", style=f"bold {c.color_warning}"))
 
         # Unread
         if self.unread_count > 0:
-            segments.append(Text(f"✉ {self.unread_count}", style="bold cyan"))
+            segments.append(Text(f"✉ {self.unread_count}", style=f"bold {c.bright}"))
 
         # Join with pipe delimiter
         result = Text()
         for i, seg in enumerate(segments):
             if i > 0:
-                result.append(" │ ", style="dim")
+                result.append(" │ ", style=c.dim)
             result.append(seg)
 
         return result

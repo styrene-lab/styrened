@@ -344,6 +344,30 @@ class ColorCascade:
         self.color_info = self.medium  # Medium for informational
 
     @classmethod
+    def from_textual_theme(cls, theme: "Theme") -> "ColorCascade":
+        """Create a ColorCascade from an active Textual Theme.
+
+        Uses the theme's accent color as the phosphex root, then overrides
+        semantic colors (success/warning/error) from the theme if they differ
+        from the algorithmically-derived defaults.
+        """
+        # Pick the best root color: accent > primary > fallback green
+        phosphex = str(theme.accent or theme.primary or "#39ff14")
+        cascade = cls(phosphex=phosphex, preset_name=theme.name or "custom")
+
+        # Override semantic colors from Textual theme if provided
+        if theme.success:
+            cascade.color_success = str(theme.success)
+        if theme.warning:
+            cascade.color_warning = str(theme.warning)
+        if theme.error:
+            cascade.color_danger = str(theme.error)
+        if theme.primary:
+            cascade.color_info = str(theme.primary)
+
+        return cascade
+
+    @classmethod
     def from_preset(cls, preset_key: str) -> "ColorCascade":
         """Create a ColorCascade from a preset name.
 

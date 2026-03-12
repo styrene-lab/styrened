@@ -214,6 +214,11 @@ class DeviceStatusWidget(Static):
     def render(self) -> str:
         """Render two-column status display."""
         cascade = get_color_cascade()
+
+        # Show loading state when no status has arrived yet
+        if self.loading and self.status is None:
+            return f"[{cascade.dim}]⟳ Querying node status...[/]"
+
         left = self._render_left(cascade)
         right = self._render_right(cascade)
 

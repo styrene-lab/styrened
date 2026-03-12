@@ -29,6 +29,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Static
 
 from styrened.ipc.protocol import IPCMessageType
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -259,9 +260,9 @@ class TerminalWidget(Widget, can_focus=True):
         if self._connected:
             return (
                 f"[bold]Terminal[/] [{self.device_identity[:16]}...] "
-                f"[green]CONNECTED[/] {self._cols}x{self._rows}"
+                f"[{get_color_cascade().bright}]CONNECTED[/] {self._cols}x{self._rows}"
             )
-        return f"[bold]Terminal[/] [{self.device_identity[:16]}...] [dim]{self.status}[/]"
+        return f"[bold]Terminal[/] [{self.device_identity[:16]}...] [{get_color_cascade().dim}]{self.status}[/]"
 
     def _render_screen(self) -> Text:
         """Render pyte screen buffer to Rich Text."""

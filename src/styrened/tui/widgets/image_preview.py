@@ -12,6 +12,7 @@ from textual.app import ComposeResult
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class ImagePreview(Widget):
         try:
             status = self.query_one("#image-status", Static)
             if loading:
-                status.update("[dim]Loading image...[/]")
+                status.update(f"[{get_color_cascade().dim}]Loading image...[/]")
             elif not self.error:
                 status.update("")
         except Exception:
@@ -107,7 +108,7 @@ class ImagePreview(Widget):
             return
         try:
             status = self.query_one("#image-status", Static)
-            status.update(f"[red]{error}[/]")
+            status.update(f"[{get_color_cascade().color_danger}]{error}[/]")
         except Exception:
             pass
 
@@ -163,7 +164,7 @@ class ImagePreview(Widget):
                 # Show metadata in status
                 w, h = pil_img.size
                 size_str = _human_size(len(data))
-                status_text = f"[dim]{self.filename}  {w}x{h}  {size_str}[/]"
+                status_text = f"[{get_color_cascade().dim}]{self.filename}  {w}x{h}  {size_str}[/]"
                 if status_widget is not None:
                     status_widget.update(status_text)
                 return
@@ -201,7 +202,7 @@ class ImagePreview(Widget):
 
         if not _HAS_IMAGE_WIDGET:
             lines.append("")
-            lines.append("[dim]Install textual-image for in-terminal preview[/]")
+            lines.append(f"[{get_color_cascade().dim}]Install textual-image for in-terminal preview[/]")
 
         fallback = Static("\n".join(lines), id="image-fallback")
         try:

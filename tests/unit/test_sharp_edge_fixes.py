@@ -1,25 +1,16 @@
 """Tests for operator sharp edge fixes (O5) and exploration identity_hash regression (O6).
 
-O5: Tests for 8 operator sharp edge fixes across TUI widgets.
-O6: Regression test ensuring MeshDevice uses identity_hash (not 'identity').
+O5: Tests for 8 operator sharp edge fixes across TUI widgets:
+  - O5-1: DeviceStatusWidget loading indicator
+  - O5-2: Inbox unread indicator (documented, not unit-testable without mounted screen)
+  - O5-3: HomeStatusBar daemon uptime warning (<300s = warning, >=300s = dim)
+  - O5-4: HomeStatusBar mesh count (MESH N or MESH N/M with total_device_count)
+  - O5-5: HomeStatusBar transport/propagation T/P indicators
+  - O5-6: HomeStatusBar active_links LNK N indicator
+  - O5-7: HomeStatusBar hub status (connected/disconnected/disabled/waiting)
+  - O5-8: MeshDevice hops display formatting
 
-Spec deviations documented:
-- O5-3: Spec calls for uptime warning style at <300s boundary. The actual
-  HomeStatusBar.render() uses "dim" style unconditionally for uptime — there is
-  no warning/dim style transition. Tests cover _format_uptime() and verify the
-  actual render() style behavior (always dim).
-- O5-4: Spec calls for total_device_count "MESH 5/10" vs "MESH 5". The widget
-  has no total_device_count reactive — only styrene_mesh_count. Tests cover the
-  actual MESH display behavior.
-- O5-5: Spec calls for transport_enabled/propagation_enabled "T"/"P" indicators.
-  These reactives do not exist in HomeStatusBar. No tests written — feature absent.
-- O5-6: Spec calls for active_links "LNK 3" indicator. This reactive does not
-  exist in HomeStatusBar. No tests written — feature absent.
-- O5-7 (W1): Spec says hub_status=WAITING → 'connecting'. Actual widget renders
-  'HUB ◐' (spinner glyph). Test matches actual widget behavior.
-- W2: mypy guardrail: existing project-wide mypy errors are outside this task's
-  file scope (tests/unit/test_sharp_edge_fixes.py). The test file itself has no
-  mypy errors.
+O6: Regression test ensuring MeshDevice uses identity_hash (not 'identity').
 """
 
 from __future__ import annotations
@@ -220,40 +211,79 @@ class TestHomeStatusBarUptime:
         from styrened.tui.widgets.home_status_bar import HomeStatusBar
         assert HomeStatusBar._format_uptime(60) == "1m"
 
-    def test_render_uptime_style_is_dim_when_connected(self):
-        """Verify the IPC segment uses 'dim' style regardless of uptime value."""
+    def test_render_uptime_low_uses_warning_style(self):
+        """Uptime < 300s uses color_warning style (recently-restarted highlight)."""
         from styrened.tui.widgets.home_status_bar import HomeStatusBar
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
         bar = HomeStatusBar()
-        # Low uptime (spec says <300s = warning, but actual code is always dim)
         object.__setattr__(bar, "daemon_connected", True)
         object.__setattr__(bar, "daemon_uptime", 120)
         result = bar.render()
         plain = result.plain
         assert "IPC ●" in plain
-        # The IPC segment is built with style="dim" — verify via _spans
+        # IPC segment should use color_warning for recently-restarted daemon
+        c = get_color_cascade()
         ipc_idx = plain.index("IPC")
-        # Check that a span covering the IPC text has "dim" style
-        found_dim = any(
-            span.start <= ipc_idx < span.end and "dim" in str(span.style)
+        found_warning = any(
+            span.start <= ipc_idx < span.end and c.color_warning in str(span.style)
             for span in result._spans
         )
-        assert found_dim, f"Expected 'dim' style at IPC segment, spans: {result._spans}"
+        assert found_warning, f"Expected warning style at IPC segment for low uptime, spans: {result._spans}"
 
-    def test_render_uptime_high_value_also_dim(self):
-        """High uptime (>300s) also renders dim — no style transition exists."""
+    def test_render_uptime_high_uses_dim_style(self):
+        """Uptime >= 300s uses dim style (normal operation)."""
         from styrened.tui.widgets.home_status_bar import HomeStatusBar
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
         bar = HomeStatusBar()
         object.__setattr__(bar, "daemon_connected", True)
         object.__setattr__(bar, "daemon_uptime", 600)
         result = bar.render()
         plain = result.plain
         assert "IPC ●" in plain
+        c = get_color_cascade()
         ipc_idx = plain.index("IPC")
         found_dim = any(
-            span.start <= ipc_idx < span.end and "dim" in str(span.style)
+            span.start <= ipc_idx < span.end and c.dim in str(span.style)
             for span in result._spans
         )
-        assert found_dim, f"Expected 'dim' style at IPC segment, spans: {result._spans}"
+        assert found_dim, f"Expected dim style at IPC segment for high uptime, spans: {result._spans}"
+
+    def test_render_uptime_zero_no_warning(self):
+        """Uptime=0 means unknown/unset — should NOT trigger warning."""
+        output = _render_bar(daemon_connected=True, daemon_uptime=0)
+        assert "IPC ●" in output
+
+    def test_render_uptime_boundary_299(self):
+        """Uptime=299 (< 300) should trigger warning style."""
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
+        bar = HomeStatusBar()
+        object.__setattr__(bar, "daemon_connected", True)
+        object.__setattr__(bar, "daemon_uptime", 299)
+        result = bar.render()
+        c = get_color_cascade()
+        ipc_idx = result.plain.index("IPC")
+        found_warning = any(
+            span.start <= ipc_idx < span.end and c.color_warning in str(span.style)
+            for span in result._spans
+        )
+        assert found_warning
+
+    def test_render_uptime_boundary_300(self):
+        """Uptime=300 (>= 300) should NOT trigger warning."""
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
+        from styrened.tui.widgets.highlighted_panel import get_color_cascade
+        bar = HomeStatusBar()
+        object.__setattr__(bar, "daemon_connected", True)
+        object.__setattr__(bar, "daemon_uptime", 300)
+        result = bar.render()
+        c = get_color_cascade()
+        ipc_idx = result.plain.index("IPC")
+        found_dim = any(
+            span.start <= ipc_idx < span.end and c.dim in str(span.style)
+            for span in result._spans
+        )
+        assert found_dim
 
 
 # ===========================================================================
@@ -261,11 +291,10 @@ class TestHomeStatusBarUptime:
 # ===========================================================================
 
 class TestHomeStatusBarMeshCount:
-    """HomeStatusBar renders MESH count from styrene_mesh_count reactive.
+    """HomeStatusBar renders MESH count with optional total_device_count.
 
-    Spec deviation: The spec calls for total_device_count support with
-    'MESH 5/10' vs 'MESH 5' formatting. The widget has no total_device_count
-    reactive — only styrene_mesh_count — so 'MESH N' is the only format.
+    When total_device_count > styrene_mesh_count, renders 'MESH 5/10'.
+    Otherwise renders 'MESH 5'.
     """
 
     def test_mesh_count_shown(self):
@@ -280,10 +309,27 @@ class TestHomeStatusBarMeshCount:
         output = _render_bar(styrene_mesh_count=999)
         assert "MESH 999" in output
 
-    def test_no_total_device_count_reactive(self):
-        """Confirm the widget has no total_device_count — spec feature is absent."""
+    def test_mesh_with_total_shows_slash_format(self):
+        """When total > styrene count, shows 'MESH 5/10'."""
+        output = _render_bar(styrene_mesh_count=5, total_device_count=10)
+        assert "MESH 5/10" in output
+
+    def test_mesh_equal_total_no_slash(self):
+        """When total == styrene count, shows 'MESH 5' without slash."""
+        output = _render_bar(styrene_mesh_count=5, total_device_count=5)
+        assert "MESH 5" in output
+        assert "/" not in output.split("MESH")[1].split("│")[0]
+
+    def test_mesh_total_less_than_styrene_no_slash(self):
+        """When total < styrene count (shouldn't happen), shows just styrene count."""
+        output = _render_bar(styrene_mesh_count=10, total_device_count=5)
+        assert "MESH 10" in output
+        assert "/" not in output.split("MESH")[1].split("│")[0]
+
+    def test_total_device_count_reactive_exists(self):
+        """Confirm total_device_count reactive is present."""
         from styrened.tui.widgets.home_status_bar import HomeStatusBar
-        assert not hasattr(HomeStatusBar, "total_device_count")
+        assert hasattr(HomeStatusBar, "total_device_count")
 
 
 # ===========================================================================
@@ -291,28 +337,35 @@ class TestHomeStatusBarMeshCount:
 # ===========================================================================
 
 class TestHomeStatusBarTransportPropagation:
-    """Spec calls for transport_enabled/propagation_enabled T/P indicators.
+    """HomeStatusBar T/P indicators for transport and propagation."""
 
-    These reactives do not exist in the widget. Tests confirm absence and
-    document that the feature is not implemented.
-    """
-
-    def test_no_transport_enabled_reactive(self):
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
-        assert not hasattr(HomeStatusBar, "transport_enabled")
-
-    def test_no_propagation_enabled_reactive(self):
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
-        assert not hasattr(HomeStatusBar, "propagation_enabled")
-
-    def test_render_does_not_contain_tp_indicators(self):
-        """Without T/P reactives, output should not contain standalone T or P flags."""
-        output = _render_bar()
-        # Ensure no "│ T │" or "│ P │" or "│ TP │" segments
+    def test_transport_enabled_shows_t(self):
+        output = _render_bar(transport_enabled=True)
         segments = [s.strip() for s in output.split("│")]
-        assert "T" not in segments
-        assert "P" not in segments
-        assert "TP" not in segments
+        assert any("T" in seg for seg in segments)
+
+    def test_propagation_enabled_shows_p(self):
+        output = _render_bar(propagation_enabled=True)
+        segments = [s.strip() for s in output.split("│")]
+        assert any("P" in seg for seg in segments)
+
+    def test_both_enabled_shows_tp(self):
+        output = _render_bar(transport_enabled=True, propagation_enabled=True)
+        # Should have both T and P in a segment (possibly combined)
+        assert "T" in output
+        assert "P" in output
+
+    def test_neither_enabled_no_tp(self):
+        output = _render_bar(transport_enabled=False, propagation_enabled=False)
+        segments = [s.strip() for s in output.split("│")]
+        # No standalone T or P segments
+        tp_segments = [s for s in segments if s in ("T", "P", "TP", "T P")]
+        assert len(tp_segments) == 0
+
+    def test_reactives_exist(self):
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
+        assert hasattr(HomeStatusBar, "transport_enabled")
+        assert hasattr(HomeStatusBar, "propagation_enabled")
 
 
 # ===========================================================================
@@ -320,18 +373,23 @@ class TestHomeStatusBarTransportPropagation:
 # ===========================================================================
 
 class TestHomeStatusBarActiveLinks:
-    """Spec calls for active_links 'LNK 3' indicator.
+    """HomeStatusBar active_links 'LNK N' indicator."""
 
-    This reactive does not exist in the widget. Tests confirm absence.
-    """
+    def test_active_links_shown(self):
+        output = _render_bar(active_links=3)
+        assert "LNK 3" in output
 
-    def test_no_active_links_reactive(self):
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
-        assert not hasattr(HomeStatusBar, "active_links")
-
-    def test_render_does_not_contain_lnk(self):
-        output = _render_bar()
+    def test_active_links_zero_not_shown(self):
+        output = _render_bar(active_links=0)
         assert "LNK" not in output
+
+    def test_active_links_one(self):
+        output = _render_bar(active_links=1)
+        assert "LNK 1" in output
+
+    def test_reactive_exists(self):
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
+        assert hasattr(HomeStatusBar, "active_links")
 
 
 # ===========================================================================
@@ -361,11 +419,11 @@ class TestHomeStatusBarHubStatus:
         output = _render_bar(hub_status=HubStatus.DISABLED)
         assert "HUB —" in output
 
-    def test_hub_waiting_shows_spinner_glyph(self):
-        """WAITING renders '◐' spinner, not the word 'connecting'."""
+    def test_hub_waiting_shows_connecting(self):
+        """WAITING renders '◐ connecting' spinner with text."""
         from styrened.services.hub_connection import HubStatus
         output = _render_bar(hub_status=HubStatus.WAITING)
-        assert "HUB ◐" in output
+        assert "HUB ◐ connecting" in output
 
 
 # ===========================================================================

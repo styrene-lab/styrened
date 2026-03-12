@@ -91,6 +91,56 @@ _OKLCH_RE = re.compile(
 )
 
 
+def _parse_oklch(value: str) -> tuple[float, float, float] | None:
+    """Extract (L, C, H) from an oklch() string, or None if not OKLCH."""
+    m = _OKLCH_RE.match(value.strip())
+    if m:
+        return float(m.group(1)), float(m.group(2)), float(m.group(3))
+    return None
+
+
+def _derive_semantic_color(
+    source: str,
+    target_hue: float,
+    chroma_scale: float = 1.0,
+    lightness_override: float | None = None,
+) -> str:
+    """Derive a semantic color by retargeting hue in OKLCH space.
+
+    Takes a source color (oklch or hex), keeps its lightness and chroma
+    (which the theme designer validated against their background), and
+    rotates the hue to a fixed semantic target.
+
+    Parameters
+    ----------
+    source:
+        Raw CSS color value (oklch() or hex).
+    target_hue:
+        Target hue angle in degrees (0-360).
+    chroma_scale:
+        Multiplier for chroma (e.g. 0.85 to desaturate slightly).
+    lightness_override:
+        If provided, use this L instead of source's L.
+    """
+    parsed = _parse_oklch(source)
+    if parsed:
+        l, c, _h = parsed
+    else:
+        # Hex input — use a reasonable default L/C
+        # (this fallback is rare; tweakcn themes use oklch)
+        return _oklch_to_hex(0.70, 0.15, target_hue)
+
+    if lightness_override is not None:
+        l = lightness_override
+    return _oklch_to_hex(l, c * chroma_scale, target_hue)
+
+
+# Semantic hue targets (degrees on OKLCH hue wheel)
+_HUE_ERROR = 30.0    # Red
+_HUE_WARNING = 75.0  # Amber
+_HUE_SUCCESS = 145.0  # Green
+
+
 def parse_color(value: str) -> str:
     """Convert a tweakcn CSS colour value to #rrggbb hex.
 
@@ -184,6 +234,26 @@ class TweakcnProfile:
         )
 
     @classmethod
+    def from_color_dict(
+        cls,
+        colors: dict[str, str],
+        *,
+        name: str = "custom",
+        source_url: str = "",
+    ) -> "TweakcnProfile":
+        """Build a profile from a flat dict of hex color values.
+
+        Used by the TUI color editor to reconstruct a profile from
+        persisted ``custom_theme_colors`` without re-fetching.
+        """
+        return cls(
+            name=name,
+            dark=dict(colors),
+            light={},
+            source_url=source_url,
+        )
+
+    @classmethod
     def from_url(cls, url: str, *, timeout: int = 10) -> "TweakcnProfile":
         """Fetch a tweakcn theme by URL and parse it.
 
@@ -244,6 +314,8 @@ class TweakcnProfile:
         secondary = c("secondary")
         accent = c("accent", primary)
         destructive = c("destructive")
+        destructive_raw = tokens.get("destructive", "")
+        primary_raw = tokens.get("primary", "")
         muted_fg = c("muted-foreground")
         border = c("border")
         border_input = c("input", border)
@@ -251,6 +323,19 @@ class TweakcnProfile:
         muted_bg = c("muted")
         card_fg = c("card-foreground", foreground)
         primary_fg = c("primary-foreground", background)
+
+        # Derive semantic colors via OKLCH hue targeting (Option C).
+        # Keep destructive's L/C (validated against theme bg), rotate hue.
+        # Success uses primary's L for brightness parity with interactive color.
+        error_color = _derive_semantic_color(
+            destructive_raw or destructive, _HUE_ERROR,
+        )
+        warning_color = _derive_semantic_color(
+            destructive_raw or destructive, _HUE_WARNING, chroma_scale=0.85,
+        )
+        success_color = _derive_semantic_color(
+            primary_raw or primary, _HUE_SUCCESS, chroma_scale=0.7,
+        )
 
         return Theme(
             name=self.theme_name(mode),
@@ -261,9 +346,9 @@ class TweakcnProfile:
             background=background,
             surface=surface,
             panel=panel,
-            success=primary,          # tweakcn has no success token; use primary
-            warning=destructive,
-            error=destructive,
+            success=success_color,
+            warning=warning_color,
+            error=error_color,
             dark=(mode == "dark"),
             variables={
                 "border": border,

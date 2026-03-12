@@ -63,21 +63,22 @@ def set_color_cascade(cascade: ColorCascade) -> None:
 class StyrenePanel(Widget):
     """Bordered panel with an optional title — the standard Styrene TUI panel.
 
-    Uses Textual's native ``border`` CSS and ``border_title`` property so
-    sizing, theming, and the ``with Panel():`` context-manager pattern all
-    work correctly without workarounds.
+    Uses ``$background`` for the panel fill so there is no color mismatch
+    at the ``solid`` border corners.  The thin line-drawing border provides
+    grouping without the heavy look of ``tall`` / ``wide`` borders.
     """
 
     DEFAULT_CSS = """
     StyrenePanel {
         height: auto;
         width: 1fr;
-        background: $surface;
+        background: $background;
         margin-bottom: 1;
         padding: 0 1;
-        border: solid $border;
+        border: round $border;
         border-title-color: $primary;
         border-title-style: bold;
+        border-title-align: left;
     }
     """
 

@@ -112,10 +112,8 @@ class ReticumAnnounceTable(DataTable[str]):
         # Load historical data — prefer live discovery, no direct daemon import
         stored_nodes: list[MeshDevice] = []
 
-        # Get live discovered devices (prefer IPC bridge, fallback to direct discovery)
+        # Get live discovered devices from cache (populated by async worker)
         live_nodes = getattr(self, "_live_nodes_cache", [])
-        if not live_nodes:
-            live_nodes = discover_devices()
 
         # Merge historical and live data (live takes precedence for duplicates)
         all_devices_dict = {n.destination_hash: n for n in stored_nodes}
@@ -593,11 +591,9 @@ class StyreneFleetTable(DataTable[str]):
         self._rebuild_table()
 
     def refresh_data(self) -> None:
-        """Standalone fallback refresh using live discovery only."""
+        """Standalone fallback refresh using cached discovery data."""
         try:
             live = getattr(self.screen, "_live_nodes_cache", [])
-            if not live:
-                live = discover_devices()
             self.load_from_devices(list(live))
         except Exception:
             pass
@@ -624,13 +620,19 @@ class ExplorationScreen(Screen[None]):
     CSS = """
     #exploration-container {
         height: 1fr;
+        border: round $border;
+        border-title-color: $primary;
+        border-title-style: bold;
+        border-title-align: left;
+        background: $background;
+        padding: 0 1;
     }
 
     #explore-search-bar {
         height: auto;
         max-height: 3;
         padding: 0 1;
-        background: $surface;
+        background: $background;
     }
 
     #explore-search-bar.hidden {
@@ -727,6 +729,11 @@ class ExplorationScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Start device discovery and load initial data."""
+        try:
+            self.query_one("#exploration-container", Container).border_title = "MESH NODES"
+        except Exception:
+            pass
+
         # Try IPC-based discovery first, fallback to direct discovery
         app = self.app
         bridge = getattr(getattr(app, "services", None), "bridge", None)
@@ -784,11 +791,20 @@ class ExplorationScreen(Screen[None]):
         self._stored_nodes_cache = []
     
     async def _async_load_all_nodes(self) -> None:
-        """Refresh live node discovery only during Nodes migration."""
+        """Refresh nodes — prefer IPC bridge, fallback to direct discovery."""
         try:
-            live_nodes = discover_devices()
-            self._stored_nodes_cache = []
-            self._live_nodes_cache = live_nodes
+            bridge = getattr(getattr(self.app, "services", None), "bridge", None)
+            if bridge is not None:
+                from styrened.tui.utils import device_info_to_mesh
+
+                device_infos = await bridge.get_devices()
+                devices = [device_info_to_mesh(d) for d in device_infos]
+                self._stored_nodes_cache = []
+                self._live_nodes_cache = devices
+            else:
+                live_nodes = discover_devices()
+                self._stored_nodes_cache = []
+                self._live_nodes_cache = live_nodes
             self._refresh_announce_tables()
         except Exception:
             pass
@@ -911,8 +927,6 @@ class ExplorationScreen(Screen[None]):
         # Exploration/Nodes is currently live-biased; broader stored history is
         # being pushed toward canonical node browsing flows incrementally.
         live_nodes = getattr(self, "_live_nodes_cache", [])
-        if not live_nodes:
-            live_nodes = discover_devices()
 
         all_merged = list({n.destination_hash: n for n in live_nodes}.values())
 
@@ -1006,7 +1020,7 @@ class ExplorationScreen(Screen[None]):
         table = self._get_active_table()
         if table and hasattr(table, "_all_devices"):
             for d in table._all_devices:
-                if d.identity == identity:
+                if d.identity_hash == identity:
                     return d
         return None
 

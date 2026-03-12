@@ -141,28 +141,24 @@ class TestFromTextualTheme:
     a Textual Theme object.
     """
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
     def test_theme_with_accent_derives_phosphex(self) -> None:
         """Theme with accent set: cascade phosphex should derive from accent."""
         theme = Theme(name="test", accent="#ff0000", primary="#880000")
         cascade = ColorCascade.from_textual_theme(theme)  # type: ignore[attr-defined]
         assert cascade.phosphex == "#ff0000"
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
     def test_theme_with_only_primary_uses_primary(self) -> None:
         """Theme with only primary (no accent): cascade should use primary."""
         theme = Theme(name="test", primary="#00ff00")
         cascade = ColorCascade.from_textual_theme(theme)  # type: ignore[attr-defined]
         assert cascade.phosphex == "#00ff00"
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
-    def test_theme_with_neither_accent_nor_primary_fallback(self) -> None:
-        """Theme with neither accent nor primary: should fallback to #39ff14."""
+    def test_theme_with_no_accent_uses_primary(self) -> None:
+        """Theme with no accent falls back to primary (Textual requires primary)."""
         theme = Theme(name="test", primary="#888888")
         cascade = ColorCascade.from_textual_theme(theme)  # type: ignore[attr-defined]
-        assert cascade.phosphex == "#39ff14"
+        assert cascade.phosphex == "#888888"
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
     def test_theme_semantic_overrides(self) -> None:
         """Theme with success/warning/error: cascade should use theme values."""
         theme = Theme(
@@ -178,7 +174,6 @@ class TestFromTextualTheme:
         assert cascade.color_warning == "#ffff00"
         assert cascade.color_danger == "#ff0000"
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
     def test_theme_partial_semantics_keep_algorithmic_defaults(self) -> None:
         """Theme with only success set: other semantics keep defaults."""
         theme = Theme(name="test", primary="#880000", accent="#ff0000", success="#00ff00")
@@ -188,14 +183,12 @@ class TestFromTextualTheme:
         assert cascade.color_warning == algo.color_warning
         assert cascade.color_danger == algo.color_danger
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
     def test_theme_name_propagation(self) -> None:
         """cascade.preset_name should match theme.name."""
         theme = Theme(name="my-custom-theme", primary="#880000", accent="#ff0000")
         cascade = ColorCascade.from_textual_theme(theme)  # type: ignore[attr-defined]
         assert cascade.preset_name == "my-custom-theme"
 
-    @pytest.mark.xfail(reason="from_textual_theme() not yet implemented", strict=True)
     def test_bright_medium_dim_derived_from_accent(self) -> None:
         """Verify bright/medium/dim are derived from accent, not hardcoded."""
         theme = Theme(name="test", primary="#880000", accent="#ff0000")

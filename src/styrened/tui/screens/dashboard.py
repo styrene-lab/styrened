@@ -26,11 +26,11 @@ class IdentityNudgeBanner(Static):
 
     DEFAULT_CSS = """
     IdentityNudgeBanner {
-        background: $primary 20%;
+        background: $primary 10%;
         color: $text;
-        border: tall $primary;
-        padding: 0 1;
-        height: 3;
+        border: hkey $primary;
+        padding: 0;
+        height: auto;
         margin: 0 0 1 0;
         display: none;
     }
@@ -57,11 +57,11 @@ class VersionMismatchBanner(Static):
 
     DEFAULT_CSS = """
     VersionMismatchBanner {
-        background: $warning 30%;
+        background: $warning 15%;
         color: $warning-lighten-2;
-        border: tall $warning;
-        padding: 0 1;
-        height: 3;
+        border: hkey $warning;
+        padding: 0;
+        height: auto;
         margin: 0 0 1 0;
         display: none;
     }
@@ -138,9 +138,10 @@ class DashboardScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Initialise Home: start discovery, then check identity nudge."""
-        # Keep discovery running so ExplorationScreen has fresh data when
-        # the operator switches to Nodes. Home itself doesn't render the tree.
-        start_discovery()
+        # In legacy mode (no IPC bridge), start direct RNS discovery.
+        # In IPC mode, ExplorationScreen fetches via bridge on demand.
+        if self._ipc_bridge is None:
+            start_discovery()
 
         # Show identity nudge if user hasn't configured their identity
         self._check_identity_nudge()
@@ -227,12 +228,11 @@ class DashboardScreen(Screen[None]):
         self.action_refresh()
 
     def action_dismiss_banner(self) -> None:
-        """D: dismiss the version mismatch banner and/or identity nudge."""
+        """D: dismiss the version mismatch banner."""
         try:
             self.query_one(VersionMismatchBanner).hide()
         except Exception:
             pass
-        self._dismiss_identity_nudge()
 
     def _check_identity_nudge(self) -> None:
         """Show the identity nudge if the operator hasn't configured identity."""
@@ -252,25 +252,19 @@ class DashboardScreen(Screen[None]):
         except Exception:
             pass
 
-    def _dismiss_identity_nudge(self) -> None:
-        """Dismiss the identity nudge and persist the dismissal to config."""
+    def on_screen_resume(self) -> None:
+        """Re-check nudge state when returning from Settings."""
         try:
-            banner = self.query_one(IdentityNudgeBanner)
-            if not banner.has_class("visible"):
-                return
-            banner.hide()
             config = self.app.config  # type: ignore[attr-defined]
-            config.tui.identity_nudge_dismissed = True
-            from styrened.tui.services.config import save_config
-            save_config(config)
+            if config.tui.identity_nudge_dismissed:
+                self.query_one(IdentityNudgeBanner).hide()
         except Exception:
             pass
 
     def action_open_settings(self) -> None:
-        """S: open settings screen (also dismisses identity nudge)."""
-        self._dismiss_identity_nudge()
+        """S: open settings screen."""
         try:
-            self.app.action_open_settings()  # type: ignore[attr-defined]
+            self.app.action_open_admin()  # type: ignore[attr-defined]
         except Exception:
             pass
 
@@ -360,6 +354,7 @@ class DashboardScreen(Screen[None]):
                 status_bar.rns_online = getattr(status, "rns_initialized", False)
                 status_bar.daemon_connected = True
                 status_bar.styrene_mesh_count = len(mesh_devices)
+                status_bar.total_device_count = getattr(status, "device_count", 0) or 0
                 status_bar.daemon_uptime = getattr(status, "uptime", 0.0) or 0.0
                 if isinstance(hub_data, dict):
                     from styrened.services.hub_connection import HubStatus
@@ -369,6 +364,9 @@ class DashboardScreen(Screen[None]):
                     )
                 iface_count = getattr(status, "interface_count", 0) or 0
                 status_bar.interface_count = iface_count
+                status_bar.transport_enabled = getattr(status, "transport_enabled", False)
+                status_bar.propagation_enabled = getattr(status, "propagation_enabled", False)
+                status_bar.active_links = getattr(status, "active_links", 0) or 0
             except Exception:
                 pass
 
@@ -394,6 +392,7 @@ class DashboardScreen(Screen[None]):
                 status_bar.unread_count = total_unread
             except Exception:
                 pass
+
         finally:
             pending = [t for t in tasks.values() if not t.done()]
             for t in pending:

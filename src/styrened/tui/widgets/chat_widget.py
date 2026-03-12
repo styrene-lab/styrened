@@ -308,7 +308,7 @@ class ChatWidget(Widget, can_focus=True):
         yield Static("", id="chat-status")
         with Horizontal(id="chat-input-bar"):
             yield Input(placeholder="Type a message…", id="chat-input")
-            yield Static("[dim]⏎[/]", id="send-hint")
+            yield Static(f"[{get_color_cascade().dim}]⏎[/]", id="send-hint")
 
     def on_mount(self) -> None:
         """Load message history on mount, subscribe to events, and mark as read."""
@@ -417,10 +417,10 @@ class ChatWidget(Widget, can_focus=True):
                     elif new_status == "delivered":
                         icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
                     elif new_status == "failed":
-                        icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
+                        icon = f"[{cascade.color_danger} bold]{STATUS_ICONS['failed']}[/]"
                     ts_str = datetime.datetime.fromtimestamp(child.timestamp).strftime("%H:%M") if child.timestamp else ""
                     if new_status == "failed":
-                        msg_text = f"[red italic]{child.raw_content}[/] {icon} [{cascade.dim}]{ts_str}[/]"
+                        msg_text = f"[{cascade.color_danger} italic]{child.raw_content}[/] {icon} [{cascade.dim}]{ts_str}[/]"
                     else:
                         msg_text = f"{child.raw_content} {icon} [{cascade.dim}]{ts_str}[/]"
                     child.update_text(msg_text)
@@ -477,7 +477,7 @@ class ChatWidget(Widget, can_focus=True):
             messages = await bridge.get_messages(self.peer_hash)
         except Exception as e:
             logger.warning(f"Failed to load messages: {e}")
-            self._set_status(f"[red]Failed to load messages: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Failed to load messages: {e}[/]")
             messages = []
 
         if not messages and self._pending_messages:
@@ -502,7 +502,7 @@ class ChatWidget(Widget, can_focus=True):
                 self._pending_messages.clear()
 
                 if not messages:
-                    await container.mount(Static("[dim]No messages yet[/]", classes="chat-no-messages"))
+                    await container.mount(Static(f"[{get_color_cascade().dim}]No messages yet[/]", classes="chat-no-messages"))
                     return
 
                 last_date: str | None = None
@@ -606,7 +606,7 @@ class ChatWidget(Widget, can_focus=True):
     ) -> MessageBubble:
         """Create a MessageBubble from message data."""
         is_outgoing = msg.get("is_outgoing", False)
-        content = msg.get("content") or "[dim]No content[/]"
+        content = msg.get("content") or f"[{get_color_cascade().dim}]No content[/]"
         status = msg.get("status", "")
         lxmf_hash = msg.get("lxmf_hash")
         reply_to_hash = msg.get("reply_to_hash")
@@ -637,7 +637,7 @@ class ChatWidget(Widget, can_focus=True):
             elif status == "delivered":
                 status_icon = f"[{cascade.dim}]{STATUS_ICONS['delivered']}[/]"
             elif status == "failed":
-                status_icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
+                status_icon = f"[{cascade.color_danger} bold]{STATUS_ICONS['failed']}[/]"
 
             if status == "failed":
                 parts.append(f"{content} {status_icon} [{cascade.dim}]{ts_str}[/]")
@@ -811,13 +811,13 @@ class ChatWidget(Widget, can_focus=True):
         container.mount(bubble)
         container.scroll_end(animate=False)
 
-        self._set_status("[dim]Sending...[/]")
+        self._set_status(f"[{get_color_cascade().dim}]Sending...[/]")
 
     async def _send_message(self, content: str, **kwargs: Any) -> None:
         """Send message via IPCBridge."""
         bridge = self._ipc_bridge
         if bridge is None:
-            self._set_status("[red]Chat requires daemon connection[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Chat requires daemon connection[/]")
             self.notify("Chat requires daemon connection", severity="error")
             return
 
@@ -827,11 +827,11 @@ class ChatWidget(Widget, can_focus=True):
                 timeout=_SEND_TIMEOUT,
             )
             logger.info(f"Message sent to {self.peer_hash[:8]}...: {result}")
-            self._set_status("[green]Sent[/]")
+            self._set_status(f"[{get_color_cascade().bright}]Sent[/]")
             self._update_optimistic_status(content, "sent")
         except TimeoutError:
             logger.error(f"Send timed out after {_SEND_TIMEOUT}s to {self.peer_hash[:8]}...")
-            self._set_status(f"[red]Send timed out ({_SEND_TIMEOUT:.0f}s)[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Send timed out ({_SEND_TIMEOUT:.0f}s)[/]")
             self._update_optimistic_status(content, "failed")
             self.notify(
                 f"Message send timed out after {_SEND_TIMEOUT:.0f}s",
@@ -845,7 +845,7 @@ class ChatWidget(Widget, can_focus=True):
             return
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
-            self._set_status(f"[red]Send failed: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Send failed: {e}[/]")
             self._update_optimistic_status(content, "failed")
             self.notify(f"Send failed: {e}", title="Chat Error", severity="error")
             # Refresh to replace optimistic bubble (id=0) with real DB record
@@ -867,10 +867,10 @@ class ChatWidget(Widget, can_focus=True):
         except Exception:
             return
 
-        get_color_cascade()
+        cascade = get_color_cascade()
         icon = STATUS_ICONS.get(status, "")
         if status == "failed":
-            icon = f"[red bold]{STATUS_ICONS['failed']}[/]"
+            icon = f"[{cascade.color_danger} bold]{STATUS_ICONS['failed']}[/]"
 
         for child in reversed(list(container.query(".--outgoing"))):
             if isinstance(child, MessageBubble):
@@ -925,7 +925,7 @@ class ChatWidget(Widget, can_focus=True):
             self._selected_message_id = bubble.message_id
             ts = datetime.datetime.fromtimestamp(bubble.timestamp).strftime("%H:%M:%S")
             method = f" [{bubble.status}]" if bubble.status else ""
-            self._set_status(f"[dim]#{bubble.message_id} {ts}{method}[/]")
+            self._set_status(f"[{get_color_cascade().dim}]#{bubble.message_id} {ts}{method}[/]")
         else:
             self._selected_message_id = None
             self._set_status("")
@@ -1029,7 +1029,7 @@ class ChatWidget(Widget, can_focus=True):
         if bubble is None or not bubble.is_failed:
             failed = [b for b in self._get_bubbles() if b.is_failed]
             if not failed:
-                self._set_status("[dim]No failed messages to retry[/]")
+                self._set_status(f"[{get_color_cascade().dim}]No failed messages to retry[/]")
                 return
             bubble = failed[-1]  # Most recent
             self._selected_message_id = bubble.message_id
@@ -1056,7 +1056,7 @@ class ChatWidget(Widget, can_focus=True):
                     await self._retry_single(bubble.message_id)
                     return
 
-        self._set_status("[red]Could not find message to retry[/]")
+        self._set_status(f"[{get_color_cascade().color_danger}]Could not find message to retry[/]")
 
     async def _retry_single(self, message_id: int) -> None:
         """Retry a single failed message via IPC."""
@@ -1068,7 +1068,7 @@ class ChatWidget(Widget, can_focus=True):
 
         try:
             await bridge.retry_message(message_id)
-            self._set_status("[green]Retry queued[/]")
+            self._set_status(f"[{get_color_cascade().bright}]Retry queued[/]")
             # Refresh to show updated status
             if self.is_mounted:
                 await asyncio.sleep(0.5)
@@ -1076,7 +1076,7 @@ class ChatWidget(Widget, can_focus=True):
         except Exception as e:
             logger.error(f"Retry failed: {e}")
             self._update_bubble_status(message_id, "failed")
-            self._set_status(f"[red]Retry failed: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Retry failed: {e}[/]")
 
     def action_retry_all_failed(self) -> None:
         """Retry all failed messages (ctrl+r)."""
@@ -1084,7 +1084,7 @@ class ChatWidget(Widget, can_focus=True):
         if not failed:
             return
 
-        self._set_status(f"[dim]Retrying {len(failed)} failed message(s)...[/]")
+        self._set_status(f"[{get_color_cascade().dim}]Retrying {len(failed)} failed message(s)...[/]")
         for bubble in failed:
             self.run_worker(
                 self._retry_single(bubble.message_id),
@@ -1106,7 +1106,7 @@ class ChatWidget(Widget, can_focus=True):
             self.run_worker(self._execute_delete(bubble.message_id), group="chat-delete")
         else:
             self._delete_pending = bubble.message_id
-            self._set_status("[yellow]Press d again to delete[/]")
+            self._set_status(f"[{get_color_cascade().color_warning}]Press d again to delete[/]")
             self._cancel_delete_timer()
             self._delete_timer = self.set_timer(
                 _DELETE_CONFIRM_TIMEOUT, self._cancel_delete_pending
@@ -1143,10 +1143,10 @@ class ChatWidget(Widget, can_focus=True):
                 self._message_ids.remove(message_id)
 
             self._selected_message_id = None
-            self._set_status("[dim]Message deleted[/]")
+            self._set_status(f"[{get_color_cascade().dim}]Message deleted[/]")
         except Exception as e:
             logger.error(f"Delete failed: {e}")
-            self._set_status(f"[red]Delete failed: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Delete failed: {e}[/]")
 
     # -------------------------------------------------------------------------
     # Phase 5: Full-text search
@@ -1197,7 +1197,7 @@ class ChatWidget(Widget, can_focus=True):
             results = await bridge.search_messages(query=query, peer_hash=self.peer_hash)
         except Exception as e:
             logger.warning(f"Search failed: {e}")
-            self._set_status(f"[red]Search failed: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Search failed: {e}[/]")
             return
 
         try:
@@ -1214,7 +1214,7 @@ class ChatWidget(Widget, can_focus=True):
 
             if not results:
                 await container.mount(
-                    Static(f"[dim]No results for '{query}'[/]", classes="chat-no-messages")
+                    Static(f"[{get_color_cascade().dim}]No results for '{query}'[/]", classes="chat-no-messages")
                 )
                 return
 
@@ -1225,7 +1225,7 @@ class ChatWidget(Widget, can_focus=True):
         except Exception:
             pass
 
-        self._set_status(f"[dim]{len(results)} results for '{query}'[/]")
+        self._set_status(f"[{get_color_cascade().dim}]{len(results)} results for '{query}'[/]")
 
     # -------------------------------------------------------------------------
     # Phase 6: Reply threading
@@ -1249,7 +1249,7 @@ class ChatWidget(Widget, can_focus=True):
 
         try:
             reply_bar = self.query_one("#chat-reply-bar", Static)
-            reply_bar.update(f"\u21a9 Replying to: {preview}  [dim]\u00d7 esc to cancel[/]")
+            reply_bar.update(f"\u21a9 Replying to: {preview}  [{get_color_cascade().dim}]\u00d7 esc to cancel[/]")
             reply_bar.remove_class("hidden")
         except Exception:
             pass
@@ -1281,9 +1281,9 @@ class ChatWidget(Widget, can_focus=True):
 
         try:
             self.app.copy_to_clipboard(bubble.raw_content)
-            self._set_status("[dim]Copied to clipboard[/]")
+            self._set_status(f"[{get_color_cascade().dim}]Copied to clipboard[/]")
         except Exception:
-            self._set_status("[red]Copy failed[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Copy failed[/]")
 
     # -------------------------------------------------------------------------
     # Block actions
@@ -1346,7 +1346,7 @@ class ChatWidget(Widget, can_focus=True):
             return
 
         if not bubble.has_attachment:
-            self._set_status("[dim]No attachment on selected message[/]")
+            self._set_status(f"[{get_color_cascade().dim}]No attachment on selected message[/]")
             return
 
         self.run_worker(
@@ -1374,11 +1374,11 @@ class ChatWidget(Widget, can_focus=True):
 
         bridge = self._ipc_bridge
         if bridge is None:
-            self._set_status("[red]No daemon connection[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]No daemon connection[/]")
             return
 
         try:
-            self._set_status("[dim]Fetching attachment...[/]")
+            self._set_status(f"[{get_color_cascade().dim}]Fetching attachment...[/]")
             import base64
 
             result = await bridge.get_attachment(message_id)
@@ -1410,10 +1410,10 @@ class ChatWidget(Widget, can_focus=True):
             # Schedule delayed cleanup (5 min) to let viewer open
             self.set_timer(300, lambda: self._cleanup_temp_file(tmp_path))
 
-            self._set_status(f"[dim]Opened {filename}[/]")
+            self._set_status(f"[{get_color_cascade().dim}]Opened {filename}[/]")
         except Exception as e:
             logger.error(f"Failed to open attachment: {e}")
-            self._set_status(f"[red]Failed to open: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Failed to open: {e}[/]")
 
     def action_attach_file(self) -> None:
         """Attach a file or clipboard content (a key).
@@ -1447,7 +1447,7 @@ class ChatWidget(Widget, can_focus=True):
             )
             size_str = _human_size(attachment.size)
             self._set_status(
-                f"[dim]{icon} 📋 {attachment.filename} ({size_str}) "
+                f"[{get_color_cascade().dim}]{icon} 📋 {attachment.filename} ({size_str}) "
                 f"| Enter to send, Esc to cancel[/]"
             )
             try:
@@ -1463,10 +1463,10 @@ class ChatWidget(Widget, can_focus=True):
             chat_input.placeholder = "Enter file path to attach (Esc to cancel)…"
             chat_input.value = ""
             chat_input.focus()
-            self._set_status("[dim]Enter path to file, then press Enter[/]")
+            self._set_status(f"[{get_color_cascade().dim}]Enter path to file, then press Enter[/]")
             self._pending_attachment = {"awaiting_path": True}
         except Exception:
-            self._set_status("[red]Cannot access input[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Cannot access input[/]")
 
     async def _stage_attachment_from_path(self, path_str: str) -> bool:
         """Read a file and stage it as a pending attachment.
@@ -1487,7 +1487,7 @@ class ChatWidget(Widget, can_focus=True):
 
         path = Path(path_str.strip()).expanduser()
         if not path.is_file():
-            self._set_status(f"[red]File not found: {path}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]File not found: {path}[/]")
             self._pending_attachment = None
             return False
 
@@ -1495,13 +1495,13 @@ class ChatWidget(Widget, can_focus=True):
         try:
             file_size = path.stat().st_size
         except OSError as e:
-            self._set_status(f"[red]Cannot stat file: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Cannot stat file: {e}[/]")
             self._pending_attachment = None
             return False
 
         if file_size > DEFAULT_MAX_FILE_SIZE:
             self._set_status(
-                f"[red]File too large: {_human_size(file_size)} "
+                f"[{get_color_cascade().color_danger}]File too large: {_human_size(file_size)} "
                 f"(max {_human_size(DEFAULT_MAX_FILE_SIZE)})[/]"
             )
             self._pending_attachment = None
@@ -1527,7 +1527,7 @@ class ChatWidget(Widget, can_focus=True):
                 ATTACHMENT_ICONS["file"],
             )
             self._set_status(
-                f"[dim]{icon} {path.name} ({size_str}) | Press Esc to cancel[/]"
+                f"[{get_color_cascade().dim}]{icon} {path.name} ({size_str}) | Press Esc to cancel[/]"
             )
 
             # Restore normal input placeholder
@@ -1540,7 +1540,7 @@ class ChatWidget(Widget, can_focus=True):
 
             return True
         except Exception as e:
-            self._set_status(f"[red]Failed to read file: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Failed to read file: {e}[/]")
             self._pending_attachment = None
             return False
 
@@ -1625,7 +1625,7 @@ class ChatWidget(Widget, can_focus=True):
 
         # Nothing in clipboard — fall back to path prompt
         logger.debug("No clipboard content, prompting for path")
-        self._set_status("[dim]No image in clipboard. Enter file path:[/]")
+        self._set_status(f"[{get_color_cascade().dim}]No image in clipboard. Enter file path:[/]")
         try:
             chat_input = self.query_one("#chat-input", Input)
             chat_input.placeholder = "Enter file path to attach (Esc to cancel)…"
@@ -1633,7 +1633,7 @@ class ChatWidget(Widget, can_focus=True):
             chat_input.focus()
             self._pending_attachment = {"awaiting_path": True}
         except Exception:
-            self._set_status("[red]Cannot access input[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Cannot access input[/]")
 
     def _stage_clipboard_attachment(self, attachment: "ClipboardAttachment") -> None:
         """Stage a clipboard attachment for sending."""
@@ -1656,7 +1656,7 @@ class ChatWidget(Widget, can_focus=True):
             "path": "📎 file",
         }.get(attachment.source, "📎")
         self._set_status(
-            f"[dim]{icon} {source_label}: {attachment.filename} ({size_str}) "
+            f"[{get_color_cascade().dim}]{icon} {source_label}: {attachment.filename} ({size_str}) "
             f"| Enter to send, Esc to cancel[/]"
         )
         try:
@@ -1680,7 +1680,7 @@ class ChatWidget(Widget, can_focus=True):
             attachment = None
 
         if attachment is None:
-            self._set_status("[dim]No image or file in clipboard[/]")
+            self._set_status(f"[{get_color_cascade().dim}]No image or file in clipboard[/]")
             return
 
         self._stage_clipboard_attachment(attachment)
@@ -1698,7 +1698,7 @@ class ChatWidget(Widget, can_focus=True):
         """Handle worker state changes to surface errors."""
         if event.state == WorkerState.ERROR:
             logger.error(f"Chat worker error: {event.worker.error}")
-            self._set_status(f"[red]Error: {event.worker.error}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Error: {event.worker.error}[/]")
             self.notify(
                 f"Chat error: {event.worker.error}",
                 title="Chat Error",

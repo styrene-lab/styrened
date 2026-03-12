@@ -8,6 +8,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Label, RadioButton, RadioSet, Static
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 
 class FirstRunWizardScreen(Screen[bool]):
@@ -43,8 +44,8 @@ class FirstRunWizardScreen(Screen[bool]):
             # Step 1: Welcome
             with Vertical(id="step-welcome", classes="wizard-step"):
                 yield Static(
-                    """
-[bold green]Welcome to Styrene TUI[/]
+                    f"""
+[{get_color_cascade().bright} bold]Welcome to Styrene TUI[/]
 
 Reticulum is not configured on this system. Reticulum provides
 encrypted mesh networking for device discovery and communication.
@@ -63,8 +64,8 @@ or running 'rnsd --config'.
             # Step 2: Interface Selection
             with Vertical(id="step-interface", classes="wizard-step hidden"):
                 yield Static(
-                    """
-[bold green]Network Interface Selection[/]
+                    f"""
+[{get_color_cascade().bright} bold]Network Interface Selection[/]
 
 Reticulum needs at least one network interface to communicate.
 Choose the interface type that best fits your setup:
@@ -80,22 +81,22 @@ Choose the interface type that best fits your setup:
                         id="interface-auto",
                     )
                     yield Static(
-                        "  [dim]Automatic local network discovery via UDP multicast.[/]",
+                        f"  [{get_color_cascade().dim}]Automatic local network discovery via UDP multicast.[/]",
                         classes="wizard-help",
                     )
                     yield Static(
-                        "  [dim]Works on LANs without router configuration.[/]",
+                        f"  [{get_color_cascade().dim}]Works on LANs without router configuration.[/]",
                         classes="wizard-help",
                     )
                     yield Label("")
 
                     yield RadioButton("TCP Client Interface", id="interface-tcp")
                     yield Static(
-                        "  [dim]Connect to a specific Reticulum node by IP:port.[/]",
+                        f"  [{get_color_cascade().dim}]Connect to a specific Reticulum node by IP:port.[/]",
                         classes="wizard-help",
                     )
                     yield Static(
-                        "  [dim]Useful for connecting to a known gateway or hub.[/]",
+                        f"  [{get_color_cascade().dim}]Useful for connecting to a known gateway or hub.[/]",
                         classes="wizard-help",
                     )
                     yield Label("")
@@ -104,11 +105,11 @@ Choose the interface type that best fits your setup:
                         "TCP Server Interface", id="interface-tcp-server"
                     )
                     yield Static(
-                        "  [dim]Listen for incoming connections from other nodes.[/]",
+                        f"  [{get_color_cascade().dim}]Listen for incoming connections from other nodes.[/]",
                         classes="wizard-help",
                     )
                     yield Static(
-                        "  [dim]Acts as a gateway for other devices.[/]",
+                        f"  [{get_color_cascade().dim}]Acts as a gateway for other devices.[/]",
                         classes="wizard-help",
                     )
 
@@ -174,7 +175,7 @@ Choose the interface type that best fits your setup:
 
         status.update(
             f"""
-[bold green]Ready to Create Configuration[/]
+[{get_color_cascade().bright} bold]Ready to Create Configuration[/]
 
 The following configuration will be created:
 
@@ -256,6 +257,6 @@ This configuration is minimal and can be customized later.
         """
         status = self.query_one("#wizard-status", Static)
         if success:
-            status.update(f"[green]{message}[/green]")
+            status.update(f"[{get_color_cascade().bright}]{message}[/]")
         else:
-            status.update(f"[red]{message}[/red]")
+            status.update(f"[{get_color_cascade().color_danger}]{message}[/]")

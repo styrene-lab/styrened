@@ -10,6 +10,7 @@ use standard micron rendering.
 """
 
 from typing import Any
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 
 def render_structured_page(page_type: str, data: dict[str, Any]) -> str | None:
@@ -51,9 +52,10 @@ def render_node_status(data: dict[str, Any]) -> str:
 
     node_name = data.get("node_name", "Unknown")
     status = data.get("status", "unknown")
-    status_color = "green" if status == "active" else "yellow" if status == "degraded" else "red"
+    c = get_color_cascade()
+    status_color = c.bright if status == "active" else c.color_warning if status == "degraded" else c.color_danger
 
-    lines.append(f"[bold]{node_name}[/bold]  [{status_color}]{status.upper()}[/{status_color}]")
+    lines.append(f"[bold]{node_name}[/bold]  [{status_color}]{status.upper()}[/]")
     lines.append("")
 
     # Uptime
@@ -112,7 +114,7 @@ def render_fleet_overview(data: dict[str, Any]) -> str:
 
     lines.append(f"[bold]Fleet Overview[/bold]  {active} active / {total} total")
     if offline > 0:
-        lines.append(f"  [yellow]{offline} offline[/yellow]")
+        lines.append(f"  [{get_color_cascade().color_warning}]{offline} offline[/]")
     lines.append("")
 
     nodes = data.get("nodes", [])
@@ -126,18 +128,19 @@ def render_fleet_overview(data: dict[str, Any]) -> str:
             status = node.get("status", "unknown")
             uptime = node.get("uptime", 0)
 
+            c = get_color_cascade()
             status_color = (
-                "green" if status == "active"
-                else "yellow" if status == "degraded"
-                else "red"
+                c.bright if status == "active"
+                else c.color_warning if status == "degraded"
+                else c.color_danger
             )
             uptime_str = _format_duration(uptime) if uptime > 0 else "-"
 
             lines.append(
-                f"  {name:<20} [{status_color}]{status:<10}[/{status_color}] {uptime_str:<15}"
+                f"  {name:<20} [{status_color}]{status:<10}[/] {uptime_str:<15}"
             )
     else:
-        lines.append("  [dim]No nodes reported[/dim]")
+        lines.append(f"  [{get_color_cascade().dim}]No nodes reported[/]")
 
     return "\n".join(lines)
 

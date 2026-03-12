@@ -20,6 +20,7 @@ from textual.widgets import Button, DataTable, Input, Label, Static
 
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.ui_state import CommsMode
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,7 @@ class ExchangeContactsTab(Widget):
     ExchangeContactsTab Input {
         background: $background;
         color: $primary;
-        border: solid $border;
+        border: round $border;
     }
 
     ExchangeContactsTab #edit-form {
@@ -339,7 +340,7 @@ class ExchangeContactsTab(Widget):
         table.add_columns("ALIAS", "STATUS", "LAST MESSAGE", "PEER HASH")
 
         if self._ipc_bridge is None:
-            table.add_row("-", "-", "-", "[dim]Contacts require daemon mode[/]")
+            table.add_row("-", "-", "-", f"[{get_color_cascade().dim}]Contacts require daemon mode[/]")
             return
 
         self.run_worker(self._load_contacts())
@@ -405,7 +406,7 @@ class ExchangeContactsTab(Widget):
         table.clear()
 
         if not contacts:
-            table.add_row("-", "-", "-", "[dim]No contacts saved[/]")
+            table.add_row("-", "-", "-", f"[{get_color_cascade().dim}]No contacts saved[/]")
             return
 
         for contact in contacts:
@@ -418,13 +419,13 @@ class ExchangeContactsTab(Widget):
                 dev_status = dev.get("status", "")
                 last_announce = dev.get("last_announce", 0)
                 if dev_status == "active":
-                    status_str = "[green]● online[/]"
+                    status_str = f"[{get_color_cascade().bright}]● online[/]"
                 elif dev_status == "stale":
-                    status_str = f"[yellow]◐ {self._relative_time(last_announce)}[/]"
+                    status_str = f"[{get_color_cascade().color_warning}]◐ {self._relative_time(last_announce)}[/]"
                 else:
-                    status_str = f"[dim]○ {self._relative_time(last_announce)}[/]"
+                    status_str = f"[{get_color_cascade().dim}]○ {self._relative_time(last_announce)}[/]"
             else:
-                status_str = "[dim]○ unknown[/]"
+                status_str = f"[{get_color_cascade().dim}]○ unknown[/]"
 
             conv = conv_map.get(peer_hash)
             if conv:
@@ -433,9 +434,9 @@ class ExchangeContactsTab(Widget):
                 if preview and len(preview) > 25:
                     preview = preview[:25] + "…"
                 if last_msg_time:
-                    last_msg_str = f"[dim]{self._relative_time(last_msg_time)}[/]"
+                    last_msg_str = f"[{get_color_cascade().dim}]{self._relative_time(last_msg_time)}[/]"
                     if preview:
-                        last_msg_str = f"{preview} [dim]{self._relative_time(last_msg_time)}[/]"
+                        last_msg_str = f"{preview} [{get_color_cascade().dim}]{self._relative_time(last_msg_time)}[/]"
                 else:
                     last_msg_str = ""
             else:
@@ -650,6 +651,6 @@ class ExchangeContactsTab(Widget):
             if peer_hash:
                 result_widget.update(f"Resolved: {peer_hash}")
             else:
-                result_widget.update("[dim]No match found[/]")
+                result_widget.update(f"[{get_color_cascade().dim}]No match found[/]")
         except Exception as e:
-            result_widget.update(f"[red]Error: {e}[/]")
+            result_widget.update(f"[{get_color_cascade().color_danger}]Error: {e}[/]")

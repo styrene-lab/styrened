@@ -25,16 +25,16 @@ Screen {
 
 /* === Panel Styling === */
 .panel {
-    border: heavy $border;
+    border: round $border;
     border-title-color: $primary;
-    background: $surface;
+    background: $background;
     padding: 1;
     height: auto;
     margin-bottom: 1;
 }
 
 .panel:focus-within {
-    border: heavy $primary;
+    border: round $primary;
 }
 
 .panel-title {
@@ -49,10 +49,37 @@ Screen {
     margin-bottom: 1;
 }
 
-.color-swatch {
-    width: 12;
+.color-swatch-btn {
+    width: 6;
     height: 1;
+    min-width: 6;
     margin-right: 1;
+}
+
+.color-swatch-btn:hover {
+    text-style: reverse;
+}
+
+.color-group-label {
+    margin-top: 1;
+    margin-bottom: 0;
+    color: $primary;
+}
+
+.color-token-label {
+    width: 20;
+    color: $text-muted;
+}
+
+.color-hex-label {
+    width: 12;
+    color: $text-muted;
+}
+
+.color-row {
+    height: 1;
+    align: left middle;
+    margin-bottom: 0;
 }
 
 .input-label {
@@ -115,25 +142,22 @@ RichLog, Log {
     text-style: underline;  /* Quarter circle ◓ + underline = processing */
 }
 
-.status-info {
-    color: $primary;  /* Uses theme color */
-}
-
 /* === Selection Controls === */
 Switch {
     margin-right: 2;
-    background: $background;
+    background: transparent;
     border: none;
-    height: 1;
+    height: auto;
+    min-height: 1;
 }
 
 Switch:focus {
-    background: $surface;
+    background: transparent;
 }
 
 Switch > .switch--slider {
-    background: $background;
-    color: $panel;
+    background: $surface;
+    color: $border;
 }
 
 Switch.-on > .switch--slider {
@@ -183,22 +207,29 @@ RadioButton.-on > .toggle--button {
 
 Select {
     width: 30;
-    background: $surface;
-    border: solid $border;
+    height: auto;
+    background: $background;
+    border: none;
 }
 
 Select:focus {
-    border: solid $primary;
+    border: none;
 }
 
 Select > SelectCurrent {
-    background: transparent;
+    background: $background;
     color: $primary;
+    border: round $border;
+    height: 3;
+}
+
+Select:focus > SelectCurrent {
+    border: round $primary;
 }
 
 Select > SelectOverlay {
-    background: $surface;
-    border: solid $border;
+    background: $background;
+    border: round $border;
 }
 
 SelectOverlay > .option-list--option {
@@ -207,7 +238,7 @@ SelectOverlay > .option-list--option {
 }
 
 SelectOverlay > .option-list--option-highlighted {
-    background: $background;
+    background: $surface;
     color: $primary;
     text-style: bold;
 }
@@ -271,6 +302,69 @@ Rule {
     color: $panel;
 }
 
+/* === Panel Tier System === */
+/* Two orthogonal axes: COLOR encodes interactivity, WEIGHT encodes urgency.
+   No backgrounds (half-char border constraint).
+   Survives tweakcn theme swaps — weight hierarchy is palette-independent.
+
+   Color axis:
+     $primary    = interactive, actionable ("you work here")
+     $border     = informational, passive ("I'm showing you something")
+     $secondary  = ambient, chrome ("background structure")
+
+   Weight axis:
+     round       = normal (80% of panels)
+     double      = structural grouping / containment
+     heavy       = urgent, alert, focused */
+
+/* INTERACTIVE: forms, settings, workspaces — the operator acts on these. */
+.panel-interactive {
+    border: round $primary;
+    border-title-color: $primary;
+    border-title-style: bold;
+}
+
+/* INFO: status readouts, node info, data tables — read-only display. */
+.panel-info {
+    border: round $border;
+    border-title-color: $border;
+    border-title-style: bold;
+}
+
+/* AMBIENT: activity feeds, logs, secondary chrome — barely there. */
+.panel-ambient {
+    border: round $secondary;
+    border-title-color: $text-muted;
+    border-title-style: none;
+}
+
+/* CONTAINER: groups multiple panels into a section. Double line = boundary. */
+.panel-container {
+    border: double $border;
+    border-title-color: $border;
+    border-title-style: bold;
+}
+
+/* ALERT: warnings, errors, focused/selected — demands immediate attention.
+   Pair with semantic color: heavy $warning, heavy $error, heavy $primary. */
+.panel-alert {
+    border: heavy $warning;
+    border-title-color: $warning;
+    border-title-style: bold;
+}
+
+.panel-alert-error {
+    border: heavy $error;
+    border-title-color: $error;
+    border-title-style: bold;
+}
+
+.panel-alert-focus {
+    border: heavy $primary;
+    border-title-color: $primary;
+    border-title-style: bold;
+}
+
 /* === Data Tables === */
 DataTable {
     background: transparent;
@@ -317,87 +411,145 @@ ProgressBar > .bar--complete {
 /* === Input Fields === */
 Input {
     background: $background;
-    border: solid $border;
+    border: round $border;
     color: $primary;
     margin-bottom: 1;
 }
 
 Input:focus {
-    border: solid $primary;
+    border: round $primary;
 }
 
 Input.-valid {
-    border: solid $border;
+    border: round $border;
 }
 
 Input.-invalid {
-    border: solid $error;
+    border: round $error;
 }
 
 /* === Buttons === */
+/* CONSTRAINT: background must be transparent (inherit parent) because half-char
+   border glyphs (round/tall) blend widget bg with parent bg. Any mismatch
+   creates visible color seams.
+   STYLE: Border weight transitions on hover — "rising" from recessed to bold.
+   Default: round subtle. Hover: heavy bright. Primary: round bright → double.
+   Semantic variants follow same pattern in their color. */
 Button {
-    background: $surface;
-    border: solid $border;
+    background: transparent;
+    border: round $primary-background;
     color: $primary;
     text-style: none;
     margin-right: 1;
     height: 3;
+    padding: 0 3;
+    min-width: 12;
+    content-align: center middle;
 }
 
 Button > .button--label {
     background: transparent;
+    color: $primary;
 }
 
 Button:hover {
-    background: $background;
-    border: solid $primary;
+    background: transparent;
+    border: heavy $primary;
+    color: $primary;
+    text-style: bold;
+}
+
+Button:hover > .button--label {
     color: $primary;
     text-style: bold;
 }
 
 Button:focus {
-    border: solid $primary;
+    background: transparent;
+    border: round $primary;
+    text-style: bold;
 }
 
 Button:focus > .button--label {
     background: transparent;
-}
-
-Button.-primary {
-    background: $background;
-    border: solid $primary;
     color: $primary;
     text-style: bold;
 }
 
-/* Semantic buttons use text-style differentiation for theme-independence */
-/* Each variant has distinct: border color + text style + shade pattern */
-
-Button.-danger {
-    border: solid $error;
-    color: $error;
-    text-style: reverse;  /* Inverted - most alarming */
+Button.-active {
+    text-style: reverse;
 }
 
-Button.-danger:hover {
-    background: $surface;
+/* Primary: already "hot" at rest — double border on hover = locked on */
+Button.-primary {
+    background: transparent;
+    border: round $primary;
+    color: $primary;
+    text-style: bold;
+}
+
+Button.-primary > .button--label {
+    color: $primary;
+    text-style: bold;
+}
+
+Button.-primary:hover {
+    background: transparent;
+    border: double $primary;
+    color: $primary;
+    text-style: bold;
+}
+
+Button.-primary:hover > .button--label {
+    color: $primary;
+    text-style: bold;
+}
+
+/* Semantic buttons: same weight transitions in semantic color */
+
+Button.-error {
+    border: round $error;
+    color: $error;
+    text-style: bold;
+}
+
+Button.-error:hover {
+    background: transparent;
+    border: heavy $error;
+    color: $error;
+    text-style: bold;
 }
 
 Button.-warning {
-    border: solid $warning;
+    border: round $warning;
     color: $warning;
-    text-style: bold italic;  /* Attention-grabbing but not alarming */
+    text-style: bold;
+}
+
+Button.-warning:hover {
+    background: transparent;
+    border: heavy $warning;
+    color: $warning;
+    text-style: bold;
 }
 
 Button.-success {
-    border: solid $success;
+    border: round $success;
     color: $success;
-    text-style: bold underline;  /* Confident affirmation */
+    text-style: bold;
+}
+
+Button.-success:hover {
+    background: transparent;
+    border: heavy $success;
+    color: $success;
+    text-style: bold;
 }
 
 /* === Footer === */
 Footer {
-    background: $surface;
+    background: transparent;
+    border-top: round $primary-background;
     overflow: hidden;
 }
 
@@ -413,7 +565,8 @@ Footer > .footer--description {
 
 /* === Header === */
 Header {
-    background: $background;
+    background: transparent;
+    border-bottom: round $primary-background;
     color: $primary;
 }
 
@@ -510,7 +663,7 @@ Header {
 .settings-section {
     height: auto;
     margin-bottom: 2;
-    border: solid $border;
+    border: round $border;
     padding: 1;
 }
 
@@ -615,6 +768,8 @@ Header {
 .peer-remove-btn {
     width: 5;
     min-width: 5;
+    height: 1;
+    border: none;
 }
 
 /* Allowed-peer rows (Security tab) */
@@ -631,6 +786,8 @@ Header {
 .allowed-peer-remove-btn {
     width: 5;
     min-width: 5;
+    height: 1;
+    border: none;
 }
 
 .allowed-peer-header-row {
@@ -644,21 +801,37 @@ Header {
 }
 
 #settings-actions {
-    height: 3;
-    margin-top: 1;
-    margin-bottom: 1;
+    dock: bottom;
+    height: 5;
+    background: transparent;
+    border-top: round $primary-background;
+    padding: 0 1;
     align: center middle;
 }
 
 #settings-actions > Button {
-    margin-left: 1;
-    margin-right: 1;
+    margin-left: 2;
+    margin-right: 2;
 }
 
 #status-message {
-    height: 2;
+    dock: bottom;
+    height: auto;
+    max-height: 1;
     text-align: center;
-    margin-top: 1;
+    background: transparent;
+}
+
+.status-success {
+    color: $primary;
+}
+
+.status-error {
+    color: $error;
+}
+
+.status-info {
+    color: $text-muted;
 }
 
 /* === First-Run Wizard === */
@@ -673,8 +846,8 @@ Header {
     width: 80;
     height: auto;
     margin: 2 0;
-    border: solid $border;
-    background: $surface;
+    border: round $border;
+    background: $background;
     padding: 2;
     align: center top;
 }
@@ -728,12 +901,12 @@ TabbedContent {
 }
 
 Tabs {
-    background: $surface;
+    background: $background;
     dock: top;
 }
 
 Tab {
-    background: $surface;
+    background: $background;
     color: $text-muted;
     padding: 0 2;
 }
@@ -807,7 +980,7 @@ ChatWidget #chat-message-container {
 ChatWidget #chat-input-bar {
     height: 2;
     dock: bottom;
-    border-top: wide $border;
+    border-top: round $primary-background;
 }
 
 ChatWidget #chat-input-bar #chat-input {

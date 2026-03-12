@@ -11,6 +11,7 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -226,9 +227,9 @@ class MessageBubble(Widget):
         name = self.attachment_name or "image"
         size_str = _human_size(self.attachment_size)
         if size_str:
-            fallback = f"[dim]{icon} {name} ({size_str})[/]"
+            fallback = f"[{get_color_cascade().dim}]{icon} {name} ({size_str})[/]"
         else:
-            fallback = f"[dim]{icon} {name}[/]"
+            fallback = f"[{get_color_cascade().dim}]{icon} {name}[/]"
         self.update_text(f"{self._text}\n{fallback}")
 
     def select(self) -> None:

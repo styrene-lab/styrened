@@ -244,9 +244,14 @@ def create_styrene_cascade() -> ColorCascade:
     cascade.status_info = STYRENE_DARK["foreground"]  # #cbf4ed
 
     # Semantic colors
-    cascade.color_success = STYRENE_DARK["primary"]  # #00f0d3
-    cascade.color_warning = STYRENE_DARK["destructive"]  # #e98100
-    cascade.color_danger = STYRENE_DARK["destructive"]  # #e98100
+    # Semantic colors derived via OKLCH hue targeting from destructive/primary.
+    # See tweakcn.py _derive_semantic_color() for the derivation logic.
+    from styrened.tui.themes.tweakcn import _derive_semantic_color, _HUE_ERROR, _HUE_WARNING, _HUE_SUCCESS
+    _destr_raw = "oklch(0.7036 0.1665 59.0920)"  # destructive
+    _prim_raw = "oklch(0.8556 0.1555 179.7932)"   # primary
+    cascade.color_success = _derive_semantic_color(_prim_raw, _HUE_SUCCESS, chroma_scale=0.7)
+    cascade.color_warning = _derive_semantic_color(_destr_raw, _HUE_WARNING, chroma_scale=0.85)
+    cascade.color_danger = _derive_semantic_color(_destr_raw, _HUE_ERROR)
     cascade.color_info = STYRENE_DARK["foreground"]  # #cbf4ed
 
     return cascade

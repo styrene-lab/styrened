@@ -25,6 +25,7 @@ from styrened.tui.services.service_installer import (
     detect_platform,
     install_service,
 )
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 
 class DaemonSetupScreen(Screen[bool]):
@@ -265,4 +266,4 @@ class DaemonSetupScreen(Screen[bool]):
         if success:
             status.update(f"[bold]{message}[/]")
         else:
-            status.update(f"[bold red]{message}[/]")
+            status.update(f"[{get_color_cascade().color_danger} bold]{message}[/]")

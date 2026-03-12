@@ -38,6 +38,7 @@ from styrened.tui.services.config import (
     update_styrene_config_from_cli,
 )
 from styrened.tui.services.reticulum import find_reticulum_config
+from styrened.tui.themes.color_cascade import FORGE_WORLD_PRESETS, ColorCascade
 from styrened.tui.themes.styrene_brand import (
     STYRENE_THEME_KEY,
     create_styrene_cascade,
@@ -50,6 +51,39 @@ try:
     HAS_TEXTUAL_IMAGE = True
 except ImportError:
     HAS_TEXTUAL_IMAGE = False
+
+
+# ---------------------------------------------------------------------------
+# macOS-friendly Input bindings
+# ---------------------------------------------------------------------------
+# Textual's Input only has ctrl-based shortcuts (Unix/Emacs).  macOS users
+# expect Option+Arrow for word navigation and Option+Backspace for
+# delete-word.  Patch these onto Input.BINDINGS so every Input in the TUI
+# gets them automatically.
+def _patch_input_bindings() -> None:
+    from textual.widgets import Input
+
+    _mac_bindings = [
+        Binding("alt+left", "cursor_left_word", "Word left", show=False),
+        Binding("alt+right", "cursor_right_word", "Word right", show=False),
+        Binding("alt+shift+left", "cursor_left_word(True)", "Select word left", show=False),
+        Binding("alt+shift+right", "cursor_right_word(True)", "Select word right", show=False),
+        Binding("alt+backspace", "delete_left_word", "Delete word left", show=False),
+        Binding("alt+delete", "delete_right_word", "Delete word right", show=False),
+        # super+arrow → home/end (Cmd+Left/Right on macOS)
+        Binding("super+left", "home", "Line start", show=False),
+        Binding("super+right", "end", "Line end", show=False),
+        Binding("super+shift+left", "home(True)", "Select to start", show=False),
+        Binding("super+shift+right", "end(True)", "Select to end", show=False),
+        Binding("super+backspace", "delete_left_all", "Delete to start", show=False),
+        Binding("super+a", "select_all", "Select all", show=False),
+    ]
+    existing_keys = {b.key for b in Input.BINDINGS}
+    for b in _mac_bindings:
+        if b.key not in existing_keys:
+            Input.BINDINGS.append(b)
+
+_patch_input_bindings()
 
 
 class StyreneApp(App[None]):
@@ -396,17 +430,34 @@ class StyreneApp(App[None]):
         Falls back to the built-in Styrene theme on any error.
         """
         theme_name = self.config.tui.theme or STYRENE_THEME_KEY
+        custom_colors = self.config.tui.custom_theme_colors
         custom_url = self.config.tui.custom_theme_url
 
-        if custom_url:
+        if custom_colors:
+            # Prefer saved color dict — no network fetch needed
+            try:
+                from styrened.tui.themes.tweakcn import TweakcnProfile
+
+                profile = TweakcnProfile.from_color_dict(
+                    custom_colors,
+                    name=theme_name,
+                    source_url=custom_url,
+                )
+                theme = profile.to_textual_theme("dark")
+                self.register_theme(theme)
+                self._registered_themes[theme.name] = theme
+                theme_name = theme.name
+            except Exception as e:
+                self.log.warning(f"Failed to apply saved theme colors: {e}")
+                theme_name = STYRENE_THEME_KEY
+        elif custom_url:
             try:
                 from styrened.tui.themes.tweakcn import TweakcnProfile
 
                 profile = TweakcnProfile.from_url(custom_url, timeout=8)
                 theme = profile.to_textual_theme("dark")
                 self.register_theme(theme)
-                # Use the fetched theme name (may differ from stored name if
-                # the profile was renamed upstream)
+                self._registered_themes[theme.name] = theme
                 theme_name = theme.name
             except Exception as e:
                 self.log.warning(f"Failed to fetch custom theme {custom_url!r}: {e}")
@@ -691,6 +742,9 @@ class StyreneApp(App[None]):
         if not self._screen_stack:
             return
 
+        # Update the global ColorCascade to match the new theme
+        self._sync_cascade_to_theme(new_theme)
+
         # Refresh all HighlightedPanel borders
         for panel in self.query(HighlightedPanel):
             panel.refresh_theme()
@@ -698,19 +752,33 @@ class StyreneApp(App[None]):
         # Refresh dashboard panels that use Rich markup
         self._refresh_themed_panels()
 
+    def _sync_cascade_to_theme(self, theme_name: str) -> None:
+        """Sync the global ColorCascade to the active Textual theme."""
+        if theme_name == STYRENE_THEME_KEY:
+            set_color_cascade(create_styrene_cascade())
+        elif theme_name in FORGE_WORLD_PRESETS:
+            set_color_cascade(ColorCascade.from_preset(theme_name))
+        else:
+            # Custom/tweakcn/builtin theme — derive cascade from Theme object
+            try:
+                theme_obj = self._registered_themes.get(theme_name)
+                if theme_obj is None:
+                    # Try Textual built-in themes (nord, dracula, etc.)
+                    from textual.theme import BUILTIN_THEMES
+                    theme_obj = BUILTIN_THEMES.get(theme_name)
+                if theme_obj is not None:
+                    set_color_cascade(ColorCascade.from_textual_theme(theme_obj))
+            except Exception:
+                pass  # Keep existing cascade on error
+
     def _refresh_themed_panels(self) -> None:
         """Refresh panels that use Rich markup with cascade colors."""
         # Import here to avoid circular imports
-        from styrened.tui.screens.dashboard import MeshDeviceTree
         from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
         # Refresh NodeInfoPanel
         for panel in self.query(NodeInfoPanel):
             panel.refresh_data()
-
-        # Refresh MeshDeviceTree
-        for tree in self.query(MeshDeviceTree):
-            tree.refresh_data()
 
     async def on_shutdown(self) -> None:
         """Cleanup on app exit.

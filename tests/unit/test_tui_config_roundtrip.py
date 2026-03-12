@@ -234,7 +234,6 @@ class TestCustomThemeColorsRoundtrip:
     behavior and will pass once the field is implemented.
     """
 
-    @pytest.mark.xfail(reason="custom_theme_colors field not yet in TUIConfig", strict=True)
     def test_dict_roundtrip(self) -> None:
         """Serialize TUI config with custom_theme_colors dict, load back, verify."""
         config = get_default_config()
@@ -242,7 +241,6 @@ class TestCustomThemeColorsRoundtrip:
         result = _roundtrip(config)
         assert result.tui.custom_theme_colors == {"phosphex": "#ff0000", "bg": "#000000"}  # type: ignore[attr-defined]
 
-    @pytest.mark.xfail(reason="custom_theme_colors field not yet in TUIConfig", strict=True)
     def test_empty_dict_roundtrip(self) -> None:
         """Serialize with empty custom_theme_colors, load back, verify empty dict."""
         config = get_default_config()
@@ -250,7 +248,6 @@ class TestCustomThemeColorsRoundtrip:
         result = _roundtrip(config)
         assert result.tui.custom_theme_colors == {}  # type: ignore[attr-defined]
 
-    @pytest.mark.xfail(reason="custom_theme_colors field not yet in TUIConfig", strict=True)
     def test_dict_values_survive_as_strings(self) -> None:
         """Verify custom_theme_colors dict values survive as strings."""
         config = get_default_config()
@@ -268,7 +265,6 @@ class TestCustomThemeColorsRoundtrip:
         colors = getattr(config.tui, "custom_theme_colors", {})
         assert isinstance(colors, dict)
 
-    @pytest.mark.xfail(reason="custom_theme_colors field not yet in TUIConfig", strict=True)
     def test_coexists_with_custom_theme_url(self) -> None:
         """Verify custom_theme_url and custom_theme_colors coexist."""
         config = get_default_config()
@@ -292,14 +288,12 @@ class TestIdentityNudgeDismissedRoundtrip:
     document the expected behavior.
     """
 
-    @pytest.mark.xfail(reason="identity_nudge_dismissed field not yet in TUIConfig", strict=True)
     def test_bool_roundtrip_true(self) -> None:
         config = get_default_config()
         config.tui.identity_nudge_dismissed = True  # type: ignore[attr-defined]
         result = _roundtrip(config)
         assert result.tui.identity_nudge_dismissed is True  # type: ignore[attr-defined]
 
-    @pytest.mark.xfail(reason="identity_nudge_dismissed field not yet in TUIConfig", strict=True)
     def test_bool_roundtrip_false(self) -> None:
         config = get_default_config()
         config.tui.identity_nudge_dismissed = False  # type: ignore[attr-defined]

@@ -145,6 +145,18 @@ class MeshInfoWidget(Static):
         if self.device.version:
             yield Static(f"[bold]Version:[/] {self.device.version}", classes="info-field")
 
+        # Routing info — hops and discovery interface
+        if self.device.hops is not None:
+            hops_label = "direct" if self.device.hops == 0 else f"{self.device.hops} hop{'s' if self.device.hops != 1 else ''}"
+            yield Static(f"[bold]Hops:[/] {hops_label}", classes="info-field")
+
+        if self.device.discovered_via:
+            yield Static(f"[bold]Via:[/] [{cascade.dim}]{self.device.discovered_via}[/]", classes="info-field")
+
+        # LXMF destination (for messaging routing)
+        if self.device.lxmf_destination_hash:
+            yield Static(f"[bold]LXMF:[/] [{cascade.dim}]{self.device.lxmf_destination_hash}[/]", classes="info-field")
+
         # Action buttons (ASCII labels — emoji cause width issues in terminals)
         with Horizontal(classes="info-actions"):
             yield Button("Message", id="btn-message", variant="primary")
@@ -231,7 +243,13 @@ class MeshDeviceDetailScreen(Screen[None]):
 
     def _find_live_device(self) -> MeshDevice | None:
         """Find the device in current live discovery, if present."""
-        live_nodes = discover_devices()
+        # Prefer the exploration screen's cache (populated via IPC bridge)
+        live_nodes: list[MeshDevice] = []
+        exploration = self.app.get_screen("exploration") if "exploration" in self.app.SCREENS else None
+        if exploration is not None:
+            live_nodes = getattr(exploration, "_live_nodes_cache", [])
+        if not live_nodes:
+            live_nodes = discover_devices()
 
         for device in live_nodes:
             if device.identity_hash == self.device_identity:
@@ -245,9 +263,9 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         if not self.device:
             message = (
-                f"[yellow]Loading device {self.device_identity[:8]}...[/]"
+                f"[{get_color_cascade().color_warning}]Loading device {self.device_identity[:8]}...[/]"
                 if not self._device_lookup_complete
-                else f"[red]Device {self.device_identity[:8]}... not found[/]"
+                else f"[{get_color_cascade().color_danger}]Device {self.device_identity[:8]}... not found[/]"
             )
             title = "LOADING" if not self._device_lookup_complete else "ERROR"
             yield HighlightedPanel(
@@ -286,9 +304,9 @@ class MeshDeviceDetailScreen(Screen[None]):
                     # full implementation filters InboxScreen by identity_hash)
                     with TabPane("Mail", id="mail"):
                         yield Static(
-                            f"[dim]Mail for peer[/dim]\n"
-                            f"[dim]({self.device_identity[:16]}...)[/dim]\n\n"
-                            "[dim]Full per-peer mail view coming in a future release.[/dim]",
+                            f"[{get_color_cascade().dim}]Mail for peer[/]\n"
+                            f"[{get_color_cascade().dim}]({self.device_identity[:16]}...)[/]\n\n"
+                            f"[{get_color_cascade().dim}]Full per-peer mail view coming in a future release.[/]",
                             id="mail-placeholder",
                         )
 
@@ -364,9 +382,14 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         from styrened.models.mesh_device import DeviceType
 
-        # Check live discovered devices
+        # Check live discovered devices (prefer exploration cache)
         try:
-            live_nodes = discover_devices()
+            live_nodes: list = []
+            exploration = self.app.get_screen("exploration") if "exploration" in self.app.SCREENS else None
+            if exploration is not None:
+                live_nodes = getattr(exploration, "_live_nodes_cache", [])
+            if not live_nodes:
+                live_nodes = discover_devices()
             for node in live_nodes:
                 if (
                     node.identity_hash == target_identity
@@ -665,17 +688,28 @@ class MeshDeviceDetailScreen(Screen[None]):
             self.notify("Speedtest requires daemon mode", severity="warning")
             return
 
-        # Check if link is active
+        # Check if link is active — auto-establish if not
+        needs_link = True
         try:
             link_info = await bridge.datalink_status(
                 destination_hash=self._dest_hash,
             )
-            if not link_info.get("connected"):
-                self.notify("No active link — press L to establish first", severity="warning")
-                return
+            needs_link = not link_info.get("connected")
         except Exception:
-            self.notify("No active link — press L to establish first", severity="warning")
-            return
+            pass  # status call failed — assume link needed
+
+        if needs_link:
+            self.notify("Establishing link for speedtest...", severity="information")
+            try:
+                result = await bridge.datalink_establish(
+                    destination_hash=self._dest_hash,
+                )
+                if result.get("status") != "active":
+                    self.notify("Could not establish link — peer may be unreachable directly", severity="warning")
+                    return
+            except Exception as e:
+                self.notify(f"Link failed: {e}", severity="error")
+                return
 
         self.notify("Running speedtest... (adaptive payload sizes)", severity="information")
         self._start_speedtest(bridge)
@@ -713,11 +747,11 @@ class MeshDeviceDetailScreen(Screen[None]):
                         f"(peer rx: {peer_rx}B)"
                     )
                 elif status == "skipped":
-                    lines.append(f"  {_format_bytes(size):>6}  →  [dim]skipped[/]")
+                    lines.append(f"  {_format_bytes(size):>6}  →  [{get_color_cascade().dim}]skipped[/]")
                 elif status == "timeout":
-                    lines.append(f"  {_format_bytes(size):>6}  →  [yellow]timeout[/]")
+                    lines.append(f"  {_format_bytes(size):>6}  →  [{get_color_cascade().color_warning}]timeout[/]")
                 else:
-                    lines.append(f"  {_format_bytes(size):>6}  →  [red]{status}[/]")
+                    lines.append(f"  {_format_bytes(size):>6}  →  [{get_color_cascade().color_danger}]{status}[/]")
 
             if link_rtt:
                 lines.insert(1, f"  Link RTT: {link_rtt:.3f}s")
