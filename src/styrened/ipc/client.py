@@ -1239,6 +1239,16 @@ class ControlClient:
         )
 
     # -------------------------------------------------------------------------
+    # Boundary logging
+    # -------------------------------------------------------------------------
+
+    async def boundary_snapshot(self) -> dict[str, Any]:
+        """Return a snapshot of the boundary log ring buffer."""
+        from styrened.ipc.messages import CmdBoundarySnapshotRequest
+
+        return await self._request(CmdBoundarySnapshotRequest())
+
+    # -------------------------------------------------------------------------
     # Remote inbox methods (RPC over LXMF)
     # -------------------------------------------------------------------------
 

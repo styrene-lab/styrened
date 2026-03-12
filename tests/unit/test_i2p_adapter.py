@@ -82,7 +82,7 @@ def test_generate_i2pd_conf_sets_permissions(tmp_path):
 @pytest.mark.asyncio
 async def test_start_managed_fails_fast_if_binary_missing():
     adapter = make_adapter(mode=DaemonMode.MANAGED)
-    with patch("shutil.which", return_value=None):
+    with patch.object(adapter, "_find_binary", return_value=None):
         with pytest.raises(RuntimeError, match="i2pd binary not found"):
             await adapter._start_managed()
 
@@ -94,7 +94,7 @@ async def test_start_managed_spawns_subprocess(tmp_path):
     mock_proc = MagicMock()
     mock_proc.pid = 1234
 
-    with patch("shutil.which", return_value="/usr/bin/i2pd"), \
+    with patch.object(adapter, "_find_binary", return_value="/usr/bin/i2pd"), \
          patch.object(adapter, "_generate_i2pd_conf"), \
          patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
         await adapter._start_managed()
@@ -309,7 +309,7 @@ def test_get_http_proxy_url_managed_returns_managed_port():
 @pytest.mark.asyncio
 async def test_provision_prints_instructions_if_binary_missing(capsys):
     adapter = make_adapter()
-    with patch("shutil.which", return_value=None):
+    with patch.object(adapter, "_find_binary", return_value=None):
         await adapter.provision()
 
     out = capsys.readouterr().out
@@ -320,7 +320,7 @@ async def test_provision_prints_instructions_if_binary_missing(capsys):
 @pytest.mark.asyncio
 async def test_provision_confirms_found_if_binary_exists(capsys):
     adapter = make_adapter()
-    with patch("shutil.which", return_value="/usr/bin/i2pd"):
+    with patch.object(adapter, "_find_binary", return_value="/usr/bin/i2pd"):
         await adapter.provision()
 
     out = capsys.readouterr().out

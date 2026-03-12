@@ -684,7 +684,39 @@ class IPCBridge:
         except Exception:
             return None
 
+    # ── Adapter Provisioning ───────────────────────────────────────
+
+    async def provision_adapter(self, adapter_name: str) -> dict[str, Any]:
+        """Provision an adapter binary locally via IPC.
+
+        LOCAL context — RBAC is bypassed for IPC calls.
+
+        Args:
+            adapter_name: Adapter to provision (e.g., "yggdrasil").
+
+        Returns:
+            Dict with success, installed_path, adapter, and optional error.
+        """
+        result = await self._call("provision_adapter", adapter_name=adapter_name)
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response"}
+
     # ── Subscriptions ──────────────────────────────────────────────
+
+    async def boundary_snapshot(self) -> list[dict[str, Any]]:
+        """Return a snapshot of the boundary log ring buffer from the daemon.
+
+        Returns up to 200 records with keys: ts, boundary, severity,
+        retryable, stack_name, operation, message.
+        Returns empty list if handler is not initialised or on error.
+        """
+        try:
+            result: Any = await self._call("boundary_snapshot")
+            if isinstance(result, dict):
+                records = result.get("records", [])
+                return list(records) if isinstance(records, list) else []
+            return []
+        except Exception:
+            return []
 
     async def subscribe_devices(self) -> bool:
         """Subscribe to real-time device events."""

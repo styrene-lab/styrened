@@ -1,0 +1,9 @@
+# Transport overlay: TCP on localhost
+# Merged on top of peer base configs at test time.
+# The DaemonHarness replaces port 0 with a dynamically allocated port.
+
+reticulum:
+  interfaces:
+    server:
+      listen_ip: 127.0.0.1
+      port: 0  # Replaced by harness with actual allocated port

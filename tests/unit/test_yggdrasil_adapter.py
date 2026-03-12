@@ -384,7 +384,7 @@ async def test_add_peer_returns_false_on_exception():
 @pytest.mark.asyncio
 async def test_provision_prints_found_message(capsys):
     adapter = make_adapter()
-    with patch("shutil.which", return_value="/usr/bin/yggdrasil"):
+    with patch.object(adapter, "_find_binary", return_value="/usr/bin/yggdrasil"):
         await adapter.provision()
 
     captured = capsys.readouterr()
@@ -395,8 +395,7 @@ async def test_provision_prints_found_message(capsys):
 @pytest.mark.asyncio
 async def test_provision_prints_install_instructions_when_missing(capsys):
     adapter = make_adapter()
-    with patch("shutil.which", return_value=None), \
-         patch.object(Path, "exists", return_value=False):
+    with patch.object(adapter, "_find_binary", return_value=None):
         await adapter.provision()
 
     captured = capsys.readouterr()

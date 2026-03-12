@@ -123,6 +123,12 @@ class IPCMessageType(IntEnum):
     CMD_DATALINK_META = 0x65  # Request non-identifiable metadata from peer
     CMD_DATALINK_INFO = 0x66  # Request identifiable metadata from peer (default-deny remote)
 
+    # Adapter provisioning (0x71)
+    CMD_PROVISION_ADAPTER = 0x71  # Provision adapter binary locally
+
+    # Boundary logging (0x70-0x7F)
+    CMD_BOUNDARY_SNAPSHOT = 0x70  # Return ring-buffer snapshot of boundary log records
+
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30
     SUB_MESSAGES = 0x31

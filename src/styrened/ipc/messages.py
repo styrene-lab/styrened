@@ -758,6 +758,16 @@ class CmdDatalinkInfoRequest(IPCRequest):
 
 
 @dataclass
+class CmdBoundarySnapshotRequest(IPCRequest):
+    """Request a snapshot of the boundary log ring buffer."""
+
+    MSG_TYPE = IPCMessageType.CMD_BOUNDARY_SNAPSHOT
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
+@dataclass
 class CmdRebootDeviceRequest(IPCRequest):
     """Reboot a remote device via RPC."""
 
@@ -772,6 +782,17 @@ class CmdRebootDeviceRequest(IPCRequest):
             "delay": self.delay,
             "timeout": self.timeout,
         }
+
+
+@dataclass
+class CmdProvisionAdapterRequest(IPCRequest):
+    """Provision an adapter binary locally (IPC/LOCAL context bypasses RBAC)."""
+
+    MSG_TYPE = IPCMessageType.CMD_PROVISION_ADAPTER
+    adapter_name: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"adapter_name": self.adapter_name}
 
 
 @dataclass
@@ -1092,6 +1113,7 @@ class DeviceInfo:
     short_name: str | None = None
     system_fingerprint: str | None = None
     discovered_via: str | None = None
+    hops: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1107,6 +1129,7 @@ class DeviceInfo:
             "short_name": self.short_name,
             "system_fingerprint": self.system_fingerprint,
             "discovered_via": self.discovered_via,
+            "hops": self.hops,
         }
 
     @classmethod
@@ -1124,6 +1147,7 @@ class DeviceInfo:
             short_name=data.get("short_name"),
             system_fingerprint=data.get("system_fingerprint"),
             discovered_via=data.get("discovered_via"),
+            hops=data.get("hops"),
         )
 
     @classmethod
@@ -1149,6 +1173,7 @@ class DeviceInfo:
             short_name=getattr(device, "short_name", None),
             system_fingerprint=getattr(device, "system_fingerprint", None),
             discovered_via=getattr(device, "discovered_via", None),
+            hops=getattr(device, "hops", None),
         )
 
 
@@ -1659,6 +1684,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return CmdDatalinkInfoRequest(
             destination_hash=payload.get("destination_hash", ""),
         )
+    elif msg_type == IPCMessageType.CMD_BOUNDARY_SNAPSHOT:
+        return CmdBoundarySnapshotRequest()
     elif msg_type == IPCMessageType.SUB_MESSAGES:
         return SubMessagesRequest(peer_hashes=payload.get("peer_hashes", []))
     elif msg_type == IPCMessageType.SUB_DEVICES:
