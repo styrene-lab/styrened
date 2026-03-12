@@ -190,15 +190,20 @@ class DashboardScreen(Screen[None]):
                 bar = self.query_one(HomeStatusBar)
                 bar.daemon_connected = True
 
-                # RNS status
-                if isinstance(status, dict):
-                    bar.rns_online = status.get("rns_online", True)
-                    ifaces = status.get("interfaces", [])
+                # RNS status — handle both dict and dataclass (DaemonStatus)
+                def _get(obj: Any, key: str, default: Any = None) -> Any:
+                    if isinstance(obj, dict):
+                        return obj.get(key, default)
+                    return getattr(obj, key, default)
+
+                if status is not None:
+                    bar.rns_online = bool(_get(status, "rns_initialized", True))
+                    ifaces = _get(status, "interfaces", [])
                     bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
-                    bar.daemon_uptime = float(status.get("uptime", 0))
-                    bar.transport_enabled = bool(status.get("transport_enabled", False))
-                    bar.propagation_enabled = bool(status.get("propagation_enabled", False))
-                    bar.active_links = int(status.get("active_links", 0))
+                    bar.daemon_uptime = float(_get(status, "uptime", 0))
+                    bar.transport_enabled = bool(_get(status, "transport_enabled", False))
+                    bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
+                    bar.active_links = int(_get(status, "active_links", 0))
 
                 # Hub status
                 if isinstance(hub_data, dict):
@@ -211,13 +216,13 @@ class DashboardScreen(Screen[None]):
                 # Mesh counts
                 styrene_count = 0
                 total_count = 0
-                device_list: list[dict[str, Any]] = []
+                device_list: list[Any] = []
                 if isinstance(all_devices, list):
                     device_list = all_devices
                     total_count = len(device_list)
                     styrene_count = sum(
                         1 for d in device_list
-                        if isinstance(d, dict) and d.get("device_type") in ("styrene_node", "styrene_hub")
+                        if _get(d, "device_type") in ("styrene_node", "styrene_hub", "styrene")
                     )
                 bar.styrene_mesh_count = styrene_count
                 bar.total_device_count = total_count
@@ -231,11 +236,27 @@ class DashboardScreen(Screen[None]):
                 table = self.query_one(HomeNodeSummaryTable)
                 nodes = []
                 for d in device_list:
-                    if isinstance(d, dict):
-                        try:
+                    try:
+                        if isinstance(d, MeshDevice):
+                            nodes.append(d)
+                        elif isinstance(d, dict):
                             nodes.append(MeshDevice.from_dict(d))
-                        except Exception:
-                            pass
+                        elif hasattr(d, "destination_hash"):
+                            # DeviceInfo dataclass from IPC bridge
+                            nodes.append(MeshDevice.from_dict({
+                                "destination_hash": getattr(d, "destination_hash", ""),
+                                "identity_hash": getattr(d, "identity_hash", ""),
+                                "name": getattr(d, "name", ""),
+                                "device_type": getattr(d, "device_type", "unknown"),
+                                "status": getattr(d, "status", "active"),
+                                "last_announce": getattr(d, "last_announce", 0),
+                                "discovered_via": getattr(d, "discovered_via", None),
+                                "hops": getattr(d, "hops", None),
+                                "version": getattr(d, "version", None),
+                                "lxmf_destination_hash": getattr(d, "lxmf_destination_hash", None),
+                            }))
+                    except Exception:
+                        pass
 
                 # Build unread map from conversations
                 unread_map: dict[str, int] = {}
@@ -246,7 +267,10 @@ class DashboardScreen(Screen[None]):
                             if isinstance(c, dict):
                                 ih = c.get("identity_hash", "")
                                 unread = c.get("unread_count", 0)
-                                if ih and unread:
+                            else:
+                                ih = getattr(c, "identity_hash", "")
+                                unread = getattr(c, "unread_count", 0)
+                            if ih and unread:
                                     unread_map[ih] = unread
                 except Exception:
                     pass

@@ -368,15 +368,19 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                         )
                 config.reticulum.interfaces.peers = peers
 
-            # Merge any missing well-known hubs (disabled) so existing installs
-            # see them in Settings > Network > Peers without manual addition.
+            # Merge any missing well-known hubs so existing installs see them
+            # in Settings > Network > Peers without manual addition.
+            # Community hub keeps its default enabled state; third-party hubs
+            # are added disabled so operators opt in explicitly.
             from styrened.models.config import WELL_KNOWN_HUBS
             existing_hosts = {(p.host, p.port) for p in config.reticulum.interfaces.peers}
             for hub in WELL_KNOWN_HUBS:
                 if (hub.host, hub.port) not in existing_hosts:
                     import copy
                     new_hub = copy.deepcopy(hub)
-                    new_hub.enabled = False  # Don't auto-enable for existing installs
+                    # Styrene Community Hub stays enabled (it's our hub);
+                    # third-party hubs added disabled for explicit opt-in.
+                    # hub.enabled from WELL_KNOWN_HUBS carries the intent.
                     config.reticulum.interfaces.peers.append(new_hub)
 
     # Parse rpc section
