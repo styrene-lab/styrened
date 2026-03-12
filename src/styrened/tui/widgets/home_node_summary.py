@@ -15,14 +15,13 @@ __all__ = ["HomeNodeSummaryTable", "format_relative_time"]
 # Abnormal-first sort order: LOST > STALE > PENDING > ONLINE
 # Unknown/future statuses sort between STALE and ACTIVE (abnormal-first).
 _STATUS_SORT_ORDER: dict[NodeStatus, int] = {
-    NodeStatus.LOST: 0,
+    NodeStatus.ACTIVE: 0,
     NodeStatus.STALE: 1,
     # PENDING (if added) would be 2
-    NodeStatus.ACTIVE: 3,
+    NodeStatus.LOST: 3,
 }
 
-# Unknown statuses sort at priority 2 (between STALE and ACTIVE)
-# so any future abnormal status sorts before ACTIVE by default.
+# Unknown statuses sort at priority 2 (between STALE and LOST)
 _UNKNOWN_STATUS_SORT_KEY = 2
 
 _STATUS_SYMBOLS: dict[NodeStatus, str] = {
@@ -122,12 +121,33 @@ class HomeNodeSummaryTable(DataTable[str]):
             )
             return
 
+        # Filter out LOST nodes — they're historical noise, not actionable
+        live_nodes = [n for n in nodes if n.status != NodeStatus.LOST]
+
+        if not live_nodes:
+            self._empty = True
+            cascade = get_color_cascade()
+            total = len(nodes)
+            if total > 0:
+                self.add_row(
+                    f"[{cascade.dim}]{total} nodes known (all lost)[/]",
+                    "", "", "", "",
+                    key="__empty__",
+                )
+            else:
+                self.add_row(
+                    f"[{cascade.dim}]No mesh nodes discovered[/]",
+                    "", "", "", "",
+                    key="__empty__",
+                )
+            return
+
         self._empty = False
         cascade = get_color_cascade()
 
-        # Sort abnormal-first; unknown statuses sort between STALE and ACTIVE
+        # Sort active-first, then stale, then alphabetical
         sorted_nodes = sorted(
-            nodes,
+            live_nodes,
             key=lambda d: (
                 _STATUS_SORT_ORDER.get(d.status, _UNKNOWN_STATUS_SORT_KEY),
                 d.name or "",

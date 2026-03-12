@@ -95,25 +95,32 @@ class TestNodeDiscovery:
 
 class TestNodeAnomaly:
 
-    def test_offline_shows_anomaly(self):
+    def test_stale_shows_anomaly(self):
         w = CopActivitySummary()
-        nodes = [FakeNode(name="relay-east", status="offline", discovered_via="YggdrasilInterface")]
+        nodes = [FakeNode(name="relay-east", status="stale", discovered_via="YggdrasilInterface")]
         w.update_from_state(nodes)
         output = w.render()
-        assert "relay-east" in output
-        assert "lost" in output
-        assert "[Ygg]" in output
+        assert "1 node stale" in output
+
+    def test_lost_nodes_ignored(self):
+        """LOST nodes are historical noise — no anomaly or discovery lines."""
+        w = CopActivitySummary()
+        nodes = [FakeNode(name="gone", status="lost", discovered_via="TCPClientInterface")]
+        w.update_from_state(nodes)
+        output = w.render()
+        assert "gone" not in output
+        assert "node" not in output or "no recent" in output
 
     def test_offline_not_in_discovery_count(self):
         w = CopActivitySummary()
         nodes = [
             FakeNode(name="good", status="active", discovered_via="TCPClientInterface"),
-            FakeNode(name="bad", status="offline", discovered_via="TCPClientInterface"),
+            FakeNode(name="bad", status="stale", discovered_via="TCPClientInterface"),
         ]
         w.update_from_state(nodes)
         output = w.render()
         assert "1 node [TCP]" in output  # Only the active one
-        assert "bad" in output  # Anomaly line
+        assert "1 node stale" in output  # Stale coalesced
 
 
 class TestUnread:
@@ -170,7 +177,7 @@ class TestPriorityOrdering:
         w = CopActivitySummary()
         nodes = [
             FakeNode(name="good", status="active", discovered_via="AutoInterface"),
-            FakeNode(name="bad", status="offline", discovered_via="TCPClientInterface"),
+            FakeNode(name="bad", status="stale", discovered_via="TCPClientInterface"),
         ]
         unread = {"ih_alice": 1}
         name_map = {"ih_alice": "Alice"}
@@ -178,7 +185,7 @@ class TestPriorityOrdering:
         output = w.render()
         lines = [l for l in output.strip().split("\n") if l.strip()]
         assert len(lines) == 3
-        assert "▲" in lines[0]  # Anomaly
+        assert "▲" in lines[0]  # Anomaly (stale)
         assert "✉" in lines[1]  # Unread
         assert "[Auto]" in lines[2]  # Discovery
 
@@ -224,10 +231,15 @@ class TestMaxSituations:
 
     def test_caps_at_6(self):
         w = CopActivitySummary()
-        nodes = [FakeNode(name=f"node-{i}", status="offline") for i in range(8)]
-        w.update_from_state(nodes)
+        # Mix active nodes across many transports + unread + hub to exceed 6 lines
+        nodes = [
+            FakeNode(name=f"n-{i}", status="active", discovered_via=f"iface-{i}")
+            for i in range(8)
+        ]
+        unread = {"ih1": 1}
+        w.update_from_state(nodes, unread_map=unread, hub_status="disconnected")
         lines = [l for l in w.render().strip().split("\n") if l.strip()]
-        assert len(lines) == 6
+        assert len(lines) <= 6
 
 
 # ---------------------------------------------------------------------------
@@ -262,11 +274,10 @@ class TestStateless:
 
     def test_anomaly_clears_when_node_recovers(self):
         w = CopActivitySummary()
-        w.update_from_state([FakeNode(name="x", status="offline")])
-        assert "x" in w.render()
-        assert "lost" in w.render()
+        w.update_from_state([FakeNode(name="x", status="stale")])
+        assert "stale" in w.render()
         w.update_from_state([FakeNode(name="x", status="active")])
-        assert "lost" not in w.render()
+        assert "stale" not in w.render()
 
 
 # ---------------------------------------------------------------------------

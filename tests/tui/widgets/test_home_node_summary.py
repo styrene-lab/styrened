@@ -86,24 +86,24 @@ class TestFormatRelativeTime:
 
 
 class TestStatusSortOrder:
-    """Tests for abnormal-first sort ordering."""
+    """Tests for active-first sort ordering (ACTIVE > STALE > LOST)."""
 
-    def test_lost_before_stale(self) -> None:
+    def test_active_before_stale(self) -> None:
         from styrened.tui.widgets.home_node_summary import _STATUS_SORT_ORDER
 
-        assert _STATUS_SORT_ORDER[NodeStatus.LOST] < _STATUS_SORT_ORDER[NodeStatus.STALE]
+        assert _STATUS_SORT_ORDER[NodeStatus.ACTIVE] < _STATUS_SORT_ORDER[NodeStatus.STALE]
 
-    def test_stale_before_active(self) -> None:
+    def test_stale_before_lost(self) -> None:
         from styrened.tui.widgets.home_node_summary import _STATUS_SORT_ORDER
 
-        assert _STATUS_SORT_ORDER[NodeStatus.STALE] < _STATUS_SORT_ORDER[NodeStatus.ACTIVE]
+        assert _STATUS_SORT_ORDER[NodeStatus.STALE] < _STATUS_SORT_ORDER[NodeStatus.LOST]
 
-    def test_unknown_status_sorts_between_stale_and_active(self) -> None:
-        """Unknown/future statuses (e.g. PENDING) sort abnormal-first, before ACTIVE."""
+    def test_unknown_status_sorts_between_stale_and_lost(self) -> None:
+        """Unknown/future statuses sort after STALE but before LOST."""
         from styrened.tui.widgets.home_node_summary import _STATUS_SORT_ORDER
 
         assert _STATUS_SORT_ORDER[NodeStatus.STALE] < _UNKNOWN_STATUS_SORT_KEY
-        assert _UNKNOWN_STATUS_SORT_KEY < _STATUS_SORT_ORDER[NodeStatus.ACTIVE]
+        assert _UNKNOWN_STATUS_SORT_KEY < _STATUS_SORT_ORDER[NodeStatus.LOST]
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ class TestHomeNodeSummaryTableWidget:
 
     @pytest.mark.asyncio
     async def test_nodes_populate_rows(self) -> None:
-        """Nodes are added as rows with correct keys."""
+        """Active/stale nodes are added as rows; LOST nodes are filtered out."""
         async with _TestApp().run_test() as pilot:
             table = pilot.app.query_one(HomeNodeSummaryTable)
             now = time.time()
@@ -159,25 +159,39 @@ class TestHomeNodeSummaryTableWidget:
             ]
             table.update_nodes(devices)
             assert table._empty is False
-            assert table.row_count == 2
+            assert table.row_count == 1  # LOST filtered out
 
     @pytest.mark.asyncio
-    async def test_sort_order_abnormal_first(self) -> None:
-        """Rows are sorted LOST > STALE > ACTIVE."""
+    async def test_lost_nodes_filtered_out(self) -> None:
+        """All-LOST list shows placeholder with count."""
         async with _TestApp().run_test() as pilot:
             table = pilot.app.query_one(HomeNodeSummaryTable)
             now = time.time()
             devices = [
-                _make_device("online", "aaa", NodeStatus.ACTIVE, now - 10),
-                _make_device("lost", "bbb", NodeStatus.LOST, now - 7200),
-                _make_device("stale", "ccc", NodeStatus.STALE, now - 600),
+                _make_device("gone", "bbb", NodeStatus.LOST, now - 7200),
             ]
             table.update_nodes(devices)
-            # First row should be the LOST node, last should be ACTIVE
+            assert table._empty is True
+            cell = str(table.get_cell_at((0, 0)))
+            assert "1 nodes known (all lost)" in cell
+
+    @pytest.mark.asyncio
+    async def test_sort_order_active_first(self) -> None:
+        """Rows are sorted ACTIVE > STALE (LOST filtered out)."""
+        async with _TestApp().run_test() as pilot:
+            table = pilot.app.query_one(HomeNodeSummaryTable)
+            now = time.time()
+            devices = [
+                _make_device("stale", "ccc", NodeStatus.STALE, now - 600),
+                _make_device("online", "aaa", NodeStatus.ACTIVE, now - 10),
+                _make_device("lost", "bbb", NodeStatus.LOST, now - 7200),
+            ]
+            table.update_nodes(devices)
+            assert table.row_count == 2  # LOST filtered
             first_name = str(table.get_cell_at((0, 0)))
-            last_name = str(table.get_cell_at((2, 0)))
-            assert first_name == "lost"
-            assert last_name == "online"
+            last_name = str(table.get_cell_at((1, 0)))
+            assert first_name == "online"
+            assert last_name == "stale"
 
     @pytest.mark.asyncio
     async def test_unread_count_displayed(self) -> None:

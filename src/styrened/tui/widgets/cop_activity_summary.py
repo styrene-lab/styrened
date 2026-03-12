@@ -162,20 +162,20 @@ class CopActivitySummary(Widget):
         """
         situations: list[SituationLine] = []
 
-        # --- NODE_ANOMALY: offline/stale nodes ---
+        # --- NODE_ANOMALY: stale nodes only (LOST is historical noise) ---
+        stale_count = 0
         for node in nodes:
             status = _get_attr(node, "status", "")
             if hasattr(status, "value"):
                 status = status.value
-            if str(status).lower() in ("offline", "lost", "stale"):
-                name = _get_attr(node, "name", "") or _get_attr(node, "destination_hash", "")[:8]
-                via = _get_attr(node, "discovered_via", None)
-                tag = transport_label(via)
-                situations.append(SituationLine(
-                    priority=SituationPriority.ANOMALY,
-                    message=f"{name} lost [{tag}]",
-                    transport_tag=tag,
-                ))
+            if str(status).lower() == "stale":
+                stale_count += 1
+        if stale_count > 0:
+            situations.append(SituationLine(
+                priority=SituationPriority.ANOMALY,
+                message=f"{stale_count} node{'s' if stale_count != 1 else ''} stale",
+                transport_tag=None,
+            ))
 
         # --- UNREAD: grouped by peer ---
         if unread_map:
@@ -213,14 +213,14 @@ class CopActivitySummary(Widget):
                 message=f"hub {hub_status}",
             ))
 
-        # --- NODE_DISCOVERY: coalesced per transport ---
+        # --- NODE_DISCOVERY: coalesced per transport (active nodes only) ---
         transport_counts: dict[str, int] = {}
         for node in nodes:
             status = _get_attr(node, "status", "")
             if hasattr(status, "value"):
                 status = status.value
-            if str(status).lower() in ("offline", "lost", "stale"):
-                continue  # Already shown as anomaly
+            if str(status).lower() != "active":
+                continue  # Only count active nodes
             via = _get_attr(node, "discovered_via", None)
             tag = transport_label(via)
             transport_counts[tag] = transport_counts.get(tag, 0) + 1
