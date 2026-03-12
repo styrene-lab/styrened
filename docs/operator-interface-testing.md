@@ -1,7 +1,7 @@
 ---
 id: operator-interface-testing
 title: Operator Interface Testing Paths
-status: implementing
+status: implemented
 tags: [testing, tui, integration, automation]
 open_questions: []
 branches: ["feature/operator-interface-testing"]

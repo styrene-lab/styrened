@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "changeName": "operator-interface-testing",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T16:51:44.334Z",
+  "summary": "All 7 spec scenarios verified. 13 operator pilot tests (10 fast + 3 slow). Nightly CI confirmed via manual Argo run styrened-op-paths-v2. 31/31 tasks complete.",
+  "snapshot": {
+    "gitHead": "4c9610f66e7468502cac7285c36c73ddc5e02fbb",
+    "fingerprint": "30484148bd74b0dbdc2ba6615b5f52c3b686875a1bfb359c8fc5289ea67ab40b",
+    "dirty": false,
+    "scopedPaths": [
+      "tests/conftest_operator.py",
+      "tests/fixtures/test_peers/alpha/core-config.yaml",
+      "tests/fixtures/test_peers/alpha/identity",
+      "tests/fixtures/test_peers/host/core-config.yaml",
+      "tests/fixtures/test_peers/host/identity",
+      "tests/fixtures/transports/i2p.yaml",
+      "tests/fixtures/transports/tcp_localhost.yaml",
+      "tests/fixtures/transports/yggdrasil.yaml"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/operator-interface-testing/design.md",
+        "exists": true,
+        "size": 15754,
+        "sha256": "8e8848a50f9f89a0e8a0a173df63ccf6545b69576f465adccd3bc2c6e6a77782"
+      },
+      {
+        "path": "openspec/changes/operator-interface-testing/proposal.md",
+        "exists": true,
+        "size": 376,
+        "sha256": "736991c394ebc0b406112e4a14764c0b864646806c5e41d88c36f9442d7351ab"
+      },
+      {
+        "path": "openspec/changes/operator-interface-testing/specs/harness.md",
+        "exists": true,
+        "size": 1800,
+        "sha256": "9d8aacfc57a5be7cef7e5e1d73315aa602701b6d10b34b5b255a5bd0b7257463"
+      },
+      {
+        "path": "openspec/changes/operator-interface-testing/specs/nightly.md",
+        "exists": true,
+        "size": 763,
+        "sha256": "f636cf0eaa8fe91586e3a5ad9a6edf47a8bcdf95ca20b069195501666be00008"
+      },
+      {
+        "path": "openspec/changes/operator-interface-testing/tasks.md",
+        "exists": true,
+        "size": 4217,
+        "sha256": "e4924c1403b21938b9ec8e66b5ec871823181031985550a4d8c4db9a2ad859be"
+      },
+      {
+        "path": "tests/conftest_operator.py",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      },
+      {
+        "path": "tests/fixtures/test_peers/alpha/core-config.yaml",
+        "exists": true,
+        "size": 783,
+        "sha256": "dbd51171f0edd85f1d8cf3cbe327e51ea1760908d5c9475c5aee5fada87c87a7"
+      },
+      {
+        "path": "tests/fixtures/test_peers/alpha/identity",
+        "exists": true,
+        "size": 64,
+        "sha256": "e372038912adf23513605536688a99041280fc82fa2e3735d4b0229d92620d1c"
+      },
+      {
+        "path": "tests/fixtures/test_peers/host/core-config.yaml",
+        "exists": true,
+        "size": 640,
+        "sha256": "6e1fcbb6ad242f7ff2e11a612770fa0caa9de45efdbd50019b7a748d4f99e27c"
+      },
+      {
+        "path": "tests/fixtures/test_peers/host/identity",
+        "exists": true,
+        "size": 64,
+        "sha256": "8577a0c0a6a17632c796caf808241c649f3226d8f70d77a4e217e27a75966d78"
+      },
+      {
+        "path": "tests/fixtures/transports/i2p.yaml",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      },
+      {
+        "path": "tests/fixtures/transports/tcp_localhost.yaml",
+        "exists": true,
+        "size": 289,
+        "sha256": "030d5f38b3f5d30cd924cc6f0cec4744de36fb36773fbfa2220145a42022eaeb"
+      },
+      {
+        "path": "tests/fixtures/transports/yggdrasil.yaml",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
