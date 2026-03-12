@@ -17,8 +17,17 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 log = logging.getLogger(__name__)
+
+
+class VerificationResult(NamedTuple):
+    """Result of binary integrity verification."""
+
+    match: bool | None  # True=ok, False=mismatch, None=skipped
+    expected: str | None  # Expected SHA-256 from manifest
+    actual: str | None  # Actual SHA-256 of binary on disk
 
 
 # Re-export from models to avoid circular imports via services/__init__.py.
@@ -114,14 +123,13 @@ class DaemonAdapter(ABC):
         binary_path: str,
         *,
         manifest_path: Path | None = None,
-    ) -> bool | None:
+    ) -> VerificationResult:
         """Verify a binary's SHA-256 against the shipped manifest.
 
         Returns:
-            True  — hash matches.
-            False — hash does NOT match.
-            None  — verification skipped (missing manifest, adapter, platform,
-                    binary file, or corrupt JSON).
+            VerificationResult with match=True (ok), False (mismatch),
+            or None (skipped). When match is False, expected and actual
+            contain the SHA-256 hex strings.
         """
         if manifest_path is None:
             manifest_path = (
@@ -135,13 +143,13 @@ class DaemonAdapter(ABC):
             manifest = json.loads(manifest_path.read_text())
         except (FileNotFoundError, json.JSONDecodeError):
             log.debug("Binary manifest not found or corrupt at %s", manifest_path)
-            return None
+            return VerificationResult(None, None, None)
 
         # Look up adapter
         adapters = manifest.get("adapters", {})
         if adapter_name not in adapters:
             log.debug("Adapter %r not in binary manifest", adapter_name)
-            return None
+            return VerificationResult(None, None, None)
 
         # Look up platform
         platform_key = DaemonAdapter._detect_platform_key()
@@ -150,22 +158,28 @@ class DaemonAdapter(ABC):
             log.debug(
                 "Platform %r not in manifest for %s", platform_key, adapter_name
             )
-            return None
+            return VerificationResult(None, None, None)
 
         expected_sha256 = platforms[platform_key].get("binary_sha256")
         if not expected_sha256:
             log.debug("No binary_sha256 for %s/%s", adapter_name, platform_key)
-            return None
+            return VerificationResult(None, None, None)
 
         # Hash the binary
         binary = Path(binary_path)
         if not binary.is_file():
             log.debug("Binary file not found: %s", binary_path)
-            return None
+            return VerificationResult(None, None, None)
 
-        sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+        # Chunked hashing — avoids loading large binaries entirely into memory
+        h = hashlib.sha256()
+        with open(binary, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 16), b""):
+                h.update(chunk)
+        sha256 = h.hexdigest()
+
         if sha256 == expected_sha256:
-            return True
+            return VerificationResult(True, expected_sha256, sha256)
 
         log.warning(
             "Binary integrity mismatch for %s: expected %s, got %s",
@@ -173,7 +187,7 @@ class DaemonAdapter(ABC):
             expected_sha256,
             sha256,
         )
-        return False
+        return VerificationResult(False, expected_sha256, sha256)
 
     # ------------------------------------------------------------------
     # Provision — binary acquisition; separate from start()

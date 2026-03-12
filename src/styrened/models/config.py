@@ -786,7 +786,6 @@ class GroupThreadsConfig:
 
 
 @dataclass
-@dataclass
 class SecurityConfig:
     """Security-related configuration.
 

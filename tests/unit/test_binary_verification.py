@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from styrened.models.config import CoreConfig, SecurityConfig
-from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode
+from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode, VerificationResult
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ class TestVerifyBinaryIntegrity:
         result = DaemonAdapter.verify_binary_integrity(
             "yggdrasil", str(binary_path), manifest_path=manifest_path
         )
-        assert result is True
+        assert result.match is True
 
     def test_tampered_hash_returns_false(self, tmp_path: Path):
         """Binary NOT matching manifest hash → returns False."""
@@ -115,7 +115,7 @@ class TestVerifyBinaryIntegrity:
         result = DaemonAdapter.verify_binary_integrity(
             "yggdrasil", str(binary_path), manifest_path=manifest_path
         )
-        assert result is False
+        assert result.match is False
 
     def test_missing_adapter_in_manifest_returns_none(self, tmp_path: Path):
         """Adapter not in manifest → returns None (skip)."""
@@ -125,7 +125,7 @@ class TestVerifyBinaryIntegrity:
         result = DaemonAdapter.verify_binary_integrity(
             "yggdrasil", str(binary_path), manifest_path=manifest_path
         )
-        assert result is None
+        assert result.match is None
 
     def test_missing_platform_in_manifest_returns_none(self, tmp_path: Path):
         """Current platform not in manifest → returns None (skip)."""
@@ -138,7 +138,7 @@ class TestVerifyBinaryIntegrity:
         result = DaemonAdapter.verify_binary_integrity(
             "yggdrasil", str(binary_path), manifest_path=manifest_path
         )
-        assert result is None
+        assert result.match is None
 
     def test_missing_manifest_file_returns_none(self, tmp_path: Path):
         """Manifest file doesn't exist → returns None (skip)."""
@@ -148,7 +148,7 @@ class TestVerifyBinaryIntegrity:
             str(binary_path),
             manifest_path=tmp_path / "nonexistent.json",
         )
-        assert result is None
+        assert result.match is None
 
     def test_missing_binary_file_returns_none(self, tmp_path: Path):
         """Binary file doesn't exist → returns None (skip)."""
@@ -158,7 +158,7 @@ class TestVerifyBinaryIntegrity:
             str(tmp_path / "nonexistent"),
             manifest_path=manifest_path,
         )
-        assert result is None
+        assert result.match is None
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ class TestNonStrictVerification:
             patch.object(
                 DaemonAdapter,
                 "verify_binary_integrity",
-                return_value=False,
+                return_value=VerificationResult(False, "expected_abc123", "actual_def456"),
             ),
         ):
             # The actual wiring test: verify that _start_managed proceeds
@@ -215,13 +215,20 @@ class TestNonStrictVerification:
                 # Process was started despite mismatch
                 mock_exec.assert_called_once()
 
+                # WARNING was logged about the mismatch
+                assert any(
+                    "mismatch" in r.message.lower() and r.levelno == logging.WARNING
+                    for r in caplog.records
+                ), f"Expected WARNING about mismatch, got: {[r.message for r in caplog.records]}"
+
     @pytest.mark.asyncio
     async def test_valid_hash_starts_normally(self, tmp_path: Path):
         """Valid binary hash → starts without warnings."""
         config = CoreConfig()
 
         with patch.object(
-            DaemonAdapter, "verify_binary_integrity", return_value=True
+            DaemonAdapter, "verify_binary_integrity",
+            return_value=VerificationResult(True, "abc123", "abc123"),
         ):
             from styrened.services.yggdrasil import YggdrasilAdapter
             from styrened.models.config import YggdrasilConfig
@@ -264,7 +271,8 @@ class TestStrictVerification:
         )
 
         with patch.object(
-            DaemonAdapter, "verify_binary_integrity", return_value=False
+            DaemonAdapter, "verify_binary_integrity",
+            return_value=VerificationResult(False, "expected_abc", "actual_def")
         ):
             ygg_config = YggdrasilConfig(mode=DaemonMode.MANAGED)
             adapter = YggdrasilAdapter(
@@ -290,7 +298,8 @@ class TestStrictVerification:
         )
 
         with patch.object(
-            DaemonAdapter, "verify_binary_integrity", return_value=False
+            DaemonAdapter, "verify_binary_integrity",
+            return_value=VerificationResult(False, "expected_abc", "actual_def")
         ):
             ygg_config = YggdrasilConfig(mode=DaemonMode.MANAGED)
             adapter = YggdrasilAdapter(
@@ -326,7 +335,8 @@ class TestI2PAdapterVerification:
         )
 
         with patch.object(
-            DaemonAdapter, "verify_binary_integrity", return_value=False
+            DaemonAdapter, "verify_binary_integrity",
+            return_value=VerificationResult(False, "expected_abc", "actual_def")
         ):
             i2p_config = I2PConfig(mode=DaemonMode.MANAGED)
             adapter = I2PAdapter(
@@ -350,7 +360,8 @@ class TestI2PAdapterVerification:
         )
 
         with patch.object(
-            DaemonAdapter, "verify_binary_integrity", return_value=False
+            DaemonAdapter, "verify_binary_integrity",
+            return_value=VerificationResult(False, "expected_abc", "actual_def")
         ):
             i2p_config = I2PConfig(mode=DaemonMode.MANAGED)
             adapter = I2PAdapter(
@@ -378,7 +389,8 @@ class TestI2PAdapterVerification:
         config = CoreConfig()
 
         with patch.object(
-            DaemonAdapter, "verify_binary_integrity", return_value=None
+            DaemonAdapter, "verify_binary_integrity",
+            return_value=VerificationResult(None, None, None)
         ):
             i2p_config = I2PConfig(mode=DaemonMode.MANAGED)
             adapter = I2PAdapter(
@@ -415,7 +427,7 @@ class TestVerificationEdgeCases:
         result = DaemonAdapter.verify_binary_integrity(
             "yggdrasil", str(binary_path), manifest_path=manifest_path
         )
-        assert result is None
+        assert result.match is None
 
     @pytest.mark.asyncio
     async def test_verification_skip_logs_debug(self, tmp_path: Path, caplog):
@@ -427,7 +439,8 @@ class TestVerificationEdgeCases:
 
         with (
             caplog.at_level(logging.DEBUG),
-            patch.object(DaemonAdapter, "verify_binary_integrity", return_value=None),
+            patch.object(DaemonAdapter, "verify_binary_integrity",
+                return_value=VerificationResult(None, None, None)),
         ):
             ygg_config = YggdrasilConfig(mode=DaemonMode.MANAGED)
             adapter = YggdrasilAdapter(

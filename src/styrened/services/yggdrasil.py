@@ -178,14 +178,16 @@ class YggdrasilAdapter(DaemonAdapter):
 
         # Binary integrity verification
         if self._core_config is not None:
-            result = self.verify_binary_integrity("yggdrasil", binary)
-            if result is None:
+            vr = self.verify_binary_integrity("yggdrasil", binary)
+            if vr.match is None:
                 log.debug("Skipping binary verification for yggdrasil (not in manifest)")
-            elif result is False:
+            elif vr.match is False:
                 strict = self._core_config.security.strict_binary_verification
                 if strict:
-                    raise BinaryIntegrityError("yggdrasil", "<manifest>", "<actual>")
+                    raise BinaryIntegrityError("yggdrasil", vr.expected or "?", vr.actual or "?")
                 log.warning("Yggdrasil binary integrity mismatch — starting anyway (strict=false)")
+        else:
+            log.debug("Skipping binary verification: core_config is None")
 
         self._ensure_yggdrasil_config()
 

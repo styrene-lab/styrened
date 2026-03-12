@@ -120,14 +120,16 @@ class I2PAdapter(DaemonAdapter):
 
         # Binary integrity verification
         if self._core_config is not None:
-            result = self.verify_binary_integrity("i2pd", binary)
-            if result is None:
+            vr = self.verify_binary_integrity("i2pd", binary)
+            if vr.match is None:
                 log.debug("Skipping binary verification for i2pd (not in manifest)")
-            elif result is False:
+            elif vr.match is False:
                 strict = self._core_config.security.strict_binary_verification
                 if strict:
-                    raise BinaryIntegrityError("i2pd", "<manifest>", "<actual>")
+                    raise BinaryIntegrityError("i2pd", vr.expected or "?", vr.actual or "?")
                 log.warning("i2pd binary integrity mismatch — starting anyway (strict=false)")
+        else:
+            log.debug("Skipping binary verification: core_config is None")
 
         self._generate_i2pd_conf()
         self._process = await asyncio.create_subprocess_exec(
