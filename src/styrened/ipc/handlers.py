@@ -3163,3 +3163,29 @@ class IPCHandlers:
         except Exception as e:
             return ErrorResponse.internal_error(f"Boundary snapshot failed: {e}")
 
+    async def handle_cmd_provision_adapter(self, request: IPCRequest) -> IPCResponse:
+        """Provision an adapter binary locally.
+
+        LOCAL (IPC) context bypasses RBAC — the operator is on the local machine.
+        """
+        err = self._check_daemon()
+        if err:
+            return err
+        assert self.daemon is not None
+
+        from styrened.ipc.messages import CmdProvisionAdapterRequest
+
+        req = request if isinstance(request, CmdProvisionAdapterRequest) else CmdProvisionAdapterRequest()
+        if not req.adapter_name:
+            return ErrorResponse.invalid_request("adapter_name is required")
+
+        provisioner = getattr(self.daemon, "_binary_provisioner", None)
+        if provisioner is None:
+            return ErrorResponse.internal_error("Binary provisioner not available")
+
+        try:
+            result = provisioner.provision(req.adapter_name)
+            return ResultResponse(data=result)
+        except Exception as e:
+            return ErrorResponse.internal_error(f"Provisioning failed: {e}")
+

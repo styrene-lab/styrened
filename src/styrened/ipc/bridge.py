@@ -684,6 +684,22 @@ class IPCBridge:
         except Exception:
             return None
 
+    # ── Adapter Provisioning ───────────────────────────────────────
+
+    async def provision_adapter(self, adapter_name: str) -> dict[str, Any]:
+        """Provision an adapter binary locally via IPC.
+
+        LOCAL context — RBAC is bypassed for IPC calls.
+
+        Args:
+            adapter_name: Adapter to provision (e.g., "yggdrasil").
+
+        Returns:
+            Dict with success, installed_path, adapter, and optional error.
+        """
+        result = await self._call("provision_adapter", adapter_name=adapter_name)
+        return result if isinstance(result, dict) else {"success": False, "error": "Unexpected response"}
+
     # ── Subscriptions ──────────────────────────────────────────────
 
     async def boundary_snapshot(self) -> list[dict[str, Any]]:

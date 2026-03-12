@@ -138,6 +138,7 @@ MESSAGE_TYPE_CAPABILITY: dict[StyreneMessageType, str] = {
     StyreneMessageType.REBOOT: Capability.REBOOT,
     StyreneMessageType.CONFIG_UPDATE: Capability.CONFIG_UPDATE,
     StyreneMessageType.SELF_UPDATE: Capability.SELF_UPDATE,
+    StyreneMessageType.PROVISION: Capability.ADAPTER_PROVISION,
     StyreneMessageType.INBOX_QUERY: Capability.INBOX_READ,
     StyreneMessageType.MESSAGES_QUERY: Capability.INBOX_READ,
 }
@@ -214,6 +215,9 @@ class RPCServer:
         self._ygg_adapter: Any = None
         self._i2p_adapter: Any = None
 
+        # Optional binary provisioner for CMD_PROVISION
+        self._binary_provisioner: Any = None
+
         # Log security configuration
         logger.info(
             f"[SECURITY] RPC server initialized with RBAC policy "
@@ -264,6 +268,15 @@ class RPCServer:
         self._i2p_adapter = adapter
         logger.info("I2PAdapter injected into RPC server")
 
+    def set_binary_provisioner(self, provisioner: Any) -> None:
+        """Inject BinaryProvisioner for CMD_PROVISION handling.
+
+        Args:
+            provisioner: BinaryProvisioner instance (or None to clear).
+        """
+        self._binary_provisioner = provisioner
+        logger.info("BinaryProvisioner injected into RPC server")
+
     def _register_with_protocol(self) -> None:
         """Register RPC message handlers with StyreneProtocol."""
         # Register for RPC command types
@@ -273,6 +286,7 @@ class RPCServer:
             StyreneMessageType.REBOOT,
             StyreneMessageType.CONFIG_UPDATE,
             StyreneMessageType.SELF_UPDATE,
+            StyreneMessageType.PROVISION,
             StyreneMessageType.PING,
             StyreneMessageType.INBOX_QUERY,
             StyreneMessageType.MESSAGES_QUERY,
@@ -287,6 +301,7 @@ class RPCServer:
         self._handlers[StyreneMessageType.REBOOT] = self._handle_reboot
         self._handlers[StyreneMessageType.CONFIG_UPDATE] = self._handle_config_update
         self._handlers[StyreneMessageType.SELF_UPDATE] = self._handle_self_update
+        self._handlers[StyreneMessageType.PROVISION] = self._handle_provision
         self._handlers[StyreneMessageType.PING] = self._handle_ping
         self._handlers[StyreneMessageType.INBOX_QUERY] = self._handle_inbox_query
         self._handlers[StyreneMessageType.MESSAGES_QUERY] = self._handle_messages_query
@@ -1035,6 +1050,90 @@ class RPCServer:
             subprocess.Popen(["systemctl", "restart", "styrened"])
         except Exception as e:
             logger.error(f"Service restart failed: {e}")
+
+    def _handle_provision(self, source_hash: str, envelope: StyreneEnvelope) -> None:
+        """Handle PROVISION - remotely provision an adapter binary.
+
+        Requires ADMIN role (adapter.provision capability, checked by RBAC layer).
+
+        Args:
+            source_hash: Source identity hash.
+            envelope: Decoded Styrene envelope.
+        """
+        # Decode payload
+        try:
+            payload_data = decode_payload(envelope.payload) if envelope.payload else {}
+        except Exception as e:
+            logger.error(f"Failed to decode PROVISION payload: {e}")
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    f"Invalid payload: {e}",
+                )
+            )
+            return
+
+        adapter_name = payload_data.get("adapter", "")
+        if not adapter_name:
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    "Missing required field: adapter",
+                )
+            )
+            return
+
+        if self._binary_provisioner is None:
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.COMMAND_FAILED,
+                    "Binary provisioner not available",
+                )
+            )
+            return
+
+        logger.info(f"Provision requested for adapter: {adapter_name}")
+
+        # Invoke provisioner
+        result = self._binary_provisioner.provision(adapter_name)
+
+        # Send response
+        asyncio.create_task(
+            self._send_provision_result(source_hash, envelope.request_id, result)
+        )
+
+    async def _send_provision_result(
+        self,
+        destination: str,
+        request_id: bytes | None,
+        result: dict[str, Any],
+    ) -> None:
+        """Send PROVISION_RESULT response.
+
+        Args:
+            destination: Destination identity hash.
+            request_id: Correlation ID from request.
+            result: Provisioning result dictionary.
+        """
+        from styrened.models.styrene_wire import create_provision_result
+
+        envelope = create_provision_result(result, request_id)
+        try:
+            await self._protocol.send_typed_message(
+                destination=destination,
+                message_type=envelope.message_type,
+                payload=envelope.payload,
+                request_id=envelope.request_id,
+            )
+            logger.debug(f"Sent PROVISION_RESULT to {destination[:16]}...")
+        except Exception as e:
+            logger.error(f"Failed to send PROVISION_RESULT: {e}")
 
     async def _send_error(
         self,
