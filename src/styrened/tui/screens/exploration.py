@@ -613,12 +613,14 @@ class ExplorationScreen(Screen[None]):
     """
 
     _REFRESH_INTERVAL: float = 60.0  # seconds between auto-refreshes
+    _EVENT_COOLDOWN: float = 5.0  # ignore rapid event-driven resets within this window
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._refresh_timer: Timer | None = None
         self._countdown_timer: Timer | None = None
         self._seconds_until_refresh: float = self._REFRESH_INTERVAL
+        self._last_event_refresh: float = 0.0  # monotonic time of last event-driven refresh
         self._node_refresh_worker = None
         self._stored_nodes_worker = None
         self._diagnostics_subscribed: bool = False
@@ -1058,10 +1060,26 @@ class ExplorationScreen(Screen[None]):
         self._refresh_announce_tables()
 
     def on_daemon_event(self, event: DaemonEvent) -> None:
-        """Handle daemon events — refresh node data on relevant changes."""
-        if event.event_type == "node_changed":
-            self._reset_countdown()
-            self._start_node_refresh()
+        """Handle daemon events — refresh node data on relevant changes.
+
+        Debounces rapid events (fleet boot, mesh convergence) so the
+        countdown timer doesn't jitter and redundant workers don't pile up.
+        First event in a burst triggers an immediate refresh; subsequent
+        events within _EVENT_COOLDOWN seconds are absorbed — the data is
+        already fresh from the first refresh.
+        """
+        if event.event_type != "node_changed":
+            return
+
+        import time as _time
+
+        now = _time.monotonic()
+        if (now - self._last_event_refresh) < self._EVENT_COOLDOWN:
+            return  # Within cooldown — first event already triggered refresh
+
+        self._last_event_refresh = now
+        self._reset_countdown()
+        self._start_node_refresh()
 
     def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
         """Look up a MeshDevice from the active table's device list."""

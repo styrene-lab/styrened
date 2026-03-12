@@ -129,15 +129,32 @@ class DashboardScreen(Screen[None]):
             self._activity_worker.cancel()
             self._activity_worker = None
 
+    _EVENT_COOLDOWN: float = 5.0  # seconds — absorb rapid event bursts
+
     def on_daemon_event(self, event: DaemonEvent) -> None:
-        """Handle daemon events — trigger immediate refresh for relevant types."""
-        if event.event_type in ("node_changed", "message_changed", "hub_changed"):
-            if self._ipc_bridge is not None:
-                self.run_worker(
-                    self._fetch_daemon_status(),
-                    group="dashboard-status",
-                    exclusive=True,
-                )
+        """Handle daemon events — trigger immediate refresh for relevant types.
+
+        Debounces rapid events so fleet-boot bursts don't spawn redundant
+        workers.  First event refreshes immediately; subsequent events
+        within _EVENT_COOLDOWN are absorbed.
+        """
+        if event.event_type not in ("node_changed", "message_changed", "hub_changed"):
+            return
+
+        import time as _time
+
+        now = _time.monotonic()
+        last = getattr(self, "_last_event_refresh", 0.0)
+        if (now - last) < self._EVENT_COOLDOWN:
+            return
+
+        self._last_event_refresh = now
+        if self._ipc_bridge is not None:
+            self.run_worker(
+                self._fetch_daemon_status(),
+                group="dashboard-status",
+                exclusive=True,
+            )
 
     def _retry_hub_connection(self) -> None:
         """Periodically poll hub status via IPC."""
