@@ -409,11 +409,15 @@ ProgressBar > .bar--complete {
 }
 
 /* === Input Fields === */
+/* Round-bordered inputs with subtle fill — the box IS the "you can type here"
+   affordance in a TUI. Safe to use background here since solid/round borders
+   on inputs won't abut a parent with a different bg (they sit inside panels). */
 Input {
-    background: $background;
+    background: $surface;
     border: round $border;
     color: $primary;
-    margin-bottom: 1;
+    margin: 0;
+    padding: 0 1;
 }
 
 Input:focus {
@@ -676,7 +680,7 @@ Header {
 .setting-row {
     height: auto;
     min-height: 3;
-    margin-bottom: 1;
+    margin-bottom: 0;
     align: left middle;
 }
 
@@ -735,7 +739,7 @@ Header {
 .peer-row {
     height: auto;
     min-height: 3;
-    margin-bottom: 1;
+    margin-bottom: 0;
 }
 
 .peer-name-input {
@@ -769,7 +773,16 @@ Header {
     width: 5;
     min-width: 5;
     height: 1;
-    border: none;
+    border: none !important;
+    color: $text-muted;
+    background: transparent;
+    hatch: none;
+}
+
+.peer-remove-btn:hover {
+    border: none !important;
+    color: $error;
+    text-style: bold;
 }
 
 /* Allowed-peer rows (Security tab) */
@@ -787,7 +800,16 @@ Header {
     width: 5;
     min-width: 5;
     height: 1;
-    border: none;
+    border: none !important;
+    color: $text-muted;
+    background: transparent;
+    hatch: none;
+}
+
+.allowed-peer-remove-btn:hover {
+    border: none !important;
+    color: $error;
+    text-style: bold;
 }
 
 .allowed-peer-header-row {
