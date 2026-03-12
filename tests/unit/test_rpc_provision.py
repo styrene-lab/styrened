@@ -165,7 +165,7 @@ class TestRPCProvisionHandler:
         return StyreneEnvelope(
             version=2,
             message_type=StyreneMessageType.PROVISION,
-            request_id=b"\x00" * 16,
+            request_id=b"\x01" * 16,
             payload=payload,
         )
 
@@ -189,8 +189,10 @@ class TestRPCProvisionHandler:
         envelope = self._make_envelope("yggdrasil")
         server._handle_provision("admin_hash", envelope)
 
-        # Let async tasks complete
-        await asyncio.sleep(0.05)
+        # Drain all pending tasks (create_task + asyncio.to_thread)
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         mock_provisioner.provision.assert_called_once_with("yggdrasil")
 
@@ -207,6 +209,33 @@ class TestRPCProvisionHandler:
         # Verify the MESSAGE_TYPE_CAPABILITY mapping exists so dispatch would check it
         from styrened.rpc.server import MESSAGE_TYPE_CAPABILITY
         assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.PROVISION] == Capability.ADAPTER_PROVISION
+
+    @pytest.mark.asyncio
+    async def test_operator_provision_rejected_by_dispatch(self):
+        """OPERATOR request is rejected at the dispatch layer before reaching handler."""
+        server = self._make_server(default_role=Role.OPERATOR)
+        server._running = True
+
+        mock_provisioner = MagicMock()
+        server.set_binary_provisioner(mock_provisioner)
+        server._send_error = AsyncMock()
+
+        envelope = self._make_envelope("yggdrasil")
+        # Create a mock LXMF message with source_hash
+        mock_message = MagicMock()
+        mock_message.source_hash = "operator_hash"
+
+        await server._protocol_handler(mock_message, envelope)
+
+        # Drain pending tasks
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Provisioner should NOT have been called — RBAC rejected at dispatch
+        mock_provisioner.provision.assert_not_called()
+        # Error should have been sent
+        server._send_error.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

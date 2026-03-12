@@ -123,8 +123,8 @@ class IPCMessageType(IntEnum):
     CMD_DATALINK_META = 0x65  # Request non-identifiable metadata from peer
     CMD_DATALINK_INFO = 0x66  # Request identifiable metadata from peer (default-deny remote)
 
-    # Adapter provisioning (0x80)
-    CMD_PROVISION_ADAPTER = 0x80  # Provision adapter binary locally
+    # Adapter provisioning (0x71)
+    CMD_PROVISION_ADAPTER = 0x71  # Provision adapter binary locally
 
     # Boundary logging (0x70-0x7F)
     CMD_BOUNDARY_SNAPSHOT = 0x70  # Return ring-buffer snapshot of boundary log records

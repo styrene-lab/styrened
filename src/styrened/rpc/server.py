@@ -131,6 +131,10 @@ PUBLIC_RPC_COMMANDS: frozenset[StyreneMessageType] = frozenset(
 
 # RBAC: map each RPC message type to the capability required to invoke it.
 # Used when an RBACPolicy is active; legacy auth is bypassed entirely.
+#: Adapters known to the provisioning subsystem.  Shared between RPC
+#: validation and any future UI that enumerates installable adapters.
+KNOWN_ADAPTERS: frozenset[str] = frozenset({"yggdrasil", "lokinet", "i2pd", "cjdns"})
+
 MESSAGE_TYPE_CAPABILITY: dict[StyreneMessageType, str] = {
     StyreneMessageType.PING: Capability.PING,
     StyreneMessageType.STATUS_REQUEST: Capability.STATUS_QUERY,
@@ -1099,7 +1103,6 @@ class RPCServer:
             return
 
         # Validate adapter name against known set
-        KNOWN_ADAPTERS = {"yggdrasil", "lokinet", "i2pd", "cjdns"}
         if adapter_name not in KNOWN_ADAPTERS:
             asyncio.create_task(
                 self._send_error(
