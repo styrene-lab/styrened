@@ -194,6 +194,7 @@ class StyreneDaemon:
         self._mesh_vpn_service: Any = None  # WireGuard mesh VPN service
         self._relay_service: Any = None  # TURN-style relay service
         self._i2p_adapter: Any = None  # Optional I2P adapter
+        self._ygg_adapter: Any = None  # Optional Yggdrasil adapter
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
 
     async def start(self) -> None:
@@ -221,6 +222,7 @@ class StyreneDaemon:
 
         # Start optional I2P integration early so announce/meta can surface it
         await self._start_i2p_adapter()
+        await self._start_yggdrasil_adapter()
 
         # Inject RBAC policy into LXMF service — must happen before any
         # message processing begins, regardless of chat.enabled state.
@@ -1315,6 +1317,46 @@ class StyreneDaemon:
                 except Exception:
                     pass
             self._i2p_adapter = None
+
+    async def _start_yggdrasil_adapter(self) -> None:
+        """Start and inject the optional Yggdrasil adapter."""
+        try:
+            from styrened.services.yggdrasil import YggdrasilAdapter
+
+            self._ygg_adapter = YggdrasilAdapter(self.config.yggdrasil, core_config=self.config)
+            await self._ygg_adapter.start()
+
+            try:
+                await self._ygg_adapter.status()
+            except Exception:
+                pass
+
+            if self._rpc_server is not None:
+                self._rpc_server.set_ygg_adapter(self._ygg_adapter)
+
+            logger.info(
+                "Yggdrasil adapter initialized (mode=%s)",
+                self.config.yggdrasil.mode.value,
+            )
+        except Exception as e:
+            logger.error(f"Failed to start Yggdrasil adapter: {e}")
+            self._ygg_adapter = None
+
+    async def _stop_yggdrasil_adapter(self) -> None:
+        """Stop the optional Yggdrasil adapter if it is running."""
+        if self._ygg_adapter is None:
+            return
+        try:
+            await self._ygg_adapter.stop()
+        except Exception as e:
+            logger.error(f"Error stopping Yggdrasil adapter: {e}")
+        finally:
+            if self._rpc_server is not None:
+                try:
+                    self._rpc_server.set_ygg_adapter(None)
+                except Exception:
+                    pass
+            self._ygg_adapter = None
 
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
@@ -2419,6 +2461,7 @@ class StyreneDaemon:
 
         # Stop optional I2P adapter
         await self._stop_i2p_adapter()
+        await self._stop_yggdrasil_adapter()
 
         # Stop direct link service
         if self._direct_link_service:

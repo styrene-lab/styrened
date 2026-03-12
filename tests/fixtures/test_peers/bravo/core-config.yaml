@@ -1,0 +1,38 @@
+# Test Peer Bravo — secondary test peer (Phase 2)
+# Identity hash: 32fae1a78f7a67540489e9497140d5fa
+# Transport config is overlaid at test time (see tests/fixtures/transports/)
+
+identity:
+  display_name: "🤖 Test Peer Bravo"
+  short_name: "BRAVO"
+  icon: "🤖"
+
+reticulum:
+  mode: standalone
+  announce_interval: 1
+  interfaces:
+    auto: false
+    server:
+      enabled: true
+      listen_ip: 127.0.0.1
+      port: 0  # Dynamic — harness allocates and overwrites
+
+rpc:
+  enabled: true
+  allow_command_execution: true
+
+discovery:
+  enabled: true
+
+chat:
+  enabled: true
+  auto_reply_mode: always
+  auto_reply_message: "Copy that — Test Peer Bravo standing by."
+  auto_reply_cooldown: 1
+
+lxmf:
+  propagation_node:
+    enabled: false
+
+api:
+  enabled: false

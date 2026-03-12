@@ -41,6 +41,9 @@ from styrened.services.reticulum import (
 
 logger = logging.getLogger(__name__)
 
+# Binary manifest path — resolved lazily to avoid import-time I/O.
+_MANIFEST_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "binary_manifest.json")
+
 
 # -----------------------------------------------------------------------------
 # Enums
@@ -66,6 +69,7 @@ class CheckCategory(Enum):
     PATHS = "paths"
     YGGDRASIL = "yggdrasil"
     I2P = "i2p"
+    BOUNDARY_LOG = "boundary_log"
 
 
 # -----------------------------------------------------------------------------
@@ -475,51 +479,97 @@ async def check_daemon() -> list[Finding]:
         )
         return findings
 
-    # Try to ping the daemon
+    # Try to ping the daemon and check version
     try:
-        from styrened.ipc import get_daemon_client
+        from styrened.ipc import ControlClient, get_default_socket_path
 
-        client = await get_daemon_client()
-        if client:
-            try:
-                pong = await client.ping(timeout=2.0)
-                if pong:
-                    findings.append(
-                        Finding(
-                            category=CheckCategory.DAEMON,
-                            severity=Severity.OK,
-                            message="Daemon is running and responsive",
-                        )
+        client = ControlClient(socket_path=get_default_socket_path(), timeout=3.0)
+        try:
+            await client.connect()
+            pong = await client.ping(timeout=2.0)
+            if pong:
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.OK,
+                        message="Daemon is running and responsive",
                     )
-                else:
+                )
+                # Version mismatch check
+                daemon_ver = getattr(pong, "daemon_version", None) if not isinstance(pong, bool) else None
+                if daemon_ver and daemon_ver != __version__:
                     findings.append(
                         Finding(
                             category=CheckCategory.DAEMON,
                             severity=Severity.WARN,
-                            message="Daemon socket exists but did not respond to ping",
+                            message=(
+                                f"Version mismatch: running daemon is v{daemon_ver}, "
+                                f"installed binary is v{__version__}"
+                            ),
+                            fix_hint=(
+                                "Restart the service to pick up the new binary: "
+                                "'systemctl --user restart styrened' (Linux) or "
+                                "'launchctl unload/load ~/Library/LaunchAgents/com.styrene.styrened.plist' (macOS). "
+                                "Or run: just dev-daemon"
+                            ),
                         )
                     )
-            finally:
-                await client.disconnect()
-        else:
+                elif daemon_ver:
+                    findings.append(
+                        Finding(
+                            category=CheckCategory.DAEMON,
+                            severity=Severity.OK,
+                            message=f"Daemon version matches: v{daemon_ver}",
+                        )
+                    )
+            else:
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.WARN,
+                        message="Daemon socket exists but did not respond to ping",
+                    )
+                )
+        finally:
+            await client.disconnect()
+    except Exception as e:
+        logger.debug(f"Daemon ping failed: {e}")
+        # Fall back to legacy get_daemon_client path
+        try:
+            from styrened.ipc import get_daemon_client
+
+            client2 = await get_daemon_client()
+            if client2:
+                try:
+                    pong = await client2.ping(timeout=2.0)
+                    if pong:
+                        findings.append(
+                            Finding(
+                                category=CheckCategory.DAEMON,
+                                severity=Severity.OK,
+                                message="Daemon is running and responsive",
+                            )
+                        )
+                finally:
+                    await client2.disconnect()
+            else:
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.WARN,
+                        message="Could not connect to daemon (socket exists but connection failed)",
+                        fix_hint="Check if daemon process is running",
+                    )
+                )
+        except Exception as e2:
             findings.append(
                 Finding(
                     category=CheckCategory.DAEMON,
                     severity=Severity.WARN,
-                    message="Could not connect to daemon (socket exists but connection failed)",
-                    fix_hint="Check if daemon process is running",
+                    message=f"Daemon connection error: {e2}",
+                    fix_hint="Try restarting the daemon",
                 )
             )
-    except Exception as e:
-        logger.debug(f"Daemon ping failed: {e}")
-        findings.append(
-            Finding(
-                category=CheckCategory.DAEMON,
-                severity=Severity.WARN,
-                message=f"Daemon connection error: {e}",
-                fix_hint="Try restarting the daemon",
-            )
-        )
 
     return findings
 
@@ -763,6 +813,436 @@ async def check_i2p(config: "Any | None" = None) -> list[Finding]:
 
 
 # -----------------------------------------------------------------------------
+# Binary checks for adapter binaries (yggdrasil, i2pd)
+# -----------------------------------------------------------------------------
+
+
+def _load_manifest() -> dict[str, Any]:
+    """Load the binary manifest JSON. Returns empty dict on failure."""
+    import json
+
+    try:
+        with open(_MANIFEST_PATH) as f:
+            result: dict[str, Any] = json.load(f)
+            return result
+    except Exception as exc:
+        logger.debug("Failed to load binary manifest: %s", exc)
+        return {}
+
+
+def _detect_platform() -> str:
+    """Map current OS + arch to manifest platform key."""
+    import platform
+    import sys
+
+    machine = platform.machine().lower()
+    arch_map = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+        "armv7l": "armhf",
+        "armv6l": "armhf",
+    }
+    arch = arch_map.get(machine, machine)
+
+    if sys.platform == "darwin":
+        return f"darwin-{arch}"
+    elif sys.platform.startswith("linux"):
+        return f"linux-{arch}"
+    return f"unknown-{arch}"
+
+
+def _get_manifest_entry(adapter_name: str) -> dict[str, Any] | None:
+    """Get platform-specific manifest entry for an adapter."""
+    manifest = _load_manifest()
+    adapter_data = manifest.get("adapters", {}).get(adapter_name)
+    if not adapter_data:
+        return None
+    platform_key = _detect_platform()
+    entry: dict[str, Any] | None = adapter_data.get("platforms", {}).get(platform_key)
+    return entry
+
+
+def _get_manifest_version(adapter_name: str) -> str | None:
+    """Get expected version string from manifest for an adapter."""
+    manifest = _load_manifest()
+    adapter_data = manifest.get("adapters", {}).get(adapter_name)
+    if adapter_data:
+        version: str | None = adapter_data.get("version")
+        return version
+    return None
+
+
+def _hash_file(path: str) -> str:
+    """Compute SHA-256 hex digest of a file."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _check_binary_version(binary_path: str, adapter_name: str) -> str | None:
+    """Run ``<binary> --version`` and extract the version string."""
+    import re
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [binary_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        output = result.stdout.strip() or result.stderr.strip()
+        # Common patterns: "yggdrasil v0.5.13", "i2pd version 2.59.0"
+        m = re.search(r"(\d+\.\d+\.\d+)", output)
+        return m.group(1) if m else None
+    except Exception as exc:
+        logger.debug("Version check for %s failed: %s", adapter_name, exc)
+        return None
+
+
+def _get_provisioner() -> Any:
+    """Import and return a BinaryProvisioner instance.
+
+    Returns None if the provisioner module is not yet available
+    (e.g. sibling task not merged).
+    """
+    try:
+        from styrened.services.binary_provisioner import BinaryProvisioner
+
+        return BinaryProvisioner()
+    except ImportError:
+        logger.debug("BinaryProvisioner not available — provisioner-core not merged?")
+        return None
+
+
+# Mapping: adapter_name → (category, config_attr)
+_ADAPTER_SPECS: list[tuple[str, CheckCategory, str]] = [
+    ("yggdrasil", CheckCategory.YGGDRASIL, "yggdrasil"),
+    ("i2pd", CheckCategory.I2P, "i2p"),
+]
+
+
+def _make_adapter(adapter_name: str, cfg: Any) -> Any:
+    """Instantiate the appropriate adapter for a given adapter name."""
+    if adapter_name == "yggdrasil":
+        return YggdrasilAdapter(cfg)
+    elif adapter_name == "i2pd":
+        return I2PAdapter(cfg)
+    raise ValueError(f"Unknown adapter: {adapter_name}")
+
+
+async def check_adapter_binaries(config: Any) -> list[Finding]:
+    """Check binary presence, integrity, and version for each non-disabled adapter.
+
+    Reports:
+      ✓ found + hash matches
+      ⚠ hash mismatch (expected vs actual)
+      ✗ not found
+    """
+    findings: list[Finding] = []
+
+    for adapter_name, category, config_attr in _ADAPTER_SPECS:
+        cfg = getattr(config, config_attr, None)
+        if cfg is None or cfg.mode == DaemonMode.DISABLED:
+            continue
+
+        adapter = _make_adapter(adapter_name, cfg)
+        binary_path = adapter._find_binary()
+
+        if binary_path is None:
+            severity = Severity.ERROR if cfg.mode == DaemonMode.MANAGED else Severity.WARN
+            findings.append(
+                Finding(
+                    category=category,
+                    severity=severity,
+                    message=f"✗ {adapter_name} binary not found",
+                    fix_hint=f"Run 'styrened doctor --fix' to provision {adapter_name}",
+                )
+            )
+            continue
+
+        # Binary found — check integrity
+        manifest_entry = _get_manifest_entry(adapter_name)
+        if manifest_entry:
+            actual_hash = _hash_file(binary_path)
+            expected_hash = manifest_entry.get("binary_sha256", "")
+
+            if actual_hash == expected_hash:
+                findings.append(
+                    Finding(
+                        category=category,
+                        severity=Severity.OK,
+                        message=f"✓ {adapter_name} found at {binary_path}, hash matches",
+                    )
+                )
+            else:
+                findings.append(
+                    Finding(
+                        category=category,
+                        severity=Severity.WARN,
+                        message=(
+                            f"⚠ {adapter_name} binary hash mismatch — "
+                            f"expected {expected_hash[:12]}…, got {actual_hash[:12]}…"
+                        ),
+                        fix_hint=f"Run 'styrened doctor --fix' to re-provision {adapter_name}",
+                    )
+                )
+        else:
+            # No manifest entry for this platform — can't verify, just report found
+            findings.append(
+                Finding(
+                    category=category,
+                    severity=Severity.OK,
+                    message=f"✓ {adapter_name} found at {binary_path} (no manifest entry for verification)",
+                )
+            )
+
+        # Version check
+        manifest_version = _get_manifest_version(adapter_name)
+        actual_version = _check_binary_version(binary_path, adapter_name)
+        if manifest_version and actual_version:
+            if actual_version == manifest_version:
+                findings.append(
+                    Finding(
+                        category=category,
+                        severity=Severity.OK,
+                        message=f"✓ {adapter_name} version {actual_version}",
+                    )
+                )
+            else:
+                findings.append(
+                    Finding(
+                        category=category,
+                        severity=Severity.WARN,
+                        message=(
+                            f"⚠ {adapter_name} version mismatch — "
+                            f"installed {actual_version}, manifest expects {manifest_version}"
+                        ),
+                    )
+                )
+
+    return findings
+
+
+async def fix_adapter_binaries(config: Any) -> list[Finding]:
+    """In --fix mode: provision missing binaries, report results.
+
+    For binaries that already exist and pass checks, no action is taken.
+    """
+    findings: list[Finding] = []
+
+    for adapter_name, category, config_attr in _ADAPTER_SPECS:
+        cfg = getattr(config, config_attr, None)
+        if cfg is None or cfg.mode == DaemonMode.DISABLED:
+            continue
+
+        adapter = _make_adapter(adapter_name, cfg)
+        binary_path = adapter._find_binary()
+
+        if binary_path is not None:
+            # Binary exists — check if it needs re-provisioning
+            manifest_entry = _get_manifest_entry(adapter_name)
+            if manifest_entry:
+                actual_hash = _hash_file(binary_path)
+                expected_hash = manifest_entry.get("binary_sha256", "")
+                if actual_hash == expected_hash:
+                    # All good, skip
+                    continue
+                # Hash mismatch — fall through to provision
+                logger.info("Re-provisioning %s due to hash mismatch", adapter_name)
+            else:
+                # No manifest entry — can't verify, skip
+                continue
+
+        # Need to provision
+        provisioner = _get_provisioner()
+        if provisioner is None:
+            findings.append(
+                Finding(
+                    category=category,
+                    severity=Severity.ERROR,
+                    message=f"✗ {adapter_name} provisioner not available",
+                    fix_hint=f"Install binary manually or upgrade styrened",
+                )
+            )
+            continue
+
+        try:
+            await provisioner.provision(adapter_name)
+            findings.append(
+                Finding(
+                    category=category,
+                    severity=Severity.OK,
+                    message=f"✓ {adapter_name} installed",
+                )
+            )
+        except Exception as exc:
+            findings.append(
+                Finding(
+                    category=category,
+                    severity=Severity.ERROR,
+                    message=f"✗ {adapter_name} provisioning failed: {exc}",
+                )
+            )
+
+    return findings
+
+
+# -----------------------------------------------------------------------------
+# Boundary log check
+# -----------------------------------------------------------------------------
+
+# Number of records per boundary tag above which we emit a WARN instead of INFO.
+_BOUNDARY_WARN_THRESHOLD = 5
+
+
+async def check_boundary_log() -> list[Finding]:
+    """Check boundary log snapshot from the running daemon.
+
+    Connects to the daemon via IPC, requests ``CMD_BOUNDARY_SNAPSHOT``, and
+    groups the returned records by their ``boundary`` tag.  Per-tag results:
+
+    * **>5 records** → WARN finding (count + last-seen timestamp + fix_hint)
+    * **≤5 transient-only records** → INFO finding
+    * Daemon not running → skip silently (no error findings)
+
+    Returns:
+        List of findings about boundary log status.  Empty list when the
+        daemon is unreachable.
+    """
+    from styrened import paths
+    from styrened.ipc import ControlClient, IPCMessageType
+
+    findings: list[Finding] = []
+
+    socket_path = paths.control_socket()
+    if not socket_path.exists():
+        # Daemon not running — skip gracefully.
+        return findings
+
+    # CMD_BOUNDARY_SNAPSHOT is added by the ipc-command sibling task.
+    # If this attribute is missing (e.g. running against an older build before
+    # the merge), bail out without surfacing an error.
+    snapshot_cmd = getattr(IPCMessageType, "CMD_BOUNDARY_SNAPSHOT", None)
+    if snapshot_cmd is None:
+        logger.debug("CMD_BOUNDARY_SNAPSHOT not available in this build — skipping boundary log check")
+        return findings
+
+    # CmdBoundarySnapshotRequest lives in ipc/messages.py (added by the
+    # ipc-command sibling task).  If it is absent the build is incomplete;
+    # surface a WARN rather than sending garbage via a silent fallback shim.
+    try:
+        from styrened.ipc.messages import CmdBoundarySnapshotRequest as _BoundaryReq  # type: ignore[attr-defined]
+    except ImportError as exc:
+        findings.append(
+            Finding(
+                category=CheckCategory.BOUNDARY_LOG,
+                severity=Severity.WARN,
+                message=f"CmdBoundarySnapshotRequest not available — ipc-command build may be incomplete ({exc})",
+                fix_hint="Ensure all sibling tasks (ipc-command) have been merged and the package rebuilt.",
+            )
+        )
+        return findings
+
+    try:
+        client = ControlClient(socket_path=socket_path, timeout=5.0)
+        await client.connect()
+        try:
+            raw = await client._request(_BoundaryReq(), timeout=5.0)
+            records: list[dict[str, Any]] = raw if isinstance(raw, list) else []
+        finally:
+            await client.disconnect()
+    except Exception as exc:
+        logger.debug("Boundary log check skipped: %s", exc)
+        return findings
+
+    if not records:
+        return findings
+
+    # Group records by boundary tag.
+    from collections import defaultdict
+
+    by_tag: dict[str, list[dict]] = defaultdict(list)
+    for rec in records:
+        tag = rec.get("boundary", "UNKNOWN")
+        by_tag[tag].append(rec)
+
+    for tag, tag_records in sorted(by_tag.items()):
+        count = len(tag_records)
+
+        # Determine last-seen timestamp (most recent ts field).
+        # Normalize to UTC before comparing so mixed timezone offsets sort correctly.
+        def _to_utc(ts: str) -> datetime:
+            try:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                return dt.astimezone(UTC)
+            except ValueError:
+                return datetime.min.replace(tzinfo=UTC)
+
+        ts_values = [str(r["ts"]) for r in tag_records if r.get("ts")]
+        last_seen_str: str
+        if ts_values:
+            last_seen_str = max(ts_values, key=_to_utc)
+        else:
+            last_seen_str = "unknown"
+
+        # Determine whether all records are transient.
+        severities = {r.get("severity", "transient") for r in tag_records}
+        all_transient = severities <= {"transient"}
+
+        if count > _BOUNDARY_WARN_THRESHOLD:
+            findings.append(
+                Finding(
+                    category=CheckCategory.BOUNDARY_LOG,
+                    severity=Severity.WARN,
+                    message=(
+                        f"Boundary [{tag}]: {count} error records"
+                        f" (last seen: {last_seen_str})"
+                    ),
+                    fix_hint=(
+                        f"Check logs for repeated {tag} failures. "
+                        "Run 'styrened doctor --offline' for offline diagnostics "
+                        "or 'journalctl -u styrened' for full service logs."
+                    ),
+                )
+            )
+        elif all_transient:
+            findings.append(
+                Finding(
+                    category=CheckCategory.BOUNDARY_LOG,
+                    severity=Severity.OK,
+                    message=(
+                        f"Boundary [{tag}]: {count} transient record(s)"
+                        f" (last seen: {last_seen_str})"
+                    ),
+                )
+            )
+        else:
+            # Non-transient records but count ≤ threshold — still INFO.
+            findings.append(
+                Finding(
+                    category=CheckCategory.BOUNDARY_LOG,
+                    severity=Severity.OK,
+                    message=(
+                        f"Boundary [{tag}]: {count} record(s)"
+                        f" (severities: {', '.join(sorted(severities))},"
+                        f" last seen: {last_seen_str})"
+                    ),
+                )
+            )
+
+    return findings
+
+
+# -----------------------------------------------------------------------------
 # Orchestrator
 # -----------------------------------------------------------------------------
 
@@ -795,8 +1275,13 @@ async def run_doctor(offline: bool = False) -> DoctorReport:
 
     # Run async checks
     report.findings.extend(await check_daemon())
+    report.findings.extend(await check_boundary_log())
     report.findings.extend(await check_yggdrasil(config=_loaded_config))
     report.findings.extend(await check_i2p(config=_loaded_config))
+
+    # Binary integrity checks for adapters
+    if _loaded_config:
+        report.findings.extend(await check_adapter_binaries(_loaded_config))
 
     # Populate summary info
     report.version_info = {"installed": __version__}

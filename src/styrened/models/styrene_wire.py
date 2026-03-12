@@ -122,6 +122,7 @@ class StyreneMessageType(IntEnum):
     INBOX_QUERY = 0x44
     MESSAGES_QUERY = 0x45
     SELF_UPDATE = 0x46
+    PROVISION = 0x47
 
     # RPC Responses (0x60-0x7F)
     EXEC_RESULT = 0x60
@@ -131,6 +132,7 @@ class StyreneMessageType(IntEnum):
     INBOX_RESPONSE = 0x64
     MESSAGES_RESPONSE = 0x65
     SELF_UPDATE_RESULT = 0x66
+    PROVISION_RESULT = 0x67
 
     # Hub Services (0x80-0x9F)
     REGISTRY_QUERY = 0x80
@@ -735,6 +737,49 @@ def create_self_update_result(
         version=STYRENE_VERSION,
         message_type=StyreneMessageType.SELF_UPDATE_RESULT,
         payload=encode_payload(payload_data),
+        request_id=request_id if request_id else NO_CORRELATION,
+    )
+
+
+# Adapter provisioning convenience functions
+
+
+def create_provision(
+    adapter: str, request_id: bytes | None = None
+) -> StyreneEnvelope:
+    """Create a PROVISION command envelope.
+
+    Args:
+        adapter: Adapter name to provision (e.g., "yggdrasil").
+        request_id: Optional correlation ID.
+
+    Returns:
+        StyreneEnvelope configured as PROVISION with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.PROVISION,
+        payload=encode_payload({"adapter": adapter, "type": "provision"}),
+        request_id=request_id if request_id else NO_CORRELATION,
+    )
+
+
+def create_provision_result(
+    result: dict[str, Any], request_id: bytes | None = None
+) -> StyreneEnvelope:
+    """Create a PROVISION_RESULT response envelope.
+
+    Args:
+        result: Provisioning result dict (success, installed_path, adapter, error).
+        request_id: Correlation ID from the PROVISION request.
+
+    Returns:
+        StyreneEnvelope configured as PROVISION_RESULT with encoded payload.
+    """
+    return StyreneEnvelope(
+        version=STYRENE_VERSION,
+        message_type=StyreneMessageType.PROVISION_RESULT,
+        payload=encode_payload(result),
         request_id=request_id if request_id else NO_CORRELATION,
     )
 

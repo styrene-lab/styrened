@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "adapters": {
+    "yggdrasil": {
+      "version": "0.5.13",
+      "upstream_repo": "yggdrasil-network/yggdrasil-go",
+      "binary_name": "yggdrasil",
+      "platforms": {
+        "linux-amd64": {
+          "asset": "yggdrasil-0.5.13-amd64.deb",
+          "sha256": "cb1fc3ef6920a3bc648a52575974295a0aa52d0d95b517821b0d649fc01131d5",
+          "binary_path_in_archive": "usr/bin/yggdrasil",
+          "binary_sha256": "15331b45cad63c1b2af8e76d8a908f69052c4ee80d40abb0c4c0a052d984a1f1",
+          "archive_format": "deb"
+        },
+        "linux-arm64": {
+          "asset": "yggdrasil-0.5.13-arm64.deb",
+          "sha256": "59008f96f17fd3064adf50abd941a37cbd60e28b3a5c2e5e93ddb4d32158eeb9",
+          "binary_path_in_archive": "usr/bin/yggdrasil",
+          "binary_sha256": "840ec903afc5c858063cf27abe88e2b09de4f2fa8ec1444aadbcf5cc9fba0fb6",
+          "archive_format": "deb"
+        },
+        "linux-armhf": {
+          "asset": "yggdrasil-0.5.13-armhf.deb",
+          "sha256": "a64a5607b146d25acf70771c987564c41e6cdb6b0dc43bacd2ec31a8235f72e1",
+          "binary_path_in_archive": "usr/bin/yggdrasil",
+          "binary_sha256": "463f07a69fdb8f7feafeb2126c17b0a02e27ff226e77058476e60ff6e6ff599f",
+          "archive_format": "deb"
+        },
+        "darwin-arm64": {
+          "asset": "yggdrasil-0.5.13-macos-arm64.pkg",
+          "sha256": "4ae09792a898a757aeda0bae4e898e129eff3b0ee880097d7276f5f34b79ab40",
+          "binary_path_in_archive": "usr/local/bin/yggdrasil",
+          "binary_sha256": "c850344f2f18ce27ec8cbf059f953862545ea249c0e7e2135567bbb623034461",
+          "archive_format": "pkg"
+        }
+      }
+    },
+    "i2pd": {
+      "version": "2.59.0",
+      "upstream_repo": "PurpleI2P/i2pd",
+      "binary_name": "i2pd",
+      "platforms": {
+        "linux-amd64": {
+          "asset": "i2pd_2.59.0-1bookworm1_amd64.deb",
+          "sha256": "96b26ee3c5fa0d7b0b598e7741a4831537b6f6bde68e19eb98dc0963f3ad97e9",
+          "binary_path_in_archive": "usr/sbin/i2pd",
+          "binary_sha256": "a34b0612f8f717fe022973042db63231e71c2074e0653fedadbcc87377bed202",
+          "archive_format": "deb"
+        },
+        "linux-arm64": {
+          "asset": "i2pd_2.59.0-1bookworm1_arm64.deb",
+          "sha256": "e56953a5214c6ada7fabc88ea3c70318dde584e34906e8e2e6f0d8017f3eaab3",
+          "binary_path_in_archive": "usr/sbin/i2pd",
+          "binary_sha256": "e2119a04b65fa25ea267672ddad5ddc398158b91597eceb8a2195b87f44ae4d9",
+          "archive_format": "deb"
+        },
+        "linux-armhf": {
+          "asset": "i2pd_2.59.0-1bookworm1_armhf.deb",
+          "sha256": "019bd71cdac6d02b9ef9dfa0acc2e6146634791a74c8aebc58255fce37d4c56d",
+          "binary_path_in_archive": "usr/sbin/i2pd",
+          "binary_sha256": "a206c9bffdae6589f98f12784a3c9c222544988cbec2f368486e633e6fcf79d7",
+          "archive_format": "deb"
+        },
+        "darwin-arm64": {
+          "asset": "i2pd_2.59.0_osx.tar.gz",
+          "sha256": "3f0121c9f1b69a9ee2ffa087a52a783ab8c63a13945962befe2436c914cd427b",
+          "binary_path_in_archive": "i2pd",
+          "binary_sha256": "79a962913668a968282b10dae0b5ae8aabf5b2758e7bd2b2a32e7caa81b0bb63",
+          "archive_format": "tar.gz"
+        }
+      }
+    }
+  }
+}

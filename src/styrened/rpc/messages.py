@@ -367,3 +367,56 @@ class MessagesResponse:
     def from_dict(cls, data: dict[str, Any]) -> "MessagesResponse":
         """Deserialize from dict."""
         return cls(messages=data.get("messages", []))
+
+
+@dataclass
+class ProvisionRequest:
+    """Remote adapter provisioning request.
+
+    Attributes:
+        adapter: Adapter name to provision (e.g., "yggdrasil").
+        type: Message type identifier.
+    """
+
+    adapter: str
+    type: str = "provision"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProvisionRequest":
+        """Deserialize from dict."""
+        return cls(adapter=data.get("adapter", ""))
+
+
+@dataclass
+class ProvisionResponse:
+    """Remote adapter provisioning response.
+
+    Attributes:
+        success: Whether provisioning succeeded.
+        adapter: Adapter name that was provisioned.
+        installed_path: Path where binary was installed (on success).
+        error: Error message (on failure).
+    """
+
+    success: bool
+    adapter: str
+    installed_path: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProvisionResponse":
+        """Deserialize from dict."""
+        return cls(
+            success=data.get("success", False),
+            adapter=data.get("adapter", ""),
+            installed_path=data.get("installed_path"),
+            error=data.get("error"),
+        )
