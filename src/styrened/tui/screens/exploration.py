@@ -767,7 +767,7 @@ class ExplorationScreen(Screen[None]):
         self._seconds_until_refresh = self._REFRESH_INTERVAL
         self._countdown_timer = self.set_interval(1.0, self._tick_countdown)
         # Focus active table after TabbedContent is ready
-        self.call_later(self._focus_active_table)
+        self.call_after_refresh(self._focus_active_table)
 
     def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
         """Pause periodic refresh while Nodes is not the active workspace."""
@@ -790,7 +790,7 @@ class ExplorationScreen(Screen[None]):
             self._countdown_timer.resume()
         self._start_node_refresh()
         # Re-focus table so Footer picks up screen bindings
-        self.call_later(self._focus_active_table)
+        self.call_after_refresh(self._focus_active_table)
 
     def on_unmount(self) -> None:
         """Stop periodic refresh when the Nodes workspace is removed."""
@@ -864,10 +864,12 @@ class ExplorationScreen(Screen[None]):
         self._start_node_refresh()
 
     def _focus_active_table(self) -> None:
-        """Focus the table in the currently active tab."""
+        """Focus the table in the currently active tab and refresh Footer."""
         table = self._get_active_table()
         if table:
             table.focus()
+        # Force Footer to pick up bindings even if focus didn't change
+        self.refresh_bindings()
 
     def _on_device_discovered(self, device: MeshDevice) -> None:
         """Called when new device discovered via announce.

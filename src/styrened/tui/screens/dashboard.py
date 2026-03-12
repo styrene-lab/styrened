@@ -93,8 +93,9 @@ class DashboardScreen(Screen[None]):
                 exclusive=True,
             )
 
-        # Focus a widget so Footer renders screen bindings
-        self.call_later(self._refocus_default)
+        # Focus a widget so Footer renders screen bindings.
+        # call_after_refresh ensures the widget tree is fully composed.
+        self.call_after_refresh(self._refocus_default)
 
     def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
         """Pause periodic refresh while Home is not the active screen."""
@@ -115,7 +116,7 @@ class DashboardScreen(Screen[None]):
             panel.refresh_theme()
 
         # Re-focus so Footer picks up screen bindings after switch_screen
-        self.call_later(self._refocus_default)
+        self.call_after_refresh(self._refocus_default)
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
@@ -170,13 +171,25 @@ class DashboardScreen(Screen[None]):
             self.run_worker(self._fetch_daemon_status(), group="hub-status")
 
     def _refocus_default(self) -> None:
-        """Focus the first focusable child so Footer renders bindings."""
+        """Focus a widget and force Footer to pick up bindings.
+
+        The Footer only renders after ``Screen.refresh_bindings()`` fires,
+        which happens on focus change.  If nothing is focused after mount
+        or screen-switch, the Footer stays blank.  We focus the node table
+        (or any focusable child) AND explicitly refresh bindings.
+        """
         try:
             from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
             table = self.query_one(HomeNodeSummaryTable)
             table.focus()
         except Exception:
-            pass
+            # Fall back to focusing *anything*
+            for widget in self.query("*"):
+                if widget.focusable:
+                    widget.focus()
+                    break
+        # Belt-and-suspenders: force bindings refresh even if focus didn't change
+        self.refresh_bindings()
 
     def _reconcile(self) -> None:
         """Slow reconciliation — catches anything events missed."""
