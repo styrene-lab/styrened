@@ -92,6 +92,9 @@ class Capability:
     RELAY_PRIORITIZE: ClassVar[str] = "relay.prioritize"
     RELAY_BRIDGE: ClassVar[str] = "relay.bridge"
 
+    # --- ADMIN tier (40) --- adapter
+    ADAPTER_PROVISION: ClassVar[str] = "adapter.provision"
+
     # --- ADMIN tier (40) --- relay
     RELAY_ADMIN: ClassVar[str] = "relay.admin"
 
@@ -156,6 +159,7 @@ _ADMIN_CAPS: frozenset[str] = _OPERATOR_CAPS | frozenset(
         Capability.REBOOT,
         Capability.SELF_UPDATE,
         Capability.TERMINAL_FULL,
+        Capability.ADAPTER_PROVISION,
         Capability.RELAY_ADMIN,
         # NOTE: VPN_HANDSHAKE is intentionally NOT in _ADMIN_CAPS.
         # It is a pure orthogonal grant — an identity must be given explicit

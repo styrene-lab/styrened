@@ -785,6 +785,17 @@ class CmdRebootDeviceRequest(IPCRequest):
 
 
 @dataclass
+class CmdProvisionAdapterRequest(IPCRequest):
+    """Provision an adapter binary locally (IPC/LOCAL context bypasses RBAC)."""
+
+    MSG_TYPE = IPCMessageType.CMD_PROVISION_ADAPTER
+    adapter_name: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"adapter_name": self.adapter_name}
+
+
+@dataclass
 class CmdSelfUpdateRequest(IPCRequest):
     """Trigger self-update on a remote device via RPC."""
 
