@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Daemon setup screen — guides operator through starting/installing styrened.
 
 Shown when the TUI detects no running daemon on startup. Offers three paths:
@@ -9,8 +11,6 @@ Shown when the TUI detects no running daemon on startup. Offers three paths:
 Returns:
     True if daemon started successfully, False if skipped.
 """
-from __future__ import annotations
-
 
 from typing import ClassVar
 
@@ -27,6 +27,7 @@ from styrened.tui.services.service_installer import (
     detect_platform,
     install_service,
 )
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 
 class DaemonSetupScreen(Screen[bool]):
@@ -267,4 +268,4 @@ class DaemonSetupScreen(Screen[bool]):
         if success:
             status.update(f"[bold]{message}[/]")
         else:
-            status.update(f"[bold red]{message}[/]")
+            status.update(f"[{get_color_cascade().color_danger} bold]{message}[/]")

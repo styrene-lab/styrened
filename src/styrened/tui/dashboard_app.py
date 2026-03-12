@@ -41,7 +41,7 @@ class LocalDashboardApp(App[None]):
     TITLE = "STYRENE"
     SUB_TITLE = "Dashboard"
 
-    CSS_PATH = Path(__file__).parent / "styles" / "imperial_crt.tcss"
+    CSS_PATH = Path(__file__).parent / "styles" / "styrene.tcss"
 
     def __init__(self) -> None:
         super().__init__()

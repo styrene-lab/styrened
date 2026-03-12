@@ -1,341 +1,97 @@
-"""Tests for HighlightedPanel widget."""
+"""Tests for StyrenePanel (aliased as HighlightedPanel).
+
+StyrenePanel uses Textual's native border system (border: round) rather than
+custom box-drawing characters.  Title is set via border_title.
+"""
 from __future__ import annotations
 
-
 import pytest
-from textual.app import App
-from textual.widgets import Label
+from textual.widgets import Label, Static
 
-from styrened.tui.themes.color_cascade import ColorCascade
 from styrened.tui.widgets.highlighted_panel import (
     HighlightedPanel,
+    StyrenePanel,
     get_color_cascade,
     set_color_cascade,
 )
-
-
-class TestHighlightedPanelThemeColors:
-    """Test theme color application to HighlightedPanel."""
-
-    def test_panel_applies_phosphex_color_correctly(self, snap_compare):
-        """Verify theme color cascade is applied to panel borders."""
-
-        # Programmatic assertion BEFORE snapshot: Verify the current color cascade has actual values
-        current_cascade = get_color_cascade()
-        assert current_cascade.bright.startswith("#"), \
-            "Cascade bright color should be hex color from theme"
-        assert current_cascade.dim.startswith("#"), \
-            "Cascade dim color should be hex color from theme"
-        assert current_cascade.medium.startswith("#"), \
-            "Cascade medium color should be hex color from theme"
-
-        # Verify all three colors are different (proper cascade)
-        assert current_cascade.bright != current_cascade.dim, \
-            "Bright and dim should be different colors"
-        assert current_cascade.bright != current_cascade.medium, \
-            "Bright and medium should be different colors"
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Test Content"),
-                    title="Theme Test",
-                )
-
-        app = PanelApp()
-
-        # Snapshot comparison - also implicitly tests that theme colors render correctly
-        assert snap_compare(app)
-
-    def test_panel_border_color_matches_theme(self, snap_compare):
-        """Verify border uses correct theme color (dim phosphex)."""
-
-        # Set styrene brand theme for testing
-        cascade = ColorCascade.from_preset("styrene")
-        set_color_cascade(cascade)
-
-        # Verify the cascade has actual distinct color values
-        assert cascade.bright.startswith("#"), "Bright color should be hex"
-        assert cascade.dim.startswith("#"), "Dim color should be hex"
-        assert cascade.medium.startswith("#"), "Medium color should be hex"
-        assert cascade.bright != cascade.dim, "Bright and dim should differ"
-        assert cascade.bright != cascade.medium, "Bright and medium should differ"
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Border Color Test"),
-                    title="Styrene Theme",
-                )
-
-        app = PanelApp()
-
-        # Snapshot comparison
-        assert snap_compare(app)
-
-    def test_panel_corner_highlights_match_theme(self, snap_compare):
-        """Verify corner symbols use bright theme color."""
-
-        # Use styrene brand cascade
-        cascade = ColorCascade.from_preset("styrene")
-        set_color_cascade(cascade)
-
-        # Verify cascade has valid colors
-        assert cascade.bright.startswith("#"), "Bright color should be hex"
-        assert cascade.dim.startswith("#"), "Dim color should be hex"
-
-        # Verify HighlightedPanel has the box-drawing characters defined
-        assert HighlightedPanel.TOP_LEFT == "\u250c", "Panel should use correct top-left corner char"
-        assert HighlightedPanel.TOP_RIGHT == "\u2510", "Panel should use correct top-right corner char"
-        assert HighlightedPanel.BOTTOM_LEFT == "\u2514", "Panel should use correct bottom-left corner char"
-        assert HighlightedPanel.BOTTOM_RIGHT == "\u2518", "Panel should use correct bottom-right corner char"
-        assert HighlightedPanel.HORIZONTAL == "\u2500", "Panel should use correct horizontal line char"
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Corner Highlight Test"),
-                    title="Corner Test",
-                )
-
-        app = PanelApp()
-
-        # Snapshot comparison - visual verification that corners render with theme
-        assert snap_compare(app)
-
-
-class TestHighlightedPanelCornerHighlighting:
-    """Test corner highlighting behavior."""
-
-    def test_panel_shows_corner_symbols_when_enabled(self, snap_compare):
-        """Verify corner symbols (box-drawing characters) appear in borders."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Corner symbols should be visible"),
-                    title="Corner Test",
-                )
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-    def test_panel_hides_corner_symbols_when_disabled(self, snap_compare):
-        """Verify panel renders without corner highlights when feature is off.
-
-        Note: Current implementation always shows corners. This test documents
-        the expected behavior if corner_extend is set to 0.
-        """
-
-        class PanelApp(App):
-            def compose(self):
-                panel = HighlightedPanel(
-                    Label("No corner highlights"),
-                    title="Minimal Borders",
-                )
-                # Set corner extension to 0 to disable highlights
-                panel.CORNER_EXTEND = 0
-                yield panel
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-    def test_panel_corner_position_correct(self, snap_compare):
-        """Verify corner symbols appear at correct positions (4 corners)."""
-
-        class PanelApp(App):
-            def compose(self):
-                # Use wider panel to make corners more distinct
-                yield HighlightedPanel(
-                    Label("Wide panel to verify corner positions"),
-                    title="Corner Position Verification",
-                )
-
-        app = PanelApp()
-        # Visual inspection will verify corners at top-left, top-right,
-        # bottom-left, and bottom-right positions
-        assert snap_compare(app)
-
-
-class TestHighlightedPanelContentRendering:
-    """Test content area and child widget rendering."""
-
-    def test_panel_renders_child_widgets_correctly(self, snap_compare):
-        """Verify content area displays child widgets properly."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("First Line"),
-                    Label("Second Line"),
-                    Label("Third Line"),
-                    title="Multi-Widget Panel",
-                )
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-    def test_panel_title_renders_correctly(self, snap_compare):
-        """Verify title positioning and styling in top border."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Content with title"),
-                    title="Panel Title Here",
-                )
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-
-class TestHighlightedPanelBehavior:
-    """Test widget behavior and dynamic updates."""
-
-    def test_panel_instantiation(self):
-        """Test panel can be instantiated without errors."""
-        panel = HighlightedPanel(title="Test")
-        assert panel is not None
-        assert panel._panel_title == "Test"
-
-    def test_panel_with_children(self):
-        """Test panel accepts child widgets."""
-        panel = HighlightedPanel(
-            Label("Child 1"),
-            Label("Child 2"),
-            title="Parent Panel",
-        )
-        assert panel is not None
-        assert len(panel._child_widgets) == 2
-
-    def test_panel_updates_on_resize(self, snap_compare):
-        """Verify panel borders redraw correctly on terminal resize.
-
-        The snap_compare fixture renders the app at a specific terminal size,
-        which triggers on_mount and on_resize in the widget lifecycle.
-        """
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Resize test content"),
-                    title="Resize Test",
-                )
-
-        app = PanelApp()
-
-        async def verify_panel(pilot):
-            """Verify the panel exists and has rendered after mount/resize."""
-            await pilot.pause()
-            panel = app.query_one(HighlightedPanel)
-            assert panel is not None
-
-        assert snap_compare(app, run_before=verify_panel)
-
-    @pytest.mark.asyncio
-    async def test_panel_refresh_theme(self):
-        """Test refresh_theme() updates panel colors dynamically."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Theme refresh test"),
-                    title="Dynamic Theme",
-                )
-
-        app = PanelApp()
-        async with app.run_test() as pilot:
-            panel = app.query_one(HighlightedPanel)
-
-            # Change cascade
-            new_cascade = ColorCascade.from_preset("stygies")
-            set_color_cascade(new_cascade)
-
-            # Refresh panel to pick up new colors
-            panel.refresh_theme()
-
-            await pilot.pause()
-
-            # Panel should have updated borders
-            assert panel is not None
-
-
-class TestHighlightedPanelEdgeCases:
-    """Test edge cases and boundary conditions."""
-
-    def test_panel_empty_title(self, snap_compare):
-        """Test panel renders correctly with no title."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("No title on this panel"),
-                )
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-    def test_panel_very_long_title(self, snap_compare):
-        """Test panel handles very long titles gracefully."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Long title test"),
-                    title="This is an extremely long title that should be truncated",
-                )
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-    def test_panel_no_children(self, snap_compare):
-        """Test panel renders correctly with no child widgets."""
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(title="Empty Panel")
-
-        app = PanelApp()
-        assert snap_compare(app)
-
-    def test_panel_special_characters_in_title(self, snap_compare):
-        """Test panel handles special characters in title correctly."""
-
-        # Programmatic assertion BEFORE snapshot: Test that panel accepts special chars
-        special_title = 'Special: <>&"\' chars'
-        test_panel = HighlightedPanel(Label("Test"), title=special_title)
-        assert test_panel._panel_title == special_title, \
-            "Panel should preserve special characters in title"
-
-        class PanelApp(App):
-            def compose(self):
-                # Test HTML/XML special characters that need proper escaping
-                yield HighlightedPanel(
-                    Label("Content with special chars"),
-                    title=special_title,
-                )
-
-        app = PanelApp()
-
-        # Snapshot comparison - visual verification that special chars render correctly
-        assert snap_compare(app)
-
-    def test_panel_very_small_terminal(self, snap_compare):
-        """Test panel renders gracefully in very small terminal."""
-
-        # Programmatic assertion: Verify panel can be created without crashing
-        test_panel = HighlightedPanel(Label("Tiny"), title="Small")
-        assert test_panel is not None, "Panel should be createable"
-        assert test_panel._panel_title == "Small", "Panel should store title"
-
-        class PanelApp(App):
-            def compose(self):
-                yield HighlightedPanel(
-                    Label("Tiny"),
-                    title="Small",
-                )
-
-        app = PanelApp()
-
-        # Snapshot comparison at small terminal size
-        assert snap_compare(app, terminal_size=(40, 10))
+from styrened.tui.themes.color_cascade import ColorCascade
+
+
+class TestStyrenePanel:
+    """Core StyrenePanel behavior."""
+
+    def test_alias_is_same_class(self):
+        assert HighlightedPanel is StyrenePanel
+
+    def test_instantiation_no_args(self):
+        panel = StyrenePanel()
+        assert panel.border_title is None or panel.border_title == ""
+
+    def test_instantiation_with_title(self):
+        panel = StyrenePanel(title="STATUS")
+        assert panel.border_title == "STATUS"
+
+    def test_instantiation_with_children(self):
+        child1 = Label("Hello")
+        child2 = Static("World")
+        panel = StyrenePanel(child1, child2, title="TEST")
+        assert panel.border_title == "TEST"
+
+    def test_instantiation_with_id(self):
+        panel = StyrenePanel(id="my-panel")
+        assert panel.id == "my-panel"
+
+    def test_instantiation_with_classes(self):
+        panel = StyrenePanel(classes="primary constrained")
+        assert "primary" in panel.classes
+        assert "constrained" in panel.classes
+
+    def test_refresh_theme_is_noop(self):
+        """refresh_theme() kept for compat but does nothing."""
+        panel = StyrenePanel(title="T")
+        panel.refresh_theme()  # should not raise
+
+
+class TestColorCascade:
+    """Module-level color cascade accessors."""
+
+    def test_get_default_cascade(self):
+        cascade = get_color_cascade()
+        assert isinstance(cascade, ColorCascade)
+        assert cascade.bright is not None
+        assert cascade.dim is not None
+
+    def test_set_and_get_cascade(self):
+        original = get_color_cascade()
+        try:
+            custom = ColorCascade.from_preset("styrene")
+            custom.bright = "#ff0000"
+            set_color_cascade(custom)
+            assert get_color_cascade().bright == "#ff0000"
+        finally:
+            set_color_cascade(original)
+
+    def test_cascade_has_bg_fields(self):
+        cascade = get_color_cascade()
+        assert hasattr(cascade, "bg_screen")
+        assert hasattr(cascade, "bg_panel")
+
+
+class TestStyrenePanel_CSS:
+    """Verify DEFAULT_CSS provides expected defaults."""
+
+    def test_default_css_has_round_border(self):
+        css = StyrenePanel.DEFAULT_CSS
+        assert "border: round" in css
+
+    def test_default_css_has_auto_height(self):
+        css = StyrenePanel.DEFAULT_CSS
+        assert "height: auto" in css
+
+    def test_default_css_has_transparent_bg(self):
+        css = StyrenePanel.DEFAULT_CSS
+        assert "background: transparent" in css
+
+    def test_default_css_has_margin(self):
+        css = StyrenePanel.DEFAULT_CSS
+        assert "margin-bottom: 1" in css

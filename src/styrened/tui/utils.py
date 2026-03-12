@@ -1,3 +1,4 @@
+
 """TUI utility functions.
 
 Pure helper functions shared across TUI screens and widgets.
@@ -87,10 +88,11 @@ def device_info_to_mesh(info: Any) -> MeshDevice:
         identity_hash=getattr(info, "identity_hash", ""),
         name=getattr(info, "name", ""),
         device_type=device_type,
-        last_announce=getattr(info, "last_announce", 0.0),
+        last_announce=getattr(info, "last_announce", 0),
         announce_count=getattr(info, "announce_count", 0),
         discovered_via=getattr(info, "discovered_via", None),
         lxmf_destination_hash=getattr(info, "lxmf_destination_hash", None),
         short_name=getattr(info, "short_name", None),
         system_fingerprint=getattr(info, "system_fingerprint", None),
+        hops=getattr(info, "hops", None),
     )

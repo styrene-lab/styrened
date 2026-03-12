@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Requires tui-home-cop features not yet on main")
 
 import re
 from typing import Any

@@ -102,7 +102,18 @@ class TUIConfig:
         confirm_destructive: Require confirmation for destructive operations.
     """
 
-    theme: ThemeMode = ThemeMode.STYRENE
+    theme: str = ThemeMode.STYRENE.value
+    """Active theme name (matches Textual registration key).  Built-in values
+    correspond to ThemeMode enum values; custom tweakcn themes get a
+    slugified name derived from the profile name."""
+    custom_theme_url: str = ""
+    """Optional tweakcn URL for a user-supplied custom theme.
+    When set, the theme is fetched, registered, and applied at startup."""
+    custom_theme_colors: dict[str, str] = field(default_factory=dict)
+    """Manually edited color tokens (hex values keyed by tweakcn token name).
+    When non-empty, these are used to build a custom Textual theme on startup
+    without re-fetching the URL.  Populated by the Appearance color editor."""
+    identity_nudge_dismissed: bool = False
     log_level: LogLevel = LogLevel.INFO
     show_hardware_panel: bool = True
     confirm_destructive: bool = True

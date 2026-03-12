@@ -86,9 +86,10 @@ class TestDashboardComposition:
             status_panel = app.screen.query_one("#status-bar-panel")
             nodes_panel = app.screen.query_one("#nodes-panel")
             activity_panel = app.screen.query_one("#activity-panel")
-            assert getattr(status_panel, "_panel_title", None) == "STATUS"
-            assert getattr(nodes_panel, "_panel_title", None) == "NODES"
-            assert getattr(activity_panel, "_panel_title", None) == "ACTIVITY"
+            # StyrenePanel uses Textual's border_title (not _panel_title)
+            assert status_panel.border_title == "STATUS"
+            assert nodes_panel.border_title == "NODES"
+            assert activity_panel.border_title == "ACTIVITY"
 
     @pytest.mark.asyncio
     async def test_home_cop_layout_order(self):

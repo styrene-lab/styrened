@@ -26,6 +26,7 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Button, Static
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class CommandWidget(Widget):
             return
 
         if not self._available_commands:
-            label.update("[dim]No available commands yet — ping to discover server whitelist[/]")
+            label.update(f"[{get_color_cascade().dim}]No available commands yet — ping to discover server whitelist[/]")
         else:
             tags = "  ".join(self._available_commands)
             label.update(f"[bold]Available:[/] {tags}")
@@ -202,31 +203,31 @@ class CommandWidget(Widget):
         for entry in self._output_entries:
             if entry.entry_type == "ping":
                 if entry.rtt_ms is not None:
-                    lines.append(f"[bold]PING[/] → [green]OK[/] ({entry.rtt_ms:.0f}ms)")
+                    lines.append(f"[bold]PING[/] → [{get_color_cascade().bright}]OK[/] ({entry.rtt_ms:.0f}ms)")
                 else:
-                    lines.append(f"[bold]PING[/] → [red]FAILED[/]: {entry.stderr}")
+                    lines.append(f"[bold]PING[/] → [{get_color_cascade().color_danger}]FAILED[/]: {entry.stderr}")
             elif entry.entry_type == "reboot":
                 if entry.exit_code == 0:
-                    lines.append(f"[bold]REBOOT[/] → [green]{entry.stdout}[/]")
+                    lines.append(f"[bold]REBOOT[/] → [{get_color_cascade().bright}]{entry.stdout}[/]")
                 else:
-                    lines.append(f"[bold]REBOOT[/] → [red]{entry.stderr}[/]")
+                    lines.append(f"[bold]REBOOT[/] → [{get_color_cascade().color_danger}]{entry.stderr}[/]")
             elif entry.entry_type == "system":
-                lines.append(f"[dim]{entry.stdout}[/]")
+                lines.append(f"[{get_color_cascade().dim}]{entry.stdout}[/]")
             else:
                 # exec
                 lines.append(f"[bold]$ {entry.command}[/]")
                 if entry.stdout:
                     lines.append(entry.stdout.rstrip())
                 if entry.stderr:
-                    lines.append(f"[red]{entry.stderr.rstrip()}[/]")
+                    lines.append(f"[{get_color_cascade().color_danger}]{entry.stderr.rstrip()}[/]")
                 if entry.exit_code is not None:
                     if entry.exit_code == 0:
-                        lines.append(f"[green][exit {entry.exit_code}][/]")
+                        lines.append(f"[{get_color_cascade().bright}][exit {entry.exit_code}][/]")
                     else:
-                        lines.append(f"[red][exit {entry.exit_code}][/]")
+                        lines.append(f"[{get_color_cascade().color_danger}][exit {entry.exit_code}][/]")
                 lines.append("")  # blank separator
 
-        log_widget.update("\n".join(lines) if lines else "[dim]No fleet operations executed yet — ping to discover available commands[/]")
+        log_widget.update("\n".join(lines) if lines else f"[{get_color_cascade().dim}]No fleet operations executed yet — ping to discover available commands[/]")
         # Auto-scroll to bottom
         scroll.scroll_end(animate=False)
 
@@ -273,7 +274,7 @@ class CommandWidget(Widget):
                 btn.label = "CONFIRM?"
             except Exception:
                 pass
-            self._set_status("[bold red]Press Reboot again within 3s to confirm[/]")
+            self._set_status(f"[{get_color_cascade().color_danger} bold]Press Reboot again within 3s to confirm[/]")
             self._reboot_confirm_timer = self.set_timer(
                 _REBOOT_CONFIRM_TIMEOUT, self._disarm_reboot
             )
@@ -309,7 +310,7 @@ class CommandWidget(Widget):
                 btn.label = "CONFIRM?"
             except Exception:
                 pass
-            self._set_status("[bold red]Press Update again within 3s to confirm[/]")
+            self._set_status(f"[{get_color_cascade().color_danger} bold]Press Update again within 3s to confirm[/]")
             self._update_confirm_timer = self.set_timer(
                 _UPDATE_CONFIRM_TIMEOUT, self._disarm_update
             )
@@ -341,7 +342,7 @@ class CommandWidget(Widget):
         args = parts[1:] if len(parts) > 1 else []
 
         self.executing = True
-        self._set_status(f"[dim]Executing: {command_string}[/]")
+        self._set_status(f"[{get_color_cascade().dim}]Executing: {command_string}[/]")
 
         try:
             bridge = self._ipc_bridge
@@ -373,14 +374,14 @@ class CommandWidget(Widget):
                 stderr=str(e),
                 entry_type="exec",
             ))
-            self._set_status(f"[red]Error: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Error: {e}[/]")
 
         finally:
             self.executing = False
 
     async def _do_ping(self) -> None:
         """Ping the device — measures RTT and populates available_commands."""
-        self._set_status("[dim]Pinging...[/]")
+        self._set_status(f"[{get_color_cascade().dim}]Pinging...[/]")
         start = time.monotonic()
 
         try:
@@ -411,11 +412,11 @@ class CommandWidget(Widget):
                 stderr=str(e),
                 entry_type="ping",
             ))
-            self._set_status("[red]Ping failed[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Ping failed[/]")
 
     async def _do_reboot(self) -> None:
         """Send reboot command to the device."""
-        self._set_status("[dim]Sending reboot...[/]")
+        self._set_status(f"[{get_color_cascade().dim}]Sending reboot...[/]")
 
         try:
             bridge = self._ipc_bridge
@@ -452,11 +453,11 @@ class CommandWidget(Widget):
                 stderr=str(e),
                 entry_type="reboot",
             ))
-            self._set_status(f"[red]Reboot failed: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Reboot failed: {e}[/]")
 
     async def _do_update(self) -> None:
         """Send self-update command to the device."""
-        self._set_status("[dim]Sending self-update...[/]")
+        self._set_status(f"[{get_color_cascade().dim}]Sending self-update...[/]")
 
         try:
             bridge = self._ipc_bridge
@@ -492,4 +493,4 @@ class CommandWidget(Widget):
                 stderr=str(e),
                 entry_type="system",
             ))
-            self._set_status(f"[red]Update failed: {e}[/]")
+            self._set_status(f"[{get_color_cascade().color_danger}]Update failed: {e}[/]")

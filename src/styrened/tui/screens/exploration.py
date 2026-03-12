@@ -1,3 +1,4 @@
+
 """Nodes workspace for Reticulum discovery and peer browsing.
 
 Categorized tabbed interface for current network discovery:
@@ -10,7 +11,7 @@ Categorized tabbed interface for current network discovery:
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual import events
@@ -29,9 +30,11 @@ from textual.widgets import (
     TabPane,
 )
 
+from styrened.ipc.protocol import IPCMessageType
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.screens.exploration_projection import build_styrene_fleet_projection
+from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import WorkspaceId
 
@@ -110,10 +113,8 @@ class ReticumAnnounceTable(DataTable[str]):
         # Load historical data — prefer live discovery, no direct daemon import
         stored_nodes: list[MeshDevice] = []
 
-        # Get live discovered devices (prefer IPC bridge, fallback to direct discovery)
+        # Get live discovered devices from cache (populated by async worker)
         live_nodes = getattr(self, "_live_nodes_cache", [])
-        if not live_nodes:
-            live_nodes = discover_devices()
 
         # Merge historical and live data (live takes precedence for duplicates)
         all_devices_dict = {n.destination_hash: n for n in stored_nodes}
@@ -591,11 +592,9 @@ class StyreneFleetTable(DataTable[str]):
         self._rebuild_table()
 
     def refresh_data(self) -> None:
-        """Standalone fallback refresh using live discovery only."""
+        """Standalone fallback refresh using cached discovery data."""
         try:
             live = getattr(self.screen, "_live_nodes_cache", [])
-            if not live:
-                live = discover_devices()
             self.load_from_devices(list(live))
         except Exception:
             pass
@@ -617,17 +616,24 @@ class ExplorationScreen(Screen[None]):
         self._refresh_timer: Timer | None = None
         self._node_refresh_worker = None
         self._stored_nodes_worker = None
+        self._diagnostics_subscribed: bool = False
 
     CSS = """
     #exploration-container {
         height: 1fr;
+        border: round $border;
+        border-title-color: $primary;
+        border-title-style: bold;
+        border-title-align: left;
+        background: $background;
+        padding: 0 1;
     }
 
     #explore-search-bar {
         height: auto;
         max-height: 3;
         padding: 0 1;
-        background: $surface;
+        background: $background;
     }
 
     #explore-search-bar.hidden {
@@ -693,11 +699,11 @@ class ExplorationScreen(Screen[None]):
         Binding("enter", "select_device", "Select"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
-        Binding("n", "app.pop_screen", "Home", show=True),
+        Binding("n", "go_home", "Home", show=True),
         Binding("h", "toggle_hide_lost", "Hide Lost"),
         Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),
-        Binding("v", "preview_page", "Preview", show=True),
+
     ]
 
     # Debounce settings for discovery callbacks
@@ -724,6 +730,11 @@ class ExplorationScreen(Screen[None]):
 
     def on_mount(self) -> None:
         """Start device discovery and load initial data."""
+        try:
+            self.query_one("#exploration-container", Container).border_title = "MESH NODES"
+        except Exception:
+            pass
+
         # Try IPC-based discovery first, fallback to direct discovery
         app = self.app
         bridge = getattr(getattr(app, "services", None), "bridge", None)
@@ -781,11 +792,20 @@ class ExplorationScreen(Screen[None]):
         self._stored_nodes_cache = []
     
     async def _async_load_all_nodes(self) -> None:
-        """Refresh live node discovery only during Nodes migration."""
+        """Refresh nodes — prefer IPC bridge, fallback to direct discovery."""
         try:
-            live_nodes = discover_devices()
-            self._stored_nodes_cache = []
-            self._live_nodes_cache = live_nodes
+            bridge = getattr(getattr(self.app, "services", None), "bridge", None)
+            if bridge is not None:
+                from styrened.tui.utils import device_info_to_mesh
+
+                device_infos = await bridge.get_devices()
+                devices = [device_info_to_mesh(d) for d in device_infos]
+                self._stored_nodes_cache = []
+                self._live_nodes_cache = devices
+            else:
+                live_nodes = discover_devices()
+                self._stored_nodes_cache = []
+                self._live_nodes_cache = live_nodes
             self._refresh_announce_tables()
         except Exception:
             pass
@@ -849,20 +869,6 @@ class ExplorationScreen(Screen[None]):
                         device_types=_LXMF_TYPES,
                         classes="explore-tab-table",
                     )
-                with TabPane("Pages", id="tab-pages"):
-                    with Vertical(id="pages-pane-content"):
-                        with Vertical(id="pages-table-section"):
-                            yield ReticumAnnounceTable(
-                                id="table-pages",
-                                device_types=_PAGES_TYPES,
-                                classes="explore-tab-table",
-                            )
-                        yield Static(
-                            "Press [bold]v[/bold] on a node to preview pages",
-                            id="pages-browser-placeholder",
-                        )
-                        with Vertical(id="pages-browser-section", classes="hidden"):
-                            pass  # PageBrowserWidget mounted dynamically
                 with TabPane("Infra", id="tab-infra"):
                     yield ReticumAnnounceTable(
                         id="table-infra",
@@ -875,12 +881,14 @@ class ExplorationScreen(Screen[None]):
                         device_types=_OTHER_TYPES,
                         classes="explore-tab-table",
                     )
+                with TabPane("Diagnostics", id="tab-diagnostics"):
+                    yield ActivityFeedWidget(id="explore-activity-feed")
             yield Static("", id="explore-count")
         yield Footer()
 
     def _get_all_tables(self) -> list[DataTable]:
         """Get all announce tables across tabs (both ReticumAnnounceTable and StyreneFleetTable)."""
-        table_ids = ["#table-styrene", "#table-lxmf", "#table-pages", "#table-infra", "#table-other"]
+        table_ids = ["#table-styrene", "#table-lxmf", "#table-infra", "#table-other"]
         tables = []
         for tid in table_ids:
             try:
@@ -897,7 +905,6 @@ class ExplorationScreen(Screen[None]):
             table_map = {
                 "tab-styrene": "#table-styrene",
                 "tab-lxmf": "#table-lxmf",
-                "tab-pages": "#table-pages",
                 "tab-infra": "#table-infra",
                 "tab-other": "#table-other",
             }
@@ -921,8 +928,6 @@ class ExplorationScreen(Screen[None]):
         # Exploration/Nodes is currently live-biased; broader stored history is
         # being pushed toward canonical node browsing flows incrementally.
         live_nodes = getattr(self, "_live_nodes_cache", [])
-        if not live_nodes:
-            live_nodes = discover_devices()
 
         all_merged = list({n.destination_hash: n for n in live_nodes}.values())
 
@@ -964,7 +969,6 @@ class ExplorationScreen(Screen[None]):
         label_map = {
             "#table-styrene": ("tab-styrene", "Styrene"),
             "#table-lxmf": ("tab-lxmf", "LXMF"),
-            "#table-pages": ("tab-pages", "Pages"),
             "#table-infra": ("tab-infra", "Infra"),
             "#table-other": ("tab-other", "Other"),
         }
@@ -1005,6 +1009,11 @@ class ExplorationScreen(Screen[None]):
                     table.set_filter("")
         except Exception:
             pass
+        # Start activity subscription when Diagnostics tab is first activated
+        if getattr(event.tab, "id", None) == "tab-diagnostics":
+            if not self._diagnostics_subscribed:
+                self._diagnostics_subscribed = True
+                self.run_worker(self._subscribe_activity(), exclusive=False)
         self._update_status_bar()
 
     def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
@@ -1012,7 +1021,7 @@ class ExplorationScreen(Screen[None]):
         table = self._get_active_table()
         if table and hasattr(table, "_all_devices"):
             for d in table._all_devices:
-                if d.identity == identity:
+                if d.identity_hash == identity:
                     return d
         return None
 
@@ -1070,6 +1079,10 @@ class ExplorationScreen(Screen[None]):
         search.remove_class("hidden")
         search.focus()
 
+    def action_go_home(self) -> None:
+        """Return to the dashboard."""
+        self.app.switch_screen("dashboard")
+
     def action_dismiss_search(self) -> None:
         """Dismiss search or pop screen."""
         search = self.query_one("#explore-search-bar", Input)
@@ -1080,7 +1093,7 @@ class ExplorationScreen(Screen[None]):
             if table:
                 table.set_filter("")
         else:
-            self.app.pop_screen()
+            self.app.switch_screen("dashboard")
 
     def _hide_search(self) -> None:
         """Hide the search input and return focus to the active tab's table."""
@@ -1131,42 +1144,6 @@ class ExplorationScreen(Screen[None]):
                     origin_workspace=WorkspaceId.NODES,
                 )
             )
-
-    def action_preview_page(self) -> None:
-        """Load selected NomadNet node's index page in the inline browser."""
-        try:
-            tabs = self.query_one("#explore-tabs", TabbedContent)
-            if tabs.active != "tab-pages":
-                return
-        except Exception:
-            return
-
-        dest_hash = self._get_selected_identity()
-        if not dest_hash:
-            return
-
-        from styrened.tui.widgets.page_browser import PageBrowserWidget
-
-        try:
-            # Hide placeholder, show browser section
-            placeholder = self.query_one("#pages-browser-placeholder", Static)
-            placeholder.add_class("hidden")
-
-            browser_section = self.query_one("#pages-browser-section", Vertical)
-            browser_section.remove_class("hidden")
-
-            # Check if browser already exists
-            existing = browser_section.query(PageBrowserWidget)
-            if existing:
-                existing.first().set_destination(dest_hash)
-            else:
-                browser = PageBrowserWidget(
-                    destination_hash=dest_hash,
-                    classes="explore-inline-browser",
-                )
-                browser_section.mount(browser)
-        except Exception:
-            pass
 
     def action_toggle_hide_lost(self) -> None:
         """Toggle visibility of LOST nodes."""
@@ -1228,3 +1205,29 @@ class ExplorationScreen(Screen[None]):
         """Refresh all data on the exploration screen."""
         self.notify("Refreshing...", title="Refresh")
         self._refresh_announce_tables()
+
+    @property
+    def _ipc_bridge(self) -> Any:
+        """Get IPCBridge via typed services protocol."""
+        try:
+            return self.app.services.bridge  # type: ignore[union-attr,attr-defined]
+        except Exception:
+            return None
+
+    async def _subscribe_activity(self) -> None:
+        """Subscribe to activity events via IPC and push into ActivityFeedWidget."""
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            await bridge.subscribe_activity()
+            async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
+                if event_type != IPCMessageType.EVENT_ACTIVITY:
+                    continue
+                try:
+                    activity_widget = self.query_one("#explore-activity-feed", ActivityFeedWidget)
+                    activity_widget.add_event(event.get("event_type", "unknown"), event)
+                except Exception:
+                    pass
+        except Exception:
+            pass

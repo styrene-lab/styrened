@@ -1,6 +1,6 @@
-"""Styrene TUI Application."""
 from __future__ import annotations
 
+"""Styrene TUI Application."""
 
 import os
 import sys
@@ -22,6 +22,7 @@ from textual.widgets import Footer, Header
 from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
 from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
+from styrened.tui.screens.exchange import ExchangeScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
 from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.exploration import ExplorationScreen
@@ -39,6 +40,7 @@ from styrened.tui.services.config import (
     update_styrene_config_from_cli,
 )
 from styrened.tui.services.reticulum import find_reticulum_config
+from styrened.tui.themes.color_cascade import FORGE_WORLD_PRESETS, ColorCascade
 from styrened.tui.themes.styrene_brand import (
     STYRENE_THEME_KEY,
     create_styrene_cascade,
@@ -53,6 +55,39 @@ except ImportError:
     HAS_TEXTUAL_IMAGE = False
 
 
+# ---------------------------------------------------------------------------
+# macOS-friendly Input bindings
+# ---------------------------------------------------------------------------
+# Textual's Input only has ctrl-based shortcuts (Unix/Emacs).  macOS users
+# expect Option+Arrow for word navigation and Option+Backspace for
+# delete-word.  Patch these onto Input.BINDINGS so every Input in the TUI
+# gets them automatically.
+def _patch_input_bindings() -> None:
+    from textual.widgets import Input
+
+    _mac_bindings = [
+        Binding("alt+left", "cursor_left_word", "Word left", show=False),
+        Binding("alt+right", "cursor_right_word", "Word right", show=False),
+        Binding("alt+shift+left", "cursor_left_word(True)", "Select word left", show=False),
+        Binding("alt+shift+right", "cursor_right_word(True)", "Select word right", show=False),
+        Binding("alt+backspace", "delete_left_word", "Delete word left", show=False),
+        Binding("alt+delete", "delete_right_word", "Delete word right", show=False),
+        # super+arrow → home/end (Cmd+Left/Right on macOS)
+        Binding("super+left", "home", "Line start", show=False),
+        Binding("super+right", "end", "Line end", show=False),
+        Binding("super+shift+left", "home(True)", "Select to start", show=False),
+        Binding("super+shift+right", "end(True)", "Select to end", show=False),
+        Binding("super+backspace", "delete_left_all", "Delete to start", show=False),
+        Binding("super+a", "select_all", "Select all", show=False),
+    ]
+    existing_keys = {b.key for b in Input.BINDINGS}
+    for b in _mac_bindings:
+        if b.key not in existing_keys:
+            Input.BINDINGS.append(b)
+
+_patch_input_bindings()
+
+
 class StyreneApp(App[None]):
     """Styrene fleet provisioning and management TUI.
 
@@ -63,7 +98,7 @@ class StyreneApp(App[None]):
     TITLE = "STYRENE"
     SUB_TITLE = "Management"
 
-    CSS_PATH = Path(__file__).parent / "styles" / "imperial_crt.tcss"
+    CSS_PATH = Path(__file__).parent / "styles" / "styrene.tcss"
 
     # Keybinding hierarchy - see docs/KEYMAP.md for design rationale
     # Priority bindings bypass widget focus and always work
@@ -72,9 +107,10 @@ class StyreneApp(App[None]):
         # Priority bindings (always work regardless of focus)
         Binding("ctrl+c", "interrupt", "Quit", show=False, priority=True),
         # Global navigation
-        Binding("?", "toggle_help", "Help"),
+        Binding("?", "toggle_help", "Help", show=True),
         Binding("grave_accent", "open_admin", "Admin", show=True),
         Binding("n", "open_nodes", "Nodes", show=True),
+        Binding("x", "open_exchange", "Exchange", show=True),
         Binding("m", "open_mail", "Mail", show=True),
         Binding("c", "open_comms", "Comms", show=False),
         Binding("b", "open_contacts", "Contacts", show=False),
@@ -90,6 +126,7 @@ class StyreneApp(App[None]):
         "comms": CommsScreen,
         "contacts": ContactsScreen,
         "dashboard": DashboardScreen,
+        "exchange": ExchangeScreen,
         "exploration": ExplorationScreen,
         "provision": ProvisionScreen,
     }
@@ -119,58 +156,79 @@ class StyreneApp(App[None]):
         """Return True if any screen in the current stack is an instance of screen_type."""
         return any(isinstance(s, screen_type) for s in self.screen_stack)
 
+    def _current_screen_name(self) -> str:
+        """Return the name/id of the current top-of-stack screen."""
+        return getattr(self.screen, "name", "") or ""
+
+    def _toggle_screen(self, name: str) -> None:
+        """Switch to named screen, or return to dashboard if already there."""
+        if self._current_screen_name() == name:
+            self.switch_screen("dashboard")
+        else:
+            self.switch_screen(name)
+
     def action_open_admin(self) -> None:
-        """Open the Admin workspace (settings and diagnostics)."""
+        """Toggle the Admin/Settings overlay."""
         if self._screen_in_stack(SettingsScreen):
-            return
-        self.push_screen(SettingsScreen(self.config))
+            self.pop_screen()
+        else:
+            self.push_screen(SettingsScreen(self.config))
 
     def action_push_screen_settings(self) -> None:
         """Backward-compatible alias for action_open_admin."""
         self.action_open_admin()
 
     def action_open_nodes(self) -> None:
-        """Open the canonical Nodes workspace."""
-        if self._screen_in_stack(ExplorationScreen):
-            return
-        self.push_screen("exploration")
+        """Toggle the Mesh/Nodes workspace."""
+        self._toggle_screen("exploration")
+
+    def action_open_exchange(self) -> None:
+        """Toggle the Exchange workspace."""
+        self._toggle_screen("exchange")
 
     def action_open_mail(self) -> None:
-        """Open the Mail workspace showing async conversations."""
-        if self.services.bridge is None:
-            self.notify("Chat requires daemon mode", severity="warning")
-            return
+        """Open Exchange on Mail tab, or return to dashboard if already on Exchange."""
+        from styrened.tui.screens.exchange import ExchangeScreen, TAB_MAIL
 
-        from styrened.tui.screens.inbox import MailScreen
-
-        if self._screen_in_stack(MailScreen):
+        if self._current_screen_name() == "exchange":
+            self.switch_screen("dashboard")
             return
-        self.push_screen(MailScreen())
+        screen = self.get_screen("exchange")
+        if isinstance(screen, ExchangeScreen):
+            screen.focus_tab(TAB_MAIL)
+        self.switch_screen("exchange")
 
     def action_open_inbox(self) -> None:
         """Backward-compatible alias for opening the Mail workspace."""
         self.action_open_mail()
 
     def action_open_comms(self) -> None:
-        """Open the aggregate Comms workspace."""
-        if self.services.bridge is None:
-            self.notify("Comms requires daemon mode", severity="warning")
+        """Open Exchange on Direct tab, or return to dashboard if already on Exchange."""
+        from styrened.tui.screens.exchange import ExchangeScreen, TAB_DIRECT
+
+        if self._current_screen_name() == "exchange":
+            self.switch_screen("dashboard")
             return
-        if self._screen_in_stack(CommsScreen):
-            return
-        self.push_screen("comms")
+        screen = self.get_screen("exchange")
+        if isinstance(screen, ExchangeScreen):
+            screen.focus_tab(TAB_DIRECT)
+        self.switch_screen("exchange")
 
     def action_open_contacts(self) -> None:
-        """Push contacts screen (no-op if already in stack)."""
-        if self._screen_in_stack(ContactsScreen):
+        """Open Exchange on Contacts tab, or return to dashboard if already on Exchange."""
+        from styrened.tui.screens.exchange import ExchangeScreen, TAB_CONTACTS
+
+        if self._current_screen_name() == "exchange":
+            self.switch_screen("dashboard")
             return
-        self.push_screen("contacts")
+        screen = self.get_screen("exchange")
+        if isinstance(screen, ExchangeScreen):
+            screen.focus_tab(TAB_CONTACTS)
+        self.switch_screen("exchange")
 
     def action_open_provision(self) -> None:
-        """Push provision screen (no-op if already in stack)."""
-        if self._screen_in_stack(ProvisionScreen):
-            return
-        self.push_screen("provision")
+        """Toggle the device provisioning workspace."""
+        self._toggle_screen("provision")
 
     def get_unread_count(self) -> int:
         """Get total unread message count.
@@ -364,6 +422,56 @@ class StyreneApp(App[None]):
             # Log validation errors and use defaults
             self.log.warning(f"Config validation failed: {e}")
             self.config = get_default_config()
+
+        self._apply_saved_theme()
+
+    def _apply_saved_theme(self) -> None:
+        """Register and apply the theme saved in tui.yaml.
+
+        If a custom_theme_url is configured, fetch it (blocking, at startup).
+        Falls back to the built-in Styrene theme on any error.
+        """
+        theme_name = self.config.tui.theme or STYRENE_THEME_KEY
+        custom_colors = self.config.tui.custom_theme_colors
+        custom_url = self.config.tui.custom_theme_url
+
+        if custom_colors:
+            # Prefer saved color dict — no network fetch needed
+            try:
+                from styrened.tui.themes.tweakcn import TweakcnProfile
+
+                profile = TweakcnProfile.from_color_dict(
+                    custom_colors,
+                    name=theme_name,
+                    source_url=custom_url,
+                )
+                theme = profile.to_textual_theme("dark")
+                self.register_theme(theme)
+                self._registered_themes[theme.name] = theme
+                theme_name = theme.name
+            except Exception as e:
+                self.log.warning(f"Failed to apply saved theme colors: {e}")
+                theme_name = STYRENE_THEME_KEY
+        elif custom_url:
+            try:
+                from styrened.tui.themes.tweakcn import TweakcnProfile
+
+                profile = TweakcnProfile.from_url(custom_url, timeout=8)
+                theme = profile.to_textual_theme("dark")
+                self.register_theme(theme)
+                self._registered_themes[theme.name] = theme
+                theme_name = theme.name
+            except Exception as e:
+                self.log.warning(f"Failed to fetch custom theme {custom_url!r}: {e}")
+                theme_name = STYRENE_THEME_KEY
+
+        if theme_name != STYRENE_THEME_KEY and theme_name not in self._registered_themes:
+            # Unknown name — fall back gracefully
+            self.log.warning(f"Saved theme {theme_name!r} not registered; using default")
+            theme_name = STYRENE_THEME_KEY
+
+        if theme_name != self.theme:
+            self.theme = theme_name
 
     async def _initialize_services(self) -> None:
         """Initialize all services asynchronously via IPC.
@@ -636,6 +744,9 @@ class StyreneApp(App[None]):
         if not self._screen_stack:
             return
 
+        # Update the global ColorCascade to match the new theme
+        self._sync_cascade_to_theme(new_theme)
+
         # Refresh all HighlightedPanel borders
         for panel in self.query(HighlightedPanel):
             panel.refresh_theme()
@@ -643,19 +754,33 @@ class StyreneApp(App[None]):
         # Refresh dashboard panels that use Rich markup
         self._refresh_themed_panels()
 
+    def _sync_cascade_to_theme(self, theme_name: str) -> None:
+        """Sync the global ColorCascade to the active Textual theme."""
+        if theme_name == STYRENE_THEME_KEY:
+            set_color_cascade(create_styrene_cascade())
+        elif theme_name in FORGE_WORLD_PRESETS:
+            set_color_cascade(ColorCascade.from_preset(theme_name))
+        else:
+            # Custom/tweakcn/builtin theme — derive cascade from Theme object
+            try:
+                theme_obj = self._registered_themes.get(theme_name)
+                if theme_obj is None:
+                    # Try Textual built-in themes (nord, dracula, etc.)
+                    from textual.theme import BUILTIN_THEMES
+                    theme_obj = BUILTIN_THEMES.get(theme_name)
+                if theme_obj is not None:
+                    set_color_cascade(ColorCascade.from_textual_theme(theme_obj))
+            except Exception:
+                pass  # Keep existing cascade on error
+
     def _refresh_themed_panels(self) -> None:
         """Refresh panels that use Rich markup with cascade colors."""
         # Import here to avoid circular imports
-        from styrened.tui.screens.dashboard import MeshDeviceTree
         from styrened.tui.widgets.node_info_panel import NodeInfoPanel
 
         # Refresh NodeInfoPanel
         for panel in self.query(NodeInfoPanel):
             panel.refresh_data()
-
-        # Refresh MeshDeviceTree
-        for tree in self.query(MeshDeviceTree):
-            tree.refresh_data()
 
     async def on_shutdown(self) -> None:
         """Cleanup on app exit.

@@ -1,10 +1,10 @@
+from __future__ import annotations
+
 """InboxScreen - Conversation list for chat messages.
 
 This screen displays a list of conversations with unread counts and message previews.
 Uses IPCBridge for daemon communication and theme variables for styling.
 """
-from __future__ import annotations
-
 
 import datetime
 import logging
@@ -18,6 +18,7 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Input, Static, Switch
 
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import (
     ConversationScopeKind,
     MailIndexInputs,
@@ -71,7 +72,7 @@ class InboxScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "go_back", "Back"),
+        Binding("escape", "go_back", "Home"),
         Binding("enter", "open_conversation", "Open"),
         Binding("n", "compose_new", "New", show=True),
         Binding("d", "delete_conversation", "Delete", show=True),
@@ -171,7 +172,7 @@ class InboxScreen(Screen[None]):
                     placeholder="Destination hash or contact name...",
                     id="compose-input",
                 ),
-                Static("[dim]Enter hash or name, then press Enter[/]", id="compose-hint"),
+                Static(f"[{get_color_cascade().dim}]Enter hash or name, then press Enter[/]", id="compose-hint"),
                 id="compose-bar",
             ),
             # Search bar (hidden by default)
@@ -203,7 +204,7 @@ class InboxScreen(Screen[None]):
         table.add_columns("DESTINATION", "LAST MESSAGE", "UNREAD", "ATTACH", "TIMESTAMP")
 
         if self._ipc_bridge is None:
-            table.add_row("-", "[dim]Chat requires daemon mode[/]", "-", "-", "-")
+            table.add_row("-", f"[{get_color_cascade().dim}]Chat requires daemon mode[/]", "-", "-", "-")
             return
 
         self.run_worker(self._load_conversations())
@@ -253,15 +254,13 @@ class InboxScreen(Screen[None]):
 
     def _render_conversations(self) -> None:
         """Render conversation table with current sort and styling."""
-        from styrened.tui.widgets.highlighted_panel import get_color_cascade
-
         table = self.query_one("#conversation-table", DataTable)
         table.clear()
 
         conversations = self._sorted_conversations()
 
         if not conversations:
-            table.add_row("-", "[dim]No conversations yet[/]", "-", "-", "-")
+            table.add_row("-", f"[{get_color_cascade().dim}]No conversations yet[/]", "-", "-", "-")
             return
 
         cascade = get_color_cascade()
@@ -296,11 +295,11 @@ class InboxScreen(Screen[None]):
             timestamp_text = _format_timestamp(last_time) if last_time else "-"
 
             if is_unread:
-                dest_display = f"[{cascade.bright} bold]{dest_display}[/]"
+                dest_display = f"[{cascade.bright} bold]● {dest_display}[/]"
                 last_msg = f"[{cascade.medium}]{last_msg}[/]"
                 timestamp_text = f"[{cascade.medium}]{timestamp_text}[/]"
             else:
-                dest_display = f"[{cascade.dim}]{dest_display}[/]"
+                dest_display = f"[{cascade.dim}]  {dest_display}[/]"
                 last_msg = f"[{cascade.dim}]{last_msg}[/]"
                 timestamp_text = f"[{cascade.dim}]{timestamp_text}[/]"
 
@@ -413,7 +412,7 @@ class InboxScreen(Screen[None]):
         if self._search_active:
             self._close_search()
             return
-        self.app.pop_screen()
+        self.app.switch_screen("dashboard")
 
     # -------------------------------------------------------------------------
     # Compose new conversation
@@ -696,12 +695,12 @@ class InboxScreen(Screen[None]):
         table.clear()
 
         if not results:
-            table.add_row("-", f"[dim]No results for '{query}'[/]", "-", "-", "-")
+            table.add_row("-", f"[{get_color_cascade().dim}]No results for '{query}'[/]", "-", "-", "-")
             return
 
         for msg in results:
             peer_hash = msg.get("source_hash", "") or msg.get("destination_hash", "")
-            content = msg.get("content", "") or "[dim]No content[/]"
+            content = msg.get("content", "") or f"[{get_color_cascade().dim}]No content[/]"
             if len(content) > 40:
                 content = content[:37] + "..."
 
