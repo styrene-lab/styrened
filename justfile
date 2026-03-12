@@ -50,20 +50,20 @@ install:
 
 # Run all tests (unit + integration, no k8s)
 test:
-    pytest tests/ --ignore=tests/k8s/
+    .venv/bin/python -m pytest tests/ --ignore=tests/k8s/
 
 # Run unit tests only (parallel, ~4s)
 test-unit:
-    pytest tests/unit/ -n auto -q --tb=short
+    .venv/bin/python -m pytest tests/unit/ -n auto -q --tb=short
 
 # Run TUI tests only (parallel, ~2min)
 test-tui:
-    pytest tests/tui/ -n auto -q --tb=short
+    .venv/bin/python -m pytest tests/tui/ -n auto -q --tb=short
 
 # Fast smoke: unit + TUI widgets/services/models (~36s, 3200+ tests)
 # Skips slow Textual run_test() screen tests and navigation workflows
 test-fast:
-    pytest tests/unit/ tests/tui/ -n auto -q --tb=short \
+    .venv/bin/python -m pytest tests/unit/ tests/tui/ -n auto -q --tb=short \
         --ignore=tests/tui/screens \
         --ignore=tests/tui/test_navigation_workflows.py \
         --ignore=tests/tui/integration \
@@ -72,7 +72,7 @@ test-fast:
 
 # Run local integration tests (no k8s)
 test-integration:
-    pytest tests/integration/ -v
+    .venv/bin/python -m pytest tests/integration/ -v
 
 # Run linter (ruff)
 lint:
@@ -94,6 +94,77 @@ validate: lint typecheck test
 # Build frontend (outputs to src/styrened/web/static/)
 build-frontend:
     cd frontend && npm ci && npx vite build
+
+# ── Dev workflow ────────────────────────────────────────────────────────────
+
+# Dev home — isolated from production config/data.
+# Override with STYRENE_HOME env var if you want a different location.
+_dev_home := env_var_or_default("STYRENE_HOME", env_var("HOME") + "/.styrene-dev")
+
+# Stop the system service and run the venv daemon in the foreground (Ctrl-C to stop).
+# Merges dev/profiles/_base.yaml + dev/profiles/<profile>.yaml into the dev home
+# before launching. Use profile= to select a profile (default: standard).
+# Use ephemeral=true to run with a temp identity discarded on exit.
+#
+# Examples:
+#   just dev-daemon                    # standard profile, persistent QA identity
+#   just dev-daemon profile=full       # all interfaces up
+#   just dev-daemon profile=minimal    # RNS + LXMF only
+#   just dev-daemon ephemeral=true     # throwaway identity, standard profile
+dev-daemon profile="standard" ephemeral="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    PROFILE="{{ profile }}"
+    EPHEMERAL="{{ ephemeral }}"
+    DEV_HOME="{{ _dev_home }}"
+
+    # Ephemeral: use a temp dir, cleaned up on exit
+    if [[ "$EPHEMERAL" == "true" ]]; then
+        DEV_HOME="$(mktemp -d)"
+        trap "rm -rf '$DEV_HOME'" EXIT
+        echo "→ Ephemeral mode: dev home at $DEV_HOME (discarded on exit)"
+    fi
+
+    CONFIG_OUT="$DEV_HOME/config/core-config.yaml"
+
+    echo "→ Stopping system service (if any)..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        launchctl unload ~/Library/LaunchAgents/com.styrene.styrened.plist 2>/dev/null || true
+    else
+        systemctl --user stop styrened.service 2>/dev/null || true
+    fi
+
+    echo "→ Merging profile '$PROFILE' → $CONFIG_OUT"
+    .venv/bin/python dev/merge_profile.py "$PROFILE" "$CONFIG_OUT"
+
+    echo "→ Starting dev daemon ($(STYRENE_HOME="$DEV_HOME" .venv/bin/python -c 'import styrened; print(styrened.__version__)'), profile=$PROFILE)..."
+    echo "   STYRENE_HOME=$DEV_HOME"
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon
+
+# Alias for dev-daemon — use when you just want a clean slate.
+dev-reset profile="standard": (dev-daemon profile)
+
+# Launch the TUI from the venv against the dev daemon's home.
+# Assumes dev daemon is already running via dev-daemon.
+dev-tui:
+    STYRENE_HOME="{{ _dev_home }}" .venv/bin/styrene
+
+# Launch the compact dashboard from the venv against the dev daemon's home.
+dev-dashboard:
+    STYRENE_HOME="{{ _dev_home }}" .venv/bin/styrene --dashboard
+
+# Restore the system service after dev work.
+dev-restore:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "$(uname)" == "Darwin" ]]; then
+        launchctl load ~/Library/LaunchAgents/com.styrene.styrened.plist
+        echo "✓ launchd service restored"
+    else
+        systemctl --user start styrened.service
+        echo "✓ systemd service restored"
+    fi
 
 # Start frontend dev server (proxies /api to localhost:8080)
 dev-frontend:
@@ -376,15 +447,15 @@ helm-logs-follow:
 
 # Run k8s tests (requires cluster)
 test-k8s:
-    pytest tests/k8s/
+    .venv/bin/python -m pytest tests/k8s/
 
 # Run k8s smoke tests only (fast)
 test-k8s-smoke:
-    pytest tests/k8s/scenarios/ -m smoke -v
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -m smoke -v
 
 # Run full k8s test suite including slow tests
 test-k8s-full:
-    pytest tests/k8s/scenarios/ --run-slow -v
+    .venv/bin/python -m pytest tests/k8s/scenarios/ --run-slow -v
 
 # Build, load image, and deploy test stack
 test-k8s-deploy: load-k8s-image helm-install
@@ -392,18 +463,18 @@ test-k8s-deploy: load-k8s-image helm-install
 
 # Run k8s tests (assumes image already deployed)
 test-k8s-run:
-    pytest tests/k8s/scenarios/ -v -m smoke --tb=short
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -v -m smoke --tb=short
 
 # Complete local k8s test workflow: build, load, test
 test-k8s-local: load-k8s-image
     @echo "=== K8s Local Test Workflow ==="
-    pytest tests/k8s/scenarios/ -v -m smoke --tb=short
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -v -m smoke --tb=short
     @echo "=== Complete ==="
 
 # Complete remote k8s test workflow: create secret, deploy from GHCR, test
 test-k8s-remote: create-ghcr-secret helm-install-ghcr
     @echo "=== K8s Remote Test Workflow (GHCR) ==="
-    pytest tests/k8s/scenarios/ -v -m smoke --tb=short
+    .venv/bin/python -m pytest tests/k8s/scenarios/ -v -m smoke --tb=short
     @echo "=== Complete ==="
 
 # List k8s test namespaces and resources
@@ -471,8 +542,16 @@ tag-release:
     git tag -a "v$ver" -m "Release v$ver"
     echo "Tag created. Push with: git push origin v$ver"
 
-# Full release workflow: validate, bump, commit, tag
-release new_version: validate
+# Full release workflow: validate, QA gate, bump, commit, tag
+# Use `just release X.Y.Z --skip-qa` to bypass visual QA (hotfixes only)
+release new_version *flags: validate
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{ flags }}" == *"--skip-qa"* ]]; then
+        bash scripts/qa_gate.sh --skip
+    else
+        bash scripts/qa_gate.sh
+    fi
     just bump-version {{ new_version }}
     git add src/styrened/__init__.py VERSION
     git commit -m "chore: bump version to {{ new_version }}"
@@ -513,46 +592,6 @@ run *args:
 run-debug:
     STYRENE_LOG_LEVEL=DEBUG styrened daemon
 
-# Stop the system service and run the venv daemon in the foreground (Ctrl-C to stop).
-# Use this when you want the TUI (also launched from the venv) to talk to the
-# dev-built daemon instead of the installed system daemon.
-dev-daemon:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "→ Stopping system service (if any)..."
-    if [[ "$(uname)" == "Darwin" ]]; then
-        launchctl unload ~/Library/LaunchAgents/com.styrene.styrened.plist 2>/dev/null || true
-    else
-        systemctl --user stop styrened.service 2>/dev/null || true
-    fi
-    echo "→ Removing stale socket..."
-    rm -f "${XDG_RUNTIME_DIR:-/tmp}/styrened.sock" ~/.styrene/styrened.sock 2>/dev/null || true
-    echo "→ Starting dev daemon from venv ($(python -c 'import styrened; print(styrened.__version__)'))..."
-    .venv/bin/styrened daemon
-
-# Alias for dev-daemon — clean slate.
-dev-reset: dev-daemon
-
-# Launch the TUI from the venv (assumes dev daemon is already running via dev-daemon).
-dev-tui:
-    .venv/bin/styrened tui
-
-# Launch the compact dashboard from the venv.
-dev-dashboard:
-    .venv/bin/styrened tui --dashboard
-
-# Restore the system service after dev work.
-dev-restore:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ "$(uname)" == "Darwin" ]]; then
-        launchctl load ~/Library/LaunchAgents/com.styrene.styrened.plist
-        echo "✓ launchd service restored"
-    else
-        systemctl --user start styrened.service
-        echo "✓ systemd service restored"
-    fi
-
 # List discovered devices
 devices *args:
     styrened devices {{ args }}
@@ -591,19 +630,19 @@ bare-metal-status:
 # Quick smoke tests on all bare-metal devices
 test-bare-metal-smoke:
     @echo "Running bare-metal smoke tests..."
-    pytest tests/bare-metal/test_smoke.py -v
+    .venv/bin/python -m pytest tests/bare-metal/test_smoke.py -v
 
 # Deploy wheel to bare-metal devices and verify
 test-bare-metal-deploy:
     @echo "Building wheel..."
     python -m build --wheel
     @echo "Running bare-metal deployment tests..."
-    pytest tests/bare-metal/test_deployment.py -v
+    .venv/bin/python -m pytest tests/bare-metal/test_deployment.py -v
 
 # Mesh integration tests (requires running daemons)
 test-bare-metal-mesh:
     @echo "Running bare-metal mesh tests..."
-    pytest tests/bare-metal/test_mesh.py -v
+    .venv/bin/python -m pytest tests/bare-metal/test_mesh.py -v
 
 # Run all bare-metal tests (smoke + mesh)
 test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
@@ -612,7 +651,7 @@ test-bare-metal: test-bare-metal-smoke test-bare-metal-mesh
 # Run bare-metal tests on specific device
 test-bare-metal-device device:
     @echo "Running tests on {{ device }}..."
-    pytest tests/bare-metal/ -v -k "{{ device }}"
+    .venv/bin/python -m pytest tests/bare-metal/ -v -k "{{ device }}"
 
 # Start daemons on all bare-metal devices (reads from devices.yaml)
 bare-metal-start:
@@ -670,32 +709,32 @@ bare-metal-deploy device="":
 # Run cross-platform scenarios on SSH backend (bare-metal devices)
 test-scenarios-ssh:
     @echo "Running cross-platform scenarios on SSH backend..."
-    pytest tests/scenarios/ --backend=ssh -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend=ssh -v
 
 # Run cross-platform scenarios on K8s backend
 test-scenarios-k8s namespace="styrene-test":
     @echo "Running cross-platform scenarios on K8s backend..."
-    pytest tests/scenarios/ --backend=k8s --k8s-namespace={{ namespace }} -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend=k8s --k8s-namespace={{ namespace }} -v
 
 # Run cross-platform scenarios on both backends
 test-scenarios-both namespace="styrene-test":
     @echo "Running cross-platform scenarios on both backends..."
-    pytest tests/scenarios/ --backend=both --k8s-namespace={{ namespace }} -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend=both --k8s-namespace={{ namespace }} -v
 
 # Run smoke-tier cross-platform tests (fast validation)
 test-scenarios-smoke backend="ssh":
     @echo "Running smoke scenarios on {{ backend }} backend..."
-    pytest tests/scenarios/ --backend={{ backend }} -m smoke -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend={{ backend }} -m smoke -v
 
 # Run integration-tier cross-platform tests
 test-scenarios-integration backend="ssh":
     @echo "Running integration scenarios on {{ backend }} backend..."
-    pytest tests/scenarios/ --backend={{ backend }} -m integration -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend={{ backend }} -m integration -v
 
 # Run comprehensive cross-platform tests
 test-scenarios-comprehensive backend="ssh":
     @echo "Running comprehensive scenarios on {{ backend }} backend..."
-    pytest tests/scenarios/ --backend={{ backend }} -m comprehensive -v
+    .venv/bin/python -m pytest tests/scenarios/ --backend={{ backend }} -m comprehensive -v
 
 # ─── Installation Testing ───────────────────────────────────────────────────
 #
@@ -705,22 +744,22 @@ test-scenarios-comprehensive backend="ssh":
 # Run installation smoke tests (validate existing installation)
 test-install-smoke:
     @echo "Running installation smoke tests..."
-    pytest tests/scenarios/test_installation.py --backend=ssh -m smoke -v
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py --backend=ssh -m smoke -v
 
 # Run full installation tests (install/upgrade cycles)
 test-install:
     @echo "Running installation tests..."
-    pytest tests/scenarios/test_installation.py --backend=ssh -m installation -v
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py --backend=ssh -m installation -v
 
 # Run provisioning tests (install + systemd setup)
 test-provision:
     @echo "Running provisioning tests..."
-    pytest tests/scenarios/test_installation.py --backend=ssh -m provisioning -v
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py --backend=ssh -m provisioning -v
 
 # Install from specific git tag on all devices
 test-install-tag tag:
     @echo "Installing tag {{ tag }} on all devices..."
-    pytest tests/scenarios/test_installation.py::TestPipGitInstallation::test_install_from_tag \
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py::TestPipGitInstallation::test_install_from_tag \
         --backend=ssh --install-tag={{ tag }} -v
 
 # Install from wheel on all devices
@@ -736,13 +775,13 @@ test-install-wheel wheel_path="":
         wheel="{{ wheel_path }}"
     fi
     echo "Installing wheel: $wheel"
-    pytest tests/scenarios/test_installation.py::TestWheelInstallation::test_install_from_wheel \
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py::TestWheelInstallation::test_install_from_wheel \
         --backend=ssh --wheel-path="$wheel" -v
 
 # Full provisioning workflow on all devices
 test-provision-all:
     @echo "Provisioning all devices..."
-    pytest tests/scenarios/test_installation.py::TestFullProvisioning::test_provision_all_nodes \
+    .venv/bin/python -m pytest tests/scenarios/test_installation.py::TestFullProvisioning::test_provision_all_nodes \
         --backend=ssh -v
 
 # ─── Test Matrix ────────────────────────────────────────────────────────────
@@ -752,17 +791,17 @@ test-provision-all:
 # Run full test matrix (smoke + integration)
 test-matrix:
     @echo "Running test matrix..."
-    pytest tests/scenarios/test_matrix.py --backend=ssh -v -s 2>&1 | tee test-results/matrix-$(date +%Y%m%d_%H%M%S).log
+    .venv/bin/python -m pytest tests/scenarios/test_matrix.py --backend=ssh -v -s 2>&1 | tee test-results/matrix-$(date +%Y%m%d_%H%M%S).log
 
 # Run smoke test matrix only
 test-matrix-smoke:
     @echo "Running smoke test matrix..."
-    pytest tests/scenarios/test_matrix.py --backend=ssh -m smoke -v -s
+    .venv/bin/python -m pytest tests/scenarios/test_matrix.py --backend=ssh -m smoke -v -s
 
 # Run integration test matrix (requires running daemons)
 test-matrix-integration:
     @echo "Running integration test matrix..."
-    pytest tests/scenarios/test_matrix.py --backend=ssh -m integration -v -s
+    .venv/bin/python -m pytest tests/scenarios/test_matrix.py --backend=ssh -m integration -v -s
 
 # Analyze test matrix results
 test-matrix-analyze:

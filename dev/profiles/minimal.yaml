@@ -1,0 +1,34 @@
+# Minimal profile — RNS + LXMF only.
+# Single hub, no AutoInterface, no server, no extras.
+# Use for: isolating RNS/LXMF bugs, low-noise baseline testing.
+
+reticulum:
+  mode: standalone
+  enable_transport: false
+  announce_interval: 300
+  interfaces:
+    auto: false
+    server:
+      enabled: false
+    peers:
+      - host: rns.styrene.io
+        port: 4242
+        name: "Styrene Community Hub"
+        enabled: true
+
+lxmf:
+  autopeer: false
+  propagation_node:
+    enabled: false
+
+api:
+  enabled: false
+
+i2p:
+  mode: disabled
+
+yggdrasil:
+  mode: disabled
+
+mesh_vpn:
+  enable: false
