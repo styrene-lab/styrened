@@ -20,7 +20,7 @@ from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hub_connection import HubStatus
 from styrened.tui.services.config import load_config
 from styrened.tui.services.reticulum import start_discovery
-from styrened.tui.widgets.activity_feed import ActivityFeedWidget
+from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
 from styrened.tui.widgets.home_status_bar import HomeStatusBar
@@ -118,7 +118,7 @@ class DashboardScreen(Screen[None]):
                 id="nodes-panel",
             )
             yield HighlightedPanel(
-                ActivityFeedWidget(id="activity-feed-widget"),
+                CopActivitySummary(id="activity-feed-widget"),
                 title="ACTIVITY",
                 id="activity-panel",
             )
@@ -139,8 +139,13 @@ class DashboardScreen(Screen[None]):
     def action_refresh(self) -> None:
         """Refresh Home status panels."""
         try:
-            activity = self.query_one(ActivityFeedWidget)
-            activity.clear()
+            cop_summary = self.query_one(CopActivitySummary)
+            cop_summary._unread.clear()
+            cop_summary._discoveries.clear()
+            cop_summary._anomalies.clear()
+            cop_summary._file_situations.clear()
+            cop_summary._security_situations.clear()
+            cop_summary.refresh()
         except Exception:
             pass
 
@@ -269,7 +274,7 @@ class DashboardScreen(Screen[None]):
                 await asyncio.gather(*pending, return_exceptions=True)
 
     async def _subscribe_activity(self) -> None:
-        """Subscribe to activity events via IPC and push into ActivityFeedWidget."""
+        """Subscribe to activity events via IPC and push into CopActivitySummary."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
@@ -279,8 +284,8 @@ class DashboardScreen(Screen[None]):
                 if event_type != IPCMessageType.EVENT_ACTIVITY:
                     continue
                 try:
-                    activity_widget = self.query_one(ActivityFeedWidget)
-                    activity_widget.add_event(event.get("type", "unknown"), event)
+                    cop_summary = self.query_one(CopActivitySummary)
+                    cop_summary.ingest_event(event.get("type", "unknown"), event)
                 except Exception:
                     pass
         except Exception:

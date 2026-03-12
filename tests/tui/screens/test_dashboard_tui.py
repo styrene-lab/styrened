@@ -36,8 +36,8 @@ class TestDashboardComposition:
 
     @pytest.mark.asyncio
     async def test_home_compose_creates_cop_widgets(self):
-        """Home compose() should create HomeStatusBar, HomeNodeSummaryTable, and ActivityFeedWidget."""
-        from styrened.tui.widgets.activity_feed import ActivityFeedWidget
+        """Home compose() should create HomeStatusBar, HomeNodeSummaryTable, and CopActivitySummary."""
+        from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
         from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
         from styrened.tui.widgets.home_status_bar import HomeStatusBar
 
@@ -55,7 +55,7 @@ class TestDashboardComposition:
             # Widgets inside panels
             assert isinstance(screen.query_one(HomeStatusBar), HomeStatusBar)
             assert isinstance(screen.query_one(HomeNodeSummaryTable), HomeNodeSummaryTable)
-            assert isinstance(screen.query_one(ActivityFeedWidget), ActivityFeedWidget)
+            assert isinstance(screen.query_one(CopActivitySummary), CopActivitySummary)
 
     @pytest.mark.asyncio
     async def test_home_has_no_peer_tree(self):
@@ -346,7 +346,7 @@ class TestDashboardActivitySubscription:
             await screen._subscribe_activity()
 
         bridge.subscribe_activity.assert_awaited_once_with()
-        activity_widget.add_event.assert_called_once_with(
+        activity_widget.ingest_event.assert_called_once_with(
             "announce_sent",
             {"type": "announce_sent"},
         )
