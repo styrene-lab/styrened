@@ -552,15 +552,15 @@ Button.-success:hover {
 
 /* === Footer === */
 Footer {
-    background: transparent;
+    background: $background;
     border-top: round $primary-background;
     overflow: hidden;
 }
 
 Footer > .footer--key {
     color: $accent;
-    background: transparent;
-    text-style: none;
+    background: $background;
+    text-style: bold;
 }
 
 Footer > .footer--description {
@@ -569,7 +569,7 @@ Footer > .footer--description {
 
 /* === Header === */
 Header {
-    background: transparent;
+    background: $background;
     border-bottom: round $primary-background;
     color: $primary;
 }
