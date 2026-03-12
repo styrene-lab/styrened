@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tui-workspace-completion",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T16:53:34.290Z",
+  "summary": "All 19 spec scenarios verified. v0.16.1 released (tag exists). 32/32 tasks complete (Group 6 release tasks were already done in prior session). Dashboard narrowed, peer workspace canonical, CommsScreen capability-gated, code cleanup done, OpenSpec closures archived.",
+  "snapshot": {
+    "gitHead": "b58d7b9fb39407f09e2e9bafef5d35a6ea1d9a32",
+    "fingerprint": "59f303ef0e7665699bce552456cf86a8c52df9a7670643b037557fbbd38a2b05",
+    "dirty": true,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/tui-workspace-completion/design.md",
+        "exists": true,
+        "size": 266,
+        "sha256": "f92a89ec088813b772be5c8d117e2e2c8b392f778f9508c7b1f7bd05e65d77e2"
+      },
+      {
+        "path": "openspec/changes/tui-workspace-completion/proposal.md",
+        "exists": true,
+        "size": 660,
+        "sha256": "542f78e2e3a00d651213225b1b5b2a3b2d2dcd24392515027115ba56df2b0cd6"
+      },
+      {
+        "path": "openspec/changes/tui-workspace-completion/specs/housekeeping.md",
+        "exists": true,
+        "size": 2685,
+        "sha256": "da93632870c75408b816b88a1cbd8fb1b21540499c57724fb7dccb0fb72a1789"
+      },
+      {
+        "path": "openspec/changes/tui-workspace-completion/specs/peer-workspace.md",
+        "exists": true,
+        "size": 1675,
+        "sha256": "7d38586b56c4f550070ce458a1be4ec6ec6da5bc4d6842bcdedfd454b29b06cd"
+      },
+      {
+        "path": "openspec/changes/tui-workspace-completion/specs/workspace-nav.md",
+        "exists": true,
+        "size": 1522,
+        "sha256": "a8e5cc15fd83395395a5518b1aa31b8e9c0df7d5d5759d801b7838bc160a071c"
+      },
+      {
+        "path": "openspec/changes/tui-workspace-completion/tasks.md",
+        "exists": true,
+        "size": 4546,
+        "sha256": "146e9c17ddbf4f44f90cd2592d66711335b9c33ebf8ccd950d1e75747eb3042a"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

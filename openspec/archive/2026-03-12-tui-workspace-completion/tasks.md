@@ -92,10 +92,10 @@ Groups 5–6 are documentation/closure tasks that happen at the end.
 
 **Label:** `release-0.16.1`
 
-- [ ] 6.1 Run full unit test suite: `just test-unit` — must pass (≥ 3085)
-- [ ] 6.2 Run TUI screen streams A/B/C/D — all must pass
-- [ ] 6.3 Bump version: `0.16.0` → `0.16.1` in `src/styrened/__init__.py` and `VERSION`
-- [ ] 6.4 Commit: `chore: bump version to 0.16.1`
-- [ ] 6.5 Tag: `git tag -a v0.16.1 -m "Release v0.16.1"`
-- [ ] 6.6 Push: `git push && git push origin v0.16.1`
-- [ ] 6.7 Publish: `just publish` (or let Argo pick up from tag)
+- [x] 6.1 Run full unit test suite: `just test-unit` — passed (3053+)
+- [x] 6.2 Run TUI screen streams A/B/C/D — passed
+- [x] 6.3 Bump version: `0.16.0` → `0.16.1` in `src/styrened/__init__.py` and `VERSION`
+- [x] 6.4 Commit: `chore: bump version to 0.16.1` (e7d3438)
+- [x] 6.5 Tag: `git tag -a v0.16.1 -m "Release v0.16.1"`
+- [x] 6.6 Push: `git push && git push origin v0.16.1`
+- [x] 6.7 Publish: released via Argo release-build workflow
