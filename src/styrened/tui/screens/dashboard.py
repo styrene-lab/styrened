@@ -93,6 +93,9 @@ class DashboardScreen(Screen[None]):
                 exclusive=True,
             )
 
+        # Focus a widget so Footer renders screen bindings
+        self.call_later(self._refocus_default)
+
     def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
         """Pause periodic refresh while Home is not the active screen."""
         if self._hub_retry_timer is not None:
@@ -105,9 +108,14 @@ class DashboardScreen(Screen[None]):
         """Refresh Home panels when the operator returns from another workspace."""
         if self._hub_retry_timer is not None:
             self._hub_retry_timer.resume()
+        if hasattr(self, "_reconcile_timer") and self._reconcile_timer is not None:
+            self._reconcile_timer.resume()
 
         for panel in self.query(HighlightedPanel):
             panel.refresh_theme()
+
+        # Re-focus so Footer picks up screen bindings after switch_screen
+        self.call_later(self._refocus_default)
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
@@ -160,6 +168,15 @@ class DashboardScreen(Screen[None]):
         """Periodically poll hub status via IPC."""
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="hub-status")
+
+    def _refocus_default(self) -> None:
+        """Focus the first focusable child so Footer renders bindings."""
+        try:
+            from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+            table = self.query_one(HomeNodeSummaryTable)
+            table.focus()
+        except Exception:
+            pass
 
     def _reconcile(self) -> None:
         """Slow reconciliation — catches anything events missed."""

@@ -11,6 +11,7 @@ Categorized tabbed interface for current network discovery:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -788,6 +789,8 @@ class ExplorationScreen(Screen[None]):
         if self._countdown_timer is not None:
             self._countdown_timer.resume()
         self._start_node_refresh()
+        # Re-focus table so Footer picks up screen bindings
+        self.call_later(self._focus_active_table)
 
     def on_unmount(self) -> None:
         """Stop periodic refresh when the Nodes workspace is removed."""
@@ -813,26 +816,48 @@ class ExplorationScreen(Screen[None]):
         self._stored_nodes_cache = []
     
     async def _async_load_all_nodes(self) -> None:
-        """Refresh nodes — prefer IPC bridge, fallback to direct discovery."""
-        try:
-            bridge = getattr(getattr(self.app, "services", None), "bridge", None)
-            if bridge is not None:
-                from styrened.tui.utils import device_info_to_mesh
+        """Refresh nodes — prefer IPC bridge, fallback to direct discovery.
 
-                device_infos = await bridge.get_devices()
-                devices = [device_info_to_mesh(d) for d in device_infos]
-                self._stored_nodes_cache = []
-                self._live_nodes_cache = devices
-            else:
-                live_nodes = discover_devices()
-                self._stored_nodes_cache = []
-                self._live_nodes_cache = live_nodes
-            self._refresh_announce_tables()
-        except Exception:
-            import logging
-            logging.getLogger(__name__).debug(
-                "Failed to load nodes in exploration screen", exc_info=True
-            )
+        Retries up to 3 times on failure with exponential backoff (1s, 2s, 4s)
+        to handle transient IPC reconnection after daemon restart.
+        """
+        import logging
+        _log = logging.getLogger(__name__)
+
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                bridge = getattr(getattr(self.app, "services", None), "bridge", None)
+                if bridge is not None:
+                    from styrened.tui.utils import device_info_to_mesh
+
+                    device_infos = await bridge.get_devices()
+                    devices = [device_info_to_mesh(d) for d in device_infos]
+                    self._stored_nodes_cache = []
+                    self._live_nodes_cache = devices
+                else:
+                    live_nodes = discover_devices()
+                    self._stored_nodes_cache = []
+                    self._live_nodes_cache = live_nodes
+                self._refresh_announce_tables()
+                if attempt > 0:
+                    _log.info("Node load succeeded on retry %d", attempt)
+                return
+            except Exception:
+                if attempt < max_retries:
+                    delay = 2 ** attempt  # 1s, 2s, 4s
+                    _log.debug(
+                        "Node load attempt %d/%d failed, retrying in %ds",
+                        attempt + 1, max_retries + 1, delay,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    _log.warning(
+                        "Node load failed after %d attempts — will retry at next interval",
+                        max_retries + 1,
+                        exc_info=True,
+                    )
     
     def _refresh_via_bridge(self) -> None:
         """Periodic refresh using IPC bridge data."""
