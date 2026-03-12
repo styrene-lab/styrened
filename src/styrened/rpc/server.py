@@ -1098,15 +1098,48 @@ class RPCServer:
             )
             return
 
-        logger.info(f"Provision requested for adapter: {adapter_name}")
+        # Validate adapter name against known set
+        KNOWN_ADAPTERS = {"yggdrasil", "lokinet", "i2pd", "cjdns"}
+        if adapter_name not in KNOWN_ADAPTERS:
+            asyncio.create_task(
+                self._send_error(
+                    source_hash,
+                    envelope.request_id,
+                    RPCErrorCode.INVALID_REQUEST,
+                    f"Unknown adapter: {adapter_name!r}",
+                )
+            )
+            return
 
-        # Invoke provisioner
-        result = self._binary_provisioner.provision(adapter_name)
+        logger.info("Provision requested for adapter: %s", adapter_name)
 
-        # Send response
+        # Run provisioner in thread to avoid blocking the event loop
         asyncio.create_task(
-            self._send_provision_result(source_hash, envelope.request_id, result)
+            self._run_provision(source_hash, envelope.request_id, adapter_name)
         )
+
+    async def _run_provision(
+        self,
+        source_hash: str,
+        request_id: bytes | None,
+        adapter_name: str,
+    ) -> None:
+        """Run BinaryProvisioner.provision() in a thread and send the result."""
+        try:
+            result = await asyncio.to_thread(
+                self._binary_provisioner.provision, adapter_name
+            )
+        except Exception as e:
+            logger.error("Provision failed for %s: %s", adapter_name, e)
+            await self._send_error(
+                source_hash,
+                request_id,
+                RPCErrorCode.COMMAND_FAILED,
+                f"Provision failed: {e}",
+            )
+            return
+
+        await self._send_provision_result(source_hash, request_id, result)
 
     async def _send_provision_result(
         self,

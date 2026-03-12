@@ -284,6 +284,7 @@ class ControlServer:
             IPCMessageType.CMD_DATALINK_INFO: self._handlers.handle_cmd_datalink_info,
             IPCMessageType.CMD_DATALINK_SPEEDTEST: self._handlers.handle_cmd_datalink_speedtest,
             IPCMessageType.CMD_BOUNDARY_SNAPSHOT: self._handlers.handle_cmd_boundary_snapshot,
+            IPCMessageType.CMD_PROVISION_ADAPTER: self._handlers.handle_cmd_provision_adapter,
             IPCMessageType.CMD_REBOOT_DEVICE: self._handlers.handle_cmd_reboot_device,
             IPCMessageType.CMD_SELF_UPDATE: self._handlers.handle_cmd_self_update,
             IPCMessageType.CMD_SET_IDENTITY: self._handlers.handle_cmd_set_identity,

@@ -194,20 +194,19 @@ class TestRPCProvisionHandler:
 
         mock_provisioner.provision.assert_called_once_with("yggdrasil")
 
-    def test_handle_provision_operator_rejected(self):
-        """OPERATOR role is rejected by RBAC before handler runs."""
+    def test_operator_lacks_provision_capability(self):
+        """OPERATOR role lacks adapter.provision — RBAC rejects before dispatch."""
         server = self._make_server(default_role=Role.OPERATOR)
 
         mock_provisioner = MagicMock()
         server.set_binary_provisioner(mock_provisioner)
 
-        envelope = self._make_envelope("yggdrasil")
-
-        # The protocol_handler checks RBAC before dispatching
-        # Since OPERATOR lacks adapter.provision, the handler should not be called
-        # We test via the capability check directly
+        # Verify the RBAC policy itself rejects OPERATOR for this capability
         assert not server._rbac_policy.has_capability("operator_hash", Capability.ADAPTER_PROVISION)
-        mock_provisioner.provision.assert_not_called()
+
+        # Verify the MESSAGE_TYPE_CAPABILITY mapping exists so dispatch would check it
+        from styrened.rpc.server import MESSAGE_TYPE_CAPABILITY
+        assert MESSAGE_TYPE_CAPABILITY[StyreneMessageType.PROVISION] == Capability.ADAPTER_PROVISION
 
 
 # ---------------------------------------------------------------------------
