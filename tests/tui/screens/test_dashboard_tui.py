@@ -334,6 +334,9 @@ class TestDashboardActivitySubscription:
         bridge.iter_events = _iter_events
         activity_widget = MagicMock()
 
+        mock_app = MagicMock()
+        mock_app.post_message = MagicMock()
+
         with (
             patch.object(
                 DashboardScreen,
@@ -342,6 +345,7 @@ class TestDashboardActivitySubscription:
                 return_value=bridge,
             ),
             patch.object(screen, "query_one", return_value=activity_widget),
+            patch.object(type(screen), "app", new_callable=PropertyMock, return_value=mock_app),
         ):
             await screen._subscribe_activity()
 
@@ -350,3 +354,5 @@ class TestDashboardActivitySubscription:
             "announce_sent",
             {"type": "announce_sent"},
         )
+        # DaemonEvent posted to app
+        mock_app.post_message.assert_called_once()
