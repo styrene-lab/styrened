@@ -74,8 +74,8 @@ class UpgradeScreen(ModalScreen[bool]):
         width: 80;
         height: 36;
         max-height: 85%;
-        background: $surface;
-        border: solid $panel;
+        background: $background;
+        border: round $panel;
         padding: 1 2;
     }
 
@@ -95,7 +95,7 @@ class UpgradeScreen(ModalScreen[bool]):
         height: 1fr;
         min-height: 4;
         margin: 0 0 1 0;
-        border: solid $border;
+        border: round $border;
         padding: 0 1;
         overflow-y: auto;
         scrollbar-background: $surface;
@@ -202,15 +202,15 @@ class UpgradeScreen(ModalScreen[bool]):
             elif "feat" in stripped[:10]:
                 parts.append(f"[{cascade.bright}]{line}[/]")
             elif stripped.startswith("  • fix") or stripped.startswith("    • fix"):
-                parts.append(f"[yellow]{line}[/]")
+                parts.append(f"[{get_color_cascade().color_warning}]{line}[/]")
             elif stripped.startswith("  • perf") or stripped.startswith("    • perf"):
                 parts.append(f"[{cascade.medium}]{line}[/]")
             elif stripped.startswith("  • docs") or stripped.startswith("    • docs"):
-                parts.append(f"[dim]{line}[/]")
+                parts.append(f"[{get_color_cascade().dim}]{line}[/]")
             else:
                 parts.append(line)
 
-        content = "\n".join(parts) if parts else "[dim]No changelog available[/]"
+        content = "\n".join(parts) if parts else f"[{get_color_cascade().dim}]No changelog available[/]"
         self.app.call_from_thread(self._update_changelog, content)
 
     def _update_changelog(self, content: str) -> None:

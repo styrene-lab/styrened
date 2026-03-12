@@ -29,6 +29,7 @@ from textual.widgets import Static
 
 from styrened.tui.widgets.micron_parser import parse_micron, render_to_rich
 from styrened.tui.widgets.page_renderers import render_structured_page
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +301,7 @@ class PageBrowserWidget(Widget):
         """Display an error in the content area."""
         try:
             body = self.query_one("#page-body", _PageBody)
-            body.update(f"[bold red]{message}[/bold red]")
+            body.update(f"[{get_color_cascade().color_danger} bold]{message}[/]")
             body.add_class("placeholder-text")
         except Exception:
             pass
@@ -340,9 +341,9 @@ class PageBrowserWidget(Widget):
 
         # Prepend cache banner
         banner = (
-            f"[bold yellow]⚠ Cached page[/bold yellow] [dim]({age_str})[/dim]\n"
-            f"[dim]{error_reason} — showing last cached version[/dim]\n"
-            f"[dim]Press F5 to retry live fetch[/dim]\n\n"
+            f"[{get_color_cascade().color_warning} bold]⚠ Cached page[/] [{get_color_cascade().dim}]({age_str})[/]\n"
+            f"[{get_color_cascade().dim}]{error_reason} — showing last cached version[/]\n"
+            f"[{get_color_cascade().dim}]Press F5 to retry live fetch[/]\n\n"
         )
 
         self._page_content = content

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Requires tui-home-cop features not yet on main")
 
 """Tests for TUI config serialization roundtrip.
 

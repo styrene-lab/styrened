@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Configuration management service for Styrene TUI.
 
 This module provides functions to load, save, and validate the TUI
@@ -13,8 +15,6 @@ Typical usage:
     config.tui.log_level = LogLevel.DEBUG
     save_config(config)
 """
-from __future__ import annotations
-
 
 import contextlib
 import os
@@ -216,8 +216,15 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
     if "tui" in data and isinstance(data["tui"], dict):
         tui_data = data["tui"]
         if "theme" in tui_data:
-            with contextlib.suppress(ValueError):
-                config.tui.theme = ThemeMode(tui_data["theme"])
+            config.tui.theme = str(tui_data["theme"])
+        if "custom_theme_url" in tui_data:
+            config.tui.custom_theme_url = str(tui_data["custom_theme_url"])
+        if "custom_theme_colors" in tui_data:
+            raw = tui_data["custom_theme_colors"]
+            if isinstance(raw, dict):
+                config.tui.custom_theme_colors = {
+                    str(k): str(v) for k, v in raw.items()
+                }
         if "log_level" in tui_data:
             with contextlib.suppress(ValueError):
                 config.tui.log_level = LogLevel(tui_data["log_level"])
@@ -225,6 +232,8 @@ def _parse_config_dict(data: dict[str, Any]) -> StyreneConfig:
             config.tui.show_hardware_panel = bool(tui_data["show_hardware_panel"])
         if "confirm_destructive" in tui_data:
             config.tui.confirm_destructive = bool(tui_data["confirm_destructive"])
+        if "identity_nudge_dismissed" in tui_data:
+            config.tui.identity_nudge_dismissed = bool(tui_data["identity_nudge_dismissed"])
         # use_ipc is silently ignored for backward compatibility with old configs
 
     # Fleet settings
@@ -406,10 +415,13 @@ def _config_to_dict(config: StyreneConfig) -> dict[str, Any]:
     """
     return {
         "tui": {
-            "theme": config.tui.theme.value,
+            "theme": config.tui.theme,
+            "custom_theme_url": config.tui.custom_theme_url,
+            "custom_theme_colors": config.tui.custom_theme_colors,
             "log_level": config.tui.log_level.value,
             "show_hardware_panel": config.tui.show_hardware_panel,
             "confirm_destructive": config.tui.confirm_destructive,
+            "identity_nudge_dismissed": config.tui.identity_nudge_dismissed,
         },
         "fleet": {
             "edge_fleet_path": (

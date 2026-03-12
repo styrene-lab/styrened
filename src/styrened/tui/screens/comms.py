@@ -1,3 +1,4 @@
+
 """Comms workspace screen.
 
 Aggregate shell for synchronous/direct/live communication. Capability-gated
@@ -23,7 +24,7 @@ class CommsScreen(Screen[None]):
     """Aggregate workspace for synchronous and live communication."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "app.pop_screen", "Back"),
+        Binding("escape", "go_home", "Home"),
     ]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -95,6 +96,10 @@ class CommsScreen(Screen[None]):
                         id="comms-presence-placeholder",
                     )
         yield Footer()
+
+    def action_go_home(self) -> None:
+        """Return to the dashboard."""
+        self.app.switch_screen("dashboard")
 
     def on_mount(self) -> None:
         """Fetch daemon capabilities and update capability-gated sections."""

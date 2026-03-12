@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Platform-aware service installer for styrened.
 
 Handles installing styrened as a system service (launchd on macOS,
@@ -8,8 +10,6 @@ Supports:
     - macOS: LaunchAgent plist in ~/Library/LaunchAgents/
     - Linux: systemd user unit in ~/.config/systemd/user/
 """
-from __future__ import annotations
-
 
 import asyncio
 import logging
@@ -448,6 +448,72 @@ async def stop_service() -> ServiceInfo:
             stderr=asyncio.subprocess.PIPE,
         )
         await proc.communicate()
+        return await _get_systemd_status()
+
+    return ServiceInfo(
+        platform=ServicePlatform.UNSUPPORTED,
+        status=ServiceStatus.ERROR,
+        error="Unsupported platform",
+    )
+
+
+async def restart_service() -> ServiceInfo:
+    """Restart the installed service (stop then start).
+
+    For launchd: unload + load (re-reads plist, picks up new binary).
+    For systemd: systemctl --user restart.
+
+    Returns:
+        ServiceInfo reflecting the post-restart state.
+    """
+    platform = detect_platform()
+
+    if platform == ServicePlatform.LAUNCHD:
+        if not LAUNCHD_PLIST_PATH.exists():
+            return ServiceInfo(
+                platform=ServicePlatform.LAUNCHD,
+                status=ServiceStatus.NOT_INSTALLED,
+                error="Service not installed",
+            )
+        # unload then load so launchd re-reads the plist and picks up any new binary path
+        proc = await asyncio.create_subprocess_exec(
+            "launchctl", "unload", str(LAUNCHD_PLIST_PATH),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        await asyncio.sleep(0.5)
+        proc = await asyncio.create_subprocess_exec(
+            "launchctl", "load", str(LAUNCHD_PLIST_PATH),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            return ServiceInfo(
+                platform=ServicePlatform.LAUNCHD,
+                status=ServiceStatus.ERROR,
+                unit_path=LAUNCHD_PLIST_PATH,
+                error=f"launchctl load failed: {error_msg}",
+            )
+        return await _get_launchd_status()
+
+    elif platform == ServicePlatform.SYSTEMD:
+        proc = await asyncio.create_subprocess_exec(
+            "systemctl", "--user", "restart", SYSTEMD_UNIT_NAME,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            return ServiceInfo(
+                platform=ServicePlatform.SYSTEMD,
+                status=ServiceStatus.ERROR,
+                unit_path=SYSTEMD_UNIT_PATH,
+                error=f"systemctl restart failed: {error_msg}",
+            )
         return await _get_systemd_status()
 
     return ServiceInfo(
