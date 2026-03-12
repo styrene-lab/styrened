@@ -36,7 +36,7 @@
 - [x] 4.1 Adapter enable toggles in Settings Network TRANSPORT panel (Yggdrasil, I2P) with status
 - [x] 4.2 ProvisionModal screen: platform info, progress bar, success/error, fallback instructions
 - [x] 4.3 Toggle → check binary → if missing mount ProvisionModal → success sets MANAGED
-- [ ] 4.4 Widget tests for ProvisionModal rendering states
+- [x] 4.4 Widget tests for ProvisionModal rendering states (9 tests)
 
 ## 5. RPC CMD_PROVISION for remote provisioning
 <!-- specs: tui-provisioning -->
