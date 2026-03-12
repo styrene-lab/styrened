@@ -108,8 +108,23 @@ Groups 5–6 are documentation/closure tasks that happen at the end.
 
 **Label:** `visual-validation`
 
-- [ ] 7.1 Operator visual review — Home screen (NodeInfoPanel + ActivityFeedWidget)
+- [x] 7.1 Operator visual review — Home screen (NodeInfoPanel + ActivityFeedWidget)
+  - Panel tier system applied: STATUS/NODES → panel-info, ACTIVITY → panel-ambient
 - [ ] 7.2 Operator visual review — Nodes tab + MeshDeviceDetailScreen (Status/Chat/Mail/Fleet Ops/Pages/Terminal tabs)
 - [ ] 7.3 Operator visual review — CommsScreen (capability-gated Direct/Yggdrasil/I2P sections)
-- [ ] 7.4 Operator visual review — Settings screen (Network tab: Transport/Peers/Local/Server/Batman panels)
+- [x] 7.4 Operator visual review — Settings screen (Network tab: Transport/Peers/Local/Server/Batman panels)
+  - All settings panels → panel-interactive, inputs restored to round-bordered with $surface fill
+  - Peer rows tightened (margin 0), remove buttons muted with hover-red
+  - Buttons: border weight transitions (round→heavy hover, primary→double hover)
+  - Footer: rising panel convention (transparent bg + border-top accent line)
+  - Appearance tab: design system sampler with all tiers + button variants
 - [ ] 7.5 Sign-off: confirm no regressions before 0.16.2 branch
+
+### Design system work delivered during visual validation:
+
+- **Panel Tier System**: panel-interactive/info/ambient/container/alert-* across 42 panels
+- **OKLCH Semantic Color Derivation**: error=#f5715e, warning=#d2911c, success=#a2e3a3
+- **Button Design**: recessed→heavy hover, primary→double hover
+- **Rising Panel Convention**: transparent chrome + accent-line separators
+- **Input Fields**: round $border with $surface fill, zero-margin row stacking
+- **StyrenePanel DEFAULT_CSS**: transparent bg baseline
