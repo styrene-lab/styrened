@@ -139,6 +139,50 @@ _HUE_ERROR = 30.0    # Red
 _HUE_WARNING = 75.0  # Amber
 _HUE_SUCCESS = 145.0  # Green
 
+# Minimum perceptual lightness delta between footer/header chrome and
+# the screen background.  Below this threshold we nudge the chrome
+# colour away from the background so it remains visible regardless of
+# theme or terminal transparency.
+_MIN_CHROME_DELTA_L = 0.06
+
+
+def _ensure_chrome_contrast(
+    chrome_raw: str,
+    background_raw: str,
+    *,
+    is_dark: bool = True,
+) -> str:
+    """Nudge a chrome surface (footer/header bg) away from the screen bg.
+
+    If the OKLCH lightness difference between *chrome* and *background*
+    is below ``_MIN_CHROME_DELTA_L``, shift the chrome colour so it is
+    perceptibly distinct.  Direction: lighter for dark themes, darker for
+    light themes.
+
+    Returns a ``#rrggbb`` hex string.
+    """
+    bg = _parse_oklch(background_raw)
+    ch = _parse_oklch(chrome_raw)
+
+    if bg is None or ch is None:
+        # Can't parse — return chrome as-is via hex conversion
+        return parse_color(chrome_raw) if chrome_raw else ""
+
+    bg_l, _bg_c, _bg_h = bg
+    ch_l, ch_c, ch_h = ch
+
+    delta = abs(ch_l - bg_l)
+    if delta >= _MIN_CHROME_DELTA_L:
+        return _oklch_to_hex(ch_l, ch_c, ch_h)
+
+    # Nudge away from background
+    if is_dark:
+        new_l = min(1.0, bg_l + _MIN_CHROME_DELTA_L)
+    else:
+        new_l = max(0.0, bg_l - _MIN_CHROME_DELTA_L)
+
+    return _oklch_to_hex(new_l, ch_c, ch_h)
+
 
 def parse_color(value: str) -> str:
     """Convert a tweakcn CSS colour value to #rrggbb hex.
@@ -355,7 +399,11 @@ class TweakcnProfile:
                 "block-cursor-background": primary,
                 "block-cursor-foreground": primary_fg,
                 "footer-key-foreground": primary,
-                "footer-background": surface,
+                "footer-background": _ensure_chrome_contrast(
+                    tokens.get("card", tokens.get("muted", "")),
+                    tokens.get("background", ""),
+                    is_dark=(mode == "dark"),
+                ),
                 "input-selection-background": f"{primary} 25%",
                 "input-cursor-background": ring,
                 "scrollbar": muted_bg,
