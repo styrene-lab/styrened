@@ -552,21 +552,18 @@ Button.-success:hover {
 
 /* === Footer === */
 /* background & key colors come from theme variables (footer-background,
-   footer-key-foreground) set in tweakcn.py — do NOT override here or
-   they'll clash with transparent-terminal fixes. */
+   footer-key-foreground) set in tweakcn.py — do NOT override here.
+   DO NOT add border-top — Footer's DEFAULT_CSS is height:1 and docked,
+   so any border eats the entire content height leaving 0 for text. */
 Footer {
-    border-top: round $primary-background;
     overflow: hidden;
 }
 
-Footer > .footer--description {
-    color: $text-muted;
-}
-
 /* === Header === */
+/* DO NOT add border-bottom — Header's DEFAULT_CSS is height:1 and docked,
+   so any border eats the entire content height leaving 0 for text. */
 Header {
     background: $surface;
-    border-bottom: round $primary-background;
     color: $primary;
 }
 
