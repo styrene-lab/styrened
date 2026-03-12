@@ -530,6 +530,16 @@ class IPCHandlers:
             rns_config_path.parent.mkdir(parents=True, exist_ok=True)
             rns_config_path.write_text(generate_rns_config(parsed_config))
 
+            # Emit config_changed to EventBus
+            if self.daemon and hasattr(self.daemon, "event_bus"):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(
+                        self.daemon.event_bus.emit("config_changed", action="saved")
+                    )
+                except RuntimeError:
+                    pass
+
             return ResultResponse(data={"saved": True})
 
         except Exception as e:

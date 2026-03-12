@@ -32,6 +32,7 @@ from textual.widgets import (
 
 from styrened.ipc.protocol import IPCMessageType
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
+from styrened.tui.models.events import DaemonEvent
 from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.screens.exploration_projection import build_styrene_fleet_projection
 from styrened.tui.widgets.activity_feed import ActivityFeedWidget
@@ -740,13 +741,13 @@ class ExplorationScreen(Screen[None]):
         bridge = getattr(getattr(app, "services", None), "bridge", None)
         if bridge is not None:
             # IPC-managed mode: use periodic bridge calls instead of direct discovery
-            self._refresh_timer = self.set_interval(15.0, self._refresh_via_bridge)
+            self._refresh_timer = self.set_interval(60.0, self._refresh_via_bridge)
             # Fetch initial data via IPC
             self._start_node_refresh()
         else:
             # Legacy/non-managed mode: use direct discovery
             start_discovery(callback=self._on_device_discovered)
-            self._refresh_timer = self.set_interval(15.0, self._refresh_announce_tables)
+            self._refresh_timer = self.set_interval(60.0, self._refresh_announce_tables)
             # Fetch stored nodes via IPC (async), then refresh tables
             self._start_stored_node_load()
             # Initial load with live-only (stored nodes arrive async)
@@ -808,7 +809,10 @@ class ExplorationScreen(Screen[None]):
                 self._live_nodes_cache = live_nodes
             self._refresh_announce_tables()
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).debug(
+                "Failed to load nodes in exploration screen", exc_info=True
+            )
     
     def _refresh_via_bridge(self) -> None:
         """Periodic refresh using IPC bridge data."""
@@ -1015,6 +1019,11 @@ class ExplorationScreen(Screen[None]):
                 self._diagnostics_subscribed = True
                 self.run_worker(self._subscribe_activity(), exclusive=False)
         self._update_status_bar()
+
+    def on_daemon_event(self, event: DaemonEvent) -> None:
+        """Handle daemon events — refresh node data on relevant changes."""
+        if event.event_type == "node_changed":
+            self._start_node_refresh()
 
     def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
         """Look up a MeshDevice from the active table's device list."""

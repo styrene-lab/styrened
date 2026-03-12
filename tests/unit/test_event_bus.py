@@ -364,3 +364,44 @@ class TestTraceLogging:
 
         trace_records = [r for r in caplog.records if r.levelno == TRACE]
         assert any("handled" in r.message and "ms" in r.message for r in trace_records)
+
+
+# ---------------------------------------------------------------------------
+# _bridge_to_event_bus mapping (daemon-level integration)
+# ---------------------------------------------------------------------------
+
+
+class TestNotificationToBusMapping:
+    """Test the daemon's notification type → EventBus type mapping."""
+
+    def test_known_mappings(self) -> None:
+        """All known notification types should map to bus types."""
+        from styrened.daemon import StyreneDaemon
+
+        mapping = StyreneDaemon._NOTIFICATION_TO_BUS
+        # node events
+        assert mapping["device_discovered"] == ("node_changed", "announced")
+        assert mapping["announce_sent"] == ("node_changed", "announce_sent")
+        # message events
+        assert mapping["new_message"] == ("message_changed", "received")
+        assert mapping["delivery_status"] == ("message_changed", "delivery_status")
+        # link events
+        assert mapping["pqc_established"] == ("link_changed", "pqc_established")
+        assert mapping["link_established"] == ("link_changed", "established")
+        # hub events
+        assert mapping["hub_connected"] == ("hub_changed", "connected")
+        # config events
+        assert mapping["config_saved"] == ("config_changed", "saved")
+
+    def test_all_five_bus_types_covered(self) -> None:
+        """The mapping should cover all 5 coarse bus types."""
+        from styrened.daemon import StyreneDaemon
+
+        bus_types = {v[0] for v in StyreneDaemon._NOTIFICATION_TO_BUS.values()}
+        assert bus_types == {
+            "node_changed",
+            "message_changed",
+            "link_changed",
+            "hub_changed",
+            "config_changed",
+        }

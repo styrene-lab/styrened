@@ -314,6 +314,56 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to seed contacts blocks to RBAC: {e}")
 
+    # Map legacy notification event types → coarse EventBus types
+    _NOTIFICATION_TO_BUS: dict[str, tuple[str, str]] = {
+        # node events
+        "device_discovered": ("node_changed", "announced"),
+        "announce_sent": ("node_changed", "announce_sent"),
+        # message events
+        "new_message": ("message_changed", "received"),
+        "delivery_status": ("message_changed", "delivery_status"),
+        "message_received": ("message_changed", "received"),
+        "message_read": ("message_changed", "read"),
+        "file_offer": ("message_changed", "file_offer"),
+        "file_complete": ("message_changed", "file_complete"),
+        # link events
+        "pqc_established": ("link_changed", "pqc_established"),
+        "link_established": ("link_changed", "established"),
+        "link_lost": ("link_changed", "lost"),
+        # hub events
+        "hub_connected": ("hub_changed", "connected"),
+        "hub_disconnected": ("hub_changed", "disconnected"),
+        # config events
+        "config_saved": ("config_changed", "saved"),
+    }
+
+    def _bridge_to_event_bus(
+        self,
+        notification_type: str,
+        peer_hash: str = "",
+        metadata: dict | None = None,
+    ) -> None:
+        """Bridge a notification to the EventBus.
+
+        Translates legacy notification type strings to coarse EventBus
+        types.  Called from _emit_activity_event and direct notify() paths.
+        """
+        mapping = self._NOTIFICATION_TO_BUS.get(notification_type)
+        if mapping is None:
+            bus_type, bus_action = notification_type, notification_type
+        else:
+            bus_type, bus_action = mapping
+
+        data: dict[str, Any] = {"peer_hash": peer_hash}
+        if metadata:
+            data.update(metadata)
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.event_bus.emit(bus_type, action=bus_action, **data))
+        except RuntimeError:
+            pass
+
     def _emit_activity_event(
         self,
         event_type: str,
@@ -323,13 +373,17 @@ class StyreneDaemon:
         """Emit a NotificationEvent for the unified activity feed.
 
         Dispatches through NotificationService which routes to both
-        targeted IPC event types and EVENT_ACTIVITY.
+        targeted IPC event types and EVENT_ACTIVITY.  Also bridges
+        to the EventBus for real-time TUI updates.
 
         Args:
             event_type: Event category string.
             peer_hash: LXMF hash of the peer (if applicable).
             metadata: Additional event-specific data.
         """
+        # Bridge to EventBus (even if notification service is down)
+        self._bridge_to_event_bus(event_type, peer_hash, metadata)
+
         if self._notification_service is None:
             return
 
@@ -1046,6 +1100,14 @@ class StyreneDaemon:
         if status is None:
             status = "received" if not is_outgoing else "pending"
 
+        # Bridge to EventBus
+        self._bridge_to_event_bus("new_message", peer_hash, {
+            "msg_id": msg_id,
+            "status": status,
+            "is_outgoing": is_outgoing,
+            "delivery_method": delivery_method,
+        })
+
         # Dispatch through notification service if available
         if self._notification_service is not None:
             try:
@@ -1127,6 +1189,13 @@ class StyreneDaemon:
             status: New message status (sent, delivered, failed)
             delivery_method: How message was delivered (direct, propagated, or None)
         """
+        # Bridge to EventBus
+        self._bridge_to_event_bus("delivery_status", peer_hash, {
+            "msg_id": msg_id,
+            "status": status,
+            "delivery_method": delivery_method,
+        })
+
         # Dispatch through notification service if available
         if self._notification_service is not None:
             try:
@@ -1720,7 +1789,11 @@ class StyreneDaemon:
 
     def _on_datalink_established(self, link: Any) -> None:
         """Log when a peer establishes a direct data link to us."""
-        logger.info(f"Incoming datalink established (link_id={link.link_id.hex()[:16]}...)")
+        link_id_hex = link.link_id.hex()[:16]
+        logger.info(f"Incoming datalink established (link_id={link_id_hex}...)")
+        self._bridge_to_event_bus("link_established", metadata={
+            "link_id": link_id_hex,
+        })
 
     def _serve_datalink_status(
         self,
