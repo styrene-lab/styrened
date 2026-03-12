@@ -237,6 +237,30 @@ class TestFixMode:
 
         mock_provisioner.provision.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_fix_reprovisions_on_hash_mismatch(self):
+        """Binary exists but hash differs → re-provision."""
+        config = _make_config(ygg_mode=DaemonMode.MANAGED)
+        adapter = _mock_adapter(binary_path="/usr/bin/yggdrasil")
+
+        mock_provisioner = MagicMock()
+        mock_provisioner.provision = AsyncMock()
+
+        with (
+            patch(f"{_DOCTOR}._make_adapter", return_value=adapter),
+            patch(f"{_DOCTOR}._hash_file", return_value="actual_bad_hash"),
+            patch(
+                f"{_DOCTOR}._get_manifest_entry",
+                return_value={"binary_sha256": "expected_good_hash"},
+            ),
+            patch(f"{_DOCTOR}._get_provisioner", return_value=mock_provisioner),
+        ):
+            findings = await fix_adapter_binaries(config)
+
+        mock_provisioner.provision.assert_called_once_with("yggdrasil")
+        ok = [f for f in findings if f.severity == Severity.OK]
+        assert any("installed" in f.message for f in ok)
+
 
 # ── ADOPT mode also checked ──────────────────────────────────────────────────
 

@@ -1046,7 +1046,7 @@ async def fix_adapter_binaries(config: Any) -> list[Finding]:
         binary_path = adapter._find_binary()
 
         if binary_path is not None:
-            # Binary exists — check if it's OK (no need to provision)
+            # Binary exists — check if it needs re-provisioning
             manifest_entry = _get_manifest_entry(adapter_name)
             if manifest_entry:
                 actual_hash = _hash_file(binary_path)
@@ -1054,11 +1054,10 @@ async def fix_adapter_binaries(config: Any) -> list[Finding]:
                 if actual_hash == expected_hash:
                     # All good, skip
                     continue
-
-            # Hash mismatch or no manifest — fall through to provision
-            if manifest_entry and actual_hash != expected_hash:
+                # Hash mismatch — fall through to provision
                 logger.info("Re-provisioning %s due to hash mismatch", adapter_name)
             else:
+                # No manifest entry — can't verify, skip
                 continue
 
         # Need to provision
