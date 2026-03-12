@@ -551,25 +551,21 @@ Button.-success:hover {
 }
 
 /* === Footer === */
+/* background & key colors come from theme variables (footer-background,
+   footer-key-foreground) set in tweakcn.py — do NOT override here or
+   they'll clash with transparent-terminal fixes. */
 Footer {
-    background: $background;
     border-top: round $primary-background;
     overflow: hidden;
 }
 
-Footer > .footer--key {
-    color: $accent;
-    background: $background;
-    text-style: bold;
-}
-
 Footer > .footer--description {
-    color: $panel;
+    color: $text-muted;
 }
 
 /* === Header === */
 Header {
-    background: $background;
+    background: $surface;
     border-bottom: round $primary-background;
     color: $primary;
 }
