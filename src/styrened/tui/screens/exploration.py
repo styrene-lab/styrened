@@ -612,9 +612,13 @@ class ExplorationScreen(Screen[None]):
     - Other: generic/unknown announces
     """
 
+    _REFRESH_INTERVAL: float = 60.0  # seconds between auto-refreshes
+
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._refresh_timer: Timer | None = None
+        self._countdown_timer: Timer | None = None
+        self._seconds_until_refresh: float = self._REFRESH_INTERVAL
         self._node_refresh_worker = None
         self._stored_nodes_worker = None
         self._diagnostics_subscribed: bool = False
@@ -741,17 +745,24 @@ class ExplorationScreen(Screen[None]):
         bridge = getattr(getattr(app, "services", None), "bridge", None)
         if bridge is not None:
             # IPC-managed mode: use periodic bridge calls instead of direct discovery
-            self._refresh_timer = self.set_interval(60.0, self._refresh_via_bridge)
+            self._refresh_timer = self.set_interval(
+                self._REFRESH_INTERVAL, self._auto_refresh_via_bridge
+            )
             # Fetch initial data via IPC
             self._start_node_refresh()
         else:
             # Legacy/non-managed mode: use direct discovery
             start_discovery(callback=self._on_device_discovered)
-            self._refresh_timer = self.set_interval(60.0, self._refresh_announce_tables)
+            self._refresh_timer = self.set_interval(
+                self._REFRESH_INTERVAL, self._auto_refresh_announce
+            )
             # Fetch stored nodes via IPC (async), then refresh tables
             self._start_stored_node_load()
             # Initial load with live-only (stored nodes arrive async)
             self._refresh_announce_tables()
+        # 1s countdown ticker for status bar "next refresh" indicator
+        self._seconds_until_refresh = self._REFRESH_INTERVAL
+        self._countdown_timer = self.set_interval(1.0, self._tick_countdown)
         # Focus active table after TabbedContent is ready
         self.call_later(self._focus_active_table)
 
@@ -759,6 +770,8 @@ class ExplorationScreen(Screen[None]):
         """Pause periodic refresh while Nodes is not the active workspace."""
         if self._refresh_timer is not None:
             self._refresh_timer.pause()
+        if self._countdown_timer is not None:
+            self._countdown_timer.pause()
         if self._node_refresh_worker is not None:
             self._node_refresh_worker.cancel()
             self._node_refresh_worker = None
@@ -770,6 +783,8 @@ class ExplorationScreen(Screen[None]):
         """Resume periodic refresh and fetch fresh node data."""
         if self._refresh_timer is not None:
             self._refresh_timer.resume()
+        if self._countdown_timer is not None:
+            self._countdown_timer.resume()
         self._start_node_refresh()
 
     def on_unmount(self) -> None:
@@ -777,6 +792,9 @@ class ExplorationScreen(Screen[None]):
         if self._refresh_timer is not None:
             self._refresh_timer.stop()
             self._refresh_timer = None
+        if self._countdown_timer is not None:
+            self._countdown_timer.stop()
+            self._countdown_timer = None
         if self._node_refresh_worker is not None:
             self._node_refresh_worker.cancel()
             self._node_refresh_worker = None
@@ -1020,9 +1038,29 @@ class ExplorationScreen(Screen[None]):
                 self.run_worker(self._subscribe_activity(), exclusive=False)
         self._update_status_bar()
 
+    def _tick_countdown(self) -> None:
+        """Tick the countdown timer and update status bar."""
+        self._seconds_until_refresh = max(0, self._seconds_until_refresh - 1)
+        self._update_status_bar()
+
+    def _reset_countdown(self) -> None:
+        """Reset countdown after a refresh (auto, manual, or event-driven)."""
+        self._seconds_until_refresh = self._REFRESH_INTERVAL
+
+    def _auto_refresh_via_bridge(self) -> None:
+        """Auto-refresh wrapper that resets countdown."""
+        self._reset_countdown()
+        self._refresh_via_bridge()
+
+    def _auto_refresh_announce(self) -> None:
+        """Auto-refresh wrapper that resets countdown."""
+        self._reset_countdown()
+        self._refresh_announce_tables()
+
     def on_daemon_event(self, event: DaemonEvent) -> None:
         """Handle daemon events — refresh node data on relevant changes."""
         if event.event_type == "node_changed":
+            self._reset_countdown()
             self._start_node_refresh()
 
     def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
@@ -1204,6 +1242,13 @@ class ExplorationScreen(Screen[None]):
         else:
             parts.append(f"[{cascade.medium}]○ {n_lost} lost[/]")
 
+        # Countdown to next auto-refresh
+        secs = int(self._seconds_until_refresh)
+        if secs > 0:
+            parts.append(f"[{cascade.dim}]⟳ {secs}s[/]")
+        else:
+            parts.append(f"[{cascade.bright}]⟳ refreshing…[/]")
+
         try:
             bar = self.query_one("#explore-status-bar", Static)
             bar.update("  ".join(parts))
@@ -1212,7 +1257,8 @@ class ExplorationScreen(Screen[None]):
 
     def action_refresh(self) -> None:
         """Refresh all data on the exploration screen."""
-        self.notify("Refreshing...", title="Refresh")
+        self._reset_countdown()
+        self.notify("Refreshing…", title="Refresh")
         self._refresh_announce_tables()
 
     @property

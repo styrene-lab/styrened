@@ -1,7 +1,7 @@
 ---
 id: internal-event-system
 title: Internal Event System
-status: implementing
+status: implemented
 tags: [architecture, daemon, tui, ipc]
 open_questions: []
 branches: ["feature/internal-event-system"]
