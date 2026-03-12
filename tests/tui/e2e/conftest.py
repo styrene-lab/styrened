@@ -3,6 +3,8 @@
 These tests require real network connectivity to the Styrene mesh.
 Configuration is loaded from tests/e2e_config.yaml (gitignored).
 """
+from __future__ import annotations
+
 
 import logging
 from pathlib import Path

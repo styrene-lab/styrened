@@ -10,6 +10,8 @@ Prerequisites:
 - Hub running on brutus K8s cluster
 - Network path to 192.168.0.102:4242
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

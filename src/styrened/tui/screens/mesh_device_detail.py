@@ -3,6 +3,8 @@
 Central hub for all peer-to-peer interactions with a node: status, chat,
 fleet operations (structured RPC), and terminal (PTY-over-RNS).
 """
+from __future__ import annotations
+
 
 from typing import TYPE_CHECKING, Any, ClassVar
 

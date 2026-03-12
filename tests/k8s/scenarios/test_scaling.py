@@ -5,6 +5,8 @@ Tests focus on horizontal scaling and resource limits:
 - Resource limits (CPU throttling, memory pressure)
 - Network bandwidth saturation
 """
+from __future__ import annotations
+
 
 import asyncio
 

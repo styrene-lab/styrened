@@ -1,4 +1,6 @@
 """Unit tests for _gather_meta() I2P integration."""
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock
 

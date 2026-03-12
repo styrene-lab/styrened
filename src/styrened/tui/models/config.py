@@ -14,6 +14,8 @@ The configuration follows a nested structure:
 
 All nested configs are combined into StyreneConfig as the root object.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from enum import Enum

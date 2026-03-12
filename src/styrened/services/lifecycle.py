@@ -23,6 +23,8 @@ Usage:
     # Cleanup
     lifecycle.shutdown()
 """
+from __future__ import annotations
+
 
 import atexit
 import logging

@@ -66,6 +66,8 @@ When we want to send to LXMF:
 2. Store LXMF destination -> identity_hash mapping in NodeStore
 3. When sending, look up identity_hash by LXMF destination_hash
 """
+from __future__ import annotations
+
 
 import logging
 import re

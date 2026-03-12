@@ -33,6 +33,8 @@ Usage (client/TUI):
     session = await client.connect(destination)
     await session.run_interactive()
 """
+from __future__ import annotations
+
 
 # Legacy alias — TerminalMessage was the old base class, now MessageBase
 from RNS.Channel import MessageBase as TerminalMessage

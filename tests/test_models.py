@@ -1,4 +1,6 @@
 """Smoke tests for styrene-core models."""
+from __future__ import annotations
+
 
 
 from styrened.models import (

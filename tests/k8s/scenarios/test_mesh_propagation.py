@@ -30,6 +30,8 @@ Usage:
     # Run integration tier only (faster subset)
     pytest tests/k8s/scenarios/test_mesh_propagation.py -m integration -v --run-slow
 """
+from __future__ import annotations
+
 
 import asyncio
 

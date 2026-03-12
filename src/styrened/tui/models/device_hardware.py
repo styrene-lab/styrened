@@ -2,6 +2,8 @@
 
 Data models for hardware specifications used in provisioning.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 

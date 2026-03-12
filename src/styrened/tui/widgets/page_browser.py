@@ -12,6 +12,8 @@ Features:
 - Link click navigation
 - Status bar with transfer time and content size
 """
+from __future__ import annotations
+
 
 import logging
 import urllib.parse

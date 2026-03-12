@@ -2,6 +2,8 @@
 
 Data models for fleet device tracking and management.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 from datetime import datetime

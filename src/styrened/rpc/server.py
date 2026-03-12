@@ -33,6 +33,8 @@ Usage:
 
     # Server automatically handles incoming Styrene RPC messages
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

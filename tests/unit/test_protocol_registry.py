@@ -2,6 +2,8 @@
 
 Tests the protocol registration, routing, and error handling.
 """
+from __future__ import annotations
+
 
 import pytest
 

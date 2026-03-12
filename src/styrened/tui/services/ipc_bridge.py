@@ -10,6 +10,8 @@ during the migration period.
 .. deprecated:: 0.15.1
     Import from ``styrened.ipc`` instead. This shim will be removed in 0.16.0.
 """
+from __future__ import annotations
+
 
 import warnings
 

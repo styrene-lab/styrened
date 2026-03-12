@@ -27,6 +27,8 @@ Usage:
     styrened doctor               # Run diagnostics
     styrened doctor --setup       # Interactive setup wizard
 """
+from __future__ import annotations
+
 
 import argparse
 import asyncio

@@ -1,4 +1,6 @@
 """Smoke tests for styrene wire protocol."""
+from __future__ import annotations
+
 
 
 from styrened.models.styrene_wire import (

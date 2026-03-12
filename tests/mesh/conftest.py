@@ -9,6 +9,8 @@ that bridges the styrened Unix socket to a TCP port. The test host connects
 via TCP using MeshControlClient, a thin ControlClient subclass that uses
 asyncio.open_connection instead of open_unix_connection.
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

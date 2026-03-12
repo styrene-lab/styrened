@@ -3,6 +3,8 @@
 Covers all element types, formatting codes, links, form fields,
 literal blocks, directives, and edge cases.
 """
+from __future__ import annotations
+
 
 from styrened.tui.widgets.micron_parser import (
     Alignment,

@@ -8,6 +8,8 @@ This is the initialization point for the direct-highest-bandwidth-datalink
 mesh system — providing low-latency request/response that bypasses LXMF
 store-and-forward overhead.
 """
+from __future__ import annotations
+
 
 import asyncio
 import json

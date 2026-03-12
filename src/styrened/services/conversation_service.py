@@ -10,6 +10,8 @@ Design decisions:
 - Unread counts tracked per-conversation in memory, persisted via message status
 - Delivery callbacks update message status in real-time
 """
+from __future__ import annotations
+
 
 import logging
 import math

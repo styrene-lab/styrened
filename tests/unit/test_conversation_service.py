@@ -3,6 +3,8 @@
 Tests conversation management, message history, unread tracking,
 and delivery status functionality.
 """
+from __future__ import annotations
+
 
 import tempfile
 from unittest.mock import MagicMock

@@ -1,4 +1,6 @@
 """Unit tests for terminal control plane messages (LXMF)."""
+from __future__ import annotations
+
 
 import signal
 

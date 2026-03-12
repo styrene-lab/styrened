@@ -3,6 +3,8 @@
 Tests the _build_announce_data method and verifies the autoreply capability
 is included/excluded based on config.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock, patch
 

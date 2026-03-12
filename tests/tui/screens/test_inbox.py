@@ -1,4 +1,6 @@
 """Tests for InboxScreen - conversation list via IPCBridge."""
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock
 

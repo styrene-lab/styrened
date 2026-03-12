@@ -9,6 +9,8 @@ Design decisions:
 - Async message routing (supports async protocol handlers)
 - Clear error handling for missing/invalid protocols
 """
+from __future__ import annotations
+
 
 import logging
 import threading

@@ -12,6 +12,8 @@ auto-reply systems, and bot-to-bot loop prevention for chatbot mode.
 Memory optimization: Uses raw bytes for identity keys and limits the
 cooldown cache size to prevent unbounded growth from mesh scanning.
 """
+from __future__ import annotations
+
 
 import asyncio
 import json

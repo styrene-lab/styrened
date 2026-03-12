@@ -21,6 +21,8 @@ Usage in an executable ``.mu`` script::
     if __name__ == "__main__":
         serve_dynamic_page(generate, page_type="fleet")
 """
+from __future__ import annotations
+
 
 import os
 import sys

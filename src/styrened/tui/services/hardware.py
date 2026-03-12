@@ -3,6 +3,8 @@
 This module re-exports from styrened.services.hardware for backward compatibility.
 New code should import directly from styrened.services.hardware.
 """
+from __future__ import annotations
+
 
 from styrened.services.hardware import (  # noqa: F401
     PlatformNotSupportedError,

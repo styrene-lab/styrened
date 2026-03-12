@@ -10,6 +10,8 @@ Prerequisites:
 - Hub running on brutus
 - At least one edge node (q502) online
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

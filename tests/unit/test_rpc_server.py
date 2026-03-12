@@ -3,6 +3,8 @@
 Tests the critical security path for command execution whitelist validation,
 timeout handling, error conditions, authorization, rate limiting, and replay protection.
 """
+from __future__ import annotations
+
 
 import asyncio
 import subprocess

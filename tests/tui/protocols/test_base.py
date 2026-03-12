@@ -1,4 +1,6 @@
 """Tests for Protocol base class and LXMFMessage."""
+from __future__ import annotations
+
 
 import pytest
 

@@ -1,4 +1,6 @@
 """Styrene Core Services."""
+from __future__ import annotations
+
 
 from styrened.services.config import (
     ensure_directories,

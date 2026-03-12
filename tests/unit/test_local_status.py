@@ -4,6 +4,8 @@ Tests backwards-compatible serialization of new DaemonStatus fields
 (hub_status, hub_address, interfaces, propagation_enabled, transport_enabled,
 active_links) and the local status display formatting.
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, patch
 

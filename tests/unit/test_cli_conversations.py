@@ -3,6 +3,8 @@
 Tests argument parsing and basic command behavior for the
 conversations and messages subcommands.
 """
+from __future__ import annotations
+
 
 import argparse
 import json

@@ -4,6 +4,8 @@ Tests actual socket communication between styrened's ControlServer
 and styrene-tui's IPCBridge/DaemonManager. Requires styrened to be
 importable (editable install or sys.path).
 """
+from __future__ import annotations
+
 
 import asyncio
 import tempfile

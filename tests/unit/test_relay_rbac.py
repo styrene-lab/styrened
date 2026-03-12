@@ -2,6 +2,8 @@
 
 TDD: written before implementation per project convention.
 """
+from __future__ import annotations
+
 
 import pytest
 

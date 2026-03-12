@@ -3,6 +3,8 @@
 Tests the repaired file transfer service: correct handler signatures,
 no auto-accept, rate limiting, request-ID based matching, and thread safety.
 """
+from __future__ import annotations
+
 
 import asyncio
 import os

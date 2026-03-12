@@ -4,6 +4,8 @@ Tests the terminal request types and their round-trip through the
 create_request factory, as well as IPCMessageType membership and
 is_event_type behavior for terminal events.
 """
+from __future__ import annotations
+
 
 from styrened.ipc.messages import (
     CmdTerminalCloseRequest,

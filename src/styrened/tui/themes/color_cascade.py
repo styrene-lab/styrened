@@ -6,6 +6,8 @@ phosphex (phosphor) color, enabling easy theming while maintaining visual consis
 Presets are named after Warhammer 40k Forge Worlds, each with a signature
 phosphor color reflecting their industrial character.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple

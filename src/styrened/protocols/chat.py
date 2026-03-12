@@ -11,6 +11,8 @@ Design decisions:
 
 Note: This protocol depends on node_store service which will be migrated in a later phase.
 """
+from __future__ import annotations
+
 
 import logging
 import time

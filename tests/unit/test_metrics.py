@@ -3,6 +3,8 @@
 Tests the StyreneCollector snapshot gauges, event counter label
 acceptance, and the /metrics FastAPI route.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock
 

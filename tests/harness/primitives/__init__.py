@@ -1,4 +1,6 @@
 """Shared test primitives that work with any TestHarness backend."""
+from __future__ import annotations
+
 
 from .base import PrimitiveResult
 from .connectivity import check_connectivity, check_version

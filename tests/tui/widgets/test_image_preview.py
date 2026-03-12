@@ -5,6 +5,8 @@ Covers:
 - ImagePreview widget initial state and reactive properties
 - MessageBubble compose() yields correct children for text, image, and audio
 """
+from __future__ import annotations
+
 
 
 

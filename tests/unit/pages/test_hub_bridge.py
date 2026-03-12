@@ -3,6 +3,8 @@
 Tests environment variable reading, page generation, and the
 serve_dynamic_page entry point.
 """
+from __future__ import annotations
+
 
 import os
 from io import StringIO

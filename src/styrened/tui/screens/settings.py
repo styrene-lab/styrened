@@ -1,4 +1,6 @@
 """Settings screen for configuration management."""
+from __future__ import annotations
+
 
 from copy import deepcopy
 from pathlib import Path

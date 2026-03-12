@@ -8,6 +8,8 @@ These tests verify:
 - Disabled state prevents replies
 - Error handling when identity recall fails
 """
+from __future__ import annotations
+
 
 import time
 from unittest.mock import Mock, patch

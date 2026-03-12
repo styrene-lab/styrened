@@ -1,4 +1,6 @@
 """Tests for ContactsScreen."""
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 

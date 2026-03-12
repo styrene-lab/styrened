@@ -3,6 +3,8 @@
 Provides a DataTable of contacts with add, edit, delete, and resolve actions.
 Uses IPCBridge for daemon communication and theme variables for styling.
 """
+from __future__ import annotations
+
 
 import datetime
 import logging

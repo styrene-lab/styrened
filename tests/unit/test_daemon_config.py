@@ -8,6 +8,8 @@ Covers:
 - Invalid mode strings fall back to DISABLED
 - CoreConfig has yggdrasil and i2p fields
 """
+from __future__ import annotations
+
 
 import pytest
 

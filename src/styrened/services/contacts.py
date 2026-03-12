@@ -1,4 +1,6 @@
 """Contact service for managing mesh peer aliases and name resolution."""
+from __future__ import annotations
+
 
 import logging
 import time

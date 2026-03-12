@@ -3,6 +3,8 @@
 Tests IPC-aware daemon section, uptime formatting, nuanced RNS labels,
 and gating of local queries behind ipc_managed flag.
 """
+from __future__ import annotations
+
 
 import io
 from unittest.mock import MagicMock, Mock, PropertyMock, patch

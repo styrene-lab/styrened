@@ -9,6 +9,8 @@ Prerequisites:
 - Hub running
 - At least one edge node with RPC server (q502)
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

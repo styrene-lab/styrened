@@ -2,3 +2,5 @@
 
 This package provides SSH-based testing on physical hardware devices.
 """
+from __future__ import annotations
+

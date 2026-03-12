@@ -1,4 +1,6 @@
 """Imperial CRT Theme - Green phosphor terminal aesthetic from Specularium."""
+from __future__ import annotations
+
 
 from textual.theme import Theme
 

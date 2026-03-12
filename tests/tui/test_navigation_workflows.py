@@ -2,6 +2,8 @@
 
 Tests screen transitions, keyboard navigation, and end-to-end user workflows.
 """
+from __future__ import annotations
+
 
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch

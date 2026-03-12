@@ -4,6 +4,8 @@ Wraps textual-image for in-terminal image display with graceful fallback
 when the library is not installed. Supports Kitty TGP, Sixel, and
 Unicode halfblock rendering depending on terminal capabilities.
 """
+from __future__ import annotations
+
 
 import io
 import logging

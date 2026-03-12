@@ -8,6 +8,8 @@ These tests verify:
 - Graceful shutdown
 - Error handling when RNS fails to initialize
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 

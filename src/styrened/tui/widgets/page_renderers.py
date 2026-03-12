@@ -8,6 +8,8 @@ returns Rich-compatible markup text.
 Falls back to None when no renderer matches, allowing the caller to
 use standard micron rendering.
 """
+from __future__ import annotations
+
 
 from typing import Any
 

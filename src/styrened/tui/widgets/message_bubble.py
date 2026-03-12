@@ -4,6 +4,8 @@ Selectable message widget that carries metadata for context actions
 (retry, delete, reply). Contains a Static for text and optionally an
 ImagePreview for inline image attachments.
 """
+from __future__ import annotations
+
 
 import logging
 from typing import Any

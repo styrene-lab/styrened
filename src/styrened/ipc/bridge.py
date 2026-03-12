@@ -24,6 +24,8 @@ Usage::
 
     await bridge.disconnect()
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

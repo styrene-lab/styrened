@@ -3,6 +3,8 @@
 Verifies that announce data uses the real version from __init__.py
 and includes the system fingerprint as the 7th field.
 """
+from __future__ import annotations
+
 
 from unittest.mock import patch
 

@@ -2,6 +2,8 @@
 
 Tests form rendering, validation, persistence, and keyboard interactions.
 """
+from __future__ import annotations
+
 
 from unittest.mock import patch
 

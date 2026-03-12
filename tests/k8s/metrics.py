@@ -23,6 +23,8 @@ Example usage:
     with open("snapshot_001.json", "w") as f:
         json.dump(snapshot.to_dict(), f, indent=2)
 """
+from __future__ import annotations
+
 
 from dataclasses import asdict, dataclass
 

@@ -3,6 +3,8 @@
 Defines security tiers, session states, and session metadata for the
 hybrid X25519 + ML-KEM-768 PQC session layer.
 """
+from __future__ import annotations
+
 
 import os
 import time

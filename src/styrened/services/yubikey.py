@@ -12,6 +12,8 @@ These 64 bytes load directly via RNS.Identity.from_bytes().
 
 Requires: pip install 'styrened[yubikey]'  (python-fido2>=1.0)
 """
+from __future__ import annotations
+
 
 import base64
 import logging

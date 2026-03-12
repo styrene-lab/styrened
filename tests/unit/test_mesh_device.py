@@ -3,6 +3,8 @@
 Tests the DeviceType enum extensions, LXMF msgpack parsing,
 aspect_hint parameter, and regression for existing formats.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock, patch
 

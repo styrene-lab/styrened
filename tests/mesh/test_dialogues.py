@@ -4,6 +4,8 @@ Runs YAML-driven dialogue scripts between two containerized styrened nodes
 using the async IPC dialogue primitives. Uses the existing discovered_mesh
 fixture for topology setup.
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 

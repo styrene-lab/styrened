@@ -3,6 +3,8 @@
 Tests actual Unix socket communication between ControlServer and ControlClient,
 validating the full request/response lifecycle.
 """
+from __future__ import annotations
+
 
 import asyncio
 import tempfile

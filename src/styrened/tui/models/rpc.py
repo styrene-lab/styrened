@@ -3,6 +3,8 @@
 This module provides backward compatibility by re-exporting RPC types from
 styrened. All RPC functionality now lives in styrene-core.
 """
+from __future__ import annotations
+
 
 # Re-export all RPC types from core
 from styrened.rpc import (

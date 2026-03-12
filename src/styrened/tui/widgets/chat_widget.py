@@ -11,6 +11,8 @@ Features:
 - Full-text search within conversation (Phase 5)
 - Reply threading with quote context (Phase 6)
 """
+from __future__ import annotations
+
 
 import asyncio
 import atexit

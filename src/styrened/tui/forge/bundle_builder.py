@@ -8,6 +8,8 @@ be flashed to USB/SD later.
 The ``edge_dir`` parameter must be provided explicitly — there is
 no default path since this code is no longer inside styrene-edge.
 """
+from __future__ import annotations
+
 
 import shutil
 import stat

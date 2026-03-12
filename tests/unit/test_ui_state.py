@@ -1,4 +1,6 @@
 """Unit tests for shared frontend-agnostic ui_state builders."""
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 

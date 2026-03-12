@@ -22,6 +22,8 @@ Message Flow:
     Outbound: envelope.encode() -> FIELD_CUSTOM_DATA, content = summary
     Inbound: FIELD_CUSTOM_DATA -> StyreneEnvelope.decode() -> handler
 """
+from __future__ import annotations
+
 
 import logging
 import time

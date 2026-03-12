@@ -3,6 +3,8 @@
 Verifies that the auto-reply handler is always created (even when disabled),
 enabling runtime toggle without daemon restart.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock, patch
 

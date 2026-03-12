@@ -3,6 +3,8 @@
 Tests service lifecycle, page fetching with mocked RNS,
 link caching, idle cleanup, and disconnect.
 """
+from __future__ import annotations
+
 
 import asyncio
 import time

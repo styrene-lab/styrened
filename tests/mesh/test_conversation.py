@@ -3,6 +3,8 @@
 Tests the full message lifecycle: send -> LXMF transport -> receive -> query.
 Uses real RNS/LXMF stack through TCP mesh transport between containers.
 """
+from __future__ import annotations
+
 
 import asyncio
 

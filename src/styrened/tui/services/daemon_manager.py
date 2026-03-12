@@ -8,6 +8,8 @@ Three modes:
     external: Connects to a pre-existing daemon (systemd, etc.).
     fallback: Legacy in-process CoreLifecycle (no daemon, no IPC).
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

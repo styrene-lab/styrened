@@ -3,6 +3,8 @@
 These fixtures provide isolated RNS/LXMF environments for testing
 client/server interactions without Kubernetes.
 """
+from __future__ import annotations
+
 
 import asyncio
 import os

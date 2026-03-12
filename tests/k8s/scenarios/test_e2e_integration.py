@@ -19,6 +19,8 @@ Wire Protocol:
     convenience methods (call_status, call_exec, etc.) which handle
     request correlation via 16-byte request IDs.
 """
+from __future__ import annotations
+
 
 import asyncio
 import json

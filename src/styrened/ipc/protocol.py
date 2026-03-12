@@ -26,6 +26,8 @@ Usage:
     # Decode a response
     msg_type, req_id, payload = decode_frame(data)
 """
+from __future__ import annotations
+
 
 import os
 import struct

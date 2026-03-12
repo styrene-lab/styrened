@@ -3,6 +3,8 @@
 Covers DeviceSpecs, DeviceProfile, FlashTarget, Bundle, StageKey,
 DiskInfo, MediaEvent, ForgeConfig, and catalog loading functions.
 """
+from __future__ import annotations
+
 
 
 import pytest

@@ -3,6 +3,8 @@
 This package contains dataclasses representing the various data
 structures used throughout the application.
 """
+from __future__ import annotations
+
 
 # Re-export from styrene-core (duplicates migrated)
 from styrened.models.messages import Base, Message, get_session, init_db

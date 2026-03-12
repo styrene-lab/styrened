@@ -10,6 +10,8 @@ Usage:
         async for event in chat.events():
             print(f"{event.peer_hash}: {event.content}")
 """
+from __future__ import annotations
+
 
 import logging
 from collections.abc import AsyncIterator

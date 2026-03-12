@@ -8,6 +8,8 @@ Covers all phases:
 - Phase 5: Full-text search
 - Phase 6: Read receipts + reply threading
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

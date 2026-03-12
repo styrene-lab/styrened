@@ -8,6 +8,8 @@ These tests verify:
 - Device discovery via RNS announces
 - Real-time network status detection
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 from typing import Any

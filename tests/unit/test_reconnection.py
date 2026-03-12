@@ -4,6 +4,8 @@ These tests verify that the RNSService and LXMFService properly handle
 LocalInterface disconnections and reconnections without spamming
 "already registered destination" errors.
 """
+from __future__ import annotations
+
 
 import threading
 import time

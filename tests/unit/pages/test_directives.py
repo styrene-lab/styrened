@@ -3,6 +3,8 @@
 Tests dataclass construction, validation, constant correctness,
 regex patterns, and block marker generation.
 """
+from __future__ import annotations
+
 
 
 import pytest

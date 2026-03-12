@@ -9,6 +9,8 @@ Clipboard content priority:
 3. Text that looks like a file path — terminal copy of path
 4. Plain text — not an attachment, let it paste normally
 """
+from __future__ import annotations
+
 
 import base64
 import logging

@@ -3,6 +3,8 @@
 Validates that two independent styrened containers connected via TCP
 transport can discover each other through RNS announces.
 """
+from __future__ import annotations
+
 
 import pytest
 

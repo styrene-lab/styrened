@@ -14,3 +14,5 @@ These behaviours are now tested in:
 - tests/tui/screens/test_dashboard_tui.py — Home workspace (activity feed,
   daemon status, no peer tree)
 """
+from __future__ import annotations
+

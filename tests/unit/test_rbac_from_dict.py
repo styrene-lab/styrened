@@ -1,4 +1,6 @@
 """Tests for RBACPolicy.from_dict() deserialization."""
+from __future__ import annotations
+
 
 from styrened.models.rbac import Capability, RBACPolicy, Role, RosterEntry
 

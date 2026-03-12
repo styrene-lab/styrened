@@ -6,6 +6,8 @@ and HKDF-based key derivation. All functions are stateless and pure.
 ML-KEM-768 operations require liboqs-python (optional dependency).
 All other operations use the cryptography library (already a dependency via RNS).
 """
+from __future__ import annotations
+
 
 import os
 

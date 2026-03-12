@@ -10,6 +10,8 @@ Covers:
 - get_blocked_peers() reads peer_blocks (identity_hash keyed, no peer_hash key)
 - _handle_lxmf_message() resolves identity_hash via NodeStore before RBAC check
 """
+from __future__ import annotations
+
 
 import time
 from unittest.mock import MagicMock, patch, call

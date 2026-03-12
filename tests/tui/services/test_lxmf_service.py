@@ -11,6 +11,8 @@ These tests verify:
 Note: These tests use patching rather than module-level mocking to avoid
 polluting sys.modules and affecting other tests.
 """
+from __future__ import annotations
+
 
 import json
 from pathlib import Path

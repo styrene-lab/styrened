@@ -2,6 +2,8 @@
 
 Tests device information display, RPC actions, tabbed layout, and real-time updates.
 """
+from __future__ import annotations
+
 
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch

@@ -11,3 +11,5 @@ Test categories:
 - Chat: Message delivery and acknowledgment
 - Announce: Discovery and mesh formation
 """
+from __future__ import annotations
+

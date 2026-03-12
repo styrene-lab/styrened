@@ -1,4 +1,6 @@
 """Tests for Styrene brand theme."""
+from __future__ import annotations
+
 
 from styrened.tui.themes.styrene_brand import (
     STYRENE_DARK,

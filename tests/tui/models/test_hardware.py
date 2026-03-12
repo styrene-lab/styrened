@@ -1,4 +1,6 @@
 """Tests for hardware detection models."""
+from __future__ import annotations
+
 
 import pytest
 

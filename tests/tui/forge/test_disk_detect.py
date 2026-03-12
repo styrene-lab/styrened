@@ -2,6 +2,8 @@
 
 All subprocess calls (diskutil, lsblk) are mocked.
 """
+from __future__ import annotations
+
 
 import json
 import subprocess

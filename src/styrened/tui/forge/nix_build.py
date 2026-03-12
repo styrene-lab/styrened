@@ -3,6 +3,8 @@
 Extracted from styrene-edge. Runs ``nix build`` against the sbc flake
 to produce a compressed SD image.
 """
+from __future__ import annotations
+
 
 import asyncio
 import time

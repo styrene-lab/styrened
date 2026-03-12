@@ -18,6 +18,8 @@ Directive categories:
     ``#!sd:b85:begin`` / ``#!sd:b85:end``   base85-encoded msgpack (production)
     ``#!sd:json:begin`` / ``#!sd:json:end`` JSON (debug/development)
 """
+from __future__ import annotations
+
 
 import re
 from dataclasses import dataclass, field

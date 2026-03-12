@@ -20,6 +20,8 @@ Usage:
     # Deserialize a response
     response = ResultResponse.from_payload(payload)
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from typing import Any

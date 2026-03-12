@@ -10,6 +10,8 @@ Endpoints:
     GET  /api/config            - Configuration (sanitized)
     GET  /health                - Health check
 """
+from __future__ import annotations
+
 
 from typing import Any
 

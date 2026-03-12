@@ -3,6 +3,8 @@
 Tests parse_announce_data() handling of the 7th field (system_fingerprint)
 and MeshDevice.system_fingerprint field.
 """
+from __future__ import annotations
+
 
 from styrened.models.mesh_device import (
     DeviceType,

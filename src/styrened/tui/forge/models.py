@@ -3,6 +3,8 @@
 Extracted from styrene-edge forge/models/ with path parameterization
 for portability outside the edge repo.
 """
+from __future__ import annotations
+
 
 import importlib.resources
 from dataclasses import dataclass, field

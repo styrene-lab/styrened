@@ -10,6 +10,8 @@ All I/O operations yield ``MediaEvent`` for TUI progress tracking.
 The ``edge_dir`` parameter must be provided explicitly — there is
 no default path since this code is no longer inside styrene-edge.
 """
+from __future__ import annotations
+
 
 import asyncio
 import platform

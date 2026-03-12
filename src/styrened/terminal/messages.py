@@ -26,6 +26,8 @@ Usage:
     msg = StreamData(stream=StreamData.STDOUT, data=b"Hello, world!")
     channel.send(msg)
 """
+from __future__ import annotations
+
 
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, cast

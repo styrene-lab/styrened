@@ -14,6 +14,8 @@ To send an LXMF message:
 2. Create RNS.Destination with that Identity + LXMF.APP_NAME + "delivery"
 3. Send via LXMF router
 """
+from __future__ import annotations
+
 
 import re
 from dataclasses import dataclass

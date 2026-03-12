@@ -10,3 +10,5 @@ Modules:
     parser: Extract PageMetadata and structured data from raw micron.
     builder: Generate dual-layer page responses with embedded directives.
 """
+from __future__ import annotations
+

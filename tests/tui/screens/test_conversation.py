@@ -1,4 +1,6 @@
 """Tests for ConversationScreen - message thread display via ChatWidget."""
+from __future__ import annotations
+
 
 
 

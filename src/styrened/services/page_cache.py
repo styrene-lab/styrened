@@ -9,6 +9,8 @@ Architecture:
     - Saved sites: user can "save" a node for periodic background crawling
     - Crawler: BFS from index.mu, follows same-node links up to depth limit
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

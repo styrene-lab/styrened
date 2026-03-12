@@ -1,4 +1,6 @@
 """Unit tests for IPC client event dispatch and server subscription filtering."""
+from __future__ import annotations
+
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock

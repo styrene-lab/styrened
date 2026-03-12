@@ -3,6 +3,8 @@
 Extracted from styrene-edge. Detects external removable disks
 (USB drives and SD cards) using platform-native tools.
 """
+from __future__ import annotations
+
 
 import json
 import re

@@ -18,6 +18,8 @@ Usage:
     response = await service.fetch_page("abcdef1234567890", "/page/index.mu")
     await service.stop()
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

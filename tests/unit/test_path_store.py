@@ -1,4 +1,6 @@
 """Unit tests for path table storage and hub node persistence."""
+from __future__ import annotations
+
 
 import tempfile
 import time

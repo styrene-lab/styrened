@@ -14,6 +14,8 @@ Test tiers:
 - @pytest.mark.integration: Moderate complexity (<10min)
 - @pytest.mark.comprehensive: Deep validation (<30min)
 """
+from __future__ import annotations
+
 
 import asyncio
 

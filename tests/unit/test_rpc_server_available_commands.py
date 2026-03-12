@@ -1,4 +1,6 @@
 """Unit tests for RPCServer._get_available_commands()."""
+from __future__ import annotations
+
 
 from unittest.mock import patch
 

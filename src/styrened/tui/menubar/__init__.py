@@ -7,3 +7,5 @@ events for real-time updates.
 Requires: pip install styrened[tui] (rumps is included in TUI extras)
 Launch:   styrened menubar
 """
+from __future__ import annotations
+

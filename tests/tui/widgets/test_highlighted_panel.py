@@ -1,4 +1,6 @@
 """Tests for HighlightedPanel widget."""
+from __future__ import annotations
+
 
 import pytest
 from textual.app import App

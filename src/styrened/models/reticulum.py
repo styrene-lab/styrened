@@ -3,6 +3,8 @@
 These models represent the data parsed from Reticulum's configuration
 files without requiring the RNS library itself.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from pathlib import Path

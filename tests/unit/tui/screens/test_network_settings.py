@@ -6,6 +6,8 @@ Tests the redesigned Network tab that manages:
 - Transport mode and settings
 - Config persistence to core-config.yaml + ~/.reticulum/config regeneration
 """
+from __future__ import annotations
+
 
 from styrened.models.config import (
     CoreConfig,

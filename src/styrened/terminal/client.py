@@ -21,6 +21,8 @@ Usage:
     )
     await session.run_interactive()
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

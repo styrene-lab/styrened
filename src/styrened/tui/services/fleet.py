@@ -3,6 +3,8 @@
 Manages the fleet device inventory, providing functions to load, save,
 query, and update device information.
 """
+from __future__ import annotations
+
 
 import json
 from datetime import datetime

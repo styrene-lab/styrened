@@ -3,6 +3,8 @@
 Ported from styrene-edge tests/conftest.py with updated imports
 for the styrene-tui module layout.
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 

@@ -13,6 +13,8 @@ Typical usage:
     config.tui.log_level = LogLevel.DEBUG
     save_config(config)
 """
+from __future__ import annotations
+
 
 import contextlib
 import os

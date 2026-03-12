@@ -1,4 +1,6 @@
 """Pytest configuration and fixtures for styrene-tui tests."""
+from __future__ import annotations
+
 
 import os
 import subprocess

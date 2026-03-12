@@ -35,6 +35,8 @@ Usage:
     # Shutdown on app exit
     service.shutdown()
 """
+from __future__ import annotations
+
 
 import json
 import logging

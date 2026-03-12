@@ -3,6 +3,8 @@
 Runs 2-node dialogue scripts between edge nodes A and C, which must relay
 through transport node B. Uses the existing discovered_multihop fixture.
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 

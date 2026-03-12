@@ -2,6 +2,8 @@
 
 Tests the tabbed exploration interface with LXMF, Pages, Infrastructure, and Other tabs.
 """
+from __future__ import annotations
+
 
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch

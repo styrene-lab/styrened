@@ -3,6 +3,8 @@
 Tests the LLM-backed chatbot features: HTTP calls, message building,
 bot-to-bot prevention, persistence, and broadcasting.
 """
+from __future__ import annotations
+
 
 import json
 import os

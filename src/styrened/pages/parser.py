@@ -8,6 +8,8 @@ directives are present, or ``None`` for plain NomadNet pages.
 The parser reuses :func:`~styrened.models.styrene_wire.decode_payload`
 for hardened msgpack deserialization (max lengths, strict keys).
 """
+from __future__ import annotations
+
 
 import base64
 import json

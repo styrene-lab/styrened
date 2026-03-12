@@ -37,6 +37,8 @@ Design Decisions:
       networks (LoRa, packet radio)
     - REQUEST_ID uses random bytes (not UUID) to avoid fingerprinting
 """
+from __future__ import annotations
+
 
 import os
 from dataclasses import dataclass, field

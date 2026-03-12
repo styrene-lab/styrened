@@ -3,6 +3,8 @@
 Tests page generation, encoding correctness, and round-trip
 compatibility with the parser.
 """
+from __future__ import annotations
+
 
 import time
 

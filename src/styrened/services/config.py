@@ -3,6 +3,8 @@
 This module provides functions to load and save CoreConfig for headless
 applications. For TUI applications, use styrene.services.config instead.
 """
+from __future__ import annotations
+
 
 import logging
 from pathlib import Path

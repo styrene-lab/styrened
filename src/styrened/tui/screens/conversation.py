@@ -4,6 +4,8 @@ This screen displays a message thread with a specific conversation partner
 and allows sending new messages. Delegates to ChatWidget for all messaging
 logic.
 """
+from __future__ import annotations
+
 
 import logging
 from typing import Any, ClassVar

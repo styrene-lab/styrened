@@ -3,6 +3,8 @@
 This screen displays a list of conversations with unread counts and message previews.
 Uses IPCBridge for daemon communication and theme variables for styling.
 """
+from __future__ import annotations
+
 
 import datetime
 import logging

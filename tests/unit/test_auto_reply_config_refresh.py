@@ -3,6 +3,8 @@
 Verifies that the handler uses a config accessor callable instead of a
 direct reference, enabling hot-reload when the daemon config is replaced.
 """
+from __future__ import annotations
+
 
 import time
 from unittest.mock import MagicMock

@@ -1,4 +1,6 @@
 """Tests for DeviceStatusWidget."""
+from __future__ import annotations
+
 
 from styrened.tui.models.rpc import StatusResponse
 

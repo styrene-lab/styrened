@@ -9,6 +9,8 @@ Design decisions:
 - Support for message status tracking (pending/sent/delivered/failed)
 - Indexed queries by protocol_id, status, timestamp
 """
+from __future__ import annotations
+
 
 import json
 import logging

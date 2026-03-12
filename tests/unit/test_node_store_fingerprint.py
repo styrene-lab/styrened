@@ -3,6 +3,8 @@
 Tests the system_fingerprint column migration, save/retrieve, and
 schema backwards compatibility.
 """
+from __future__ import annotations
+
 
 import sqlite3
 

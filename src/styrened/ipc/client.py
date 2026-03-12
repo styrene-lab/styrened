@@ -10,6 +10,8 @@ Usage:
         devices = await client.query_devices()
         print(f"Found {len(devices)} devices")
 """
+from __future__ import annotations
+
 
 import asyncio
 import base64

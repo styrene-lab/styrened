@@ -35,6 +35,8 @@ Example (Server):
     server = RPCServer(protocol)
     server.start()
 """
+from __future__ import annotations
+
 
 # Client
 from styrened.rpc.client import RPCClient

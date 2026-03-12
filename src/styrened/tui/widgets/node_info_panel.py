@@ -5,6 +5,8 @@ into a single unified view of "this node" - the daemon behind the TUI.
 
 Uses cascade colors for theme-aware rendering.
 """
+from __future__ import annotations
+
 
 
 import RNS  # type: ignore

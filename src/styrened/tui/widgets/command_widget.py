@@ -11,6 +11,8 @@ Features:
 - Session log: Scrollable output with color-coded exit codes
 - Routes all commands through IPCBridge (daemon IPC)
 """
+from __future__ import annotations
+
 
 import logging
 import time

@@ -26,6 +26,8 @@ This design trades connection reuse for guaranteed resource cleanup and
 thread safety. SQLite connection overhead is negligible (<1ms) and eliminates
 the complexity of connection pooling for this use case.
 """
+from __future__ import annotations
+
 
 import logging
 import re

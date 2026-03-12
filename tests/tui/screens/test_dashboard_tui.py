@@ -3,6 +3,8 @@
 Home owns: local node status, recent activity, and navigation to peer workspaces.
 Peer browsing (MeshDeviceTree) belongs in ExplorationScreen (Nodes workspace).
 """
+from __future__ import annotations
+
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch

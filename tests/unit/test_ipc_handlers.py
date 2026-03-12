@@ -3,6 +3,8 @@
 Tests null checks and error handling for IPC request handlers,
 ensuring proper error responses when daemon or dependencies are unavailable.
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

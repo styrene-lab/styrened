@@ -4,6 +4,8 @@ Provides the same interface as RPCClient but returns canned offline
 responses. Used by the TUI when the daemon is not connected to the
 mesh network.
 """
+from __future__ import annotations
+
 
 import asyncio
 

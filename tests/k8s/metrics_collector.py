@@ -16,6 +16,8 @@ Usage:
 
     collector.stop()  # Writes summary.json
 """
+from __future__ import annotations
+
 
 import asyncio
 import json

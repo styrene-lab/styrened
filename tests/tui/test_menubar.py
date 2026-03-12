@@ -1,4 +1,6 @@
 """Tests for the macOS menu bar agent module."""
+from __future__ import annotations
+
 
 import time
 

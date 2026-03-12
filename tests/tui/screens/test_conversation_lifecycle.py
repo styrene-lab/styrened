@@ -5,6 +5,8 @@ These tests verify:
 - Message sending via ChatWidget's IPCBridge
 - Proper screen navigation
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 

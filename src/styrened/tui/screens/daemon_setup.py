@@ -9,6 +9,8 @@ Shown when the TUI detects no running daemon on startup. Offers three paths:
 Returns:
     True if daemon started successfully, False if skipped.
 """
+from __future__ import annotations
+
 
 from typing import ClassVar
 

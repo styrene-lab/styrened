@@ -1,4 +1,6 @@
 """Tests for the main Styrene application."""
+from __future__ import annotations
+
 
 import pytest
 

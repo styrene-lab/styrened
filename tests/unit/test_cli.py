@@ -3,6 +3,8 @@
 Tests argument parsing, command structure, and basic command behavior
 without requiring actual mesh network connectivity.
 """
+from __future__ import annotations
+
 
 import argparse
 from unittest.mock import AsyncMock, patch

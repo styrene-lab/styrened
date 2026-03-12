@@ -5,6 +5,8 @@ Tests the config path discovery and precedence logic to ensure:
 2. Standard RNS paths are checked in correct order
 3. Temp config is generated only when no existing config found
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 from unittest.mock import patch

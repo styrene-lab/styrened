@@ -10,6 +10,8 @@ Usage:
         id="terminal-widget",
     )
 """
+from __future__ import annotations
+
 
 import asyncio
 import base64

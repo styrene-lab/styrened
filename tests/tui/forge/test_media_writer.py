@@ -3,6 +3,8 @@
 Ported from styrene-edge with updated imports. All tests run without
 root, network, or real disks. Subprocess calls are patched.
 """
+from __future__ import annotations
+
 
 import stat
 from pathlib import Path

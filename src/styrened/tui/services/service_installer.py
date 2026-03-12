@@ -8,6 +8,8 @@ Supports:
     - macOS: LaunchAgent plist in ~/Library/LaunchAgents/
     - Linux: systemd user unit in ~/.config/systemd/user/
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

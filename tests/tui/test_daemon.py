@@ -1,4 +1,6 @@
 """Smoke tests for daemon module."""
+from __future__ import annotations
+
 
 import pytest
 

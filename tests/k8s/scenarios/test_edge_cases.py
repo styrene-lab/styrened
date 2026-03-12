@@ -7,6 +7,8 @@ Tests focus on failure modes, recovery, and graceful degradation:
 - Message overflow (queue saturation)
 - RNS initialization failure
 """
+from __future__ import annotations
+
 
 import asyncio
 

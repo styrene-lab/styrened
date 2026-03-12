@@ -11,6 +11,8 @@ Topology:
 Node A and Node C share NO Docker network — all traffic between them
 must be relayed by Node B's RNS transport layer.
 """
+from __future__ import annotations
+
 
 import pytest
 

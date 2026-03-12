@@ -1,4 +1,6 @@
 """Tests for screen implementations."""
+from __future__ import annotations
+
 
 import pytest
 

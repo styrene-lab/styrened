@@ -13,6 +13,8 @@ Design decisions:
 - Batches multiple message hashes per receipt for efficiency
 - Only sends receipts for messages that have been locally marked as read
 """
+from __future__ import annotations
+
 
 import logging
 import time

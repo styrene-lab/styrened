@@ -7,6 +7,8 @@ These tests verify:
 - Validation of required fields
 - Handling of missing/extra fields
 """
+from __future__ import annotations
+
 
 import pytest
 

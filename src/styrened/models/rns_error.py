@@ -3,6 +3,8 @@
 Provides a structured model for capturing and categorizing Reticulum
 initialization failures to enable informative UX for degraded states.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 from enum import Enum

@@ -3,6 +3,8 @@
 This mock provides the same interface as the real RPCClient (from Child 1)
 but with simulated responses for testing purposes.
 """
+from __future__ import annotations
+
 
 import asyncio
 

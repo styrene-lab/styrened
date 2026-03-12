@@ -3,6 +3,8 @@
 Data models for system hardware information including CPU, RAM, disks,
 and network interfaces.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 from enum import Enum

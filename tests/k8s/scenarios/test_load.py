@@ -5,6 +5,8 @@ Tests focus on throughput, scaling, and concurrency:
 - Discovery scaling (20 nodes announcing)
 - RPC concurrency (5 simultaneous exec commands)
 """
+from __future__ import annotations
+
 
 import asyncio
 import re

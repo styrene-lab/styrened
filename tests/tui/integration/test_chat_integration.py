@@ -14,6 +14,8 @@ Fixtures used from conftest.py:
 - mock_router: Mock LXMF router
 - mock_identity: Mock RNS identity
 """
+from __future__ import annotations
+
 
 from unittest.mock import Mock
 

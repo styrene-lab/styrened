@@ -3,6 +3,8 @@
 Tests that all key types (printable, arrows, function keys, ctrl combos)
 are correctly mapped to their VT100/xterm escape sequences.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock
 

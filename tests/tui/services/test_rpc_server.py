@@ -8,6 +8,8 @@ These tests verify:
 - Error handling for malformed requests
 - Timeout behavior
 """
+from __future__ import annotations
+
 
 import asyncio
 from unittest.mock import Mock, patch

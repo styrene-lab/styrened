@@ -5,6 +5,8 @@ Verifies that ygg_address and ygg_port are:
   - absent entirely (not None) when the adapter is absent or not running
   - that the 'yggdrasil' capability string is only present when running
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock
 

@@ -11,6 +11,8 @@ This covers the critical gaps identified in the test coverage assessment:
 - Gap 4: Device-side handler execution
 - Gap 5: End-to-end operator→device→operator flow
 """
+from __future__ import annotations
+
 
 import asyncio
 import json

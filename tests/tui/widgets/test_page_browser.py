@@ -2,6 +2,8 @@
 
 Covers widget initialization, page loading, navigation, and error handling.
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

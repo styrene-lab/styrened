@@ -31,6 +31,8 @@ Usage (CLI side):
         finally:
             await client.disconnect()
 """
+from __future__ import annotations
+
 
 from styrened.ipc.bridge import IPCBridge
 from styrened.ipc.client import (

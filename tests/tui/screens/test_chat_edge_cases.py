@@ -7,6 +7,8 @@ These tests cover scenarios that might cause issues:
 - Navigation robustness
 - Multi-device scenarios
 """
+from __future__ import annotations
+
 
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch

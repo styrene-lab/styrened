@@ -7,3 +7,5 @@ These tests require:
 
 Run with: make test-e2e
 """
+from __future__ import annotations
+

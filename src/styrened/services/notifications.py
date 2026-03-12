@@ -4,6 +4,8 @@ Dispatches notification events (new messages, delivery status, announces)
 to registered backends. Supports in-process callbacks for TUI/GUI embedding
 and IPC event broadcasting for connected clients.
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

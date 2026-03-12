@@ -5,6 +5,8 @@ Tests the status request RPC pattern:
 - Server responds with STATUS_RESPONSE containing same request_id
 - Client correlates response and returns StatusResponse object
 """
+from __future__ import annotations
+
 
 import pytest
 

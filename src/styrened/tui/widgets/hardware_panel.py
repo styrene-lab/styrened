@@ -3,6 +3,8 @@
 Displays compact system info in minimal space.
 Uses cascade colors for theme-aware rendering.
 """
+from __future__ import annotations
+
 
 from textual.reactive import reactive
 from textual.widgets import Static

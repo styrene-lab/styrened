@@ -1,4 +1,6 @@
 """Tests for relay data models and error hierarchy. TDD: written before implementation."""
+from __future__ import annotations
+
 
 import time
 from datetime import datetime

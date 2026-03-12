@@ -3,6 +3,8 @@
 Tests cooldown logic, LRU eviction, template formatting, and message handling.
 These are critical for preventing spam loops and unbounded memory growth.
 """
+from __future__ import annotations
+
 
 import time
 from unittest.mock import MagicMock, patch

@@ -7,6 +7,8 @@ to a fresh Unix socket connection.
 Usage:
     python3 tcp_relay.py <unix_socket_path> <tcp_port>
 """
+from __future__ import annotations
+
 
 import asyncio
 import sys

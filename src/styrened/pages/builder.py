@@ -11,6 +11,8 @@ The result is a valid NomadNet page that standard browsers render normally
 (all ``#!`` lines are invisible), while Styrene-aware clients can extract
 the embedded structured data via :func:`~styrened.pages.parser.parse_page_directives`.
 """
+from __future__ import annotations
+
 
 import base64
 import json

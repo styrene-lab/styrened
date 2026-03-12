@@ -3,6 +3,8 @@
 Tests service lifecycle, static page serving, dynamic handler dispatch,
 configuration, and destination conflict detection.
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 from unittest.mock import patch

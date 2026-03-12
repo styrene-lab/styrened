@@ -8,6 +8,8 @@ to identity_hash (RNS identity hash, 64-char hex) for canonical identity-
 based blocking.  The peer_blocks table is the authoritative block store;
 Contact.blocked/blocked_at are retained for UI display.
 """
+from __future__ import annotations
+
 
 import time
 

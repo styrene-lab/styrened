@@ -8,6 +8,8 @@ The visual differentiation uses three layers:
 2. Text style: CSS text-style (bold, italic, underline, reverse, strike)
 3. Shade pattern: Block element fill characters (▓▒░)
 """
+from __future__ import annotations
+
 
 from enum import Enum
 from typing import NamedTuple

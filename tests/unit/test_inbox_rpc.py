@@ -7,6 +7,8 @@ Tests cover:
 - Authorization: verify inbox queries require auth (not in PUBLIC_RPC_COMMANDS)
 - Error cases: conversation service unavailable, invalid peer_hash, empty inbox
 """
+from __future__ import annotations
+
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock

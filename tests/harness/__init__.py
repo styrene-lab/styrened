@@ -1,4 +1,6 @@
 """Unified test harness for styrened across SSH and Kubernetes backends."""
+from __future__ import annotations
+
 
 from .base import (
     CommandResult,

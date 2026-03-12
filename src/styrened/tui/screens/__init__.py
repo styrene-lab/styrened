@@ -1,4 +1,6 @@
 """Styrene TUI screens package."""
+from __future__ import annotations
+
 
 from styrened.tui.screens.base import (
     BridgeUnavailableError,

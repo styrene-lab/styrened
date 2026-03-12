@@ -3,6 +3,8 @@
 This package contains service modules that handle business logic,
 data loading, and external interactions.
 """
+from __future__ import annotations
+
 
 from styrened.tui.services.config import (
     config_exists,

@@ -3,6 +3,8 @@
 The ui_state package normalizes authoritative daemon/IPC snapshots into typed,
 immutable state objects that multiple frontends can consume.
 """
+from __future__ import annotations
+
 
 from styrened.ui_state.base import (
     CapabilityState,

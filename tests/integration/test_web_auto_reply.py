@@ -2,6 +2,8 @@
 
 Tests GET /api/auto-reply and POST /api/auto-reply with a test FastAPI client.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock, patch
 

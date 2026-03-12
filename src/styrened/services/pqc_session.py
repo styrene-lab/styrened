@@ -10,6 +10,8 @@ Handshake flow:
 
 Key material lives only in memory — never persisted to disk.
 """
+from __future__ import annotations
+
 
 import asyncio
 import hashlib

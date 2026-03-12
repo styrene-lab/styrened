@@ -1,4 +1,6 @@
 """Unit tests for ContactService CRUD and name resolution."""
+from __future__ import annotations
+
 
 import tempfile
 

@@ -1,4 +1,6 @@
 """Unit tests for PQC models and wire format extensions."""
+from __future__ import annotations
+
 
 import time
 

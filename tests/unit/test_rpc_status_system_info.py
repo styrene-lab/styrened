@@ -3,6 +3,8 @@
 Verifies that _gather_status() includes styrened version, hostname,
 architecture, OS, NixOS generation, CPU, and RAM.
 """
+from __future__ import annotations
+
 
 from unittest.mock import MagicMock, patch
 

@@ -23,6 +23,8 @@ Note:
 
     See: models/styrene_wire.py for the wire format implementation.
 """
+from __future__ import annotations
+
 
 from dataclasses import asdict, dataclass
 from typing import Any

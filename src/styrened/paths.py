@@ -28,6 +28,8 @@ STYRENE_HOME is useful for containers where all state lives under
 a single mount: STYRENE_HOME=/app/data gives config/, data/, state/,
 run/ subdirectories.
 """
+from __future__ import annotations
+
 
 import enum
 import logging

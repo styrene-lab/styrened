@@ -1,4 +1,6 @@
 """Tests for MeshVPN service — WireGuard mesh VPN bootstrapped over RNS.Link."""
+from __future__ import annotations
+
 
 import json
 from unittest.mock import patch

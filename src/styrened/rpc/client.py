@@ -24,6 +24,8 @@ Usage:
     # Execute command
     result = await rpc_client.call_exec(device_hash, "systemctl", ["status", "reticulum"])
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

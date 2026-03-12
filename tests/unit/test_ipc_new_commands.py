@@ -3,6 +3,8 @@
 Tests: GET_NODES, GET_CORE_CONFIG, SAVE_CORE_CONFIG, GET_HUB_STATUS, GET_UNREAD_COUNTS.
 Each handler is tested in isolation with mocked daemon services.
 """
+from __future__ import annotations
+
 
 import time
 from unittest.mock import MagicMock, patch

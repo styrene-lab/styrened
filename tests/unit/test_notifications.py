@@ -1,4 +1,6 @@
 """Unit tests for NotificationService and backends."""
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock
 

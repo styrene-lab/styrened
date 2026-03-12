@@ -9,6 +9,8 @@ Usage:
     handlers = IPCHandlers(daemon)
     response = await handlers.handle_query_devices(request)
 """
+from __future__ import annotations
+
 
 import asyncio
 import base64

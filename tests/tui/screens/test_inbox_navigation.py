@@ -5,6 +5,8 @@ These tests verify:
 - Correct peer identity passed to conversation screen
 - Proper screen stack management
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 

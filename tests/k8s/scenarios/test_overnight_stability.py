@@ -36,6 +36,8 @@ Network topology:
     - Peers: Connect to hub via TCPClientInterface
     This avoids multicast/AutoInterface issues in containerized environments.
 """
+from __future__ import annotations
+
 
 import asyncio
 

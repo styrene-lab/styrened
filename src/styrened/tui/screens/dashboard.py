@@ -3,6 +3,8 @@
 Home shows the local node status, unread summary, and recent activity.
 Peer browsing lives in the Nodes workspace (ExplorationScreen).
 """
+from __future__ import annotations
+
 
 from typing import Any, ClassVar
 

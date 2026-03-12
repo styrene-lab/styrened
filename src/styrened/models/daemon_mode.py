@@ -6,6 +6,8 @@ without creating a circular dependency through services/__init__.py.
 The canonical public API remains styrened.services.daemon_adapter.DaemonMode,
 which re-exports this enum.
 """
+from __future__ import annotations
+
 
 from enum import Enum
 

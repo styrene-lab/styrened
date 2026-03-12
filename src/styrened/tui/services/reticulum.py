@@ -9,6 +9,8 @@ TUI-specific additions:
 - initialize_reticulum_with_config() - wrapper accepting StyreneConfig
 - First-run wizard helpers for config generation
 """
+from __future__ import annotations
+
 
 import logging
 import tempfile

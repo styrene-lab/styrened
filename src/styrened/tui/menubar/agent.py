@@ -8,6 +8,8 @@ Architecture:
 - asyncio event loop runs in a background thread for IPC
 - Thread-safe communication via rumps.Timer polling + shared state
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging

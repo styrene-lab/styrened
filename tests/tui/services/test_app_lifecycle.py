@@ -8,6 +8,8 @@ These tests verify:
 - Property accessors
 - Backward-compatible utility functions
 """
+from __future__ import annotations
+
 
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch

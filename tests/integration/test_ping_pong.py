@@ -6,6 +6,8 @@ This validates:
 - StyreneProtocol message routing
 - Request correlation via request_id
 """
+from __future__ import annotations
+
 
 import pytest
 

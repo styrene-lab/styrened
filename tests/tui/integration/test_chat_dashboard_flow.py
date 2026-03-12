@@ -7,6 +7,8 @@ These tests verify the complete user journey:
 4. User sends/receives messages
 5. User returns to dashboard with updated state
 """
+from __future__ import annotations
+
 
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch

@@ -3,6 +3,8 @@
 Tests binary presence, integrity (SHA-256), version checking,
 and --fix provisioning for adapter binaries (yggdrasil, i2pd).
 """
+from __future__ import annotations
+
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

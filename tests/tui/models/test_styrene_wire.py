@@ -1,4 +1,6 @@
 """Tests for Styrene wire format."""
+from __future__ import annotations
+
 
 import pytest
 

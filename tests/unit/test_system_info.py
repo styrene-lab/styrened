@@ -3,6 +3,8 @@
 Tests OS detection, NixOS generation extraction, and system fingerprint
 generation for announce data and status responses.
 """
+from __future__ import annotations
+
 
 from unittest.mock import mock_open, patch
 

@@ -5,6 +5,8 @@ from being incorrectly parsed as True.
 
 Also tests config_path_override parsing for RNS configuration.
 """
+from __future__ import annotations
+
 
 import tempfile
 from pathlib import Path

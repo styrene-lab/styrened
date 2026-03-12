@@ -4,6 +4,8 @@ This module contains configuration models that are shared between
 headless (core) and TUI applications. TUI-specific config is in
 styrene-tui/src/styrene/models/config.py.
 """
+from __future__ import annotations
+
 
 import re
 from dataclasses import dataclass, field

@@ -12,6 +12,8 @@ Architecture:
 This follows the terminal service pattern for link negotiation,
 identity verification, and thread-safe asyncio interaction.
 """
+from __future__ import annotations
+
 
 import asyncio
 import hashlib

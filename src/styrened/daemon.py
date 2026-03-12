@@ -21,6 +21,8 @@ RPC commands:
 Dependencies:
     - styrene-core only (no textual, lightweight)
 """
+from __future__ import annotations
+
 
 import asyncio
 import json

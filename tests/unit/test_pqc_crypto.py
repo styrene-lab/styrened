@@ -1,4 +1,6 @@
 """Unit tests for PQC cryptographic primitives."""
+from __future__ import annotations
+
 
 import pytest
 

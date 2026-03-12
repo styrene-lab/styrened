@@ -3,6 +3,8 @@
 Tests the read receipt protocol for sending and receiving
 message read acknowledgments.
 """
+from __future__ import annotations
+
 
 import tempfile
 from unittest.mock import MagicMock

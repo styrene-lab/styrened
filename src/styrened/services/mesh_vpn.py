@@ -13,6 +13,8 @@ Key exchange happens as end-to-end encrypted LXMF messages routed through
 any available hub — no direct RNS.Link connection needed per peer. The hub
 acts as a signaling server; WireGuard data flows directly peer-to-peer.
 """
+from __future__ import annotations
+
 
 import base64
 import hashlib

@@ -9,6 +9,8 @@ links, form fields, literal blocks, dividers, and page directives.
 
 Reference: NomadNet MicronParser.py
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto

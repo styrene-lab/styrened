@@ -9,6 +9,8 @@ Threading Model:
     Runs as a daemon thread. Uses NodeStore's thread-safe write methods.
     The RNS path table API is read-only and thread-safe.
 """
+from __future__ import annotations
+
 
 import logging
 import threading

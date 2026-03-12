@@ -15,6 +15,8 @@ Usage:
     for finding in report.findings:
         print(f"[{finding.severity.value}] {finding.message}")
 """
+from __future__ import annotations
+
 
 import logging
 import os

@@ -12,6 +12,8 @@ Usage:
     topo = presets.star_hub(peer_count=5)
     # -> MeshTopology with 1 hub + 5 peers on a single network
 """
+from __future__ import annotations
+
 
 from .presets import (
     linear_chain,
