@@ -75,6 +75,14 @@ spec:
                   value: comprehensive
                 - name: timeout
                   value: "3600"
+          # Operator interface path tests (TUI pilot + live daemon)
+          - name: operator-paths
+            template: run-operator-paths
+            depends: "smoke.Succeeded"
+            arguments:
+              parameters:
+                - name: timeout
+                  value: "300"
           # Build + push nightly OCI after tests pass
           - name: build
             template: nix-build-oci
@@ -106,6 +114,44 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+
+    - name: run-operator-paths
+      inputs:
+        parameters:
+          - name: timeout
+      activeDeadlineSeconds: "{{inputs.parameters.timeout}}"
+      container:
+        image: python:3.11-slim
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+
+            cd /workspace/src
+
+            # Install styrened with TUI + test dependencies
+            pip install --quiet -e ".[tui,dev]" 2>&1 | tail -5
+            pip install --quiet pytest pytest-asyncio pyyaml 2>&1 | tail -2
+
+            echo "Running operator path tests..."
+            mkdir -p /workspace/results
+
+            python -m pytest tests/tui/operator/ \
+              -m operator_path -v --tb=short \
+              --junitxml=/workspace/results/operator-paths-results.xml \
+              2>&1 | tee /workspace/results/operator-paths-output.log
+
+            echo "exit_code=$?" > /workspace/results/operator-paths-status
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
 
     - name: run-tests
       inputs:

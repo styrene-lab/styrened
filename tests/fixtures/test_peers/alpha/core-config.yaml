@@ -1,0 +1,38 @@
+# Test Peer Alpha — ADMIN-tier test peer
+# Identity hash: e426a96311c5ea0e7644317040455b39
+# Transport config is overlaid at test time (see tests/fixtures/transports/)
+
+identity:
+  display_name: "🤖 Test Peer Alpha"
+  short_name: "ALPHA"
+  icon: "🤖"
+
+reticulum:
+  mode: standalone
+  announce_interval: 1
+  interfaces:
+    auto: false
+    server:
+      enabled: true
+      listen_ip: 127.0.0.1
+      port: 0  # Dynamic — harness allocates and overwrites
+
+rpc:
+  enabled: true
+  allow_command_execution: true
+
+discovery:
+  enabled: true
+
+chat:
+  enabled: true
+  auto_reply_mode: always
+  auto_reply_message: "Roger that — Test Peer Alpha received your transmission. Standing by."
+  auto_reply_cooldown: 1
+
+lxmf:
+  propagation_node:
+    enabled: false
+
+api:
+  enabled: false

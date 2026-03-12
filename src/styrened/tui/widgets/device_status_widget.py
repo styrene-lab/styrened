@@ -143,7 +143,7 @@ class DeviceStatusWidget(Static):
         elif self.error:
             lines.append(f"  [{cascade.dim}]⚠ {self.error}[/]")
         elif s:
-            if s.hostname:
+            if getattr(s, "hostname", None):
                 lines.append(f"  Host: [{cascade.medium}]{s.hostname}[/]")
             if s.uptime == -1:
                 lines.append(f"  Uptime: [{cascade.dim}]unknown[/]")

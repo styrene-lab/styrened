@@ -1,0 +1,35 @@
+# Test Host — the operator under test (TUI user)
+# Identity hash: 1c2a8ad3dce089023a779f84335bba86
+# Transport config is overlaid at test time (see tests/fixtures/transports/)
+
+identity:
+  display_name: "Test Operator"
+  short_name: "HOST"
+  icon: "🖥️"
+
+reticulum:
+  mode: standalone
+  announce_interval: 1
+  interfaces:
+    auto: false
+    server:
+      enabled: false
+    peers: []  # Populated by transport overlay at test time
+
+rpc:
+  enabled: true
+  allow_command_execution: true
+
+discovery:
+  enabled: true
+
+chat:
+  enabled: true
+  auto_reply_mode: disabled
+
+lxmf:
+  propagation_node:
+    enabled: false
+
+api:
+  enabled: false
