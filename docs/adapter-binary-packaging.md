@@ -1,12 +1,12 @@
 ---
 id: adapter-binary-packaging
 title: "Adapter Binary Packaging &amp; Provisioning Strategy"
-status: exploring
+status: implementing
 parent: operator-interface-testing
 tags: [packaging, i2p, yggdrasil, airgap, provisioning]
-open_questions:
-  - "Q4: What architectures must air-gapped bundles cover? Minimum: linux/amd64, linux/arm64 (Pi 4B). Extended: linux/armv6l (Pi Zero 2W), darwin/arm64 (dev machines). Each binary × arch = a build matrix entry."
-  - "Q7: What's the TUI provisioning UX? A screen/modal in Settings? A doctor --fix flow? A dedicated Forge-like provisioner widget? Must show progress (download/extract), handle errors (no internet in air-gap, wrong arch), and report success to the operator."
+open_questions: []
+branches: ["feature/adapter-binary-packaging"]
+openspec_change: adapter-binary-packaging
 ---
 
 # Adapter Binary Packaging &amp; Provisioning Strategy
@@ -238,7 +238,16 @@ In air-gapped deployments, binaries arrive via USB stick or Nix closure. The Nix
 **Status:** decided
 **Rationale:** Explicit config is highest priority (operator knows best). ~/.styrene/bin/ is user-local provisioned binaries (no root). System PATH enables ADOPT mode for system-installed binaries. Nix store is fallback for NixOS/nix-profile installs.
 
+### Decision: Q4: 4-arch matrix, oversupport rather than undersupport
+
+**Status:** decided
+**Rationale:** Manifest covers linux/amd64, linux/arm64, linux/armhf, darwin/arm64. armhf included despite styrene-edge targeting aarch64 NixOS — valid target for 32-bit Raspbian users. Nix handles the happy path for most instances; the SHA-256 manifest matters for Tier 2 (BinaryProvisioner) downloads. darwin/amd64 omitted (dying platform, brew covers it if needed).
+
+### Decision: Q7: Settings toggle + doctor --fix combo
+
+**Status:** decided
+**Rationale:** Primary path: Settings → Network → Transport panel toggle. When enabled and binary not found, progress modal handles download/extract/verify/install to ~/.styrene/bin/. Diagnostic path: styrened doctor detects missing binary, offers --fix acquisition. Forge-like dedicated widget rejected as overkill for single-binary downloads.
+
 ## Open Questions
 
-- Q4: What architectures must air-gapped bundles cover? Minimum: linux/amd64, linux/arm64 (Pi 4B). Extended: linux/armv6l (Pi Zero 2W), darwin/arm64 (dev machines). Each binary × arch = a build matrix entry.
-- Q7: What's the TUI provisioning UX? A screen/modal in Settings? A doctor --fix flow? A dedicated Forge-like provisioner widget? Must show progress (download/extract), handle errors (no internet in air-gap, wrong arch), and report success to the operator.
+*No open questions.*
