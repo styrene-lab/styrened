@@ -20,7 +20,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from styrened.models.config import YggdrasilConfig
+from styrened.models.config import CoreConfig, YggdrasilConfig
+from styrened.services.binary_errors import BinaryIntegrityError
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode
 
 log = logging.getLogger(__name__)
@@ -59,9 +60,15 @@ class YggdrasilAdapter(DaemonAdapter):
 
     warm_up_seconds: float = 30.0
 
-    def __init__(self, config: YggdrasilConfig) -> None:
+    def __init__(
+        self,
+        config: YggdrasilConfig,
+        *,
+        core_config: "CoreConfig | None" = None,
+    ) -> None:
         super().__init__(config.mode)
         self._config = config
+        self._core_config = core_config
         self._local_address: str | None = None
         self._active_socket: Path | None = None  # set by _probe()
 
@@ -158,6 +165,7 @@ class YggdrasilAdapter(DaemonAdapter):
         """Start the yggdrasil process (MANAGED mode only).
 
         Fails fast if the binary is not found — does NOT provision.
+        Verifies binary integrity before launch when core_config is available.
         """
         binary = self._find_binary()
         if binary is None:
@@ -167,6 +175,17 @@ class YggdrasilAdapter(DaemonAdapter):
                 f"and Nix store). "
                 f"Run 'styrened setup --enable yggdrasil' to install."
             )
+
+        # Binary integrity verification
+        if self._core_config is not None:
+            result = self.verify_binary_integrity("yggdrasil", binary)
+            if result is None:
+                log.debug("Skipping binary verification for yggdrasil (not in manifest)")
+            elif result is False:
+                strict = self._core_config.security.strict_binary_verification
+                if strict:
+                    raise BinaryIntegrityError("yggdrasil", "<manifest>", "<actual>")
+                log.warning("Yggdrasil binary integrity mismatch — starting anyway (strict=false)")
 
         self._ensure_yggdrasil_config()
 

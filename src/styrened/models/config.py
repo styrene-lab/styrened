@@ -786,6 +786,19 @@ class GroupThreadsConfig:
 
 
 @dataclass
+@dataclass
+class SecurityConfig:
+    """Security-related configuration.
+
+    Attributes:
+        strict_binary_verification: When True, refuse to start managed
+            adapters whose binary SHA-256 doesn't match the manifest.
+            When False (default), log a WARNING but start anyway.
+    """
+
+    strict_binary_verification: bool = False
+
+
 class LoggingConfig:
     """Logging subsystem configuration.
 
@@ -846,6 +859,7 @@ class CoreConfig:
     i2p: I2PConfig = field(default_factory=I2PConfig)
     group_threads: GroupThreadsConfig = field(default_factory=GroupThreadsConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize CoreConfig to a dictionary suitable for YAML output.
