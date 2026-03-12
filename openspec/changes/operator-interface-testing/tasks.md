@@ -44,7 +44,7 @@ Phase 1: Single-peer TCP localhost. Full daemon subprocess + TUI pilot.
 
 - [x] 5.1 Add `operator-paths` task to nightly DAG in `.argo/workflows/nightly-tests.yaml`
 - [x] 5.2 Install styrened[tui] + test deps in the workflow step
-- [ ] 5.3 Verify daemon subprocess starts inside CI container (standalone mode, no shared instance)
+- [ ] 5.3 Verify daemon subprocess starts inside CI container (standalone mode, no shared instance) — requires actual CI run
 - [x] 5.4 JUnit XML output to `/workspace/results/operator-paths-results.xml`
 - [x] 5.5 Update cron-nightly.yaml comment to document the new tier
 

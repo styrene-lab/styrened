@@ -75,6 +75,10 @@ spec:
                   value: comprehensive
                 - name: timeout
                   value: "3600"
+          # Operator interface tests (daemon subprocess + TUI pilot)
+          - name: operator-paths
+            template: run-operator-paths
+            depends: "checkout"
           # Build + push nightly OCI after tests pass
           - name: build
             template: nix-build-oci
@@ -136,6 +140,34 @@ spec:
               --junitxml=/workspace/results/${MARKER}-results.xml \
               2>&1 | tee /workspace/results/${MARKER}-output.log
             echo "exit_code=$?" > /workspace/results/${MARKER}-status
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
+
+    - name: run-operator-paths
+      activeDeadlineSeconds: "600"
+      container:
+        image: python:3.11-slim
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            cd /workspace/src
+            pip install --quiet -e ".[tui,dev]"
+            mkdir -p /workspace/results
+
+            echo "Running operator interface tests..."
+            python -m pytest tests/tui/operator/ -v --tb=short \
+              --junitxml=/workspace/results/operator-paths-results.xml \
+              2>&1 | tee /workspace/results/operator-paths-output.log
+            echo "exit_code=$?" > /workspace/results/operator-paths-status
         volumeMounts:
           - name: workspace
             mountPath: /workspace
