@@ -117,7 +117,13 @@ class YggdrasilAdapter(DaemonAdapter):
         return MANAGED_ADMIN_SOCKET
 
     def _ensure_yggdrasil_config(self) -> None:
-        """Write the yggdrasil.conf for the managed instance."""
+        """Write the yggdrasil.conf for the managed instance.
+
+        Sets ``IfName`` to ``"none"`` to skip TUN device creation, which
+        requires root.  Styrened uses Yggdrasil purely as an overlay peer
+        network — RNS peers over Yggdrasil's TCP listener, not via the
+        TUN/IPv6 stack.
+        """
         config_dir = self._managed_config_dir()
         self._ensure_config_dir(config_dir)
 
@@ -128,6 +134,7 @@ class YggdrasilAdapter(DaemonAdapter):
             f'  "Listen": ["tcp://0.0.0.0:{MANAGED_PORT}"],\n'
             f'  "AdminListen": "unix://{self._managed_socket_path()}",\n'
             f'  "Peers": {peers_json},\n'
+            f'  "IfName": "none",\n'
             f'  "MulticastInterfaces": [\n'
             f'    {{\n'
             f'      "Regex": ".*",\n'
@@ -231,17 +238,26 @@ class YggdrasilAdapter(DaemonAdapter):
         try:
             self_info = await self._admin_call("getSelf")
             if self_info:
-                addr = self_info.get("address") or self_info.get("self", {}).get("address")
+                # Response format: {"status":"success","response":{"address":"...","key":"..."}}
+                resp = self_info.get("response", self_info)
+                addr = resp.get("address") or resp.get("self", {}).get("address")
                 if addr:
                     self._local_address = addr
                     details["address"] = addr
+                key = resp.get("key")
+                if key:
+                    details["public_key"] = key
+                version = resp.get("build_version")
+                if version:
+                    details["version"] = version
         except Exception as exc:
             log.debug("getSelf failed: %s", exc)
 
         try:
             peers_info = await self._admin_call("getPeers")
             if peers_info is not None:
-                peers = peers_info.get("peers", peers_info if isinstance(peers_info, list) else [])
+                resp = peers_info.get("response", peers_info)
+                peers = resp.get("peers", resp if isinstance(resp, list) else [])
                 details["peer_count"] = len(peers)
         except Exception as exc:
             log.debug("getPeers failed: %s", exc)

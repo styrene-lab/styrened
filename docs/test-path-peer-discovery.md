@@ -1,7 +1,7 @@
 ---
 id: test-path-peer-discovery
 title: "Test Path: Peer Discovery &amp; Node Detail"
-status: exploring
+status: decided
 parent: operator-interface-testing
 open_questions: []
 ---

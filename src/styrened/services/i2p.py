@@ -42,7 +42,7 @@ port = {http_proxy_port}
 enabled = true
 port = {i2pcontrol_port}
 
-[httpserver]
+[http]
 enabled = true
 
 [sam]
