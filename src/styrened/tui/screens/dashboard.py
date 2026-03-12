@@ -239,22 +239,24 @@ class DashboardScreen(Screen[None]):
                     try:
                         if isinstance(d, MeshDevice):
                             nodes.append(d)
-                        elif isinstance(d, dict):
-                            nodes.append(MeshDevice.from_dict(d))
-                        elif hasattr(d, "destination_hash"):
-                            # DeviceInfo dataclass from IPC bridge
-                            nodes.append(MeshDevice.from_dict({
-                                "destination_hash": getattr(d, "destination_hash", ""),
-                                "identity_hash": getattr(d, "identity_hash", ""),
-                                "name": getattr(d, "name", ""),
-                                "device_type": getattr(d, "device_type", "unknown"),
-                                "status": getattr(d, "status", "active"),
-                                "last_announce": getattr(d, "last_announce", 0),
-                                "discovered_via": getattr(d, "discovered_via", None),
-                                "hops": getattr(d, "hops", None),
-                                "version": getattr(d, "version", None),
-                                "lxmf_destination_hash": getattr(d, "lxmf_destination_hash", None),
-                            }))
+                        else:
+                            # DeviceInfo dataclass or dict from IPC bridge
+                            dt_str = _get(d, "device_type", "unknown")
+                            try:
+                                from styrened.models.mesh_device import DeviceType
+                                dt = DeviceType(dt_str)
+                            except (ValueError, KeyError):
+                                dt = DeviceType.UNKNOWN
+                            nodes.append(MeshDevice(
+                                destination_hash=_get(d, "destination_hash", ""),
+                                identity_hash=_get(d, "identity_hash", ""),
+                                name=_get(d, "name", ""),
+                                device_type=dt,
+                                last_announce=int(_get(d, "last_announce", 0)),
+                                discovered_via=_get(d, "discovered_via", None),
+                                hops=_get(d, "hops", None),
+                                lxmf_destination_hash=_get(d, "lxmf_destination_hash", None),
+                            ))
                     except Exception:
                         pass
 
