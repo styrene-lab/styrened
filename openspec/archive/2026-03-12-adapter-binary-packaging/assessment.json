@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "changeName": "adapter-binary-packaging",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T16:06:27.916Z",
+  "summary": "All 20/20 spec scenarios pass. 3238 unit tests green. Manifest schema, provisioner core, startup verification, doctor checks, RPC CMD_PROVISION, TUI modal, Settings toggles — all implemented and tested.",
+  "snapshot": {
+    "gitHead": "948f90f43910f34876840c57e5c9fe7036a41fcd",
+    "fingerprint": "775fb3ff9d723c746d44f5dd7810fc4cf227194577fe3a4099fbc7608755012a",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/adapter-binary-packaging/design.md",
+        "exists": true,
+        "size": 3167,
+        "sha256": "561ec39273b11d79f9b2ab5b42dcb170ca89a2fce2f34c2ba8131b5eb872d219"
+      },
+      {
+        "path": "openspec/changes/adapter-binary-packaging/proposal.md",
+        "exists": true,
+        "size": 273,
+        "sha256": "cd2ade134c6505590a8ded49d12ec3bc57e4a10466eed6655c749902d75d5bde"
+      },
+      {
+        "path": "openspec/changes/adapter-binary-packaging/specs/provisioner.md",
+        "exists": true,
+        "size": 4802,
+        "sha256": "f5625e567ed8b03265ad31e9f4c3ab73121922644e4fb504de5affd566debdf4"
+      },
+      {
+        "path": "openspec/changes/adapter-binary-packaging/specs/tui-provisioning.md",
+        "exists": true,
+        "size": 2720,
+        "sha256": "d0501498ebf5f2c7f0573a12bbbe15ce3b98a70da520eaa08a13e5a70a7b51bf"
+      },
+      {
+        "path": "openspec/changes/adapter-binary-packaging/tasks.md",
+        "exists": true,
+        "size": 2718,
+        "sha256": "8783b8cc50f2bd78e0edbf9f9c1faf92d5e7358a2bebf17695e523513ed81aef"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

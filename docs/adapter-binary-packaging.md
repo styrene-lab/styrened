@@ -1,7 +1,7 @@
 ---
 id: adapter-binary-packaging
 title: "Adapter Binary Packaging &amp; Provisioning Strategy"
-status: implementing
+status: implemented
 parent: operator-interface-testing
 tags: [packaging, i2p, yggdrasil, airgap, provisioning]
 open_questions: []
