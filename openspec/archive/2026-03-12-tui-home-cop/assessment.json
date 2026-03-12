@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tui-home-cop",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T17:19:59.270Z",
+  "summary": "All 19 spec scenarios verified. COP layout complete. 66 tests passing.",
+  "snapshot": {
+    "gitHead": "cb1da38895b7540b3a6ee6e58f480a0bf0f01988",
+    "fingerprint": "c920a174a6f2538dbbe27ca5153e74ce3d817b2ef9fcea87961e3bb377106a89",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/tui-home-cop/design.md",
+        "exists": true,
+        "size": 4071,
+        "sha256": "75e3cce55ba497aeccb83f203a033679109710b03aa249a611802abf9bcd2109"
+      },
+      {
+        "path": "openspec/changes/tui-home-cop/proposal.md",
+        "exists": true,
+        "size": 1013,
+        "sha256": "c87da43217394e55dc4c7a79442438758462d5ebc7161dcb24e05a062f3814d9"
+      },
+      {
+        "path": "openspec/changes/tui-home-cop/specs/home-layout-nav.md",
+        "exists": true,
+        "size": 2782,
+        "sha256": "4824d75bb322cd63c69476785f534c428441c17617b6fa7b02de378621bfd6f5"
+      },
+      {
+        "path": "openspec/changes/tui-home-cop/specs/home-node-summary.md",
+        "exists": true,
+        "size": 2438,
+        "sha256": "623266f554be91d8f6968ddd1a13b4b1446688efa5db812cb94e645d73c6c0f7"
+      },
+      {
+        "path": "openspec/changes/tui-home-cop/specs/home-status-bar.md",
+        "exists": true,
+        "size": 2900,
+        "sha256": "3f3725a7405dc3f6f0f994eb756074f85e9083905e24ec676e56f04edba63be2"
+      },
+      {
+        "path": "openspec/changes/tui-home-cop/tasks.md",
+        "exists": true,
+        "size": 6018,
+        "sha256": "03110f215c556e61e5d1cf6a8bc2bca2df9521bd4eb395f995c40b55cb1e485a"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
