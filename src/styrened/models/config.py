@@ -798,6 +798,7 @@ class SecurityConfig:
     strict_binary_verification: bool = False
 
 
+@dataclass
 class LoggingConfig:
     """Logging subsystem configuration.
 
@@ -1113,6 +1114,16 @@ class CoreConfig:
                 "background_catchup": self.group_threads.background_catchup,
                 "first_run_auto_tier": self.group_threads.first_run_auto_tier,
             },
+        }
+
+        # Security section
+        result["security"] = {
+            "strict_binary_verification": self.security.strict_binary_verification,
+        }
+
+        # Logging section
+        result["logging"] = {
+            "boundary_sink": self.logging.boundary_sink,
         }
 
         # Serialize RBAC policy

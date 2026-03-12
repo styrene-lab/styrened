@@ -1286,7 +1286,7 @@ class StyreneDaemon:
         try:
             from styrened.services.i2p import I2PAdapter
 
-            self._i2p_adapter = I2PAdapter(self.config.i2p)
+            self._i2p_adapter = I2PAdapter(self.config.i2p, core_config=self.config)
             await self._i2p_adapter.start()
 
             # Warm status cache opportunistically so announce/meta can use
@@ -1330,7 +1330,7 @@ class StyreneDaemon:
         try:
             from styrened.services.yggdrasil import YggdrasilAdapter
 
-            self._ygg_adapter = YggdrasilAdapter(self.config.yggdrasil)
+            self._ygg_adapter = YggdrasilAdapter(self.config.yggdrasil, core_config=self.config)
             await self._ygg_adapter.start()
 
             # Warm status cache so announce/meta can use cached address/peers
