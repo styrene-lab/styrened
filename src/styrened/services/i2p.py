@@ -15,11 +15,12 @@ Warm-up: i2pd requires ~8 minutes on first start to build its router table.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import shutil
 import signal
 import socket
-import json
 import struct
 from pathlib import Path
 
@@ -27,6 +28,9 @@ from styrened.models.config import I2PConfig
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode
 
 log = logging.getLogger(__name__)
+
+# User-local binary location for provisioned binaries
+_STYRENE_BIN = Path.home() / ".styrene" / "bin"
 
 _I2PD_CONF_TEMPLATE = """\
 # i2pd configuration managed by styrened — do not edit manually.
@@ -74,15 +78,36 @@ class I2PAdapter(DaemonAdapter):
         self._conf_path.chmod(0o600)
 
     # ------------------------------------------------------------------
+    # Binary discovery
+    # ------------------------------------------------------------------
+
+    def _find_binary(self) -> str | None:
+        """Locate the i2pd binary.
+
+        Search order:
+        1. ~/.styrene/bin/i2pd (user-local provisioned)
+        2. System PATH via shutil.which()
+        """
+        styrene_bin = _STYRENE_BIN / "i2pd"
+        if styrene_bin.exists() and os.access(styrene_bin, os.X_OK):
+            return str(styrene_bin)
+
+        found = shutil.which("i2pd")
+        if found is not None:
+            return found
+
+        return None
+
+    # ------------------------------------------------------------------
     # DaemonAdapter abstract methods
     # ------------------------------------------------------------------
 
     async def _start_managed(self) -> None:
         """Start managed i2pd process. Fails fast if binary is missing."""
-        binary = shutil.which("i2pd")
+        binary = self._find_binary()
         if binary is None:
             raise RuntimeError(
-                "i2pd binary not found in PATH. "
+                "i2pd binary not found in PATH or ~/.styrene/bin/. "
                 "Run 'styrened setup --enable i2p' for installation instructions."
             )
         self._generate_i2pd_conf()
@@ -286,19 +311,22 @@ class I2PAdapter(DaemonAdapter):
 
     async def provision(self) -> None:
         """Check for i2pd binary. Print instructions if not found. Does NOT install."""
-        binary = shutil.which("i2pd")
+        binary = self._find_binary()
         if binary is not None:
             log.info("i2pd found at %s", binary)
             print(f"✓ i2pd found at {binary}")
             return
 
         print(
-            "✗ i2pd binary not found in PATH.\n"
+            "✗ i2pd binary not found.\n"
             "\n"
             "To install i2pd:\n"
             "  Nix:     nix profile install nixpkgs#i2pd\n"
             "  Debian:  sudo apt install i2pd\n"
             "  macOS:   brew install i2pd\n"
+            "\n"
+            "Or use the built-in provisioner:\n"
+            "  styrened setup --enable i2p\n"
             "\n"
             "Note: i2pd requires 5–10 minutes to warm up after first start."
         )

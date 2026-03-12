@@ -195,6 +195,7 @@ class StyreneDaemon:
         self._mesh_vpn_service: Any = None  # WireGuard mesh VPN service
         self._relay_service: Any = None  # TURN-style relay service
         self._i2p_adapter: Any = None  # Optional I2P adapter
+        self._ygg_adapter: Any = None  # Optional Yggdrasil adapter
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
         self._boundary_handler: BoundaryLogHandler | None = None  # Set in main()
 
@@ -221,8 +222,9 @@ class StyreneDaemon:
         # Start RPC server for incoming requests
         self._start_rpc_server()
 
-        # Start optional I2P integration early so announce/meta can surface it
+        # Start optional overlay adapters early so announce/meta can surface them
         await self._start_i2p_adapter()
+        await self._start_yggdrasil_adapter()
 
         # Inject RBAC policy into LXMF service — must happen before any
         # message processing begins, regardless of chat.enabled state.
@@ -1318,6 +1320,52 @@ class StyreneDaemon:
                     pass
             self._i2p_adapter = None
 
+    async def _start_yggdrasil_adapter(self) -> None:
+        """Start and inject the optional Yggdrasil adapter.
+
+        Like I2P, the adapter is started before discovery so local announces
+        and ``/meta`` can immediately advertise Yggdrasil when a local address
+        is known.
+        """
+        try:
+            from styrened.services.yggdrasil import YggdrasilAdapter
+
+            self._ygg_adapter = YggdrasilAdapter(self.config.yggdrasil)
+            await self._ygg_adapter.start()
+
+            # Warm status cache so announce/meta can use cached address/peers
+            try:
+                await self._ygg_adapter.status()
+            except Exception:
+                pass
+
+            if self._rpc_server is not None:
+                self._rpc_server.set_ygg_adapter(self._ygg_adapter)
+
+            logger.info(
+                "Yggdrasil adapter initialized (mode=%s)",
+                self.config.yggdrasil.mode.value,
+            )
+        except Exception as e:
+            logger.error(f"Failed to start Yggdrasil adapter: {e}")
+            self._ygg_adapter = None
+
+    async def _stop_yggdrasil_adapter(self) -> None:
+        """Stop the optional Yggdrasil adapter if it is running."""
+        if self._ygg_adapter is None:
+            return
+        try:
+            await self._ygg_adapter.stop()
+        except Exception as e:
+            logger.error(f"Error stopping Yggdrasil adapter: {e}")
+        finally:
+            if self._rpc_server is not None:
+                try:
+                    self._rpc_server.set_ygg_adapter(None)
+                except Exception:
+                    pass
+            self._ygg_adapter = None
+
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
 
@@ -2170,18 +2218,15 @@ class StyreneDaemon:
         if self.config.chat.auto_reply_mode != AutoReplyMode.DISABLED:
             capabilities.append("autoreply")
 
-        # Advertise Yggdrasil capability if local adapter is live
+        # Advertise overlay capabilities if local adapters are live
         try:
             from styrened.models.capabilities import CAPABILITY_I2P, CAPABILITY_YGGDRASIL
-            from styrened.services.yggdrasil import YggdrasilAdapter
 
-            ygg: YggdrasilAdapter | None = getattr(self, "_ygg_adapter", None)
-            if ygg is not None and ygg.get_local_address() is not None:
+            if self._ygg_adapter is not None and self._ygg_adapter.get_local_address() is not None:
                 capabilities.append(CAPABILITY_YGGDRASIL)
 
-            i2p = getattr(self, "_i2p_adapter", None)
-            if i2p is not None:
-                b32 = i2p.get_b32_address() if hasattr(i2p, "get_b32_address") else None
+            if self._i2p_adapter is not None:
+                b32 = self._i2p_adapter.get_b32_address() if hasattr(self._i2p_adapter, "get_b32_address") else None
                 if b32:
                     capabilities.append(CAPABILITY_I2P)
         except Exception:
@@ -2419,8 +2464,9 @@ class StyreneDaemon:
             self._relay_service = None
             logger.info("Relay service stopped")
 
-        # Stop optional I2P adapter
+        # Stop optional overlay adapters
         await self._stop_i2p_adapter()
+        await self._stop_yggdrasil_adapter()
 
         # Stop direct link service
         if self._direct_link_service:
