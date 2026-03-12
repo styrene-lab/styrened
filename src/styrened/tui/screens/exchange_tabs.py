@@ -301,6 +301,7 @@ class ExchangeContactsTab(Widget):
                 DataTable(id="contacts-table"),
                 title="CONTACTS",
                 id="contacts-panel",
+                classes="panel-info",
             )
 
             # Edit form (hidden by default)
@@ -317,6 +318,7 @@ class ExchangeContactsTab(Widget):
                 ),
                 title="EDIT CONTACT",
                 id="edit-form-panel",
+                classes="panel-interactive",
             )
 
             # Resolve panel (hidden by default)
@@ -331,6 +333,7 @@ class ExchangeContactsTab(Widget):
                 ),
                 title="RESOLVE NAME",
                 id="resolve-panel-container",
+                classes="panel-interactive",
             )
 
     def on_mount(self) -> None:

@@ -271,6 +271,7 @@ class MeshDeviceDetailScreen(Screen[None]):
             yield HighlightedPanel(
                 Static(message, classes="error-message"),
                 title=title,
+                classes="panel-alert-error",
             )
         else:
             with Container(id="mesh-device-detail-container"):
@@ -279,6 +280,7 @@ class MeshDeviceDetailScreen(Screen[None]):
                     MeshInfoWidget(self.device),
                     title="MESH INFO",
                     id="mesh-info-panel",
+                    classes="panel-info",
                 )
 
                 # Default to pages tab for NomadNet nodes

@@ -42,11 +42,13 @@ class LocalDashboardScreen(Screen[None]):
                 NodeInfoPanel(id="dashboard-node-info"),
                 title="NODE STATUS",
                 id="dashboard-node-panel",
+                classes="panel-info",
             )
             yield HighlightedPanel(
                 UptimePanel(id="dashboard-uptime"),
                 title="LOAD",
                 id="dashboard-uptime-panel",
+                classes="panel-ambient",
             )
         yield Footer()
 

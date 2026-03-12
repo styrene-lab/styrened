@@ -72,11 +72,11 @@ class StyrenePanel(Widget):
     StyrenePanel {
         height: auto;
         width: 1fr;
-        background: $background;
+        background: transparent;
         margin-bottom: 1;
         padding: 0 1;
         border: round $border;
-        border-title-color: $primary;
+        border-title-color: $border;
         border-title-style: bold;
         border-title-align: left;
     }

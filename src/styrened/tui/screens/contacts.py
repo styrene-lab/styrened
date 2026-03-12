@@ -102,6 +102,7 @@ class ContactsScreen(Screen[None]):
                 DataTable(id="contacts-table"),
                 title="CONTACTS",
                 id="contacts-panel",
+                classes="panel-info",
             )
 
             # Edit form (hidden by default)
@@ -118,6 +119,7 @@ class ContactsScreen(Screen[None]):
                 ),
                 title="EDIT CONTACT",
                 id="edit-form-panel",
+                classes="panel-interactive",
             )
 
             # Resolve panel (hidden by default)
@@ -132,6 +134,7 @@ class ContactsScreen(Screen[None]):
                 ),
                 title="RESOLVE NAME",
                 id="resolve-panel-container",
+                classes="panel-interactive",
             )
         yield Footer()
 

@@ -198,11 +198,11 @@ class ProvisionScreen(Screen[None]):
         yield Header()
         with Container(id="provision-container"):
             # Device selection panel
-            with HighlightedPanel(title="SELECT DEVICE", id="device-panel"):
+            with HighlightedPanel(title="SELECT DEVICE", id="device-panel", classes="panel-interactive"):
                 yield DeviceCatalogTable(id="device-catalog-table")
 
             # Configuration panel (hidden until device selected)
-            with HighlightedPanel(title="CONFIGURE", id="config-panel", classes="hidden"):
+            with HighlightedPanel(title="CONFIGURE", id="config-panel", classes="hidden panel-interactive"):
                 with Vertical(id="config-inner"):
                     yield ConfigForm(id="config-form")
 
@@ -221,7 +221,7 @@ class ProvisionScreen(Screen[None]):
                         )
 
             # Forge panel (hidden until flash starts)
-            with HighlightedPanel(title="FORGE", id="forge-panel", classes="hidden"):
+            with HighlightedPanel(title="FORGE", id="forge-panel", classes="hidden panel-interactive"):
                 yield ForgeLog(id="forge-log")
 
         yield Footer()

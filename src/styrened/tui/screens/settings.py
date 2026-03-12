@@ -167,6 +167,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="OPERATOR IDENTITY",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -184,6 +185,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="NOTIFICATIONS",
+                            classes="panel-interactive",
                         )
 
                 # ── Tab 2: Network ───────────────────────────────────────
@@ -206,6 +208,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="STYRENE COMMUNITY HUB",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -247,6 +250,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="TRANSPORT",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -273,6 +277,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="PEERS",
+                            classes="panel-interactive",
                             id="peers-panel",
                         )
                         yield HighlightedPanel(
@@ -294,6 +299,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="PROPAGATION",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -312,6 +318,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="LOCAL DISCOVERY",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -351,6 +358,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="SERVER",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -393,6 +401,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             title="BATMAN-ADV MESH",
+                            classes="panel-interactive",
                         )
 
                 # ── Tab 3: Fleet ─────────────────────────────────────────
@@ -429,6 +438,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             title="FLEET",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -455,6 +465,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             title="PROVISIONING DEFAULTS",
+                            classes="panel-interactive",
                         )
 
                 # ── Tab 4: Security ──────────────────────────────────────
@@ -484,6 +495,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="MESH ACCESS CONTROL",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -511,6 +523,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="ALLOWED IDENTITIES",
+                            classes="panel-interactive",
                             id="allowed-peers-panel",
                         )
 
@@ -547,6 +560,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-row",
                             ),
                             title="TUI",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -620,6 +634,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="GROUP THREADS",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -640,6 +655,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="DAEMON",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -658,6 +674,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="DATA",
+                            classes="panel-interactive",
                         )
                         yield HighlightedPanel(
                             Horizontal(
@@ -694,6 +711,7 @@ class SettingsScreen(Screen[None]):
                                 classes="setting-description",
                             ),
                             title="PAGES",
+                            classes="panel-interactive",
                         )
 
                 # ── Tab 6: Appearance ────────────────────────────────────

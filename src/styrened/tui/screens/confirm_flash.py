@@ -85,7 +85,7 @@ class ConfirmFlash(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         cascade = get_color_cascade()
 
-        with HighlightedPanel(title="CONFIRM FLASH", id="confirm-flash-container"):
+        with HighlightedPanel(title="CONFIRM FLASH", id="confirm-flash-container", classes="panel-alert"):
             with Vertical(id="confirm-flash-content"):
                 yield Static(
                     f"[{cascade.bright} bold]ALL DATA ON THIS DEVICE WILL BE ERASED[/]",

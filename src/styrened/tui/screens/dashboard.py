@@ -199,16 +199,19 @@ class DashboardScreen(Screen[None]):
                 HomeStatusBar(id="home-status-bar"),
                 title="STATUS",
                 id="status-bar-panel",
+                classes="panel-info",
             )
             yield HighlightedPanel(
                 HomeNodeSummaryTable(id="home-node-summary"),
                 title="NODES",
                 id="nodes-panel",
+                classes="panel-info",
             )
             yield HighlightedPanel(
                 ActivityFeedWidget(id="activity-feed-widget"),
                 title="ACTIVITY",
                 id="activity-panel",
+                classes="panel-ambient",
             )
         yield Footer()
 

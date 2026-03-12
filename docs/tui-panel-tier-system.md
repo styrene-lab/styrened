@@ -120,3 +120,17 @@ Con: More complex derivation code.
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `src/styrened/tui/widgets/highlighted_panel.py` (modified) — DEFAULT_CSS baseline to panel-info (round $border)
+- `src/styrened/tui/screens/settings.py` (modified) — All settings panels → panel-interactive
+- `src/styrened/tui/screens/dashboard.py` (modified) — STATUS/NODES → panel-info, ACTIVITY → panel-ambient
+- `src/styrened/tui/screens/dashboard_local.py` (modified) — NODE STATUS → panel-info, LOAD → panel-ambient
+- `src/styrened/tui/screens/contacts.py` (modified) — CONTACTS → panel-info, EDIT/RESOLVE → panel-interactive
+- `src/styrened/tui/screens/exchange_tabs.py` (modified) — Same as contacts
+- `src/styrened/tui/screens/mesh_device_detail.py` (modified) — MESH INFO → panel-info, Error → panel-alert-error
+- `src/styrened/tui/screens/provision.py` (modified) — SELECT DEVICE/CONFIGURE → panel-interactive, FORGE → panel-interactive
+- `src/styrened/tui/screens/confirm_flash.py` (modified) — CONFIRM FLASH → panel-alert
