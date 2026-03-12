@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "changeName": "internal-event-system",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T23:32:19.989Z",
+  "summary": "All 9 Given/When/Then scenarios verified. 23 unit tests covering subscribe/emit, fan-out, isolation, unsubscribe, non-blocking emit, no-op on empty, daemon wiring, IPC bridge, and TUI DaemonEvent. All 5 event types wired. Footer/Header chrome fixes landed as bonus.",
+  "snapshot": {
+    "gitHead": "7a032f475429bca33ef5d56d591e88341819e119",
+    "fingerprint": "87556f383f759c967ef143501def3e171504380c637e2a2a2cc7e6e3a01c02d6",
+    "dirty": false,
+    "scopedPaths": [
+      "src/styrened/daemon.py",
+      "src/styrened/ipc/server.py",
+      "src/styrened/services/event_bus.py",
+      "src/styrened/tui/models/events.py",
+      "src/styrened/tui/screens/dashboard.py",
+      "src/styrened/tui/screens/exploration.py",
+      "src/styrened/tui/services/ipc_bridge.py",
+      "tests/unit/test_event_bus.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/internal-event-system/design.md",
+        "exists": true,
+        "size": 6890,
+        "sha256": "28347c6e17c218a3384acafed3a2df8f2d879c2b989a32bcdbd2c828f6fefcaf"
+      },
+      {
+        "path": "openspec/changes/internal-event-system/proposal.md",
+        "exists": true,
+        "size": 1633,
+        "sha256": "2810cb59a985076b5daface8806173501198829c52cedb64b0e7ad131d290a8e"
+      },
+      {
+        "path": "openspec/changes/internal-event-system/specs/event-bus.md",
+        "exists": true,
+        "size": 1875,
+        "sha256": "2d4c4f743f809f89160b2e62eb6c7773e09f2d04c3e82ce474d6f8958362156d"
+      },
+      {
+        "path": "openspec/changes/internal-event-system/tasks.md",
+        "exists": true,
+        "size": 2878,
+        "sha256": "1ff1a9d00abdcb1645377ac6808f93f6fffda5f4e1c4100a150e2cf1b0d95623"
+      },
+      {
+        "path": "src/styrened/daemon.py",
+        "exists": true,
+        "size": 109656,
+        "sha256": "1ee4bb13485adc7c2a235cd1bf3cc600a720b683c5e15d8b40d9fdb943498d31"
+      },
+      {
+        "path": "src/styrened/ipc/server.py",
+        "exists": true,
+        "size": 19150,
+        "sha256": "c3b4727b83896f920cb62385612f147e9ae33e009aa425373a216c583524fb80"
+      },
+      {
+        "path": "src/styrened/services/event_bus.py",
+        "exists": true,
+        "size": 8408,
+        "sha256": "3adca930ee360ef8c3899745ee07be6247899d27b1d4db2525e0f0bb6b7a1a5c"
+      },
+      {
+        "path": "src/styrened/tui/models/events.py",
+        "exists": true,
+        "size": 770,
+        "sha256": "a5e56ed803e60e085f0523840ae8797c322c197f829dc8d3f8d8f37ddf677df7"
+      },
+      {
+        "path": "src/styrened/tui/screens/dashboard.py",
+        "exists": true,
+        "size": 18417,
+        "sha256": "2a0b8c069fcb83928c8f4548d7d37dc3297bbf5905f48139247ec22d23f5f726"
+      },
+      {
+        "path": "src/styrened/tui/screens/exploration.py",
+        "exists": true,
+        "size": 50305,
+        "sha256": "d2caef904c631104e13682de4d6e40b7edd2d2bb0d778caf27dd027ae1e2715c"
+      },
+      {
+        "path": "src/styrened/tui/services/ipc_bridge.py",
+        "exists": true,
+        "size": 714,
+        "sha256": "2a7b028a99978c5a5e2ccbbe850b5c6d0636c0a3edee7a27c1053999c0c92ffa"
+      },
+      {
+        "path": "tests/unit/test_event_bus.py",
+        "exists": true,
+        "size": 13917,
+        "sha256": "0ff21205176e0bd49519e854dec62d8b69b2cf5165a1554fcc8ac025841e8ca5"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
