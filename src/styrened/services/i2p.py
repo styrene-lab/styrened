@@ -24,7 +24,8 @@ import socket
 import struct
 from pathlib import Path
 
-from styrened.models.config import I2PConfig
+from styrened.models.config import CoreConfig, I2PConfig
+from styrened.services.binary_errors import BinaryIntegrityError
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode
 
 log = logging.getLogger(__name__)
@@ -58,9 +59,15 @@ class I2PAdapter(DaemonAdapter):
 
     warm_up_seconds: float = 480.0
 
-    def __init__(self, config: I2PConfig) -> None:
+    def __init__(
+        self,
+        config: I2PConfig,
+        *,
+        core_config: "CoreConfig | None" = None,
+    ) -> None:
         super().__init__(config.mode)
         self._config = config
+        self._core_config = core_config
         self._conf_path = Path.home() / ".styrene" / "i2pd" / "i2pd.conf"
 
     # ------------------------------------------------------------------
@@ -110,6 +117,20 @@ class I2PAdapter(DaemonAdapter):
                 "i2pd binary not found in PATH or ~/.styrene/bin/. "
                 "Run 'styrened setup --enable i2p' for installation instructions."
             )
+
+        # Binary integrity verification
+        if self._core_config is not None:
+            vr = self.verify_binary_integrity("i2pd", binary)
+            if vr.match is None:
+                log.debug("Skipping binary verification for i2pd (not in manifest)")
+            elif vr.match is False:
+                strict = self._core_config.security.strict_binary_verification
+                if strict:
+                    raise BinaryIntegrityError("i2pd", vr.expected or "?", vr.actual or "?")
+                log.warning("i2pd binary integrity mismatch — starting anyway (strict=false)")
+        else:
+            log.debug("Skipping binary verification: core_config is None")
+
         self._generate_i2pd_conf()
         self._process = await asyncio.create_subprocess_exec(
             binary,

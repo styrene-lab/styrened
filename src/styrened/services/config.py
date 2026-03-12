@@ -668,6 +668,9 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
     # Parse group thread footprint policy
     _parse_group_threads(config, data)
 
+    # Parse security section
+    _parse_security(config, data)
+
     # Parse RBAC policy
     config.rbac = _parse_rbac(data)
 
@@ -763,6 +766,20 @@ def _parse_group_threads(config: CoreConfig, data: dict) -> None:
         metadata_first_sync=_parse_bool(g.get("metadata_first_sync", False)),
         background_catchup=_parse_bool(g.get("background_catchup", True)),
         first_run_auto_tier=_parse_bool(g.get("first_run_auto_tier", True)),
+    )
+
+
+def _parse_security(config: CoreConfig, data: dict) -> None:
+    """Parse security section from config data into config.security."""
+    if "security" not in data or not isinstance(data["security"], dict):
+        return
+    from styrened.models.config import SecurityConfig
+
+    s = data["security"]
+    config.security = SecurityConfig(
+        strict_binary_verification=_parse_bool(
+            s.get("strict_binary_verification", False)
+        ),
     )
 
 
