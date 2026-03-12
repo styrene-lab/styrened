@@ -18,7 +18,32 @@ from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hub_connection import HubStatus
+from styrened.tui.models.events import DaemonEvent
 from styrened.tui.services.config import load_config
+
+# Map legacy IPC activity event type strings to coarse bus event types
+_IPC_TO_BUS_TYPE: dict[str, str] = {
+    "device_discovered": "node_changed",
+    "device_updated": "node_changed",
+    "device_lost": "node_changed",
+    "announce_sent": "node_changed",
+    "message_received": "message_changed",
+    "message_delivered": "message_changed",
+    "message_read": "message_changed",
+    "hub_connected": "hub_changed",
+    "hub_disconnected": "hub_changed",
+    "link_established": "link_changed",
+    "link_lost": "link_changed",
+    "config_saved": "config_changed",
+    "pqc_established": "link_changed",
+    "file_offer": "message_changed",
+    "file_complete": "message_changed",
+}
+
+
+def _ipc_type_to_bus_type(ipc_type: str) -> str:
+    """Convert IPC activity event type to coarse bus event type."""
+    return _IPC_TO_BUS_TYPE.get(ipc_type, ipc_type)
 from styrened.tui.services.reticulum import start_discovery
 from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
@@ -57,6 +82,8 @@ class DashboardScreen(Screen[None]):
         """Initialise Home: start discovery, then fetch daemon state."""
         start_discovery()
         self._hub_retry_timer = self.set_interval(30.0, self._retry_hub_connection)
+        # Slow reconciliation timer — belt-and-suspenders behind event-driven updates
+        self._reconcile_timer = self.set_interval(60.0, self._reconcile)
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
@@ -95,14 +122,36 @@ class DashboardScreen(Screen[None]):
         if self._hub_retry_timer is not None:
             self._hub_retry_timer.stop()
             self._hub_retry_timer = None
+        if hasattr(self, "_reconcile_timer") and self._reconcile_timer is not None:
+            self._reconcile_timer.stop()
+            self._reconcile_timer = None
         if self._activity_worker is not None:
             self._activity_worker.cancel()
             self._activity_worker = None
+
+    def on_daemon_event(self, event: DaemonEvent) -> None:
+        """Handle daemon events — trigger immediate refresh for relevant types."""
+        if event.event_type in ("node_changed", "message_changed", "hub_changed"):
+            if self._ipc_bridge is not None:
+                self.run_worker(
+                    self._fetch_daemon_status(),
+                    group="dashboard-status",
+                    exclusive=True,
+                )
 
     def _retry_hub_connection(self) -> None:
         """Periodically poll hub status via IPC."""
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="hub-status")
+
+    def _reconcile(self) -> None:
+        """Slow reconciliation — catches anything events missed."""
+        if self._ipc_bridge is not None:
+            self.run_worker(
+                self._fetch_daemon_status(),
+                group="dashboard-status",
+                exclusive=True,
+            )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -339,9 +388,16 @@ class DashboardScreen(Screen[None]):
             async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
                 if event_type != IPCMessageType.EVENT_ACTIVITY:
                     continue
+                # Post DaemonEvent to app so any screen can handle it
+                evt_type = event.get("type", "unknown")
+                self.app.post_message(DaemonEvent(
+                    event_type=_ipc_type_to_bus_type(evt_type),
+                    action=evt_type,
+                    data=event,
+                ))
                 try:
                     cop_summary = self.query_one(CopActivitySummary)
-                    cop_summary.add_ephemeral(event.get("type", "unknown"), event)
+                    cop_summary.add_ephemeral(evt_type, event)
                 except Exception:
                     pass
         except Exception:

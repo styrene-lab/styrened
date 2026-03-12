@@ -199,6 +199,10 @@ class StyreneDaemon:
         self._ygg_adapter: Any = None  # Optional Yggdrasil adapter
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
 
+        # Central event bus — the daemon's nervous system
+        from styrened.services.event_bus import EventBus
+        self.event_bus: EventBus = EventBus()
+
     async def start(self) -> None:
         """Start the daemon services."""
         logger.info("Starting Styrene daemon...")
@@ -373,7 +377,7 @@ class StyreneDaemon:
             except Exception:
                 pass
 
-        # Emit activity event for dashboard feed
+        # Emit activity event for dashboard feed (legacy path)
         self._emit_activity_event(
             "device_discovered",
             peer_hash=device.destination_hash,
@@ -384,6 +388,21 @@ class StyreneDaemon:
                 "discovered_via": device.discovered_via,
             },
         )
+
+        # Emit to event bus — the canonical notification path
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.event_bus.emit(
+                "node_changed",
+                action="announced",
+                destination_hash=device.destination_hash,
+                identity_hash=device.identity_hash,
+                name=device.name,
+                device_type=device.device_type.value,
+                discovered_via=device.discovered_via,
+            ))
+        except RuntimeError:
+            pass  # No event loop — happens in tests
 
         # Auto-initiate PQC session with Styrene nodes
         self._maybe_initiate_pqc(device)

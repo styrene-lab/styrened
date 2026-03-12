@@ -304,6 +304,9 @@ class TestDashboardActivitySubscription:
         bridge.iter_events = _iter_events
         cop_widget = MagicMock()
 
+        mock_app = MagicMock()
+        mock_app.post_message = MagicMock()
+
         with (
             patch.object(
                 DashboardScreen,
@@ -312,6 +315,7 @@ class TestDashboardActivitySubscription:
                 return_value=bridge,
             ),
             patch.object(screen, "query_one", return_value=cop_widget),
+            patch.object(type(screen), "app", new_callable=PropertyMock, return_value=mock_app),
         ):
             await screen._subscribe_activity()
 
