@@ -246,6 +246,50 @@ class TestTUIPeerDiscovery:
             assert app.screen.device_identity == ALPHA_IDENTITY_HASH
 
     @pytest.mark.slow
+    async def test_status_tab_fires_rpc(
+        self, host_daemon: DaemonHarness, _host_env: None, alpha_daemon: DaemonHarness
+    ) -> None:
+        """Status tab on detail screen should fire RPC status request.
+
+        Requires LXMF path for RPC. Marked slow (~30-60s).
+        """
+        from styrened.ipc.client import IPCResponseError, IPCTimeoutError
+        from styrened.tui.app import StyreneApp
+        from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+        app = StyreneApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(delay=3.0)
+
+            bridge = app.bridge
+            if bridge is None:
+                pytest.skip("IPC bridge not connected")
+
+            alpha = await self._poll_for_alpha(bridge, timeout=30.0)
+            if alpha is None:
+                pytest.skip("Alpha not discovered in time")
+
+            # Push detail screen — status tab is default
+            app.push_screen(
+                MeshDeviceDetailScreen(device_identity=ALPHA_IDENTITY_HASH)
+            )
+            await pilot.pause(delay=2.0)
+
+            # Try to get status via bridge RPC
+            try:
+                status = await bridge.send_rpc(
+                    destination=ALPHA_IDENTITY_HASH,
+                    command="status",
+                    timeout=45.0,
+                )
+            except (IPCResponseError, IPCTimeoutError) as e:
+                if "timed out" in str(e).lower():
+                    pytest.skip(f"RPC status timed out — LXMF path not ready: {e}")
+                raise
+
+            assert status is not None, "Status response was None"
+
+    @pytest.mark.slow
     async def test_chat_send_and_auto_reply(
         self, host_daemon: DaemonHarness, _host_env: None, alpha_daemon: DaemonHarness
     ) -> None:

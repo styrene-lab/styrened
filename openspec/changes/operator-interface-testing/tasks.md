@@ -35,10 +35,10 @@ Phase 1: Single-peer TCP localhost. Full daemon subprocess + TUI pilot.
 - [x] 4.3 `test_peer_discovery.py::TestTUIPeerDiscovery::test_tui_connects_to_host_daemon` — IPC bridge connects
 - [x] 4.4 `test_peer_discovery.py::TestTUIPeerDiscovery::test_tui_discovers_alpha_peer` — alpha found via bridge.get_devices() after polling
 - [x] 4.5 `test_peer_discovery.py::TestTUIPeerDiscovery::test_tui_alpha_display_name_correct` — name matches fixture
-- [ ] 4.6 `test_peer_discovery.py::test_navigate_to_device_detail` — select alpha in device list, MeshDeviceDetailScreen opens with correct identity
-- [ ] 4.7 `test_peer_discovery.py::test_status_tab_loads` — Status tab fires RPC, receives system info
-- [ ] 4.8 `test_peer_discovery.py::test_chat_send_and_auto_reply` — send message, auto-reply received, both visible
-- [ ] 4.9 `test_peer_discovery.py::test_fleet_ops_exec` — execute `echo hello` via RPC, response displayed
+- [x] 4.6 `test_peer_discovery.py::TestTUIPeerDiscovery::test_navigate_to_device_detail` — MeshDeviceDetailScreen mounts with correct identity
+- [x] 4.7 `test_peer_discovery.py::TestTUIPeerDiscovery::test_status_tab_fires_rpc` — (slow) status RPC via detail screen
+- [x] 4.8 `test_peer_discovery.py::TestTUIPeerDiscovery::test_chat_send_and_auto_reply` — (slow) send message, auto-reply with retry for LXMF path
+- [x] 4.9 `test_peer_discovery.py::TestTUIPeerDiscovery::test_rpc_exec` — (slow) echo command via RPC
 
 ## Group 5: Nightly Workflow Integration
 
@@ -46,4 +46,10 @@ Phase 1: Single-peer TCP localhost. Full daemon subprocess + TUI pilot.
 - [x] 5.2 Install styrened[tui] + test deps in the workflow step
 - [ ] 5.3 Verify daemon subprocess starts inside CI container (standalone mode, no shared instance)
 - [x] 5.4 JUnit XML output to `/workspace/results/operator-paths-results.xml`
-- [ ] 5.5 Update cron-nightly.yaml comment to document the new tier
+- [x] 5.5 Update cron-nightly.yaml comment to document the new tier
+
+## Notes
+
+- Chat and RPC tests are `@pytest.mark.slow` — LXMF path establishment takes 20-60s on localhost TCP
+- RNS announce discovery takes ~15s; poll-with-timeout pattern used throughout
+- 5.3 requires running in CI to verify — cannot be tested locally

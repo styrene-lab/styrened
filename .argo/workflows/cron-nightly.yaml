@@ -1,5 +1,7 @@
 # Nightly cron: test main, build + push OCI with :nightly and :nightly-{sha} tags
 # Tagged releases (v*) are "islands of stability" — nightly builds are continuous.
+# Test tiers: smoke (unit + fast integration), integration (multi-pod),
+# operator-paths (TUI pilot against live daemon subprocesses, runs after smoke).
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
