@@ -1,10 +1,9 @@
-"""Comprehensive TUI tests for Dashboard (Home) screen.
+"""Comprehensive TUI tests for Dashboard (Home) screen — COP layout.
 
-Home owns: local node status, recent activity, and navigation to peer workspaces.
+Home owns: compact status bar, node summary table, activity feed.
 Peer browsing (MeshDeviceTree) belongs in ExplorationScreen (Nodes workspace).
 """
 from __future__ import annotations
-
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
@@ -33,13 +32,14 @@ def mock_reticulum(tmp_path):
 
 
 class TestDashboardComposition:
-    """Test Home screen widget composition — no peer tree."""
+    """Test Home screen widget composition — COP layout."""
 
     @pytest.mark.asyncio
-    async def test_home_compose_creates_status_and_activity_widgets(self):
-        """Home compose() should create NodeInfoPanel and ActivityFeedWidget."""
+    async def test_home_compose_creates_cop_widgets(self):
+        """Home compose() should create HomeStatusBar, HomeNodeSummaryTable, and ActivityFeedWidget."""
         from styrened.tui.widgets.activity_feed import ActivityFeedWidget
-        from styrened.tui.widgets.node_info_panel import NodeInfoPanel
+        from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
 
         app = StyreneApp()
         async with app.run_test() as pilot:
@@ -48,13 +48,18 @@ class TestDashboardComposition:
 
             screen = app.screen
             assert isinstance(screen, DashboardScreen)
-            # Status and activity panels are present
-            assert screen.query_one("#node-info-panel") is not None
-            assert screen.query_one("#activity-feed-panel") is not None
+            # COP panels are present
+            assert screen.query_one("#status-bar-panel") is not None
+            assert screen.query_one("#nodes-panel") is not None
+            assert screen.query_one("#activity-panel") is not None
+            # Widgets inside panels
+            assert isinstance(screen.query_one(HomeStatusBar), HomeStatusBar)
+            assert isinstance(screen.query_one(HomeNodeSummaryTable), HomeNodeSummaryTable)
+            assert isinstance(screen.query_one(ActivityFeedWidget), ActivityFeedWidget)
 
     @pytest.mark.asyncio
     async def test_home_has_no_peer_tree(self):
-        """Home must NOT render a peer-browsing tree — that lives in Nodes."""
+        """Home must NOT render a peer-browsing tree or NodeInfoPanel."""
         from textual.css.query import NoMatches
 
         app = StyreneApp()
@@ -65,23 +70,38 @@ class TestDashboardComposition:
             screen = app.screen
             with pytest.raises(NoMatches):
                 screen.query_one("#mesh-device-tree")
+            # NodeInfoPanel should NOT be on Home (lives on LocalDashboard)
+            with pytest.raises(NoMatches):
+                from styrened.tui.widgets.node_info_panel import NodeInfoPanel
+                screen.query_one(NodeInfoPanel)
 
     @pytest.mark.asyncio
     async def test_home_panels_have_correct_titles(self):
-        """Home panels should use Home-scope titles (no CURRENT NODES panel)."""
+        """Home panels should use COP titles: STATUS, NODES, ACTIVITY."""
         app = StyreneApp()
         async with app.run_test() as pilot:
             await app.push_screen(DashboardScreen())
             await pilot.pause()
 
-            info_panel = app.screen.query_one("#node-info-panel")
-            activity_panel = app.screen.query_one("#activity-feed-panel")
-            assert getattr(info_panel, "_panel_title", None) == "HOME STATUS"
-            assert getattr(activity_panel, "_panel_title", None) == "RECENT ACTIVITY"
-            # CURRENT NODES panel must not be present
-            from textual.css.query import NoMatches
-            with pytest.raises(NoMatches):
-                app.screen.query_one("#mesh-devices-panel")
+            status_panel = app.screen.query_one("#status-bar-panel")
+            nodes_panel = app.screen.query_one("#nodes-panel")
+            activity_panel = app.screen.query_one("#activity-panel")
+            assert getattr(status_panel, "_panel_title", None) == "STATUS"
+            assert getattr(nodes_panel, "_panel_title", None) == "NODES"
+            assert getattr(activity_panel, "_panel_title", None) == "ACTIVITY"
+
+    @pytest.mark.asyncio
+    async def test_home_cop_layout_order(self):
+        """Status bar before node table before activity feed."""
+        app = StyreneApp()
+        async with app.run_test() as pilot:
+            await app.push_screen(DashboardScreen())
+            await pilot.pause()
+
+            from styrened.tui.widgets.highlighted_panel import HighlightedPanel
+            panels = list(app.screen.query(HighlightedPanel))
+            ids = [p.id for p in panels]
+            assert ids == ["status-bar-panel", "nodes-panel", "activity-panel"]
 
 
 class TestDashboardKeyboardBindings:
@@ -97,7 +117,6 @@ class TestDashboardKeyboardBindings:
 
             await pilot.press("r")
             await pilot.pause()
-            # Still on dashboard, no crash
             assert isinstance(app.screen, DashboardScreen)
 
     @pytest.mark.asyncio
@@ -158,13 +177,13 @@ class TestDashboardHomeRouting:
 
     def test_open_exploration_delegates_to_app_nodes_action(self):
         """action_open_exploration() should delegate to app.action_open_nodes()."""
-        app = MagicMock()
+        app_mock = MagicMock()
         screen = DashboardScreen()
 
-        with patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=app):
+        with patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=app_mock):
             screen.action_open_exploration()
 
-        app.action_open_nodes.assert_called_once_with()
+        app_mock.action_open_nodes.assert_called_once_with()
 
 
 class TestDashboardTimerLifecycle:
@@ -186,7 +205,6 @@ class TestDashboardTimerLifecycle:
         screen = DashboardScreen()
         screen._hub_retry_timer = Mock()
         screen.query = Mock(return_value=[])
-        screen.query_one = Mock(return_value=MagicMock())
 
         with patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=None):
             screen.on_screen_resume(MagicMock())
@@ -197,7 +215,6 @@ class TestDashboardTimerLifecycle:
         screen = DashboardScreen()
         screen._hub_retry_timer = Mock()
         screen.query = Mock(return_value=[])
-        screen.query_one = Mock(return_value=MagicMock())
         worker_results = [Mock(), Mock()]
         screen.run_worker = Mock(side_effect=worker_results)
 
@@ -226,131 +243,77 @@ class TestDashboardTimerLifecycle:
         assert screen._activity_worker is None
 
 
-class TestDashboardPanelStateOwnership:
-    """Test dashboard-owned NodeInfoPanel state application."""
-
-    def test_apply_local_panel_snapshot_pushes_local_snapshot(self):
-        screen = DashboardScreen()
-        panel = MagicMock()
-
-        fake_config = MagicMock()
-        fake_config.reticulum.mode.value = "peer"
-        fake_config.identity.display_name = "Alice"
-        fake_config.identity.icon = "🖥️"
-        fake_config.identity.short_name = "alice"
-        fake_config.identity.provider = "yubikey"
-        fake_system_info = MagicMock()
-        fake_iface = MagicMock(is_hardware=True, is_up=True, ip_address="10.0.0.1")
-        fake_disk = MagicMock(is_removable=True)
-        local_snapshot = MagicMock()
-
-        with (
-            patch("styrened.tui.screens.dashboard.get_system_info", return_value=fake_system_info),
-            patch("styrened.tui.screens.dashboard.get_network_interfaces", return_value=[fake_iface]),
-            patch("styrened.tui.screens.dashboard.get_disks", return_value=[fake_disk]),
-            patch("styrened.tui.screens.dashboard.load_config", return_value=fake_config),
-            patch(
-                "styrened.tui.screens.dashboard.build_home_node_local_state",
-                return_value=local_snapshot,
-            ) as build_local,
-        ):
-            screen._apply_local_panel_snapshot(panel)
-
-        build_local.assert_called_once()
-        panel.apply_home_local_snapshot.assert_called_once_with(local_snapshot)
-
-    def test_apply_local_daemon_snapshot_pushes_panel_snapshot(self):
-        screen = DashboardScreen()
-        panel = MagicMock()
-        daemon_state = MagicMock()
-        status = MagicMock()
-        mesh_device_infos = (MagicMock(), MagicMock())
-        home_snapshot = MagicMock()
-        panel._apply_mesh_catalog_count.return_value = 2
-
-        with patch(
-            "styrened.tui.screens.dashboard.build_home_node_info_state",
-            return_value=home_snapshot,
-        ) as build_snapshot:
-            screen._apply_local_daemon_snapshot(
-                panel,
-                daemon_state=daemon_state,
-                mesh_device_infos=mesh_device_infos,
-                raw_status=status,
-            )
-
-        panel._apply_mesh_catalog_count.assert_called_once_with(mesh_device_infos)
-        build_snapshot.assert_called_once_with(
-            daemon_state=daemon_state,
-            daemon_status=status,
-            mesh_node_count=2,
-        )
-        panel.apply_home_snapshot.assert_called_once_with(home_snapshot)
+class TestDashboardStatusBarWiring:
+    """Test that _fetch_daemon_status feeds HomeStatusBar correctly."""
 
     @pytest.mark.asyncio
-    async def test_fetch_daemon_status_uses_dashboard_owned_panel_seams(self):
+    async def test_fetch_daemon_status_updates_status_bar(self):
+        """Status bar should be updated with daemon state."""
         screen = DashboardScreen()
         bridge = MagicMock()
-        panel = MagicMock()
-        panel.hub_status = MagicMock(CONNECTED="connected", DISCONNECTED="disconnected")
+        status_bar = MagicMock()
+        node_table = MagicMock()
 
-        bridge.get_status = AsyncMock(return_value=MagicMock(rns_initialized=True))
-        bridge.get_identity = AsyncMock(return_value=MagicMock(identity_hash="abc123"))
-        bridge.get_hub_status = AsyncMock(return_value={"is_connected": True})
-        bridge.get_core_config = AsyncMock(return_value={"group_threads": {"feature_tier": "balanced"}})
-        bridge.get_devices = AsyncMock(return_value=[MagicMock(), MagicMock()])
-        bridge.get_conversations = AsyncMock(return_value=[{"unread_count": 2, "message_count": 5}])
-        bridge.get_contacts = AsyncMock(return_value=[{"name": "Alice"}])
-        bridge.get_auto_reply = AsyncMock(return_value={"enabled": True})
+        bridge.get_status = AsyncMock(return_value={
+            "rns_online": True,
+            "interfaces": [{"name": "tcp0"}, {"name": "auto0"}],
+            "uptime": 3600,
+            "transport_enabled": False,
+            "propagation_enabled": False,
+            "active_links": 2,
+        })
+        bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
+        bridge.get_core_config = AsyncMock(return_value={})
+        bridge.get_devices = AsyncMock(return_value=[
+            {"device_type": "styrene_node", "identity_hash": "abc"},
+            {"device_type": "lxmf_peer", "identity_hash": "def"},
+        ])
+        bridge.get_conversations = AsyncMock(return_value=[
+            {"identity_hash": "abc", "unread_count": 3},
+        ])
+
+        def query_one_side_effect(widget_type):
+            from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+            from styrened.tui.widgets.home_status_bar import HomeStatusBar
+            if widget_type is HomeStatusBar or widget_type == HomeStatusBar:
+                return status_bar
+            if widget_type is HomeNodeSummaryTable or widget_type == HomeNodeSummaryTable:
+                return node_table
+            return MagicMock()
 
         with (
             patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
-            patch.object(screen, "query_one", return_value=panel),
-            patch("styrened.tui.screens.dashboard.build_local_daemon_state", return_value=MagicMock()),
-            patch.object(screen, "_apply_local_daemon_snapshot") as apply_snapshot,
-            patch(
-                "styrened.tui.screens.dashboard.build_home_node_info_state",
-                return_value=MagicMock(),
-            ) as build_snapshot,
+            patch.object(screen, "query_one", side_effect=query_one_side_effect),
         ):
             await screen._fetch_daemon_status()
 
-        bridge.get_identity.assert_awaited_once_with()
-        bridge.get_devices.assert_awaited_once_with(styrene_only=True)
-        apply_snapshot.assert_called_once()
-        build_snapshot.assert_called_once()
-        _, kwargs = build_snapshot.call_args
-        assert kwargs["mesh_node_count"] == panel.styrene_mesh_count
-        assert kwargs["conversations"] == [{"unread_count": 2, "message_count": 5}]
-        assert kwargs["contacts"] == [{"name": "Alice"}]
-        assert kwargs["auto_reply"] == {"enabled": True}
-        panel.apply_home_snapshot.assert_called_once_with(build_snapshot.return_value)
+        assert status_bar.daemon_connected is True
+        assert status_bar.rns_online is True
+        assert status_bar.interface_count == 2
+        assert status_bar.daemon_uptime == 3600.0
+        assert status_bar.active_links == 2
+        assert status_bar.unread_count == 3
 
     @pytest.mark.asyncio
-    async def test_fetch_daemon_status_cancels_pending_background_requests_on_early_failure(self):
+    async def test_fetch_daemon_status_marks_disconnected_on_failure(self):
+        """Status bar should show disconnected when bridge fails."""
         screen = DashboardScreen()
         bridge = MagicMock()
-        panel = MagicMock()
-
-        async def _stall():
-            await asyncio.Future()
+        status_bar = MagicMock()
 
         bridge.get_status = AsyncMock(side_effect=RuntimeError("boom"))
-        bridge.get_identity = AsyncMock(return_value=MagicMock(identity_hash="abc123"))
-        bridge.get_hub_status = AsyncMock(return_value={"is_connected": True})
-        bridge.get_core_config = AsyncMock(return_value={"group_threads": {"feature_tier": "balanced"}})
-        bridge.get_devices = AsyncMock(return_value=[MagicMock()])
-        bridge.get_conversations = AsyncMock(side_effect=_stall)
-        bridge.get_contacts = AsyncMock(side_effect=_stall)
-        bridge.get_auto_reply = AsyncMock(side_effect=_stall)
+        bridge.get_hub_status = AsyncMock(return_value={})
+        bridge.get_core_config = AsyncMock(return_value={})
+        bridge.get_devices = AsyncMock(return_value=[])
+        bridge.get_conversations = AsyncMock(return_value=[])
 
         with (
             patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
-            patch.object(screen, "query_one", return_value=panel),
+            patch.object(screen, "query_one", return_value=status_bar),
         ):
             await screen._fetch_daemon_status()
 
-        assert panel.daemon_connected is False
+        assert status_bar.daemon_connected is False
 
 
 class TestDashboardActivitySubscription:

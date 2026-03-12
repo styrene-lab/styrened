@@ -437,37 +437,36 @@ Header {
 /* === HighlightedPanel Widget === */
 /* Base styles defined in widget DEFAULT_CSS, only overrides here */
 
-/* === Dashboard Layout === */
+/* === Dashboard Layout (COP) === */
 #dashboard-container {
     height: 1fr;
-    overflow-y: auto;
+    overflow: hidden;
+    overflow-x: hidden;
     background: $background;
 }
 
-/* Node info: compact two-column layout */
-#node-info-panel {
+/* Status bar panel: auto-height, no scrollbars — fits HomeStatusBar. */
+#status-bar-panel {
     height: auto;
-    max-height: 28;
+    overflow: hidden;
 }
 
-/* Mesh devices tree: takes majority of remaining space */
-#mesh-devices-panel {
-    height: 2fr;
-    min-height: 6;
-}
-
-#mesh-devices-panel > .hp-content {
+/* Nodes panel: takes majority of vertical space for the node summary table. */
+#nodes-panel {
     height: 1fr;
 }
 
-/* Activity feed: smaller portion, grows with content */
-#activity-feed-panel {
+#nodes-panel > .hp-content {
     height: 1fr;
-    min-height: 4;
-    max-height: 16;
 }
 
-#activity-feed-panel > .hp-content {
+/* Activity panel: compact, capped height for the feed. */
+#activity-panel {
+    height: auto;
+    max-height: 8;
+}
+
+#activity-panel > .hp-content {
     height: 1fr;
 }
 

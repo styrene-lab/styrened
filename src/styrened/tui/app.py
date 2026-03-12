@@ -76,12 +76,12 @@ class StyreneApp(App[None]):
         Binding("grave_accent", "open_admin", "Admin", show=True),
         Binding("n", "open_nodes", "Nodes", show=True),
         Binding("m", "open_mail", "Mail", show=True),
-        Binding("c", "open_comms", "Comms", show=True),
-        Binding("b", "open_contacts", "Contacts", show=True),
+        Binding("c", "open_comms", "Comms", show=False),
+        Binding("b", "open_contacts", "Contacts", show=False),
         # Backward-compatible / admin-adjacent shortcuts
         Binding("i", "open_mail", "Mail", show=False),
         # Screen shortcuts (can be overridden by screens)
-        Binding("p", "open_provision", "Provision", show=True),
+        Binding("p", "open_provision", "Provision", show=False),
         Binding("ctrl+r", "restart_daemon", "Restart Daemon", show=False),
         Binding("a", "announce", "Announce", show=True),
     ]

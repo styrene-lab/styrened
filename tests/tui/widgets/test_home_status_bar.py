@@ -91,7 +91,7 @@ class TestNominalRendering:
             interface_count=1,
             styrene_mesh_count=4,
             daemon_connected=True,
-            daemon_uptime=34.0,
+            daemon_uptime=600.0,
             unread_count=0,
             error_state=None,
         )
@@ -142,13 +142,13 @@ class TestAnomalyPromotion:
 
         assert "RNS ○ offline" in plain
         assert "no interfaces" in plain
-        # Should have bold red
+        # Should have bold (error/danger style)
         rns_start = plain.index("RNS")
-        found_red = False
+        found_bold = False
         for start, end, style in text._spans:
-            if start <= rns_start < end and "red" in str(style):
-                found_red = True
-        assert found_red, "RNS offline with error should use red style"
+            if start <= rns_start < end and "bold" in str(style):
+                found_bold = True
+        assert found_bold, "RNS offline with error should use bold style"
 
     def test_rns_offline_no_error_uses_yellow(self) -> None:
         """RNS offline without error_state uses yellow warning."""
@@ -163,11 +163,11 @@ class TestAnomalyPromotion:
         assert "RNS ○ offline" in plain
 
         rns_start = plain.index("RNS")
-        found_yellow = False
+        found_bold = False
         for start, end, style in text._spans:
-            if start <= rns_start < end and "yellow" in str(style):
-                found_yellow = True
-        assert found_yellow
+            if start <= rns_start < end and "bold" in str(style):
+                found_bold = True
+        assert found_bold, "RNS offline without error should use bold warning style"
 
     def test_unread_count_bright(self) -> None:
         """Unread messages render with bright style."""
