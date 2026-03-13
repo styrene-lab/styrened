@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -42,6 +43,7 @@ class RelaySession:
     """An active relay session bridging two peers through the hub."""
     requester_hash: str
     target_hash: str
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     bytes_forwarded: int = 0
     is_permanent: bool = False
     is_priority: bool = False
@@ -49,7 +51,12 @@ class RelaySession:
     last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def record_bytes(self, n: int) -> None:
-        """Record n bytes forwarded and update last_activity."""
+        """Record n bytes forwarded and update last_activity.
+
+        Raises ValueError if n is negative.
+        """
+        if n < 0:
+            raise ValueError(f"record_bytes() requires non-negative value, got {n}")
         self.bytes_forwarded += n
         self.last_activity = datetime.now(timezone.utc)
 

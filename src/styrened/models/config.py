@@ -11,8 +11,12 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from styrened.models.rbac import RBACPolicy
+
+if TYPE_CHECKING:
+    from styrened.models.relay import RelayConfig
 from styrened.models.daemon_mode import DaemonMode
 
 # -----------------------------------------------------------------------------
@@ -872,8 +876,6 @@ class CoreConfig:
         Returns:
             Nested dictionary matching the YAML config file structure.
         """
-        from typing import Any
-        
         # Reticulum section
         reticulum_dict: dict[str, Any] = {
             "mode": self.reticulum.mode.value,
