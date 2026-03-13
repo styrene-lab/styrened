@@ -18,6 +18,7 @@ from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hub_connection import HubStatus
+from styrened.tui.models.adapter_status import AdapterStatusTracker
 from styrened.tui.models.cop_situation import CopSituationTracker
 from styrened.tui.models.events import DaemonEvent
 from styrened.tui.services.config import load_config
@@ -46,6 +47,7 @@ def _ipc_type_to_bus_type(ipc_type: str) -> str:
     """Convert IPC activity event type to coarse bus event type."""
     return _IPC_TO_BUS_TYPE.get(ipc_type, ipc_type)
 from styrened.tui.services.reticulum import start_discovery
+from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
 from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
@@ -71,6 +73,7 @@ class DashboardScreen(Screen[None]):
         self._hub_retry_timer: Timer | None = None
         self._activity_worker: Worker | None = None
         self._situation_tracker = CopSituationTracker()
+        self._adapter_tracker = AdapterStatusTracker()
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -151,13 +154,32 @@ class DashboardScreen(Screen[None]):
         Store-backed events (node changes, messages, hub) debounce to avoid
         spawning redundant refresh workers during fleet-boot bursts.
         """
-        # Always feed the tracker — it ignores events it doesn't care about
+        # Always feed the COP tracker — it ignores events it doesn't care about
         self._situation_tracker.ingest(event)
         try:
             cop = self.query_one(CopActivitySummary)
             cop.apply_snapshot(self._situation_tracker.snapshot())
         except Exception:
             pass
+
+        # Feed adapter tracker; push snapshot to bar; inject situation line if present
+        if event.event_type == "adapter_changed":
+            self._adapter_tracker.ingest(event)
+            try:
+                bar = self.query_one(AdapterStatusBar)
+                bar.apply_snapshot(self._adapter_tracker.snapshot())
+            except Exception:
+                pass
+            situation_line = self._adapter_tracker.get_situation_line()
+            if situation_line is not None:
+                self._situation_tracker._push_ephemeral(
+                    situation_line.message, situation_line.priority
+                )
+                try:
+                    cop = self.query_one(CopActivitySummary)
+                    cop.apply_snapshot(self._situation_tracker.snapshot())
+                except Exception:
+                    pass
 
         # Store-backed events trigger a full poll refresh (debounced)
         if event.event_type not in ("node_changed", "message_changed", "hub_changed"):
@@ -221,6 +243,7 @@ class DashboardScreen(Screen[None]):
                 title="STATUS",
                 id="status-bar-panel",
             )
+            yield AdapterStatusBar(id="adapter-status-bar-widget")
             yield HighlightedPanel(
                 HomeNodeSummaryTable(id="home-node-summary-widget"),
                 title="NODES",
