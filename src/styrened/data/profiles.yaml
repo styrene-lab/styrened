@@ -1,0 +1,13 @@
+profiles:
+  node:
+    label: "Styrene Node"
+    description: "Single-device styrene node profile."
+    roles: [styrene-node]
+    verified: [[rpi4], [rpi-zero2w], [x86-generic]]
+    requires_traits: null
+  router:
+    label: "Mesh Router"
+    description: "Dedicated mesh routing node."
+    roles: [mesh-router]
+    verified: [[rpi4]]
+    requires_traits: [low_power]
