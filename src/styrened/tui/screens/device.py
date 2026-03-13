@@ -68,6 +68,9 @@ class DeviceActionsPanel(Static):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle action button presses."""
+        if event.button.id is None:
+            return
+
         action_messages = {
             "action-shell": "rnsh integration coming in Phase 2B",
             "action-logs": "Log viewer coming in Phase 2B",
@@ -75,7 +78,7 @@ class DeviceActionsPanel(Static):
             "action-update": "Config rebuild coming in Phase 2B",
         }
 
-        message = action_messages.get(str(event.button.id), "Action not implemented")
+        message = action_messages.get(event.button.id, "Action not implemented")
         self.notify(message, title="Coming Soon", severity="information")
 
 
@@ -108,34 +111,22 @@ class DeviceScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        # Always compose the container; panels are mounted dynamically in on_mount()
+        # after _load_device() completes.  compose() runs before on_mount() so
+        # self.device is never available here.
         with Container(id="device-container"):
-            if self.device:
-                yield HighlightedPanel(
-                    DeviceInfoPanel(self.device),
-                    title=f"DEVICE: {self.device.name}",
-                    id="device-info-panel",
-                )
-                yield HighlightedPanel(
-                    DeviceActionsPanel(),
-                    title="ACTIONS",
-                    id="device-actions-panel",
-                )
-            else:
-                yield HighlightedPanel(
-                    Static(
-                        f"[red]Device '{self.device_name}' not found in inventory[/]",
-                        classes="error-message",
-                    ),
-                    title="ERROR",
-                )
+            yield Static("", id="device-placeholder")
         yield Footer()
 
     def on_mount(self) -> None:
-        """Load device data on mount."""
+        """Load device data on mount, then build the panel tree."""
         self._load_device()
 
     def _load_device(self) -> None:
-        """Load device from inventory."""
+        """Load device from inventory and update the widget tree."""
+        container = self.query_one("#device-container")
+        placeholder = self.query_one("#device-placeholder", Static)
+
         try:
             self.device = get_device(self.device_name)
             if self.device is None:
@@ -144,8 +135,31 @@ class DeviceScreen(Screen[None]):
                     title="Error",
                     severity="error",
                 )
+                placeholder.update(
+                    f"[red]Device '{self.device_name}' not found in inventory[/]"
+                )
+                return
+
+            # Remove placeholder and mount real panels
+            placeholder.remove()
+            container.mount(
+                HighlightedPanel(
+                    DeviceInfoPanel(self.device),
+                    title=f"DEVICE: {self.device.name}",
+                    id="device-info-panel",
+                )
+            )
+            container.mount(
+                HighlightedPanel(
+                    DeviceActionsPanel(),
+                    title="ACTIONS",
+                    id="device-actions-panel",
+                )
+            )
+
         except FleetInventoryError as e:
             self.notify(str(e), title="Error", severity="error")
+            placeholder.update(f"[red]Error loading device: {e}[/]")
 
     def action_action_shell(self) -> None:
         """Stub for shell action (Phase 2B)."""
