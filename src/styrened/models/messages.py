@@ -444,11 +444,27 @@ def init_db(db_path: str | None = None) -> Engine:
         )
         with engine.connect() as conn:
             # SQLite does not support DROP COLUMN before 3.35.0; use recreate.
+            # Use explicit DDL + INSERT to preserve constraints and column types;
+            # CREATE TABLE ... AS SELECT strips NOT NULL / PRIMARY KEY constraints.
             conn.execute(
                 text(
-                    "CREATE TABLE contacts_clean AS "
+                    "CREATE TABLE contacts_clean ("
+                    "identity_hash TEXT PRIMARY KEY, "
+                    "alias VARCHAR(100) NOT NULL, "
+                    "notes VARCHAR(500), "
+                    "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                    "blocked_at REAL, "
+                    "created_at REAL NOT NULL, "
+                    "updated_at REAL NOT NULL"
+                    ")"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO contacts_clean "
+                    "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at) "
                     "SELECT identity_hash, alias, notes, "
-                    "COALESCE(blocked, 0) AS blocked, "
+                    "COALESCE(blocked, 0), "
                     "blocked_at, created_at, updated_at "
                     "FROM contacts"
                 )
@@ -460,7 +476,6 @@ def init_db(db_path: str | None = None) -> Engine:
     elif "peer_hash" in cols and "identity_hash" not in cols:
         logger.info("Migrating contacts table: peer_hash → identity_hash PK")
         with engine.connect() as conn:
-            conn.execute(text("BEGIN"))
             conn.execute(
                 text(
                     "CREATE TABLE contacts_new ("
@@ -627,7 +642,7 @@ def backfill_contacts_identity_hash(engine: Engine, node_store: _NodeStoreProtoc
     updated = 0
     with engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT identity_hash FROM contacts WHERE LENGTH(identity_hash) = 32")
+            text("SELECT identity_hash FROM contacts WHERE LENGTH(identity_hash) != 64")
         ).fetchall()
         for (ih,) in rows:
             resolved = node_store.get_identity_hash_for_destination(ih)
