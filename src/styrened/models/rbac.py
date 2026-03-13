@@ -84,6 +84,8 @@ class Capability:
     RELAY_LIST: ClassVar[str] = "relay.list"
     RELAY_TEARDOWN: ClassVar[str] = "relay.teardown"
     RELAY_ACCEPT: ClassVar[str] = "relay.accept"
+
+    # --- Orthogonal --- relay (explicit grant only, not in any tier)
     RELAY_REJECT: ClassVar[str] = "relay.reject"
 
     # --- OPERATOR tier (30) --- relay
@@ -92,11 +94,11 @@ class Capability:
     RELAY_PRIORITIZE: ClassVar[str] = "relay.prioritize"
     RELAY_BRIDGE: ClassVar[str] = "relay.bridge"
 
-    # --- ADMIN tier (40) --- adapter
-    ADAPTER_PROVISION: ClassVar[str] = "adapter.provision"
-
     # --- ADMIN tier (40) --- relay
     RELAY_ADMIN: ClassVar[str] = "relay.admin"
+
+    # --- ADMIN tier (40) --- adapter
+    ADAPTER_PROVISION: ClassVar[str] = "adapter.provision"
 
     # --- Orthogonal grants (not part of role hierarchy) ---
     VPN_HANDSHAKE: ClassVar[str] = "vpn.handshake"
