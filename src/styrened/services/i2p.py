@@ -25,6 +25,11 @@ import struct
 from pathlib import Path
 
 from styrened.models.config import CoreConfig, I2PConfig
+from styrened.services.adapter_registry import (
+    AdapterProtocol,
+    AdapterState,
+    WarmupBehavior,
+)
 from styrened.services.binary_errors import BinaryIntegrityError
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode
 
@@ -54,10 +59,56 @@ enabled = false
 _I2PCONTROL_PASSWORD = ""
 
 
-class I2PAdapter(DaemonAdapter):
-    """Adapter for i2pd, the I2P router daemon."""
+class I2PAdapter(DaemonAdapter, AdapterProtocol):
+    """Adapter for i2pd, the I2P router daemon.
+
+    Implements both :class:`DaemonAdapter` (lifecycle management) and
+    :class:`AdapterProtocol` (registry / probe interface).
+    """
 
     warm_up_seconds: float = 480.0
+
+    # AdapterProtocol metadata
+    display_name: str = "I2P"
+    short_label: str = "I2P"
+
+    # ------------------------------------------------------------------
+    # AdapterProtocol implementation
+    # ------------------------------------------------------------------
+
+    @property
+    def adapter_id(self) -> str:
+        """Stable registry identifier."""
+        return "i2p"
+
+    @property
+    def warmup_behavior(self) -> WarmupBehavior:
+        """I2P warm-up is ~8 min; operator cannot accelerate it."""
+        return WarmupBehavior(
+            expected_seconds=self.warm_up_seconds,
+            actionable=False,
+            description="i2pd is building its router table (~8 min on first start).",
+        )
+
+    async def probe(self) -> AdapterState:
+        """Map the low-level TCP probe result to an :class:`AdapterState`.
+
+        State mapping:
+        - DISABLED mode → :attr:`AdapterState.DISABLED`
+        - MANAGED and warming up → :attr:`AdapterState.WARMING`
+        - Probe succeeds → :attr:`AdapterState.READY`
+        - Probe fails (but mode is ADOPT/MANAGED) → :attr:`AdapterState.DEGRADED`
+        """
+        if self.mode == DaemonMode.DISABLED:
+            return AdapterState.DISABLED
+        if self.mode == DaemonMode.MANAGED and self.is_warming_up:
+            return AdapterState.WARMING
+        reachable = await self._probe()
+        return AdapterState.READY if reachable else AdapterState.DEGRADED
+
+    async def gather_details(self) -> dict:
+        """Return cached proxy URL and b32 address for the registry record."""
+        return await self._gather_details()
 
     def __init__(
         self,
