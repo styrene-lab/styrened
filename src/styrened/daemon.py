@@ -198,6 +198,7 @@ class StyreneDaemon:
         self._i2p_adapter: Any = None  # Optional I2P adapter
         self._ygg_adapter: Any = None  # Optional Yggdrasil adapter
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
+        self._adapter_probe_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
         # Central event bus — the daemon's nervous system
         from styrened.services.event_bus import EventBus
@@ -229,6 +230,7 @@ class StyreneDaemon:
         # Start optional I2P integration early so announce/meta can surface it
         await self._start_i2p_adapter()
         await self._start_yggdrasil_adapter()
+        self._start_adapter_probe_loop()
 
         # Inject RBAC policy into LXMF service — must happen before any
         # message processing begins, regardless of chat.enabled state.
@@ -1449,6 +1451,97 @@ class StyreneDaemon:
                     pass
             self._ygg_adapter = None
 
+    # ------------------------------------------------------------------
+    # Adapter probe loop
+    # ------------------------------------------------------------------
+
+    _ADAPTER_PROBE_INTERVAL: float = 30.0  # seconds between probe cycles
+
+    def _start_adapter_probe_loop(self) -> None:
+        """Register adapters with the AdapterRegistry and start the probe loop.
+
+        Called from :meth:`start` after both I2P and Yggdrasil adapters are
+        initialised.  The loop runs as a background task for the lifetime of
+        the daemon.
+        """
+        from styrened.services.adapter_registry import AdapterRegistry
+
+        self._adapter_registry: AdapterRegistry = AdapterRegistry()
+
+        if self._i2p_adapter is not None:
+            self._adapter_registry.register(self._i2p_adapter)
+            logger.debug("Registered I2P adapter with AdapterRegistry")
+
+        if self._ygg_adapter is not None:
+            self._adapter_registry.register(self._ygg_adapter)
+            logger.debug("Registered Yggdrasil adapter with AdapterRegistry")
+
+        if not self._adapter_registry.adapter_ids():
+            logger.debug("No adapters registered; probe loop will not start")
+            return
+
+        self._adapter_probe_task = asyncio.ensure_future(
+            self._adapter_probe_loop()
+        )
+        logger.info(
+            "Adapter probe loop started (interval=%.0fs, adapters=%s)",
+            self._ADAPTER_PROBE_INTERVAL,
+            self._adapter_registry.adapter_ids(),
+        )
+
+    async def _adapter_probe_loop(self) -> None:
+        """Poll every registered adapter and emit ``adapter_changed`` on transitions.
+
+        State transitions only: if the state is unchanged from the previous
+        probe, no event is emitted.  Initial state is always PROBING (set by
+        :meth:`AdapterRegistry.register`) so the first successful/failed probe
+        always generates a transition event.
+        """
+        from styrened.services.adapter_registry import AdapterState
+
+        while True:
+            await asyncio.sleep(self._ADAPTER_PROBE_INTERVAL)
+
+            for aid in list(self._adapter_registry.adapter_ids()):
+                adapter = self._adapter_registry.get_adapter(aid)
+                if adapter is None:
+                    continue
+
+                # Remember previous state before the probe
+                prev_record = self._adapter_registry.get(aid)
+                prev_state = prev_record.state if prev_record else AdapterState.PROBING
+
+                try:
+                    new_state = await adapter.probe()
+                    details = await adapter.gather_details()
+                except Exception as exc:
+                    logger.warning("Adapter probe failed for %r: %s", aid, exc)
+                    new_state = AdapterState.DEGRADED
+                    details = {}
+
+                # Update registry with the latest state
+                self._adapter_registry.update_state(
+                    aid, new_state, details=details,
+                )
+
+                # Emit EventBus event only on state transitions
+                if new_state != prev_state:
+                    logger.info(
+                        "Adapter state transition: %s %s → %s",
+                        aid, prev_state.value, new_state.value,
+                    )
+                    try:
+                        await self.event_bus.emit(
+                            "adapter_changed",
+                            action=new_state.value,
+                            adapter=aid,
+                            prev=prev_state.value,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to emit adapter_changed for %r: %s", aid, exc
+                        )
+
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
 
@@ -2553,6 +2646,15 @@ class StyreneDaemon:
         if self._relay_service:
             self._relay_service = None
             logger.info("Relay service stopped")
+
+        # Stop adapter probe loop
+        if self._adapter_probe_task is not None:
+            self._adapter_probe_task.cancel()
+            try:
+                await self._adapter_probe_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._adapter_probe_task = None
 
         # Stop optional I2P adapter
         await self._stop_i2p_adapter()
