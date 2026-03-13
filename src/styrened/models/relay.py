@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -42,6 +43,7 @@ class RelaySession:
     """An active relay session bridging two peers through the hub."""
     requester_hash: str
     target_hash: str
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     bytes_forwarded: int = 0
     is_permanent: bool = False
     is_priority: bool = False
@@ -49,7 +51,12 @@ class RelaySession:
     last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def record_bytes(self, n: int) -> None:
-        """Record n bytes forwarded and update last_activity."""
+        """Record n bytes forwarded and update last_activity.
+
+        Raises ValueError if n is negative.
+        """
+        if n < 0:
+            raise ValueError(f"record_bytes() requires non-negative value, got {n}")
         self.bytes_forwarded += n
         self.last_activity = datetime.now(timezone.utc)
 
@@ -64,37 +71,37 @@ class RelayError(Exception):
 
 
 class RelayDisabled(RelayError):
-    error_code = "relay_disabled"
+    error_code = "relay.disabled"
 
 class RelayMaxSessions(RelayError):
-    error_code = "relay_max_sessions"
+    error_code = "relay.max_sessions"
 
 class RelayMaxPerIdentity(RelayError):
-    error_code = "relay_max_per_identity"
+    error_code = "relay.max_per_identity"
 
 class RelayByteLimitExceeded(RelayError):
-    error_code = "relay_byte_limit_exceeded"
+    error_code = "relay.byte_limit"
 
 class RelayIdleTimeout(RelayError):
-    error_code = "relay_idle_timeout"
+    error_code = "relay.idle_timeout"
 
 class RelayUnauthorized(RelayError):
-    error_code = "relay_unauthorized"
+    error_code = "relay.unauthorized"
 
 class RelayPermanentDenied(RelayError):
-    error_code = "relay_permanent_denied"
+    error_code = "relay.permanent_denied"
 
 class RelayTargetRejected(RelayError):
-    error_code = "relay_target_rejected"
+    error_code = "relay.target_rejected"
 
 class RelayTargetOffline(RelayError):
-    error_code = "relay_target_offline"
+    error_code = "relay.target_offline"
 
 class RelayPermanentConsentDenied(RelayError):
-    error_code = "relay_permanent_consent_denied"
+    error_code = "relay.consent_denied"
 
 class RelayEvicted(RelayError):
-    error_code = "relay_evicted"
+    error_code = "relay.evicted"
 
 class RelayBridgeDenied(RelayError):
-    error_code = "relay_bridge_denied"
+    error_code = "relay.bridge_denied"
