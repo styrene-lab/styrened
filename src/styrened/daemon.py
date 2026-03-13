@@ -2155,9 +2155,7 @@ class StyreneDaemon:
         role = self._datalink_rbac_role(identity_hex)
         if role <= int(Role.BLOCKED):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
-        if self.config.rbac and not self.config.rbac.has_capability(
-            identity_hex, Capability.RELAY_REQUEST
-        ):
+        if not self.config.rbac.has_capability(identity_hex, Capability.RELAY_REQUEST):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Parse request
@@ -2173,6 +2171,12 @@ class StyreneDaemon:
 
         if not target_hash:
             return json.dumps({"error": "missing_target_hash"}).encode("utf-8")
+
+        # Defense-in-depth: check relay.request_permanent when permanent is requested
+        if permanent and not self.config.rbac.has_capability(
+            identity_hex, Capability.RELAY_REQUEST_PERMANENT
+        ):
+            return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Check target is connected via DirectLink
         if self._direct_link_service:
@@ -2688,6 +2692,11 @@ class StyreneDaemon:
 
         # Stop relay service
         if self._relay_service:
+            try:
+                for session_id in list(self._relay_service._sessions.keys()):
+                    await self._relay_service.teardown_session(session_id)
+            except Exception as e:
+                logger.error(f"Error tearing down relay sessions: {e}")
             self._relay_service = None
             logger.info("Relay service stopped")
 

@@ -364,3 +364,114 @@ class TestDaemonRelayServiceWiring:
             daemon._relay_service = None
 
         assert daemon._relay_service is None
+
+
+# ---------------------------------------------------------------------------
+# Additional tests: permanent capability check (W2) and async path (W1)
+# ---------------------------------------------------------------------------
+
+
+class TestRelayPermanentCapabilityCheck:
+    """Daemon handler must check relay.request_permanent when permanent=True (W2)."""
+
+    def _make_daemon(self, has_permanent_cap: bool):
+        from styrened.daemon import StyreneDaemon
+        from styrened.models.rbac import Capability, RBACPolicy, Role
+
+        daemon = object.__new__(StyreneDaemon)
+        daemon._datalink_rl = MagicMock()
+        daemon._datalink_rl.check.return_value = True
+        daemon._datalink_rbac_role = MagicMock(return_value=int(Role.PEER))
+        daemon._datalink_identity_hex = MagicMock(return_value="aabbccdd")
+        daemon._event_loop = MagicMock()
+
+        relay_svc = MagicMock()
+        daemon._relay_service = relay_svc
+
+        dls = MagicMock()
+        link_info = MagicMock()
+        link_info.status = "active"
+        dls.get_link.return_value = link_info
+        daemon._direct_link_service = dls
+
+        # Build a real RBACPolicy that either does/doesn't have RELAY_REQUEST_PERMANENT
+        rbac = MagicMock()
+        rbac.has_capability.side_effect = lambda identity, cap: (
+            cap in (Capability.RELAY_REQUEST,)
+            or (has_permanent_cap and cap == Capability.RELAY_REQUEST_PERMANENT)
+        )
+        cfg = MagicMock()
+        cfg.rbac = rbac
+        daemon.config = cfg
+        return daemon
+
+    def test_permanent_request_denied_without_relay_request_permanent_capability(self):
+        daemon = self._make_daemon(has_permanent_cap=False)
+        data = json.dumps({"target_hash": "deadbeef", "permanent": True}).encode()
+        result = daemon._serve_datalink_relay(
+            path="/relay", data=data, request_id=None,
+            link_id=None, remote_identity=MagicMock(), requested_at=None,
+        )
+        resp = json.loads(result)
+        assert resp["error"] == "unauthorized"
+
+    def test_permanent_request_allowed_with_relay_request_permanent_capability(self):
+        from styrened.models.relay import RelaySession
+        daemon = self._make_daemon(has_permanent_cap=True)
+        session = RelaySession(requester_hash="aabbccdd", target_hash="deadbeef", is_permanent=True)
+        future_mock = MagicMock()
+        future_mock.result.return_value = session
+        data = json.dumps({"target_hash": "deadbeef", "permanent": True}).encode()
+        with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+            result = daemon._serve_datalink_relay(
+                path="/relay", data=data, request_id=None,
+                link_id=None, remote_identity=MagicMock(), requested_at=None,
+            )
+        resp = json.loads(result)
+        assert resp["status"] == "established"
+        assert resp["is_permanent"] is True
+
+    def test_non_permanent_request_does_not_require_permanent_capability(self):
+        from styrened.models.relay import RelaySession
+        daemon = self._make_daemon(has_permanent_cap=False)
+        session = RelaySession(requester_hash="aabbccdd", target_hash="deadbeef")
+        future_mock = MagicMock()
+        future_mock.result.return_value = session
+        data = json.dumps({"target_hash": "deadbeef", "permanent": False}).encode()
+        with patch("asyncio.run_coroutine_threadsafe", return_value=future_mock):
+            result = daemon._serve_datalink_relay(
+                path="/relay", data=data, request_id=None,
+                link_id=None, remote_identity=MagicMock(), requested_at=None,
+            )
+        resp = json.loads(result)
+        assert resp["status"] == "established"
+
+
+class TestRelayServiceTeardownOnStop:
+    """Relay service teardown must call teardown_session for all active sessions (C1)."""
+
+    def test_teardown_calls_teardown_session_for_all_active_sessions(self):
+        import asyncio
+        from styrened.services.relay import RelayService
+        from styrened.models.relay import RelayConfig, RelaySession
+
+        svc = RelayService(RelayConfig(enabled=True))
+        s1 = RelaySession(requester_hash="aa", target_hash="bb")
+        s2 = RelaySession(requester_hash="cc", target_hash="dd")
+        svc._sessions = {1: s1, 2: s2}
+
+        torn_down = []
+
+        async def fake_teardown(session_id: int) -> None:
+            torn_down.append(session_id)
+            svc._sessions.pop(session_id, None)
+
+        svc.teardown_session = fake_teardown  # type: ignore[method-assign]
+
+        async def run():
+            for session_id in list(svc._sessions.keys()):
+                await svc.teardown_session(session_id)
+
+        asyncio.run(run())
+        assert sorted(torn_down) == [1, 2]
+        assert svc._sessions == {}
