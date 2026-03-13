@@ -35,6 +35,8 @@ from styrened.tui.models.config import (
     TUIConfig,
 )
 from styrened.tui.models.device_hardware import Hardware
+from styrened.tui.models.profiles import Profile
+from styrened.tui.models.roles import Role
 from styrened.tui.models.fleet import Device, DeviceStatus
 from styrened.tui.models.hardware import (
     DiskInfo,
@@ -58,6 +60,8 @@ __all__ = [
     "FleetConfig",
     "GatewayMode",
     "Hardware",
+    "Profile",
+    "Role",
     "InterfaceCategory",
     "LogLevel",
     "MeshDefaults",
