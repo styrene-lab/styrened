@@ -127,6 +127,7 @@ class IPCMessageType(IntEnum):
 
     # Adapter provisioning (0x71)
     CMD_PROVISION_ADAPTER = 0x71  # Provision adapter binary locally
+    GET_ADAPTER_STATE = 0x72      # Query current state of all registered adapters
 
     # Boundary logging (0x70-0x7F)
     CMD_BOUNDARY_SNAPSHOT = 0x70  # Return ring-buffer snapshot of boundary log records

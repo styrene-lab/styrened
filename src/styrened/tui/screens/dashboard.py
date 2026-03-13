@@ -40,6 +40,7 @@ _IPC_TO_BUS_TYPE: dict[str, str] = {
     "pqc_established": "link_changed",
     "file_offer": "message_changed",
     "file_complete": "message_changed",
+    "adapter_changed": "adapter_changed",
 }
 
 
@@ -92,6 +93,7 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self.run_worker(self._fetch_adapter_state(), group="dashboard-adapters")
             self._activity_worker = self.run_worker(
                 self._subscribe_activity(),
                 group="dashboard-activity",
@@ -125,6 +127,7 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self.run_worker(self._fetch_adapter_state(), group="dashboard-adapters")
             self._activity_worker = self.run_worker(
                 self._subscribe_activity(),
                 group="dashboard-activity",
@@ -455,6 +458,32 @@ class DashboardScreen(Screen[None]):
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
+    async def _fetch_adapter_state(self) -> None:
+        """Pull current adapter states from daemon on connect.
+
+        Avoids the up-to-30-second wait for the first probe cycle event by
+        querying the daemon directly.  Synthesises DaemonEvents so the normal
+        on_daemon_event → AdapterStatusTracker → AdapterStatusBar path handles
+        the result without any special-casing.
+        """
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            adapters = await bridge.get_adapter_state()
+            for entry in adapters:
+                self.post_message(DaemonEvent(
+                    event_type="adapter_changed",
+                    action=entry.get("state", "probing"),
+                    data={
+                        "adapter_name": entry.get("adapter_name", ""),
+                        "state": entry.get("state", "probing"),
+                        "prev": "probing",
+                    },
+                ))
+        except Exception:
+            pass  # Daemon may not support this yet; probe events will catch up
+
     async def _subscribe_activity(self) -> None:
         """Subscribe to activity events via IPC — ephemeral events only.
 
@@ -473,7 +502,7 @@ class DashboardScreen(Screen[None]):
                     continue
                 # Post DaemonEvent — on_daemon_event handles tracker + COP update
                 evt_type = event.get("type", "unknown")
-                self.app.post_message(DaemonEvent(
+                self.post_message(DaemonEvent(
                     event_type=_ipc_type_to_bus_type(evt_type),
                     action=evt_type,
                     data=event,

@@ -603,6 +603,42 @@ class IPCHandlers:
             logger.exception(f"Error getting unread counts: {e}")
             return ErrorResponse.internal_error(f"Failed to get unread counts: {e}")
 
+    async def handle_get_adapter_state(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_ADAPTER_STATE request.
+
+        Returns current state of all registered adapters so TUI clients can
+        seed their adapter status display immediately on connect without
+        waiting for the next probe cycle (up to 30 s).
+
+        Returns:
+            ResultResponse with {adapters: [{name, state, details}, ...]}.
+        """
+        try:
+            err = self._check_daemon()
+            if err:
+                return err
+            assert self.daemon is not None
+
+            registry = getattr(self.daemon, "_adapter_registry", None)
+            if registry is None:
+                return ResultResponse(data={"adapters": []})
+
+            adapters = []
+            for aid in list(registry.adapter_ids()):
+                record = registry.get(aid)
+                if record is None:
+                    continue
+                adapters.append({
+                    "adapter_name": aid,
+                    "state": record.state.value,
+                    "details": getattr(record, "details", {}),
+                })
+            return ResultResponse(data={"adapters": adapters})
+
+        except Exception as e:
+            logger.exception(f"Error getting adapter state: {e}")
+            return ErrorResponse.internal_error(f"Failed to get adapter state: {e}")
+
     # -------------------------------------------------------------------------
     # Command handlers
     # -------------------------------------------------------------------------

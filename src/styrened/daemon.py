@@ -1492,15 +1492,20 @@ class StyreneDaemon:
     async def _adapter_probe_loop(self) -> None:
         """Poll every registered adapter and emit ``adapter_changed`` on transitions.
 
-        State transitions only: if the state is unchanged from the previous
-        probe, no event is emitted.  Initial state is always PROBING (set by
-        :meth:`AdapterRegistry.register`) so the first successful/failed probe
-        always generates a transition event.
+        The first iteration always emits for every adapter regardless of state
+        change — this seeds any connected TUI clients with initial adapter state
+        so they don't show "no adapters registered" until the next transition.
+        Subsequent iterations emit only on state transitions.
         """
         from styrened.services.adapter_registry import AdapterState
 
+        first_iteration = True
+        # Short initial delay so RNS/LXMF settle before first probe,
+        # then fall into the normal cadence.
+        next_sleep = 3.0
         while True:
-            await asyncio.sleep(self._ADAPTER_PROBE_INTERVAL)
+            await asyncio.sleep(next_sleep)
+            next_sleep = self._ADAPTER_PROBE_INTERVAL
 
             for aid in list(self._adapter_registry.adapter_ids()):
                 adapter = self._adapter_registry.get_adapter(aid)
@@ -1524,23 +1529,42 @@ class StyreneDaemon:
                     aid, new_state, details=details,
                 )
 
-                # Emit EventBus event only on state transitions
-                if new_state != prev_state:
-                    logger.info(
-                        "Adapter state transition: %s %s → %s",
-                        aid, prev_state.value, new_state.value,
-                    )
+                # Emit on state transitions, or unconditionally on first iteration
+                # to seed TUI clients that connected after startup.
+                if new_state != prev_state or first_iteration:
+                    if new_state != prev_state:
+                        logger.info(
+                            "Adapter state transition: %s %s → %s",
+                            aid, prev_state.value, new_state.value,
+                        )
                     try:
                         await self.event_bus.emit(
                             "adapter_changed",
                             action=new_state.value,
-                            adapter=aid,
+                            adapter_name=aid,
                             prev=prev_state.value,
                         )
                     except Exception as exc:
                         logger.warning(
                             "Failed to emit adapter_changed for %r: %s", aid, exc
                         )
+                    # Also route through NotificationService so the event
+                    # reaches IPC clients (TUI) via EVENT_ACTIVITY.
+                    # event_bus.emit above is internal-only; IPC consumers
+                    # never see it unless we bridge it here.
+                    # Include "type" key for the TUI's event.get("type") lookup.
+                    # Use "adapter_name" to match AdapterStatusTracker.ingest().
+                    self._emit_activity_event(
+                        "adapter_changed",
+                        metadata={
+                            "type": "adapter_changed",
+                            "adapter_name": aid,
+                            "state": new_state.value,
+                            "prev": prev_state.value,
+                        },
+                    )
+
+            first_iteration = False
 
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
