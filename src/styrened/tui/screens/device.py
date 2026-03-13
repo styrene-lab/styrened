@@ -1,5 +1,6 @@
 """Device Detail Screen - Device information and actions."""
 
+import logging
 from typing import ClassVar
 
 from textual.app import ComposeResult
@@ -9,8 +10,9 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
 
 from styrened.tui.models.fleet import Device
-from styrened.tui.services.fleet import FleetInventoryError, get_device
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceInfoPanel(Static):
@@ -85,12 +87,15 @@ class DeviceActionsPanel(Static):
 class DeviceScreen(Screen[None]):
     """Device detail screen showing device information and actions.
 
-    This screen displays detailed information about a specific device
-    and provides action buttons for remote operations (stubbed for Phase 2A).
+    Accepts a pre-resolved ``Device`` object so the screen never issues
+    direct fleet-service I/O calls on the event loop thread.  The caller
+    is responsible for loading the device from the fleet inventory (via the
+    IPC bridge or any other mechanism) before pushing this screen.
+
+    This screen is usable standalone (reachable from mesh_device_detail or
+    the Exchange/Provision screen).
     """
 
-    # Screen-specific bindings - 's' means Shell here (not Status)
-    # See docs/KEYMAP.md for hierarchy
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "app.pop_screen", "Back"),
         Binding("s", "action_shell", "Shell", show=False),
@@ -99,67 +104,31 @@ class DeviceScreen(Screen[None]):
         Binding("u", "action_update", "Update", show=False),
     ]
 
-    def __init__(self, device_name: str) -> None:
+    def __init__(self, device: Device) -> None:
         """Initialize device screen.
 
         Args:
-            device_name: Name of the device to display.
+            device: Pre-resolved fleet Device to display.  The caller is
+                responsible for fetching this from the inventory; this screen
+                does no fleet I/O of its own.
         """
         super().__init__()
-        self.device_name = device_name
-        self.device: Device | None = None
+        self.device: Device = device
 
     def compose(self) -> ComposeResult:
         yield Header()
-        # Always compose the container; panels are mounted dynamically in on_mount()
-        # after _load_device() completes.  compose() runs before on_mount() so
-        # self.device is never available here.
         with Container(id="device-container"):
-            yield Static("", id="device-placeholder")
+            yield HighlightedPanel(
+                DeviceInfoPanel(self.device),
+                title=f"DEVICE: {self.device.name}",
+                id="device-info-panel",
+            )
+            yield HighlightedPanel(
+                DeviceActionsPanel(),
+                title="ACTIONS",
+                id="device-actions-panel",
+            )
         yield Footer()
-
-    def on_mount(self) -> None:
-        """Load device data on mount, then build the panel tree."""
-        self._load_device()
-
-    def _load_device(self) -> None:
-        """Load device from inventory and update the widget tree."""
-        container = self.query_one("#device-container")
-        placeholder = self.query_one("#device-placeholder", Static)
-
-        try:
-            self.device = get_device(self.device_name)
-            if self.device is None:
-                self.notify(
-                    f"Device '{self.device_name}' not found",
-                    title="Error",
-                    severity="error",
-                )
-                placeholder.update(
-                    f"[red]Device '{self.device_name}' not found in inventory[/]"
-                )
-                return
-
-            # Remove placeholder and mount real panels
-            placeholder.remove()
-            container.mount(
-                HighlightedPanel(
-                    DeviceInfoPanel(self.device),
-                    title=f"DEVICE: {self.device.name}",
-                    id="device-info-panel",
-                )
-            )
-            container.mount(
-                HighlightedPanel(
-                    DeviceActionsPanel(),
-                    title="ACTIONS",
-                    id="device-actions-panel",
-                )
-            )
-
-        except FleetInventoryError as e:
-            self.notify(str(e), title="Error", severity="error")
-            placeholder.update(f"[red]Error loading device: {e}[/]")
 
     def action_action_shell(self) -> None:
         """Stub for shell action (Phase 2B)."""

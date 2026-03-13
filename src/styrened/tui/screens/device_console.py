@@ -6,11 +6,10 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.containers import Container, Horizontal
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Input, RichLog, Static
 
-from styrened.rpc import RPCClient
 from styrened.rpc.errors import RPCTimeoutError
 from styrened.rpc.messages import (
     ExecResult,
@@ -25,13 +24,15 @@ logger = logging.getLogger(__name__)
 class DeviceConsoleScreen(Screen[None]):
     """SSH-like console for device management over LXMF.
 
-    Allows sending RPC commands to remote devices and displaying responses.
-    Uses Imperial CRT theme (#39ff14 green phosphor on #0a0a0a black).
+    Sends RPC commands to a remote device via ``self.app.services.bridge``
+    (IPCBridge) — never via a directly-held RPCClient instance, which would
+    require a live RNS/LXMF layer in the TUI process.
+
+    Imperial CRT theme: #39ff14 green phosphor on #0a0a0a black.
 
     Attributes:
-        device_hash: Target device identity hash.
-        rpc_client: RPCClient instance for sending commands.
-        command_history: List of command/response dicts (last 100 entries).
+        device_hash: Target device destination hash.
+        command_history: Last 100 command/response dicts.
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -73,81 +74,58 @@ class DeviceConsoleScreen(Screen[None]):
         border: solid #39ff14;
     }
 
-    DeviceConsoleScreen #history-container {
+    DeviceConsoleScreen #history-log {
         height: 1fr;
         scrollbar-gutter: stable;
         border: solid #39ff14;
-    }
-
-    DeviceConsoleScreen .history-entry {
-        padding: 1;
-        border-bottom: solid #39ff14;
+        background: #0a0a0a;
+        color: #39ff14;
     }
 
     DeviceConsoleScreen .command-prompt {
         color: #39ff14;
     }
-
-    DeviceConsoleScreen .response-text {
-        color: #39ff14;
-        padding-left: 2;
-    }
-
-    DeviceConsoleScreen .error-text {
-        color: red;
-        padding-left: 2;
-    }
     """
 
-    def __init__(
-        self,
-        device_hash: str,
-        rpc_client: RPCClient,
-    ) -> None:
+    def __init__(self, device_hash: str) -> None:
         """Initialize device console screen.
 
         Args:
-            device_hash: Target device identity hash.
-            rpc_client: RPC client for sending commands.
+            device_hash: Target device destination hash.  RPC calls are
+                routed through ``self.app.services.bridge`` at runtime.
         """
         super().__init__()
         self.device_hash = device_hash
-        self.rpc_client = rpc_client
         self.command_history: list[dict[str, str]] = []
 
     def compose(self) -> ComposeResult:
         """Compose device console UI."""
         yield Header()
 
-        # Device info header
         with Container(id="header-bar"):
             yield Static(f"Device Console: {self.device_hash[:16]}...", id="device-info")
 
-        # Command history display
-        with ScrollableContainer(id="history-container"):
-            yield Static("", id="history-display")
+        # RichLog renders each write() as a new line — no full-string rebuild.
+        yield RichLog(id="history-log", highlight=False, markup=True, wrap=True)
 
-        # Command input at bottom
         with Horizontal(id="command-input"):
             yield Static("$ ", classes="command-prompt")
-            yield Input(placeholder="Enter command (status, exec, reboot, update-config)", id="cmd-input")
+            yield Input(
+                placeholder="Enter command (status, exec, reboot, update-config)",
+                id="cmd-input",
+            )
 
         yield Footer()
 
     def on_mount(self) -> None:
         """Focus command input on mount."""
         try:
-            cmd_input = self.query_one("#cmd-input", Input)
-            cmd_input.focus()
+            self.query_one("#cmd-input", Input).focus()
         except Exception:
             pass
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle command input submission.
-
-        Args:
-            event: Input submitted event.
-        """
+        """Handle command input submission."""
         if event.input.id != "cmd-input":
             return
 
@@ -155,14 +133,11 @@ class DeviceConsoleScreen(Screen[None]):
         if not command_string:
             return
 
-        # Clear input
         event.input.value = ""
-
-        # Execute command
         await self._execute_command(command_string)
 
     async def _execute_command(self, command_string: str) -> None:
-        """Parse and execute RPC command.
+        """Parse and execute RPC command via IPCBridge.
 
         Supported commands:
         - status: Display device status
@@ -189,24 +164,38 @@ class DeviceConsoleScreen(Screen[None]):
             elif command == "update-config":
                 await self._handle_update_config_command(parts[1:])
             else:
-                self._add_to_history(command_string, "Unknown command. Available: status, exec, reboot, update-config")
+                self._add_to_history(
+                    command_string,
+                    "Unknown command. Available: status, exec, reboot, update-config",
+                )
         except Exception as e:
-            logger.error(f"Command execution error: {e}")
+            logger.error("Unhandled error in _execute_command for %r: %s", command_string, e)
             self._add_to_history(command_string, f"Error: {e!s}")
 
     async def _handle_status_command(self) -> None:
-        """Handle status command."""
+        """Handle status command via IPCBridge."""
         try:
-            status = await self.rpc_client.call_status(self.device_hash, timeout=30.0)
+            bridge = self.app.services.bridge  # type: ignore[attr-defined]
+            result = await bridge.query_device_status(self.device_hash, timeout=30.0)
+            # Convert RemoteStatusInfo → StatusResponse for shared formatter.
+            status = StatusResponse(
+                ip=result.ip,
+                uptime=int(result.uptime),
+                services=list(result.services),
+                disk_used=result.disk_used,
+                disk_total=result.disk_total,
+            )
             response = self._format_status_response(status)
             self._add_to_history("status", response)
         except RPCTimeoutError as e:
+            logger.warning("Status command timed out for %s: %s", self.device_hash, e)
             self._add_to_history("status", str(e))
         except Exception as e:
+            logger.error("Status command failed for %s: %s", self.device_hash, e)
             self._add_to_history("status", f"Error: {e}")
 
     async def _handle_exec_command(self, args: list[str]) -> None:
-        """Handle exec command.
+        """Handle exec command via IPCBridge.
 
         Args:
             args: Command and arguments to execute.
@@ -219,21 +208,29 @@ class DeviceConsoleScreen(Screen[None]):
         command_args = args[1:]
 
         try:
-            result = await self.rpc_client.call_exec(
+            bridge = self.app.services.bridge  # type: ignore[attr-defined]
+            result = await bridge.send_rpc(
                 self.device_hash,
                 command=command,
                 args=command_args,
                 timeout=30.0,
             )
-            response = self._format_exec_result(result)
+            exec_result = ExecResult(
+                exit_code=result.exit_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+            response = self._format_exec_result(exec_result)
             self._add_to_history(f"exec {command} {' '.join(command_args)}", response)
         except RPCTimeoutError as e:
+            logger.warning("Exec command timed out for %s: %s", self.device_hash, e)
             self._add_to_history(f"exec {command}", str(e))
         except Exception as e:
+            logger.error("Exec command failed for %s %r: %s", self.device_hash, command, e)
             self._add_to_history(f"exec {command}", f"Error: {e}")
 
     async def _handle_reboot_command(self, args: list[str]) -> None:
-        """Handle reboot command.
+        """Handle reboot command via IPCBridge.
 
         Args:
             args: Optional delay in seconds.
@@ -243,25 +240,37 @@ class DeviceConsoleScreen(Screen[None]):
             try:
                 delay = int(args[0])
             except ValueError:
-                self._add_to_history("reboot", f"Error: invalid delay '{args[0]}', expected integer")
+                self._add_to_history(
+                    "reboot",
+                    f"Error: invalid delay '{args[0]}', expected integer",
+                )
                 return
 
         try:
-            result = await self.rpc_client.call_reboot(
-                self.device_hash,
-                delay=delay,
-                timeout=30.0,
+            bridge = self.app.services.bridge  # type: ignore[attr-defined]
+            result = await bridge.reboot_device(self.device_hash, delay=delay, timeout=30.0)
+            reboot_result = RebootResult(
+                success=result.success,
+                message=result.message,
+                scheduled_time=None,
             )
-            response = self._format_reboot_result(result)
+            response = self._format_reboot_result(reboot_result)
             command_str = f"reboot {delay}" if delay > 0 else "reboot"
             self._add_to_history(command_str, response)
         except RPCTimeoutError as e:
+            logger.warning("Reboot command timed out for %s: %s", self.device_hash, e)
             self._add_to_history("reboot", str(e))
         except Exception as e:
+            logger.error("Reboot command failed for %s: %s", self.device_hash, e)
             self._add_to_history("reboot", f"Error: {e}")
 
     async def _handle_update_config_command(self, args: list[str]) -> None:
         """Handle update-config command.
+
+        Currently stubbed: ``update_config`` has no dedicated IPC bridge
+        method yet.  The route through RPCClient is unavailable in the TUI
+        process (C4); a follow-up task should add
+        ``IPCBridge.update_remote_config()``.
 
         Args:
             args: Key and value to update.
@@ -271,33 +280,31 @@ class DeviceConsoleScreen(Screen[None]):
             return
 
         key = args[0]
-        value = " ".join(args[1:])  # Join remaining args as value
+        value = " ".join(args[1:])
 
-        try:
-            result = await self.rpc_client.call_update_config(
-                self.device_hash,
-                config_updates={key: value},
-                timeout=30.0,
-            )
-            response = self._format_update_config_result(result)
-            self._add_to_history(f"update-config {key} {value}", response)
-        except RPCTimeoutError as e:
-            self._add_to_history("update-config", str(e))
-        except Exception as e:
-            self._add_to_history("update-config", f"Error: {e}")
+        logger.info("update-config called for %s key=%r (stub — no IPC bridge method yet)", self.device_hash, key)
+        # Stub: return a success-shaped UpdateConfigResult so the formatter
+        # works while the full IPC bridge method is added in a follow-up.
+        result = UpdateConfigResult(
+            success=False,
+            message="update-config is not yet supported via IPC bridge",
+            updated_keys=[],
+        )
+        response = self._format_update_config_result(result)
+        self._add_to_history(f"update-config {key} {value}", response)
+
+    # ------------------------------------------------------------------
+    # Formatters
+    # ------------------------------------------------------------------
 
     def _format_status_response(self, status: StatusResponse) -> str:
-        """Format status response for display.
-
-        Args:
-            status: Status response from device.
-
-        Returns:
-            Formatted status string.
-        """
+        """Format status response for display."""
         uptime_str = str(timedelta(seconds=status.uptime))
-        disk_percent = int((status.disk_used / status.disk_total) * 100) if status.disk_total > 0 else 0
-
+        disk_percent = (
+            int((status.disk_used / status.disk_total) * 100)
+            if status.disk_total > 0
+            else 0
+        )
         lines = [
             f"IP Address: {status.ip}",
             f"Uptime: {uptime_str} ({status.uptime}s)",
@@ -307,38 +314,17 @@ class DeviceConsoleScreen(Screen[None]):
         return "\n".join(lines)
 
     def _format_exec_result(self, result: ExecResult) -> str:
-        """Format exec result for display.
-
-        Args:
-            result: Exec result from device.
-
-        Returns:
-            Formatted result string.
-        """
-        lines = [f"Exit Code: {result.exit_code}"]
-
+        """Format exec result for display."""
+        lines: list[str] = [f"Exit Code: {result.exit_code}"]
         if result.stdout:
             lines.append(f"Output:\n{result.stdout}")
-
         if result.stderr:
             lines.append(f"Error Output:\n{result.stderr}")
-
-        if result.exit_code != 0:
-            lines.append("[Failed]")
-        else:
-            lines.append("[Success]")
-
+        lines.append("[Success]" if result.exit_code == 0 else "[Failed]")
         return "\n".join(lines)
 
     def _format_reboot_result(self, result: RebootResult) -> str:
-        """Format reboot result for display.
-
-        Args:
-            result: Reboot result from device.
-
-        Returns:
-            Formatted result string.
-        """
+        """Format reboot result for display."""
         if result.success:
             if result.scheduled_time:
                 return f"Success: {result.message} at {result.scheduled_time}"
@@ -346,63 +332,53 @@ class DeviceConsoleScreen(Screen[None]):
         return f"Failed: {result.message}"
 
     def _format_update_config_result(self, result: UpdateConfigResult) -> str:
-        """Format update-config result for display.
-
-        Args:
-            result: Update config result from device.
-
-        Returns:
-            Formatted result string.
-        """
+        """Format update-config result for display."""
         if result.success:
             keys_str = ", ".join(result.updated_keys)
             return f"Success: {result.message}\nUpdated keys: {keys_str}"
         return f"Failed: {result.message}"
 
-    def _add_to_history(self, command: str, response: str) -> None:
-        """Add command and response to history.
+    # ------------------------------------------------------------------
+    # History management
+    # ------------------------------------------------------------------
 
-        Maintains last 100 entries.
+    def _add_to_history(self, command: str, response: str) -> None:
+        """Append a command/response pair to history.
+
+        Uses ``RichLog.write()`` for incremental display instead of
+        rebuilding the full history string on every entry (W2 fix).
+        Maintains at most 100 entries in ``self.command_history``.
 
         Args:
             command: Command string executed.
             response: Response text to display.
         """
-        self.command_history.append({
-            "command": command,
-            "response": response,
-        })
-
-        # Limit to last 100 entries
+        self.command_history.append({"command": command, "response": response})
         if len(self.command_history) > 100:
             self.command_history = self.command_history[-100:]
 
-        # Update display
-        self._update_history_display()
+        try:
+            log = self.query_one("#history-log", RichLog)
+            log.write(f"[bold]$ {command}[/bold]")
+            log.write(response)
+            log.write("")
+        except Exception as e:
+            logger.error("Failed to write to history log: %s", e)
 
     def _update_history_display(self) -> None:
-        """Update history display widget with current history."""
+        """Rebuild history display from scratch (used by clear_history).
+
+        For incremental appends, use ``_add_to_history()`` instead.
+        """
         try:
-            history_display = self.query_one("#history-display", Static)
-
-            # Build history text
-            lines = []
+            log = self.query_one("#history-log", RichLog)
+            log.clear()
             for entry in self.command_history:
-                lines.append(f"$ {entry['command']}")
-                lines.append(entry['response'])
-                lines.append("")  # Blank line between entries
-
-            history_display.update("\n".join(lines))
-
-            # Scroll to bottom
-            try:
-                container = self.query_one("#history-container", ScrollableContainer)
-                container.scroll_end(animate=False)
-            except Exception:
-                pass
-
+                log.write(f"[bold]$ {entry['command']}[/bold]")
+                log.write(entry["response"])
+                log.write("")
         except Exception as e:
-            logger.error(f"Failed to update history display: {e}")
+            logger.error("Failed to rebuild history display: %s", e)
 
     def action_clear_history(self) -> None:
         """Clear command history (bound to ctrl+l)."""

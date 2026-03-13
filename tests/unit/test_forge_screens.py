@@ -9,25 +9,34 @@ import pytest
 
 from textual.binding import Binding
 
-from styrened.tui.models.fleet import Device
+from styrened.tui.models.fleet import Device, DeviceStatus
 from styrened.tui.screens.device import DeviceInfoPanel, DeviceScreen
 from styrened.tui.screens.device_console import DeviceConsoleScreen
 
 
-def make_mock_device(**kwargs) -> Device:
+def make_mock_device(
+    name: str = "test-node",
+    profile: str = "node",
+    hardware: str = "rpi-zero2w",
+    status: DeviceStatus = "online",
+    last_seen: datetime | None = None,
+    reticulum_identity: str | None = "abc123def456",
+    ip_address: str | None = "10.0.0.1",
+    notes: str | None = None,
+) -> Device:
     """Create a Device instance with sensible defaults."""
-    defaults = {
-        "name": "test-node",
-        "profile": "node",
-        "hardware": "rpi-zero2w",
-        "status": "online",
-        "last_seen": datetime(2026, 3, 13, 9, 0, 0),
-        "reticulum_identity": "abc123def456",
-        "ip_address": "10.0.0.1",
-        "notes": None,
-    }
-    defaults.update(kwargs)
-    return Device(**defaults)
+    if last_seen is None:
+        last_seen = datetime(2026, 3, 13, 9, 0, 0)
+    return Device(
+        name=name,
+        profile=profile,
+        hardware=hardware,
+        status=status,
+        last_seen=last_seen,
+        reticulum_identity=reticulum_identity,
+        ip_address=ip_address,
+        notes=notes,
+    )
 
 
 class TestDeviceInfoPanel:
@@ -83,81 +92,21 @@ class TestDeviceInfoPanel:
 
 
 class TestDeviceScreenLifecycle:
-    """Tests for DeviceScreen compose/mount lifecycle (C1 regression guard)."""
+    """Tests for DeviceScreen compose/mount lifecycle."""
 
-    def test_device_screen_mounts_panels_after_load(self) -> None:
-        """DeviceScreen._load_device() mounts info and action panels when device found.
-
-        This is a regression test for C1: compose() always saw self.device=None
-        and rendered dead/error markup regardless of inventory state.
-        The fix moves panel construction into _load_device(), which runs in on_mount().
-        """
-        from unittest.mock import patch as _patch
-
-        from styrened.tui.screens.device import DeviceScreen
-
+    def test_device_screen_constructed_with_device(self) -> None:
+        """DeviceScreen accepts a Device object directly (C3 fix: no service I/O)."""
         device = make_mock_device(name="boot-node")
+        screen = DeviceScreen(device=device)
+        assert screen.device is device
+        assert screen.device.name == "boot-node"
 
-        screen = DeviceScreen(device_name="boot-node")
-
-        # Simulate what on_mount() does: call _load_device with a mocked inventory.
-        # We verify that the container receives mounted panels, not an error message.
-        with _patch("styrened.tui.screens.device.get_device", return_value=device):
-            with _patch("styrened.tui.screens.device.HighlightedPanel") as mock_panel_cls, \
-                 _patch.object(screen, "query_one") as mock_query_one, \
-                 _patch.object(screen, "notify"):
-
-                mock_container = MagicMock()
-                mock_placeholder = MagicMock()
-
-                def query_side_effect(selector, *args, **kwargs):
-                    if selector == "#device-container":
-                        return mock_container
-                    if selector == "#device-placeholder":
-                        return mock_placeholder
-                    raise Exception(f"Unexpected query: {selector}")
-
-                mock_query_one.side_effect = query_side_effect
-
-                screen._load_device()
-
-        # After _load_device(), the placeholder should be removed and two panels mounted.
-        mock_placeholder.remove.assert_called_once()
-        assert mock_container.mount.call_count == 2
-
-    def test_device_screen_shows_error_when_device_not_found(self) -> None:
-        """DeviceScreen._load_device() updates placeholder when device is None.
-
-        Ensures the error path in the fixed implementation works correctly.
-        """
-        from unittest.mock import patch as _patch
-
-        from styrened.tui.screens.device import DeviceScreen
-
-        screen = DeviceScreen(device_name="missing-node")
-
-        with _patch("styrened.tui.screens.device.get_device", return_value=None):
-            with _patch.object(screen, "query_one") as mock_query_one, \
-                 _patch.object(screen, "notify"):
-
-                mock_container = MagicMock()
-                mock_placeholder = MagicMock()
-
-                def query_side_effect(selector, *args, **kwargs):
-                    if selector == "#device-container":
-                        return mock_container
-                    if selector == "#device-placeholder":
-                        return mock_placeholder
-                    raise Exception(f"Unexpected query: {selector}")
-
-                mock_query_one.side_effect = query_side_effect
-                screen._load_device()
-
-        # No panels mounted; placeholder updated with error text.
-        mock_container.mount.assert_not_called()
-        mock_placeholder.update.assert_called_once()
-        call_arg = mock_placeholder.update.call_args[0][0]
-        assert "not found" in call_arg
+    def test_device_screen_stores_device(self) -> None:
+        """DeviceScreen.device attribute holds the provided Device instance."""
+        device = make_mock_device(name="relay-node", profile="hub")
+        screen = DeviceScreen(device=device)
+        assert screen.device.name == "relay-node"
+        assert screen.device.profile == "hub"
 
 
 class TestDeviceConsoleScreen:
@@ -172,42 +121,33 @@ class TestDeviceConsoleScreen:
     def test_has_expected_bindings(self) -> None:
         """DeviceConsoleScreen has escape and ctrl+l bindings."""
         # BindingType = Binding | tuple[str, str] | tuple[str, str, str]
-        # Normalise all forms safely before accessing .key to avoid AttributeError
-        # on tuple entries (which have no .key attribute).
+        # Normalise all forms safely: Binding has .key, tuple has [0] as str.
         def _key(b: object) -> str:
             if isinstance(b, Binding):
                 return b.key
             if isinstance(b, tuple):
-                return b[0]
+                return str(b[0])  # str() avoids [no-any-return] on tuple[0]
             return str(b)
 
         keys = {_key(b) for b in DeviceConsoleScreen.BINDINGS}
         assert "escape" in keys
         assert "ctrl+l" in keys
 
-    def test_can_be_instantiated_with_mock_rpc_client(self) -> None:
-        """DeviceConsoleScreen can be instantiated with mock RPC client."""
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(
-            device_hash="aabbccddeeff0011",
-            rpc_client=mock_client,
-        )
+    def test_can_be_instantiated_with_device_hash(self) -> None:
+        """DeviceConsoleScreen can be instantiated with only a device_hash (C4 fix)."""
+        screen = DeviceConsoleScreen(device_hash="aabbccddeeff0011")
         assert screen.device_hash == "aabbccddeeff0011"
-        assert screen.rpc_client is mock_client
 
     def test_command_history_starts_empty(self) -> None:
         """DeviceConsoleScreen initializes with empty command history."""
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(device_hash="abcdef", rpc_client=mock_client)
+        screen = DeviceConsoleScreen(device_hash="abcdef")
         assert screen.command_history == []
 
     def test_add_to_history_appends_entry(self) -> None:
         """_add_to_history stores command/response without Textual app running."""
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(device_hash="abcdef", rpc_client=mock_client)
-        # Use patch.object rather than direct attribute assignment to avoid
-        # mypy's "Cannot assign to a method" error (C3).
-        with patch.object(screen, "_update_history_display"):
+        screen = DeviceConsoleScreen(device_hash="abcdef")
+        with patch.object(screen, "_update_history_display"), \
+             patch.object(screen, "query_one", side_effect=Exception("no app")):
             screen._add_to_history("status", "ip: 10.0.0.1")
         assert len(screen.command_history) == 1
         assert screen.command_history[0]["command"] == "status"
@@ -215,21 +155,18 @@ class TestDeviceConsoleScreen:
 
     def test_history_capped_at_100(self) -> None:
         """_add_to_history caps history at 100 entries."""
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(device_hash="abcdef", rpc_client=mock_client)
-        with patch.object(screen, "_update_history_display"):
+        screen = DeviceConsoleScreen(device_hash="abcdef")
+        with patch.object(screen, "query_one", side_effect=Exception("no app")):
             for i in range(150):
                 screen._add_to_history(f"cmd{i}", f"response{i}")
         assert len(screen.command_history) == 100
-        # Most recent entries should be kept
         assert screen.command_history[-1]["command"] == "cmd149"
 
     def test_format_status_response(self) -> None:
         """_format_status_response returns a readable string."""
         from styrened.rpc.messages import StatusResponse
 
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(device_hash="abcdef", rpc_client=mock_client)
+        screen = DeviceConsoleScreen(device_hash="abcdef")
 
         status = StatusResponse(
             ip="10.0.0.5",
@@ -246,8 +183,7 @@ class TestDeviceConsoleScreen:
         """_format_exec_result includes stdout and exit code."""
         from styrened.rpc.messages import ExecResult
 
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(device_hash="abcdef", rpc_client=mock_client)
+        screen = DeviceConsoleScreen(device_hash="abcdef")
 
         result = ExecResult(exit_code=0, stdout="hello\n", stderr="")
         text = screen._format_exec_result(result)
@@ -259,8 +195,7 @@ class TestDeviceConsoleScreen:
         """_format_reboot_result handles success."""
         from styrened.rpc.messages import RebootResult
 
-        mock_client = MagicMock()
-        screen = DeviceConsoleScreen(device_hash="abcdef", rpc_client=mock_client)
+        screen = DeviceConsoleScreen(device_hash="abcdef")
 
         result = RebootResult(success=True, message="Rebooting now", scheduled_time=None)
         text = screen._format_reboot_result(result)
