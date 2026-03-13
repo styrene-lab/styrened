@@ -315,24 +315,27 @@ def test_relay_config_default_when_no_section():
 
 
 def test_link_info_default_link_type():
-    """LinkInfo defaults to 'direct' link_type."""
+    """LinkInfo defaults to LinkType.DIRECT link_type."""
+    from styrened.models.relay import LinkType
     from styrened.services.direct_link import LinkInfo
 
     info = LinkInfo(destination_hash="abc123", status="active")
-    assert info.link_type == "direct"
+    assert info.link_type == LinkType.DIRECT
 
 
 def test_link_info_relayed_link_type():
-    """LinkInfo can be set to 'relayed'."""
+    """LinkInfo can be set to LinkType.RELAYED."""
+    from styrened.models.relay import LinkType
     from styrened.services.direct_link import LinkInfo
 
-    info = LinkInfo(destination_hash="abc123", status="active", link_type="relayed")
-    assert info.link_type == "relayed"
+    info = LinkInfo(destination_hash="abc123", status="active", link_type=LinkType.RELAYED)
+    assert info.link_type == LinkType.RELAYED
 
 
 def test_link_entry_default_link_type():
-    """_LinkEntry defaults to 'direct' link_type."""
+    """_LinkEntry defaults to LinkType.DIRECT link_type."""
     from unittest.mock import MagicMock
+    from styrened.models.relay import LinkType
     from styrened.services.direct_link import _LinkEntry
 
     entry = _LinkEntry(
@@ -340,21 +343,22 @@ def test_link_entry_default_link_type():
         destination_hash="abc123",
         datalink_hash="def456",
     )
-    assert entry.link_type == "direct"
+    assert entry.link_type == LinkType.DIRECT
 
 
 def test_link_entry_relayed_link_type():
-    """_LinkEntry can be set to 'relayed'."""
+    """_LinkEntry can be set to LinkType.RELAYED."""
     from unittest.mock import MagicMock
+    from styrened.models.relay import LinkType
     from styrened.services.direct_link import _LinkEntry
 
     entry = _LinkEntry(
         link=MagicMock(),
         destination_hash="abc123",
         datalink_hash="def456",
-        link_type="relayed",
+        link_type=LinkType.RELAYED,
     )
-    assert entry.link_type == "relayed"
+    assert entry.link_type == LinkType.RELAYED
 
 
 # ---------------------------------------------------------------------------

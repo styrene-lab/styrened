@@ -1900,6 +1900,9 @@ class StyreneDaemon:
             relay_config = getattr(self.config, "relay", None)
             if relay_config is None:
                 return
+            if not relay_config.enabled:
+                logger.debug("Relay service disabled (relay.enabled=false)")
+                return
 
             self._relay_service = RelayService(relay_config)
 
@@ -1913,6 +1916,7 @@ class StyreneDaemon:
             )
         except Exception as e:
             logger.error(f"Failed to start relay service: {e}")
+            raise
 
     def _on_datalink_established(self, link: Any) -> None:
         """Log when a peer establishes a direct data link to us."""
@@ -2138,6 +2142,10 @@ class StyreneDaemon:
 
         RBAC: PEER+ required (relay.request capability).
         """
+        # Fast-path: relay disabled check before any capability leak via RBAC
+        if self._relay_service is None:
+            return json.dumps({"error": "relay_disabled"}).encode("utf-8")
+
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex):
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
@@ -2147,9 +2155,7 @@ class StyreneDaemon:
         role = self._datalink_rbac_role(identity_hex)
         if role <= int(Role.BLOCKED):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
-        if self.config.rbac and not self.config.rbac.has_capability(
-            identity_hex, Capability.RELAY_REQUEST
-        ):
+        if not self.config.rbac.has_capability(identity_hex, Capability.RELAY_REQUEST):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Parse request
@@ -2166,9 +2172,11 @@ class StyreneDaemon:
         if not target_hash:
             return json.dumps({"error": "missing_target_hash"}).encode("utf-8")
 
-        # Check relay service
-        if self._relay_service is None:
-            return json.dumps({"error": "relay_disabled"}).encode("utf-8")
+        # Defense-in-depth: check relay.request_permanent when permanent is requested
+        if permanent and not self.config.rbac.has_capability(
+            identity_hex, Capability.RELAY_REQUEST_PERMANENT
+        ):
+            return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Check target is connected via DirectLink
         if self._direct_link_service:
@@ -2198,9 +2206,15 @@ class StyreneDaemon:
                 loop,
             )
             session = future.result(timeout=5.0)
+            # Mark the target link as RELAYED in DirectLinkService
+            if self._direct_link_service:
+                from styrened.models.relay import LinkType
+                self._direct_link_service.set_link_type(target_hash, LinkType.RELAYED)
+            import uuid
+            session_id = str(getattr(session, "session_id", None) or uuid.uuid4())
             return json.dumps({
                 "status": "established",
-                "session_id": id(session),
+                "session_id": session_id,
                 "requester_hash": session.requester_hash,
                 "target_hash": session.target_hash,
                 "is_permanent": session.is_permanent,
@@ -2678,6 +2692,11 @@ class StyreneDaemon:
 
         # Stop relay service
         if self._relay_service:
+            try:
+                for session_id in list(self._relay_service._sessions.keys()):
+                    await self._relay_service.teardown_session(session_id)
+            except Exception as e:
+                logger.error(f"Error tearing down relay sessions: {e}")
             self._relay_service = None
             logger.info("Relay service stopped")
 

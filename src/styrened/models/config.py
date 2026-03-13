@@ -13,14 +13,14 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from typing import Any
-
 from styrened.models.rbac import RBACPolicy
+from styrened.models.daemon_mode import DaemonMode
 
 if TYPE_CHECKING:
     from styrened.models.relay import RelayConfig
-from styrened.models.daemon_mode import DaemonMode
-from styrened.models.relay import RelayConfig
+
+if TYPE_CHECKING:
+    from styrened.models.relay import RelayConfig
 
 # -----------------------------------------------------------------------------
 # Enums
