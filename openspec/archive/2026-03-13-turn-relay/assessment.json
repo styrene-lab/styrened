@@ -3,11 +3,11 @@
   "changeName": "turn-relay",
   "assessmentKind": "cleave",
   "outcome": "pass",
-  "timestamp": "2026-03-13T12:09:20.961Z",
-  "summary": "All 25 tasks implemented. RelayService, RelayConfig, RelaySession, 12 RelayError subclasses, 10 relay.* RBAC capabilities, /relay DirectLink endpoint, daemon wiring. 147 new relay tests pass, 3306 total unit tests pass (1 pre-existing unrelated failure).",
+  "timestamp": "2026-03-13T12:09:31.131Z",
+  "summary": "tasks.md reconciled — all 25 tasks marked complete.",
   "snapshot": {
-    "gitHead": "3624696c228b541b4b8da203b98c1779a2b338d0",
-    "fingerprint": "68850fb1ba1e88d270618b9d4fb045b455c83f04db27c9b7bc2baf386ea6d53d",
+    "gitHead": "c538169fc9235ba30f090b1484d4b97495fdeaa7",
+    "fingerprint": "a2cd0fae72745ad2c3c5d7efa73faa467a9f5d7745b82b3148d435e1d1df5fc5",
     "dirty": false,
     "scopedPaths": [],
     "files": [
@@ -51,24 +51,14 @@
         "path": "openspec/changes/turn-relay/tasks.md",
         "exists": true,
         "size": 4503,
-        "sha256": "fabb12b2cf20bf388c210b4a84c6c75af2d8f6a7ab651beba5b36794722f7af8"
+        "sha256": "8828ce09d34841345e663b650cf96e4b363628868944900e34ac42869d48d548"
       }
     ]
   },
   "reconciliation": {
     "reopen": false,
     "changedFiles": [
-      "src/styrened/models/relay.py",
-      "src/styrened/models/config.py",
-      "src/styrened/models/rbac.py",
-      "src/styrened/services/relay.py",
-      "src/styrened/services/config.py",
-      "src/styrened/services/direct_link.py",
-      "src/styrened/daemon.py",
-      "tests/unit/test_relay.py",
-      "tests/unit/test_relay_errors.py",
-      "tests/unit/test_relay_rbac.py",
-      "tests/unit/test_relay_directlink.py"
+      "openspec/changes/turn-relay/tasks.md"
     ],
     "constraints": [],
     "recommendedAction": null

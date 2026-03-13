@@ -1,7 +1,7 @@
 ---
 id: turn-relay
 title: TURN-Style Link Relay via Hub
-status: decided
+status: implemented
 parent: cross-enclave-features
 open_questions: []
 ---
@@ -61,6 +61,8 @@ RNS.Channel provides reliable bidirectional message delivery but is size-constra
 - `tests/unit/test_relay.py` (new) — RelayService unit tests — session lifecycle, limit enforcement
 - `tests/unit/test_relay_errors.py` (new) — 12 error path tests — one per RelayError subclass
 - `tests/unit/test_relay_rbac.py` (new) — RBAC gating tests for all relay.* capabilities
+- `tests/unit/test_relay_directlink.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `openspec/changes/turn-relay/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
