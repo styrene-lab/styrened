@@ -2144,7 +2144,7 @@ class StyreneDaemon:
         """
         # Fast-path: relay disabled check before any capability leak via RBAC
         if self._relay_service is None:
-            return json.dumps({"error": "relay_disabled"}).encode("utf-8")
+            return json.dumps({"error": "relay.disabled"}).encode("utf-8")
 
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex):

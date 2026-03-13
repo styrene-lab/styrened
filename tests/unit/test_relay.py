@@ -459,7 +459,7 @@ def test_serve_relay_no_service():
         None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
     )
     resp = _json.loads(result)
-    assert resp["error"] == "relay_disabled"
+    assert resp["error"] == "relay.disabled"
 
 
 def test_serve_relay_blocked_identity():
@@ -619,7 +619,7 @@ def test_serve_relay_error_propagation():
             None, None, MagicMock(hash=bytes.fromhex("aa" * 16)), None,
         )
         resp = _json.loads(result)
-        assert resp["error"] == "relay_disabled"
+        assert resp["error"] == "relay.disabled"
     finally:
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=2)

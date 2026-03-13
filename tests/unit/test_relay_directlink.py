@@ -231,7 +231,7 @@ class TestDaemonRelayEndpoint:
             link_id=None, remote_identity=MagicMock(), requested_at=None,
         )
         response = json.loads(result)
-        assert response["error"] == "relay_disabled"
+        assert response["error"] == "relay.disabled"
 
     def test_relay_handler_returns_target_offline_when_no_link(self):
         from styrened.daemon import StyreneDaemon
