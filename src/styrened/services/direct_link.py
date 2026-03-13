@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from styrened.models.relay import LinkType
+
 if TYPE_CHECKING:
     import RNS
 
@@ -165,7 +167,7 @@ class LinkInfo:
     rtt: float | None = None  # seconds (from RNS)
     established_at: float | None = None
     last_activity: float | None = None
-    link_type: str = "direct"  # "direct" or "relayed"
+    link_type: LinkType = LinkType.DIRECT
 
 
 @dataclass
@@ -178,7 +180,7 @@ class _LinkEntry:
     established: bool = False
     established_at: float | None = None
     last_used: float = field(default_factory=time.time)
-    link_type: str = "direct"  # "direct" or "relayed" — see LinkType enum
+    link_type: LinkType = LinkType.DIRECT
 
 
 class DirectLinkService:
@@ -693,6 +695,21 @@ class DirectLinkService:
         if entry is None:
             return None
         return self._entry_to_info(entry)
+
+    # Alias used by daemon relay handler
+    def get_link(self, lxmf_destination_hash: str) -> LinkInfo | None:
+        """Alias for get_link_info."""
+        return self.get_link_info(lxmf_destination_hash)
+
+    def set_link_type(self, lxmf_destination_hash: str, link_type: LinkType) -> None:
+        """Update the link_type for a tracked link entry.
+
+        Called by the relay handler to mark a link as RELAYED when a relay
+        session is established through the hub.
+        """
+        entry = self._links.get(lxmf_destination_hash)
+        if entry is not None:
+            entry.link_type = link_type
 
     def get_all_links(self) -> list[LinkInfo]:
         """Get info for all managed links."""

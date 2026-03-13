@@ -2198,6 +2198,10 @@ class StyreneDaemon:
                 loop,
             )
             session = future.result(timeout=5.0)
+            # Mark the target link as RELAYED in DirectLinkService
+            if self._direct_link_service:
+                from styrened.models.relay import LinkType
+                self._direct_link_service.set_link_type(target_hash, LinkType.RELAYED)
             return json.dumps({
                 "status": "established",
                 "session_id": id(session),
