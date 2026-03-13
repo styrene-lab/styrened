@@ -3,11 +3,11 @@
   "changeName": "styrene-distrust-model",
   "assessmentKind": "cleave",
   "outcome": "pass",
-  "timestamp": "2026-03-13T05:47:30.891Z",
-  "summary": "All 9 tasks implemented. peer_blocks table added, identity_hash migration in contacts, lxmf_service block_peer/unblock_peer redesigned, _seed_blocks_to_rbac seeding from peer_blocks, IPC compat shim for peer_hash fallback, MeshDevice.identity removed. 3281 unit tests pass.",
+  "timestamp": "2026-03-13T05:47:42.840Z",
+  "summary": "All 19 tasks marked complete. tasks.md reconciled.",
   "snapshot": {
-    "gitHead": "2ba00c9ba85c11b41f1ffbe982d4a71472074e6a",
-    "fingerprint": "183e4d3e426a5a649505e2c30257237e23ad7de168b43cb7c88d50beb50b0ae0",
+    "gitHead": "2c30884ea9bd37557ebaba0e2032cf4468fd61ca",
+    "fingerprint": "3f49bbdc293d8c835ad74af5b802f49391998dcf045383aa22292b0416e9f2b4",
     "dirty": false,
     "scopedPaths": [
       "src/styrened/ipc/bridge.py",
@@ -37,7 +37,7 @@
         "path": "openspec/changes/styrene-distrust-model/tasks.md",
         "exists": true,
         "size": 3577,
-        "sha256": "7821cad50387d496466b3ff29af2f81851815ca2af806e80c0d29783bff05eb4"
+        "sha256": "5844757bee424cc66020c8ec7cf2f88a86372651900da30173065374e7e8fa19"
       },
       {
         "path": "src/styrened/ipc/bridge.py",
@@ -98,16 +98,7 @@
   "reconciliation": {
     "reopen": false,
     "changedFiles": [
-      "src/styrened/models/messages.py",
-      "src/styrened/daemon.py",
-      "src/styrened/services/lxmf_service.py",
-      "src/styrened/ipc/handlers.py",
-      "src/styrened/ipc/messages.py",
-      "src/styrened/ipc/client.py",
-      "src/styrened/ipc/bridge.py",
-      "src/styrened/models/mesh_device.py",
-      "src/styrened/tui/screens/conversation.py",
-      "src/styrened/tui/widgets/chat_widget.py"
+      "openspec/changes/styrene-distrust-model/tasks.md"
     ],
     "constraints": [],
     "recommendedAction": null

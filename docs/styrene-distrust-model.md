@@ -1,7 +1,7 @@
 ---
 id: styrene-distrust-model
 title: Styrene Distrust Model — Negative Signals, Propagation Boundaries, and Sybil Resistance
-status: implementing
+status: implemented
 parent: styrene-trust-model
 open_questions: []
 branches: ["feature/styrene-distrust-model"]
@@ -139,6 +139,8 @@ The current Contact.blocked field uses LXMF destination hash as primary key, whi
 - `src/styrened/models/mesh_device.py` (modified) — Remove MeshDevice.identity property (legacy alias returning destination_hash). All callers must use .identity_hash or .destination_hash explicitly.
 - `src/styrened/tui/screens/conversation.py` (modified) — Block action: use device.identity_hash not device.identity.
 - `src/styrened/tui/widgets/chat_widget.py` (modified) — Block action: use peer's identity_hash.
+- `src/styrened/daemon.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `openspec/changes/styrene-distrust-model/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
