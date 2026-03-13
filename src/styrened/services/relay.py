@@ -140,7 +140,10 @@ class RelayService:
             # Global cap — try LRU eviction if priority
             if len(self._sessions) >= self._config.max_sessions:
                 if priority:
-                    self._evict_oldest_non_priority()
+                    try:
+                        self._evict_oldest_non_priority()
+                    except RelayEvicted:
+                        pass  # Eviction succeeded; proceed to create new session
                 # Re-check after possible eviction
                 if len(self._sessions) >= self._config.max_sessions:
                     raise RelayMaxSessions(
@@ -166,11 +169,12 @@ class RelayService:
             (sid, s) for sid, s in self._sessions.items() if not s.is_priority
         ]
         if not non_priority:
-            return  # caller will raise RelayMaxSessions
+            raise RelayMaxSessions("All sessions are priority; cannot evict")
         non_priority.sort(key=lambda x: x[1].created_at)
         evict_sid, evict_session = non_priority[0]
         del self._sessions[evict_sid]
         logger.info("Evicted relay session %s (RelayEvicted)", evict_sid)
+        raise RelayEvicted(f"Session {evict_sid} evicted to make room for new relay session")
 
     async def teardown_session(self, session_id: int) -> None:
         """Tear down a session by ID. No-op if not found."""
@@ -217,6 +221,7 @@ class RelayService:
                     f"Session {session_id} exceeded byte limit "
                     f"({session.bytes_forwarded + nbytes} > {self._config.max_bytes_per_session})"
                 )
+            session.record_bytes(nbytes)
 
     async def idle_check(self) -> None:
         """Scan sessions and tear down idle non-permanent ones."""
