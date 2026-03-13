@@ -428,7 +428,8 @@ class DirectLinkService:
         data = await self.request(lxmf_destination_hash, "/status", timeout=timeout)
         if data:
             try:
-                return json.loads(data)
+                result: dict[str, Any] = json.loads(data)
+                return result
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning(f"Datalink /status decode error: {e}")
         return None

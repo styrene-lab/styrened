@@ -97,8 +97,7 @@ class TestDirectLinkServiceRelayMethods:
 
     def test_get_link_alias_returns_same_as_get_link_info(self):
         svc, _ = self._make_service_with_entry()
-        # Both methods should return the same result
-        import RNS  # type: ignore[import]
+        # Both methods should return the same result (RNS patched via sys.modules)
         # Mock RNS.Link constants
         with patch.dict("sys.modules", {"RNS": MagicMock()}):
             import sys
@@ -332,6 +331,21 @@ class TestDaemonRelayServiceWiring:
 
         cfg = MagicMock()
         cfg.relay = None
+        daemon.config = cfg
+
+        daemon._start_relay_service()
+        assert daemon._relay_service is None
+
+    def test_start_relay_service_noop_when_relay_disabled(self):
+        """Primary opt-in guard: relay.enabled=False must prevent service creation."""
+        from styrened.daemon import StyreneDaemon
+        from styrened.models.relay import RelayConfig
+
+        daemon = object.__new__(StyreneDaemon)
+        daemon._relay_service = None
+
+        cfg = MagicMock()
+        cfg.relay = RelayConfig(enabled=False)
         daemon.config = cfg
 
         daemon._start_relay_service()
