@@ -371,8 +371,76 @@ class PageBrowserWidget(Widget):
         self.run_worker(self._load_page(self.current_path), exclusive=True)
 
     def action_focus_url(self) -> None:
-        """Focus URL bar for manual navigation (placeholder)."""
-        self.notify("Manual URL entry coming soon", severity="information")
+        """Open a URL entry modal for manual navigation.
+
+        Accepts NomadNet destination hashes, .i2p hostnames, and http(s):// URLs.
+        Routes to the appropriate transport based on the entered value.
+        """
+        from textual.screen import ModalScreen
+        from textual.widgets import Input
+
+        current = self.current_path or ""
+
+        class _UrlInputScreen(ModalScreen[str | None]):
+            """Modal for entering a URL or NomadNet destination."""
+
+            DEFAULT_CSS = """
+            _UrlInputScreen {
+                align: center middle;
+            }
+            #url-input-container {
+                width: 72;
+                height: auto;
+                border: thick $accent;
+                background: $surface;
+                padding: 1 2;
+            }
+            #url-label {
+                margin-bottom: 1;
+            }
+            #url-hint {
+                margin-top: 1;
+                color: $text-muted;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="url-input-container"):
+                    yield Static("  Navigate to:", id="url-label")
+                    yield Input(
+                        value=current,
+                        placeholder="dest_hash, hostname.i2p, or https://...",
+                        id="url-input",
+                    )
+                    yield Static(
+                        "  [dim]NomadNet: hex hash  ·  I2P: *.i2p  ·  Web: https://[/]",
+                        id="url-hint",
+                    )
+
+            def on_mount(self) -> None:
+                self.query_one("#url-input", Input).focus()
+
+            def on_input_submitted(self, event: Input.Submitted) -> None:
+                self.dismiss(event.value.strip() or None)
+
+            def key_escape(self) -> None:
+                self.dismiss(None)
+
+        def _handle_url(result: str | None) -> None:
+            if not result:
+                return
+            # Route based on URL shape
+            if result.endswith(".i2p") or result.startswith("http://") or result.startswith("https://"):
+                # External URL — switch to external mode and navigate
+                self.set_external_url(result)
+                self.run_worker(self._load_page(result), exclusive=True, group="page-load")
+            else:
+                # Treat as NomadNet destination hash or path
+                if self._is_external_mode:
+                    self.set_external_url("")  # exit external mode
+                self.run_worker(self._load_page(result), exclusive=True, group="page-load")
+
+        self.app.push_screen(_UrlInputScreen(), _handle_url)
 
     def action_save_site(self) -> None:
         """Save this node for periodic background crawling and caching."""

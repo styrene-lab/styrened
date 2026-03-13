@@ -5,7 +5,7 @@ Covers widget initialization, page loading, navigation, and error handling.
 from __future__ import annotations
 
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -271,3 +271,78 @@ class TestPageBrowserLinkClick:
             widget.on__link_clicked(message)
 
         assert "/page/index.mu" in widget._history
+
+
+class TestFocusUrl:
+    """action_focus_url opens a modal and routes to the correct transport."""
+
+    def test_focus_url_i2p_sets_external_mode(self):
+        """Entering a .i2p URL switches to external mode and loads."""
+        widget = PageBrowserWidget(destination_hash="abc")
+
+        captured: list[str] = []
+
+        def fake_push_screen(screen, callback):
+            callback("stats.i2p")
+
+        with (
+            patch.object(widget, "run_worker") as mock_rw,
+            patch.object(type(widget), "app", new_callable=PropertyMock) as mock_app,
+        ):
+            mock_app.return_value.push_screen.side_effect = fake_push_screen
+            widget.action_focus_url()
+
+        assert widget._external_url == "stats.i2p"
+        assert mock_rw.call_count >= 1  # may include on_mount initial load
+
+    def test_focus_url_https_sets_external_mode(self):
+        """Entering an https:// URL switches to external mode and loads."""
+        widget = PageBrowserWidget(destination_hash="abc")
+
+        def fake_push_screen(screen, callback):
+            callback("https://example.com")
+
+        with (
+            patch.object(widget, "run_worker") as mock_rw,
+            patch.object(type(widget), "app", new_callable=PropertyMock) as mock_app,
+        ):
+            mock_app.return_value.push_screen.side_effect = fake_push_screen
+            widget.action_focus_url()
+
+        assert widget._external_url == "https://example.com"
+        assert mock_rw.call_count >= 1
+
+    def test_focus_url_nomadnet_hash_exits_external_mode(self):
+        """Entering a NomadNet hash exits external mode and navigates."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        widget._external_url = "stats.i2p"  # was in external mode
+
+        def fake_push_screen(screen, callback):
+            callback("deadbeef1234abcd")
+
+        with (
+            patch.object(widget, "run_worker") as mock_rw,
+            patch.object(type(widget), "app", new_callable=PropertyMock) as mock_app,
+        ):
+            mock_app.return_value.push_screen.side_effect = fake_push_screen
+            widget.action_focus_url()
+
+        assert widget._external_url == ""  # external mode cleared
+        assert mock_rw.call_count >= 1
+
+    def test_focus_url_cancelled_does_nothing(self):
+        """Dismissing the modal (None) makes no changes."""
+        widget = PageBrowserWidget(destination_hash="abc")
+
+        def fake_push_screen(screen, callback):
+            callback(None)
+
+        with (
+            patch.object(widget, "run_worker") as mock_rw,
+            patch.object(type(widget), "app", new_callable=PropertyMock) as mock_app,
+        ):
+            mock_app.return_value.push_screen.side_effect = fake_push_screen
+            widget.action_focus_url()
+
+        mock_rw.assert_not_called()
+        assert widget._external_url == ""
