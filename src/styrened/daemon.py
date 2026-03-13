@@ -620,6 +620,16 @@ class StyreneDaemon:
             if self._node_store is None:
                 self._node_store = get_node_store()
 
+            # Backfill any contacts rows whose identity_hash is still a dest-hash
+            # placeholder from the pre-v0.16 peer_hash→identity_hash migration.
+            # Must run after NodeStore is populated so mappings are available.
+            from styrened.models.messages import backfill_contacts_identity_hash
+
+            try:
+                backfill_contacts_identity_hash(db_engine, self._node_store)
+            except Exception as _bf_exc:
+                logger.warning("contacts identity_hash backfill failed (non-fatal): %s", _bf_exc)
+
             # Create contact service (shares db_engine and node_store)
             from styrened.services.contacts import ContactService
 

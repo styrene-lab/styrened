@@ -126,7 +126,7 @@ class TestScreenNavigation:
                 screen = app.screen
                 assert isinstance(screen, DashboardScreen)
 
-                with patch.object(screen, "_get_selected_identity", return_value=device.identity):
+                with patch.object(screen, "_get_selected_identity", return_value=device.identity_hash):
                     screen.action_select_device()
                     await pilot.pause()
 
@@ -515,7 +515,7 @@ class TestErrorRecovery:
         ):
             async with app.run_test() as pilot:
                 await app.push_screen(
-                    MeshDeviceDetailScreen(device_identity=device.identity)
+                    MeshDeviceDetailScreen(device_identity=device.identity_hash)
                 )
                 await pilot.pause()
 

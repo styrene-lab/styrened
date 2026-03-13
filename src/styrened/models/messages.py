@@ -444,11 +444,27 @@ def init_db(db_path: str | None = None) -> Engine:
         )
         with engine.connect() as conn:
             # SQLite does not support DROP COLUMN before 3.35.0; use recreate.
+            # Use explicit DDL + INSERT to preserve constraints and column types;
+            # CREATE TABLE ... AS SELECT strips NOT NULL / PRIMARY KEY constraints.
             conn.execute(
                 text(
-                    "CREATE TABLE contacts_clean AS "
+                    "CREATE TABLE contacts_clean ("
+                    "identity_hash TEXT PRIMARY KEY, "
+                    "alias VARCHAR(100) NOT NULL, "
+                    "notes VARCHAR(500), "
+                    "blocked BOOLEAN NOT NULL DEFAULT 0, "
+                    "blocked_at REAL, "
+                    "created_at REAL NOT NULL, "
+                    "updated_at REAL NOT NULL"
+                    ")"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO contacts_clean "
+                    "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at) "
                     "SELECT identity_hash, alias, notes, "
-                    "COALESCE(blocked, 0) AS blocked, "
+                    "COALESCE(blocked, 0), "
                     "blocked_at, created_at, updated_at "
                     "FROM contacts"
                 )
@@ -460,7 +476,6 @@ def init_db(db_path: str | None = None) -> Engine:
     elif "peer_hash" in cols and "identity_hash" not in cols:
         logger.info("Migrating contacts table: peer_hash → identity_hash PK")
         with engine.connect() as conn:
-            conn.execute(text("BEGIN"))
             conn.execute(
                 text(
                     "CREATE TABLE contacts_new ("
@@ -470,13 +485,17 @@ def init_db(db_path: str | None = None) -> Engine:
                     "blocked BOOLEAN NOT NULL DEFAULT 0, "
                     "blocked_at REAL, "
                     "created_at REAL NOT NULL, "
-                    "updated_at REAL NOT NULL"
+                    "updated_at REAL NOT NULL, "
+                    # Flag rows whose identity_hash is still a dest-hash placeholder.
+                    # Using a dedicated column avoids the unreliable length-based
+                    # heuristic (RNS dest-hashes and identity hashes are both 64 hex
+                    # chars, so LENGTH() cannot discriminate them).
+                    "needs_identity_backfill BOOLEAN NOT NULL DEFAULT 0"
                     ")"
                 )
             )
-            # Copy rows; old peer_hash becomes identity_hash (best-effort, will be
-            # backfilled by NodeStore later when the mapping is available).
-            # Use conditional column references depending on what the old table has.
+            # Copy rows; old peer_hash becomes identity_hash placeholder.
+            # needs_identity_backfill=1 marks these rows for NodeStore resolution.
             old_result = conn.execute(text("PRAGMA table_info(contacts)"))
             old_cols = {row[1] for row in old_result}
             blocked_expr = "COALESCE(blocked, 0)" if "blocked" in old_cols else "0"
@@ -485,9 +504,9 @@ def init_db(db_path: str | None = None) -> Engine:
             conn.execute(
                 text(
                     "INSERT INTO contacts_new "
-                    "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at) "
+                    "(identity_hash, alias, notes, blocked, blocked_at, created_at, updated_at, needs_identity_backfill) "
                     f"SELECT peer_hash, alias, {notes_expr}, "
-                    f"{blocked_expr}, {blocked_at_expr}, created_at, updated_at "
+                    f"{blocked_expr}, {blocked_at_expr}, created_at, updated_at, 1 "
                     "FROM contacts"
                 )
             )
@@ -499,10 +518,14 @@ def init_db(db_path: str | None = None) -> Engine:
         # Edge case: table exists but has neither column — nothing to migrate
         logger.warning("contacts table has unexpected schema; skipping migration")
 
-    # Migrate contacts table: add blocked columns if missing (pre-migration DBs)
+    # Migrate contacts table: add missing columns for databases that pre-date them.
+    # needs_identity_backfill=0 on existing rows: only rows created by the
+    # peer_hash→identity_hash migration (above) carry 1, signalling that their
+    # identity_hash is still a dest-hash placeholder awaiting NodeStore resolution.
     for col_name, col_type in [
         ("blocked", "BOOLEAN NOT NULL DEFAULT 0"),
         ("blocked_at", "REAL"),
+        ("needs_identity_backfill", "BOOLEAN NOT NULL DEFAULT 0"),
     ]:
         try:
             with engine.connect() as conn:
@@ -515,6 +538,8 @@ def init_db(db_path: str | None = None) -> Engine:
     # Create peer_blocks table — authoritative block store keyed by identity_hash
     # This replaces the contacts.blocked flag as the canonical block state.
     # The contacts table retains blocked/blocked_at for UI display purposes.
+    from sqlalchemy.exc import OperationalError as SA_OperationalError
+
     try:
         with engine.connect() as conn:
             conn.execute(
@@ -528,8 +553,13 @@ def init_db(db_path: str | None = None) -> Engine:
             )
             conn.commit()
             logger.debug("peer_blocks table initialized")
-    except Exception as exc:
-        logger.debug("peer_blocks table creation skipped (likely already exists): %s", exc)
+    except SA_OperationalError as exc:
+        # Only swallow "already exists" errors; genuine schema errors are re-raised below.
+        if "already exists" in str(exc).lower():
+            logger.debug("peer_blocks table already exists, skipping creation")
+        else:
+            logger.error("Failed to create peer_blocks table: %s", exc)
+            raise
 
     # Add performance indexes for conversation queries (idempotent)
     perf_indexes = [
@@ -612,14 +642,19 @@ class _NodeStoreProtocol(Protocol):
 
 
 def backfill_contacts_identity_hash(engine: Engine, node_store: _NodeStoreProtocol) -> int:
-    """Resolve 32-char dest-hashes in contacts.identity_hash to full 64-char identity hashes.
+    """Resolve dest-hash placeholders in contacts.identity_hash to real identity hashes.
 
     Called at daemon startup after NodeStore is populated.  Rows whose
-    ``identity_hash`` is exactly 32 characters long are assumed to be old
-    destination-hash values copied verbatim from the pre-v0.16 ``peer_hash``
+    ``needs_identity_backfill`` flag is 1 were created by the peer_hash →
+    identity_hash schema migration and carry a dest-hash in the identity_hash
     column.  For each such row we ask *node_store* for the real identity hash;
-    if the mapping is known and no row with the full identity already exists,
-    the row is updated in-place.
+    if the mapping is known and no row with that identity already exists, the
+    row is updated in-place and the flag is cleared.
+
+    Note: length-based heuristics are intentionally NOT used here.  RNS
+    destination hashes and identity hashes are both 32 bytes (64 hex chars),
+    so ``LENGTH(identity_hash) != 64`` cannot distinguish them.  The
+    ``needs_identity_backfill`` flag is the only reliable discriminator.
 
     Returns the number of rows updated.
     """
@@ -627,7 +662,7 @@ def backfill_contacts_identity_hash(engine: Engine, node_store: _NodeStoreProtoc
     updated = 0
     with engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT identity_hash FROM contacts WHERE LENGTH(identity_hash) = 32")
+            text("SELECT identity_hash FROM contacts WHERE needs_identity_backfill = 1")
         ).fetchall()
         for (ih,) in rows:
             resolved = node_store.get_identity_hash_for_destination(ih)
@@ -639,12 +674,23 @@ def backfill_contacts_identity_hash(engine: Engine, node_store: _NodeStoreProtoc
                 if not existing:
                     conn.execute(
                         text(
-                            "UPDATE contacts SET identity_hash = :new "
+                            "UPDATE contacts SET identity_hash = :new, needs_identity_backfill = 0 "
                             "WHERE identity_hash = :old"
                         ),
                         {"new": resolved, "old": ih},
                     )
                     updated += 1
+                else:
+                    # Resolved identity already has a row; just clear the flag to
+                    # avoid re-processing this stale dest-hash placeholder on the
+                    # next startup.
+                    conn.execute(
+                        text(
+                            "UPDATE contacts SET needs_identity_backfill = 0 "
+                            "WHERE identity_hash = :old"
+                        ),
+                        {"old": ih},
+                    )
         conn.commit()
     if updated:
         logger.info("Backfilled %d contacts row(s) with full identity hashes", updated)
