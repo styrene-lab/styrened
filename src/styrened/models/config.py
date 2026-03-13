@@ -13,11 +13,14 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from typing import Any
+
 from styrened.models.rbac import RBACPolicy
 
 if TYPE_CHECKING:
     from styrened.models.relay import RelayConfig
 from styrened.models.daemon_mode import DaemonMode
+from styrened.models.relay import RelayConfig
 
 # -----------------------------------------------------------------------------
 # Enums
@@ -859,7 +862,7 @@ class CoreConfig:
     page_server: PageServerConfig = field(default_factory=PageServerConfig)
     pqc: PQCConfig = field(default_factory=PQCConfig)
     mesh_vpn: MeshVPNConfig = field(default_factory=MeshVPNConfig)
-    relay: "RelayConfig" = field(default_factory=lambda: _default_relay_config())
+    relay: RelayConfig = field(default_factory=lambda: _default_relay_config())
     rbac: RBACPolicy = field(default_factory=RBACPolicy)
     yggdrasil: YggdrasilConfig = field(default_factory=YggdrasilConfig)
     i2p: I2PConfig = field(default_factory=I2PConfig)
