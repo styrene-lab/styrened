@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "changeName": "cop-adapter-status",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-13T04:56:46.896Z",
+  "summary": "Adapter state surfaces to COP home immediately on connect — verified visually. Both adapters (i2p, ygg) appear in ADAPTERS bar within seconds. Three root causes fixed: IPC wire path (activity event routing), pull-on-connect (GET_ADAPTER_STATE), and post_message routing bug.",
+  "snapshot": {
+    "gitHead": "b1f1e12a646873828e1104b07e3803087477933f",
+    "fingerprint": "0c9b903fd8fd2f2706ef8da9e5b95bbd242255c87badd3a70557960ab51aecbe",
+    "dirty": false,
+    "scopedPaths": [
+      "src/styrened/services/adapter_registry.py",
+      "src/styrened/services/event_bus.py",
+      "src/styrened/services/i2p.py",
+      "src/styrened/tui/models/adapter_status.py",
+      "src/styrened/tui/screens/dashboard.py",
+      "src/styrened/tui/widgets/adapter_status_bar.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/cop-adapter-status/design.md",
+        "exists": true,
+        "size": 7188,
+        "sha256": "e1369abf5c5bb8300566cc3ca9a455406a1c9b1b3549fc6087194736d3e7e923"
+      },
+      {
+        "path": "openspec/changes/cop-adapter-status/proposal.md",
+        "exists": true,
+        "size": 540,
+        "sha256": "5352ece2d7e121be9e1b30439043bed0f87c98b6ffa893b7db8785c464d7bcee"
+      },
+      {
+        "path": "openspec/changes/cop-adapter-status/tasks.md",
+        "exists": true,
+        "size": 1669,
+        "sha256": "d210a0bf2f883ab35dedb4180909ada7fb0e3c2bf50ffc72b32c934f986c8bb4"
+      },
+      {
+        "path": "src/styrened/services/adapter_registry.py",
+        "exists": true,
+        "size": 8524,
+        "sha256": "e8a45af569e54eb69833d3df7a665b92f9a58b64e7065f6c69159fdf93975aaa"
+      },
+      {
+        "path": "src/styrened/services/event_bus.py",
+        "exists": true,
+        "size": 8478,
+        "sha256": "f0f1d2166467001edc4aae6737778a65aecb5b3646645e9e11cbe66887cfc9ae"
+      },
+      {
+        "path": "src/styrened/services/i2p.py",
+        "exists": true,
+        "size": 13989,
+        "sha256": "719df254d076d489333d8ae72d9e5bc37948f5263537054a5f04c02e40194265"
+      },
+      {
+        "path": "src/styrened/tui/models/adapter_status.py",
+        "exists": true,
+        "size": 7092,
+        "sha256": "8b79be63a45a3d2e46afb69ce1e17e41870a2b7b735aab75c98777222f9b9934"
+      },
+      {
+        "path": "src/styrened/tui/screens/dashboard.py",
+        "exists": true,
+        "size": 21347,
+        "sha256": "ba86ffaad97279d5cc4f9e6da6769c6bc3c5f66da0640bf28720966a45da2730"
+      },
+      {
+        "path": "src/styrened/tui/widgets/adapter_status_bar.py",
+        "exists": true,
+        "size": 3396,
+        "sha256": "c36af9736252d9aad5c8e26828559704c1587cd8c241e92ca2faf5df3e312881"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/daemon.py",
+      "src/styrened/ipc/bridge.py",
+      "src/styrened/ipc/client.py",
+      "src/styrened/ipc/handlers.py",
+      "src/styrened/ipc/messages.py",
+      "src/styrened/ipc/protocol.py",
+      "src/styrened/ipc/server.py",
+      "src/styrened/tui/screens/dashboard.py"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

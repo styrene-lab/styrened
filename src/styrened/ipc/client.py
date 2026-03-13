@@ -1150,6 +1150,17 @@ class ControlClient:
         data = await self._request(GetUnreadCountsRequest())
         return cast(dict[str, int], data.get("counts", {}))
 
+    async def get_adapter_state(self) -> list[dict[str, Any]]:
+        """Get current state of all registered adapters.
+
+        Returns:
+            List of dicts with keys: adapter_name, state, details.
+        """
+        from styrened.ipc.messages import GetAdapterStateRequest
+
+        data = await self._request(GetAdapterStateRequest())
+        return cast(list[dict[str, Any]], data.get("adapters", []))
+
     # -------------------------------------------------------------------------
     # Direct data link methods
     # -------------------------------------------------------------------------

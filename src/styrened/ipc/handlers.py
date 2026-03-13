@@ -11,7 +11,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import base64
 import logging
@@ -97,7 +96,7 @@ class IPCHandlers:
         daemon: Reference to the StyreneDaemon instance (may be None during tests).
     """
 
-    def __init__(self, daemon: "StyreneDaemon | None") -> None:
+    def __init__(self, daemon: StyreneDaemon | None) -> None:
         """Initialize handlers.
 
         Args:
@@ -497,8 +496,9 @@ class IPCHandlers:
 
         try:
             import tempfile
-            import yaml
             from pathlib import Path
+
+            import yaml
 
             from styrened import paths
             from styrened.services.config import load_core_config, save_core_config
@@ -602,6 +602,42 @@ class IPCHandlers:
         except Exception as e:
             logger.exception(f"Error getting unread counts: {e}")
             return ErrorResponse.internal_error(f"Failed to get unread counts: {e}")
+
+    async def handle_get_adapter_state(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_ADAPTER_STATE request.
+
+        Returns current state of all registered adapters so TUI clients can
+        seed their adapter status display immediately on connect without
+        waiting for the next probe cycle (up to 30 s).
+
+        Returns:
+            ResultResponse with {adapters: [{name, state, details}, ...]}.
+        """
+        try:
+            err = self._check_daemon()
+            if err:
+                return err
+            assert self.daemon is not None
+
+            registry = getattr(self.daemon, "_adapter_registry", None)
+            if registry is None:
+                return ResultResponse(data={"adapters": []})
+
+            adapters = []
+            for aid in list(registry.adapter_ids()):
+                record = registry.get(aid)
+                if record is None:
+                    continue
+                adapters.append({
+                    "adapter_name": aid,
+                    "state": record.state.value,
+                    "details": getattr(record, "details", {}),
+                })
+            return ResultResponse(data={"adapters": adapters})
+
+        except Exception as e:
+            logger.exception(f"Error getting adapter state: {e}")
+            return ErrorResponse.internal_error(f"Failed to get adapter state: {e}")
 
     # -------------------------------------------------------------------------
     # Command handlers
@@ -2939,13 +2975,42 @@ class IPCHandlers:
         return None
 
     async def handle_cmd_block_peer(self, request: IPCRequest) -> IPCResponse:
-        """Block a peer — silently drop all future messages."""
+        """Block a peer — silently drop all future messages.
+
+        Accepts identity_hash (preferred) or peer_hash (deprecated compat shim).
+        If only peer_hash is provided, resolves to identity_hash via NodeStore.
+        Shim is removed at 0.17.0.
+        """
         from styrened.ipc.messages import CmdBlockPeerRequest
 
         assert isinstance(request, CmdBlockPeerRequest)
         identity_hash = request.identity_hash
         lxmf_dest_hash = request.lxmf_dest_hash
         alias = request.alias
+
+        # Compat shim: resolve deprecated peer_hash → identity_hash via NodeStore
+        if not identity_hash and lxmf_dest_hash:
+            try:
+                from styrened.services.node_store import get_node_store
+                store = get_node_store()
+                resolved = store.get_identity_for_lxmf_destination(lxmf_dest_hash)
+                if resolved:
+                    identity_hash = resolved
+                    logger.debug(
+                        "block_peer: resolved peer_hash %s → identity_hash %s (compat shim)",
+                        lxmf_dest_hash[:16], identity_hash[:16],
+                    )
+                else:
+                    # Best-effort: use dest hash as identity key (self-heals on next announce)
+                    identity_hash = lxmf_dest_hash
+                    logger.debug(
+                        "block_peer: peer_hash %s not in NodeStore, using as identity key (best-effort)",
+                        lxmf_dest_hash[:16],
+                    )
+            except Exception as e:
+                logger.warning("block_peer: NodeStore lookup failed: %s", e)
+                identity_hash = lxmf_dest_hash
+
         if not identity_hash:
             return ErrorResponse(message="identity_hash required")
         if len(identity_hash) < 16 or not all(c in "0123456789abcdefABCDEF" for c in identity_hash):

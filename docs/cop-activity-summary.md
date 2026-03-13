@@ -33,6 +33,32 @@ Events NOT shown on COP: delivery_status, announce_sent, rpc_received, contact_s
 
 Widget is a Static (re-rendered on each update), NOT a RichLog (append-only). Max 5-6 situation lines. Priority ordering: anomalies first, then actionable (unread), then informational. Resolved situations dim then age out after configurable TTL (default 30m).
 
+### Event system conflict — full reassessment (2026-03-12)
+
+The original spec was written before `internal-event-system` was implemented. It assumed the widget would own a `bridge.subscribe_activity()` loop and route 16 raw IPC event types through an `ingest_event()` method on the widget itself. This conflicts with three implemented decisions:
+
+1. **IPC bridge is the only subscriber** — `DashboardScreen._subscribe_activity()` already subscribes once, posts `DaemonEvent` Textual messages to the app, and `on_daemon_event()` handles them. A second subscription loop inside the widget would duplicate the connection and bypass the event bus architecture.
+
+2. **Widget is presentation-only** — The NodeInfoPanel/snapshot pattern established that widgets receive parent-owned canonical state, not bridge access. `CopActivitySummary` should be a `Static` that renders a `CopSituationSnapshot` pushed by the dashboard.
+
+3. **Five coarse bus types, not 16 raw event strings** — The live bus uses: `node_changed` (announced/stale/lost/updated), `message_changed` (received/delivered/read), `hub_changed` (connected/disconnected/disabled), `link_changed` (established/lost). The spec's raw event names (`new_message`, `device_discovered`, `device_updated`, `pqc_established`, `file_offer_received`) no longer exist at the TUI boundary.
+
+**Taxonomy resolution (no new bus types required):**
+- UNREAD → `message_changed/received`
+- NODE_ANOMALY → `node_changed/stale`, `node_changed/lost`
+- NODE_DISCOVERY → `node_changed/announced`
+- HUB_STATUS → `hub_changed/connected`, `hub_changed/disconnected`
+- FILE_ACTIVITY → `message_changed/file_received`, `message_changed/file_complete` (new actions, existing type)
+- SECURITY → `link_changed/pqc_established`, `link_changed/pqc_rekey` (new actions, existing type)
+
+New actions on `message_changed` and `link_changed` require corresponding emit sites in the daemon — these don't exist yet and are the only daemon-side additions needed.
+
+**Corrected architecture:**
+- `CopSituationTracker` — owns situation state machine, lives on DashboardScreen
+- `DashboardScreen.on_daemon_event()` → updates tracker → calls `cop_widget.apply_snapshot(tracker.snapshot())`
+- `CopActivitySummary(Static)` — presentation only, renders snapshot
+- No widget-owned subscription, no `ingest_event()`, no bridge access from widget
+
 ## Decisions
 
 ### Decision: Separate widget (CopActivitySummary) backed by situation state machine, not a filtered ActivityFeedWidget
@@ -59,6 +85,16 @@ Widget is a Static (re-rendered on each update), NOT a RichLog (append-only). Ma
 
 **Status:** decided
 **Rationale:** Adding 'Mesh' to the label dict is one line, costs nothing, and signals intent. MeshtasticBridgeService is a separate design node (meshtastic-bridge) with its own open questions around message format mapping and trust boundary semantics. Radio-only, no MQTT.
+
+### Decision: CopSituationTracker owned by DashboardScreen — widget is presentation-only
+
+**Status:** decided
+**Rationale:** Aligns with the NodeInfoPanel snapshot pattern and StyreneScreen lifecycle contract. DashboardScreen.on_daemon_event() is the single intake point for all daemon events. It updates a CopSituationTracker (holds situation dict, coalescing logic, aging), then pushes a CopSituationSnapshot to the widget via apply_snapshot(). CopActivitySummary(Static) renders the snapshot — no bridge access, no subscription, no mutable state. This keeps worker/timer/subscription ownership at the screen level, consistent with all other dashboard surfaces.
+
+### Decision: FILE_ACTIVITY and SECURITY fold into existing bus types via new actions — no new top-level types
+
+**Status:** decided
+**Rationale:** FILE_ACTIVITY maps to message_changed with actions file_received and file_complete. SECURITY (PQC) maps to link_changed with actions pqc_established and pqc_rekey. Both are semantically correct — files are message-layer, PQC is link-layer. Daemon emit sites for these actions don't exist yet and must be added as part of this change. The EventBus schema (5 coarse types) remains stable; only the action vocabulary expands.
 
 ## Open Questions
 

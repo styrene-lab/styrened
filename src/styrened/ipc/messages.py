@@ -624,6 +624,15 @@ class GetUnreadCountsRequest(IPCRequest):
         return {}
 
 
+class GetAdapterStateRequest(IPCRequest):
+    """Request current state of all registered adapters."""
+
+    MSG_TYPE = IPCMessageType.GET_ADAPTER_STATE
+
+    def to_payload(self) -> dict[str, Any]:
+        return {}
+
+
 @dataclass
 class CmdBlockPeerRequest(IPCRequest):
     """Block a peer — silently drop all future messages from them."""
@@ -1652,6 +1661,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return GetHubStatusRequest()
     elif msg_type == IPCMessageType.GET_UNREAD_COUNTS:
         return GetUnreadCountsRequest()
+    elif msg_type == IPCMessageType.GET_ADAPTER_STATE:
+        return GetAdapterStateRequest()
     elif msg_type == IPCMessageType.CMD_BLOCK_PEER:
         return CmdBlockPeerRequest.from_payload(payload)
     elif msg_type == IPCMessageType.CMD_UNBLOCK_PEER:

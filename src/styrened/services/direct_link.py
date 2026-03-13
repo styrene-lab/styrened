@@ -10,7 +10,6 @@ store-and-forward overhead.
 """
 from __future__ import annotations
 
-
 import asyncio
 import json
 import logging
@@ -18,6 +17,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from styrened.models.relay import LinkType
 
 if TYPE_CHECKING:
     import RNS
@@ -165,20 +166,20 @@ class LinkInfo:
     rtt: float | None = None  # seconds (from RNS)
     established_at: float | None = None
     last_activity: float | None = None
-    link_type: str = "direct"  # "direct" or "relayed"
+    link_type: LinkType = LinkType.DIRECT
 
 
 @dataclass
 class _LinkEntry:
     """Internal link tracking."""
 
-    link: "RNS.Link"
+    link: RNS.Link
     destination_hash: str  # keyed by LXMF dest hash (user-facing ID)
     datalink_hash: str  # the ("styrene","datalink") destination hash
     established: bool = False
     established_at: float | None = None
     last_used: float = field(default_factory=time.time)
-    link_type: str = "direct"  # "direct" or "relayed" — see LinkType enum
+    link_type: LinkType = LinkType.DIRECT
 
 
 class DirectLinkService:
@@ -426,7 +427,8 @@ class DirectLinkService:
         data = await self.request(lxmf_destination_hash, "/status", timeout=timeout)
         if data:
             try:
-                return json.loads(data)
+                result: dict[str, Any] = json.loads(data)
+                return result
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning(f"Datalink /status decode error: {e}")
         return None
@@ -694,6 +696,21 @@ class DirectLinkService:
             return None
         return self._entry_to_info(entry)
 
+    # Alias used by daemon relay handler
+    def get_link(self, lxmf_destination_hash: str) -> LinkInfo | None:
+        """Alias for get_link_info."""
+        return self.get_link_info(lxmf_destination_hash)
+
+    def set_link_type(self, lxmf_destination_hash: str, link_type: LinkType) -> None:
+        """Update the link_type for a tracked link entry.
+
+        Called by the relay handler to mark a link as RELAYED when a relay
+        session is established through the hub.
+        """
+        entry = self._links.get(lxmf_destination_hash)
+        if entry is not None:
+            entry.link_type = link_type
+
     def get_all_links(self) -> list[LinkInfo]:
         """Get info for all managed links."""
         return [self._entry_to_info(e) for e in self._links.values()]
@@ -725,9 +742,9 @@ class DirectLinkService:
     async def _create_link(
         self,
         lxmf_destination_hash: str,
-        datalink_dest: "RNS.Destination",
+        datalink_dest: RNS.Destination,
         datalink_hash: str,
-    ) -> "RNS.Link | None":
+    ) -> RNS.Link | None:
         """Create and cache a new RNS.Link."""
         import RNS
 
@@ -739,7 +756,7 @@ class DirectLinkService:
         )
         link = RNS.Link(datalink_dest)
 
-        def on_established(lnk: "RNS.Link") -> None:
+        def on_established(lnk: RNS.Link) -> None:
             logger.info(f"Datalink ESTABLISHED to {lxmf_destination_hash[:16]}...")
             if self._event_loop:
                 asyncio.run_coroutine_threadsafe(
@@ -747,7 +764,7 @@ class DirectLinkService:
                     self._event_loop,
                 )
 
-        def on_closed(lnk: "RNS.Link") -> None:
+        def on_closed(lnk: RNS.Link) -> None:
             logger.info(f"Datalink CLOSED to {lxmf_destination_hash[:16]}...")
             self._links.pop(lxmf_destination_hash, None)
             if self._event_loop and not established_future.done():

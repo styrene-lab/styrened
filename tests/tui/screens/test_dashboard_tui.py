@@ -354,3 +354,139 @@ class TestDashboardActivitySubscription:
         activity_widget.add_ephemeral.assert_not_called()
         # DaemonEvent posted to app for the EVENT_ACTIVITY item
         mock_app.post_message.assert_called_once()
+
+
+class TestDashboardAdapterWiring:
+    """Test adapter_changed event wiring into DashboardScreen."""
+
+    def _make_event(self, adapter_name: str, state: str, detail: str = "") -> "DaemonEvent":
+        from styrened.tui.models.events import DaemonEvent
+        return DaemonEvent(
+            event_type="adapter_changed",
+            action="adapter_changed",
+            data={"adapter_name": adapter_name, "state": state, "detail": detail},
+        )
+
+    def test_adapter_changed_updates_adapter_status_bar(self):
+        """adapter_changed event feeds AdapterStatusTracker and pushes snapshot to AdapterStatusBar."""
+        from unittest.mock import MagicMock, patch
+        from styrened.tui.screens.dashboard import DashboardScreen
+        from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
+        from styrened.tui.models.adapter_status import AdapterDisplayState
+
+        screen = DashboardScreen()
+        mock_bar = MagicMock(spec=AdapterStatusBar)
+        mock_cop = MagicMock()
+
+        def _query_one(widget_type):
+            if widget_type is AdapterStatusBar:
+                return mock_bar
+            return mock_cop
+
+        with patch.object(screen, "query_one", side_effect=_query_one):
+            event = self._make_event("i2p", "ready")
+            screen.on_daemon_event(event)
+
+        mock_bar.apply_snapshot.assert_called_once()
+        snap = mock_bar.apply_snapshot.call_args[0][0]
+        assert len(snap.adapters) == 1
+        assert snap.adapters[0].name == "i2p"
+        assert snap.adapters[0].state == AdapterDisplayState.READY
+
+    def test_ready_to_degraded_injects_anomaly_situation_line(self):
+        """READY→DEGRADED transition should inject an ANOMALY situation line into COP feed."""
+        from unittest.mock import MagicMock, patch
+        from styrened.tui.screens.dashboard import DashboardScreen
+        from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
+        from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
+        from styrened.tui.models.cop_situation import SituationPriority
+
+        screen = DashboardScreen()
+        mock_bar = MagicMock(spec=AdapterStatusBar)
+        mock_cop = MagicMock(spec=CopActivitySummary)
+
+        def _query_one(widget_type):
+            if widget_type is AdapterStatusBar:
+                return mock_bar
+            return mock_cop
+
+        with patch.object(screen, "query_one", side_effect=_query_one):
+            # First: establish READY state
+            screen.on_daemon_event(self._make_event("i2p", "ready"))
+            cop_calls_before = mock_cop.apply_snapshot.call_count
+            # Now: transition to DEGRADED
+            screen.on_daemon_event(self._make_event("i2p", "degraded"))
+
+        # COP apply_snapshot should have been called again after the transition
+        assert mock_cop.apply_snapshot.call_count > cop_calls_before
+        # Check snapshot contains an anomaly line
+        snap = mock_cop.apply_snapshot.call_args[0][0]
+        anomaly_lines = [
+            line for line in snap.lines
+            if line.priority == SituationPriority.ANOMALY
+        ]
+        assert any("degraded" in line.message.lower() for line in anomaly_lines), \
+            f"Expected anomaly line about degraded, got: {[l.message for l in snap.lines]}"
+
+    def test_warming_to_ready_injects_informational_situation_line(self):
+        """WARMING→READY transition should inject an INFO situation line into COP feed."""
+        from unittest.mock import MagicMock, patch
+        from styrened.tui.screens.dashboard import DashboardScreen
+        from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
+        from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
+        from styrened.tui.models.cop_situation import SituationPriority
+
+        screen = DashboardScreen()
+        mock_bar = MagicMock(spec=AdapterStatusBar)
+        mock_cop = MagicMock(spec=CopActivitySummary)
+
+        def _query_one(widget_type):
+            if widget_type is AdapterStatusBar:
+                return mock_bar
+            return mock_cop
+
+        with patch.object(screen, "query_one", side_effect=_query_one):
+            screen.on_daemon_event(self._make_event("ygg", "warming"))
+            screen.on_daemon_event(self._make_event("ygg", "ready"))
+
+        snap = mock_cop.apply_snapshot.call_args[0][0]
+        info_lines = [
+            line for line in snap.lines
+            if line.priority == SituationPriority.INFO
+        ]
+        assert any("ready" in line.message.lower() or "ygg" in line.message.lower()
+                   for line in info_lines), \
+            f"Expected info line about ready, got: {[l.message for l in snap.lines]}"
+
+    def test_disabled_to_probing_generates_no_situation_line(self):
+        """DISABLED→PROBING transitions generate no situation line in COP feed."""
+        from unittest.mock import MagicMock, patch
+        from styrened.tui.screens.dashboard import DashboardScreen
+        from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
+        from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
+
+        screen = DashboardScreen()
+        mock_bar = MagicMock(spec=AdapterStatusBar)
+        mock_cop = MagicMock(spec=CopActivitySummary)
+
+        def _query_one(widget_type):
+            if widget_type is AdapterStatusBar:
+                return mock_bar
+            return mock_cop
+
+        with patch.object(screen, "query_one", side_effect=_query_one):
+            screen.on_daemon_event(self._make_event("i2p", "disabled"))
+            mock_cop.apply_snapshot.reset_mock()
+            screen.on_daemon_event(self._make_event("i2p", "probing"))
+
+        # COP may be called, but the snapshot should have NO anomaly or info lines
+        # from the adapter transition (DISABLED origin → no situation)
+        if mock_cop.apply_snapshot.called:
+            snap = mock_cop.apply_snapshot.call_args[0][0]
+            from styrened.tui.models.cop_situation import SituationPriority
+            adapter_lines = [
+                line for line in snap.lines
+                if "i2p" in line.message.lower()
+            ]
+            assert len(adapter_lines) == 0, \
+                f"Expected no i2p situation lines, got: {[l.message for l in adapter_lines]}"

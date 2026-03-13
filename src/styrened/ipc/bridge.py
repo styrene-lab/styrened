@@ -620,6 +620,10 @@ class IPCBridge:
         """Get per-peer unread message counts."""
         return await self._call("get_unread_counts")
 
+    async def get_adapter_state(self) -> list[dict]:
+        """Get current state of all registered adapters."""
+        return await self._call("get_adapter_state")
+
     # ── Direct data link methods ──────────────────────────────────
 
     async def block_peer(

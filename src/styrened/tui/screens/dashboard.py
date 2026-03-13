@@ -18,6 +18,7 @@ from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hub_connection import HubStatus
+from styrened.tui.models.adapter_status import AdapterStatusTracker
 from styrened.tui.models.cop_situation import CopSituationTracker
 from styrened.tui.models.events import DaemonEvent
 from styrened.tui.services.config import load_config
@@ -39,6 +40,7 @@ _IPC_TO_BUS_TYPE: dict[str, str] = {
     "pqc_established": "link_changed",
     "file_offer": "message_changed",
     "file_complete": "message_changed",
+    "adapter_changed": "adapter_changed",
 }
 
 
@@ -46,6 +48,7 @@ def _ipc_type_to_bus_type(ipc_type: str) -> str:
     """Convert IPC activity event type to coarse bus event type."""
     return _IPC_TO_BUS_TYPE.get(ipc_type, ipc_type)
 from styrened.tui.services.reticulum import start_discovery
+from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
 from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
@@ -71,6 +74,7 @@ class DashboardScreen(Screen[None]):
         self._hub_retry_timer: Timer | None = None
         self._activity_worker: Worker | None = None
         self._situation_tracker = CopSituationTracker()
+        self._adapter_tracker = AdapterStatusTracker()
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -89,6 +93,7 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self.run_worker(self._fetch_adapter_state(), group="dashboard-adapters")
             self._activity_worker = self.run_worker(
                 self._subscribe_activity(),
                 group="dashboard-activity",
@@ -122,6 +127,7 @@ class DashboardScreen(Screen[None]):
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
+            self.run_worker(self._fetch_adapter_state(), group="dashboard-adapters")
             self._activity_worker = self.run_worker(
                 self._subscribe_activity(),
                 group="dashboard-activity",
@@ -151,13 +157,32 @@ class DashboardScreen(Screen[None]):
         Store-backed events (node changes, messages, hub) debounce to avoid
         spawning redundant refresh workers during fleet-boot bursts.
         """
-        # Always feed the tracker — it ignores events it doesn't care about
+        # Always feed the COP tracker — it ignores events it doesn't care about
         self._situation_tracker.ingest(event)
         try:
             cop = self.query_one(CopActivitySummary)
             cop.apply_snapshot(self._situation_tracker.snapshot())
         except Exception:
             pass
+
+        # Feed adapter tracker; push snapshot to bar; inject situation line if present
+        if event.event_type == "adapter_changed":
+            self._adapter_tracker.ingest(event)
+            try:
+                bar = self.query_one(AdapterStatusBar)
+                bar.apply_snapshot(self._adapter_tracker.snapshot())
+            except Exception:
+                pass
+            situation_line = self._adapter_tracker.get_situation_line()
+            if situation_line is not None:
+                self._situation_tracker._push_ephemeral(
+                    situation_line.message, situation_line.priority
+                )
+                try:
+                    cop = self.query_one(CopActivitySummary)
+                    cop.apply_snapshot(self._situation_tracker.snapshot())
+                except Exception:
+                    pass
 
         # Store-backed events trigger a full poll refresh (debounced)
         if event.event_type not in ("node_changed", "message_changed", "hub_changed"):
@@ -221,6 +246,7 @@ class DashboardScreen(Screen[None]):
                 title="STATUS",
                 id="status-bar-panel",
             )
+            yield AdapterStatusBar(id="adapter-status-bar-widget")
             yield HighlightedPanel(
                 HomeNodeSummaryTable(id="home-node-summary-widget"),
                 title="NODES",
@@ -432,6 +458,32 @@ class DashboardScreen(Screen[None]):
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
+    async def _fetch_adapter_state(self) -> None:
+        """Pull current adapter states from daemon on connect.
+
+        Avoids the up-to-30-second wait for the first probe cycle event by
+        querying the daemon directly.  Synthesises DaemonEvents so the normal
+        on_daemon_event → AdapterStatusTracker → AdapterStatusBar path handles
+        the result without any special-casing.
+        """
+        bridge = self._ipc_bridge
+        if bridge is None:
+            return
+        try:
+            adapters = await bridge.get_adapter_state()
+            for entry in adapters:
+                self.post_message(DaemonEvent(
+                    event_type="adapter_changed",
+                    action=entry.get("state", "probing"),
+                    data={
+                        "adapter_name": entry.get("adapter_name", ""),
+                        "state": entry.get("state", "probing"),
+                        "prev": "probing",
+                    },
+                ))
+        except Exception:
+            pass  # Daemon may not support this yet; probe events will catch up
+
     async def _subscribe_activity(self) -> None:
         """Subscribe to activity events via IPC — ephemeral events only.
 
@@ -450,7 +502,7 @@ class DashboardScreen(Screen[None]):
                     continue
                 # Post DaemonEvent — on_daemon_event handles tracker + COP update
                 evt_type = event.get("type", "unknown")
-                self.app.post_message(DaemonEvent(
+                self.post_message(DaemonEvent(
                     event_type=_ipc_type_to_bus_type(evt_type),
                     action=evt_type,
                     data=event,

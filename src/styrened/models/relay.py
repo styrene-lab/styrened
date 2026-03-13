@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-
 
 # ---------------------------------------------------------------------------
 # LinkType
@@ -42,16 +42,22 @@ class RelaySession:
     """An active relay session bridging two peers through the hub."""
     requester_hash: str
     target_hash: str
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     bytes_forwarded: int = 0
     is_permanent: bool = False
     is_priority: bool = False
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_activity: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def record_bytes(self, n: int) -> None:
-        """Record n bytes forwarded and update last_activity."""
+        """Record n bytes forwarded and update last_activity.
+
+        Raises ValueError if n is negative.
+        """
+        if n < 0:
+            raise ValueError(f"record_bytes() requires non-negative value, got {n}")
         self.bytes_forwarded += n
-        self.last_activity = datetime.now(timezone.utc)
+        self.last_activity = datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -63,38 +69,41 @@ class RelayError(Exception):
     error_code: str = "relay_error"
 
 
-class RelayDisabled(RelayError):
-    error_code = "relay_disabled"
+# Relay error subclasses use domain-name convention (Relay<Condition>) rather
+# than the PEP-8 *Error suffix because they carry structured error_code strings
+# consumed by protocol handlers and TUI.  N818 suppressed intentionally.
+class RelayDisabled(RelayError):  # noqa: N818
+    error_code = "relay.disabled"
 
-class RelayMaxSessions(RelayError):
-    error_code = "relay_max_sessions"
+class RelayMaxSessions(RelayError):  # noqa: N818
+    error_code = "relay.max_sessions"
 
-class RelayMaxPerIdentity(RelayError):
-    error_code = "relay_max_per_identity"
+class RelayMaxPerIdentity(RelayError):  # noqa: N818
+    error_code = "relay.max_per_identity"
 
-class RelayByteLimitExceeded(RelayError):
-    error_code = "relay_byte_limit_exceeded"
+class RelayByteLimitExceeded(RelayError):  # noqa: N818
+    error_code = "relay.byte_limit"
 
-class RelayIdleTimeout(RelayError):
-    error_code = "relay_idle_timeout"
+class RelayIdleTimeout(RelayError):  # noqa: N818
+    error_code = "relay.idle_timeout"
 
-class RelayUnauthorized(RelayError):
-    error_code = "relay_unauthorized"
+class RelayUnauthorized(RelayError):  # noqa: N818
+    error_code = "relay.unauthorized"
 
-class RelayPermanentDenied(RelayError):
-    error_code = "relay_permanent_denied"
+class RelayPermanentDenied(RelayError):  # noqa: N818
+    error_code = "relay.permanent_denied"
 
-class RelayTargetRejected(RelayError):
-    error_code = "relay_target_rejected"
+class RelayTargetRejected(RelayError):  # noqa: N818
+    error_code = "relay.target_rejected"
 
-class RelayTargetOffline(RelayError):
-    error_code = "relay_target_offline"
+class RelayTargetOffline(RelayError):  # noqa: N818
+    error_code = "relay.target_offline"
 
-class RelayPermanentConsentDenied(RelayError):
-    error_code = "relay_permanent_consent_denied"
+class RelayPermanentConsentDenied(RelayError):  # noqa: N818
+    error_code = "relay.consent_denied"
 
-class RelayEvicted(RelayError):
-    error_code = "relay_evicted"
+class RelayEvicted(RelayError):  # noqa: N818
+    error_code = "relay.evicted"
 
-class RelayBridgeDenied(RelayError):
-    error_code = "relay_bridge_denied"
+class RelayBridgeDenied(RelayError):  # noqa: N818
+    error_code = "relay.bridge_denied"

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "changeName": "styrene-distrust-model",
+  "assessmentKind": "cleave",
+  "outcome": "pass",
+  "timestamp": "2026-03-13T05:47:42.840Z",
+  "summary": "All 19 tasks marked complete. tasks.md reconciled.",
+  "snapshot": {
+    "gitHead": "2c30884ea9bd37557ebaba0e2032cf4468fd61ca",
+    "fingerprint": "3f49bbdc293d8c835ad74af5b802f49391998dcf045383aa22292b0416e9f2b4",
+    "dirty": false,
+    "scopedPaths": [
+      "src/styrened/ipc/bridge.py",
+      "src/styrened/ipc/client.py",
+      "src/styrened/ipc/handlers.py",
+      "src/styrened/ipc/messages.py",
+      "src/styrened/models/mesh_device.py",
+      "src/styrened/models/messages.py",
+      "src/styrened/services/lxmf_service.py",
+      "src/styrened/tui/screens/conversation.py",
+      "src/styrened/tui/widgets/chat_widget.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/styrene-distrust-model/design.md",
+        "exists": true,
+        "size": 12295,
+        "sha256": "247d3d9be2062cfc1101c3fb5bd1ca15a344ed64c1a9bee0f07812dcb14ea14c"
+      },
+      {
+        "path": "openspec/changes/styrene-distrust-model/proposal.md",
+        "exists": true,
+        "size": 464,
+        "sha256": "bf8efb037ce1ff46d024b828489d758e818b58afafc2ad2a676cbb2c99efbdcd"
+      },
+      {
+        "path": "openspec/changes/styrene-distrust-model/tasks.md",
+        "exists": true,
+        "size": 3577,
+        "sha256": "5844757bee424cc66020c8ec7cf2f88a86372651900da30173065374e7e8fa19"
+      },
+      {
+        "path": "src/styrened/ipc/bridge.py",
+        "exists": true,
+        "size": 28062,
+        "sha256": "570fb16c4b056447efcdbdecb2a356be10fadb4d098190a6fd3e0e2a4e1b3f46"
+      },
+      {
+        "path": "src/styrened/ipc/client.py",
+        "exists": true,
+        "size": 45988,
+        "sha256": "bd5185353da120728ace0dd3481fd916f410bfb2e7600cee7227cc2f867cae16"
+      },
+      {
+        "path": "src/styrened/ipc/handlers.py",
+        "exists": true,
+        "size": 128552,
+        "sha256": "42f45e4546b7798eefd9fe33f6c71e4440c21f4aaa4b6d867c8fea2f6df4befb"
+      },
+      {
+        "path": "src/styrened/ipc/messages.py",
+        "exists": true,
+        "size": 52414,
+        "sha256": "38e358fb4f93f6fe780183a4e598c09f2d0b6ce365e4ef444bc3036b4ff92206"
+      },
+      {
+        "path": "src/styrened/models/mesh_device.py",
+        "exists": true,
+        "size": 14661,
+        "sha256": "9652bd124e855396e8da7c372148e649bc434d68eb60d1fcbe2efebe31ec2a3a"
+      },
+      {
+        "path": "src/styrened/models/messages.py",
+        "exists": true,
+        "size": 29358,
+        "sha256": "c5f2de6997f2c8e27bcc9fdbfb2c2669bc0aa1664dc209afea9ec3575935ee6a"
+      },
+      {
+        "path": "src/styrened/services/lxmf_service.py",
+        "exists": true,
+        "size": 58630,
+        "sha256": "119a75d865dbfa99960ef34a361862b63835d13d2b329bf92d2c7f93fecc71ad"
+      },
+      {
+        "path": "src/styrened/tui/screens/conversation.py",
+        "exists": true,
+        "size": 8939,
+        "sha256": "83d6c95b1b1ed54b2ba9441243c8bccd884af417db3d979fc6df4c699fef3e0e"
+      },
+      {
+        "path": "src/styrened/tui/widgets/chat_widget.py",
+        "exists": true,
+        "size": 62822,
+        "sha256": "c310574830a0e0f0afa7750dddfa0f77de367bdfc48ba265fd2e0f3b5fbcc4a2"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/styrene-distrust-model/tasks.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

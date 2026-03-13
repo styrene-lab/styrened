@@ -23,7 +23,6 @@ Dependencies:
 """
 from __future__ import annotations
 
-
 import asyncio
 import json
 import logging
@@ -198,6 +197,7 @@ class StyreneDaemon:
         self._i2p_adapter: Any = None  # Optional I2P adapter
         self._ygg_adapter: Any = None  # Optional Yggdrasil adapter
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
+        self._adapter_probe_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
         # Central event bus — the daemon's nervous system
         from styrened.services.event_bus import EventBus
@@ -229,6 +229,7 @@ class StyreneDaemon:
         # Start optional I2P integration early so announce/meta can surface it
         await self._start_i2p_adapter()
         await self._start_yggdrasil_adapter()
+        self._start_adapter_probe_loop()
 
         # Inject RBAC policy into LXMF service — must happen before any
         # message processing begins, regardless of chat.enabled state.
@@ -402,7 +403,7 @@ class StyreneDaemon:
         except RuntimeError:
             pass
 
-    def _on_device_discovered(self, device: "MeshDevice") -> None:
+    def _on_device_discovered(self, device: MeshDevice) -> None:
         """Handle discovered device.
 
         Args:
@@ -557,7 +558,7 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to initialize PQC session service: {e}")
 
-    def _maybe_initiate_pqc(self, device: "MeshDevice") -> None:
+    def _maybe_initiate_pqc(self, device: MeshDevice) -> None:
         """Auto-initiate PQC session with a newly discovered Styrene node.
 
         Args:
@@ -617,6 +618,16 @@ class StyreneDaemon:
             # conversation service display name lookups
             if self._node_store is None:
                 self._node_store = get_node_store()
+
+            # Backfill any contacts rows whose identity_hash is still a dest-hash
+            # placeholder from the pre-v0.16 peer_hash→identity_hash migration.
+            # Must run after NodeStore is populated so mappings are available.
+            from styrened.models.messages import backfill_contacts_identity_hash
+
+            try:
+                backfill_contacts_identity_hash(db_engine, self._node_store)
+            except Exception as _bf_exc:
+                logger.warning("contacts identity_hash backfill failed (non-fatal): %s", _bf_exc)
 
             # Create contact service (shares db_engine and node_store)
             from styrened.services.contacts import ContactService
@@ -681,7 +692,7 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to initialize read receipt protocol: {e}")
 
-    def _handle_read_receipt_message(self, lxmf_message: "LXMF.LXMessage") -> None:
+    def _handle_read_receipt_message(self, lxmf_message: LXMF.LXMessage) -> None:
         """Handle incoming LXMF message that might be a read receipt.
 
         Routes read receipt protocol messages to the ReadReceiptProtocol handler.
@@ -762,7 +773,7 @@ class StyreneDaemon:
             logger.error(f"Failed to send read receipts: {e}")
             return False
 
-    def _handle_chat_message_for_conversation(self, lxmf_message: "LXMF.LXMessage") -> None:
+    def _handle_chat_message_for_conversation(self, lxmf_message: LXMF.LXMessage) -> None:
         """Handle incoming LXMF message for conversation service.
 
         Saves chat messages to the conversation service for history tracking,
@@ -1321,7 +1332,7 @@ class StyreneDaemon:
 
     def _handle_styrene_message_dispatch(
         self, styrene_protocol: Any
-    ) -> Callable[["LXMF.LXMessage"], None]:
+    ) -> Callable[[LXMF.LXMessage], None]:
         """Create a callback to dispatch LXMF messages to StyreneProtocol.
 
         This bridges the LXMFService callback mechanism with StyreneProtocol's
@@ -1337,7 +1348,7 @@ class StyreneDaemon:
 
         from styrened.protocols.base import LXMFMessage
 
-        def callback(lxmf_message: "LXMF.LXMessage") -> None:
+        def callback(lxmf_message: LXMF.LXMessage) -> None:
             # Wrap raw LXMF message in our LXMFMessage dataclass
             wrapped = LXMFMessage(
                 source_hash=lxmf_message.source_hash.hex(),
@@ -1448,6 +1459,121 @@ class StyreneDaemon:
                 except Exception:
                     pass
             self._ygg_adapter = None
+
+    # ------------------------------------------------------------------
+    # Adapter probe loop
+    # ------------------------------------------------------------------
+
+    _ADAPTER_PROBE_INTERVAL: float = 30.0  # seconds between probe cycles
+
+    def _start_adapter_probe_loop(self) -> None:
+        """Register adapters with the AdapterRegistry and start the probe loop.
+
+        Called from :meth:`start` after both I2P and Yggdrasil adapters are
+        initialised.  The loop runs as a background task for the lifetime of
+        the daemon.
+        """
+        from styrened.services.adapter_registry import AdapterRegistry
+
+        self._adapter_registry: AdapterRegistry = AdapterRegistry()
+
+        if self._i2p_adapter is not None:
+            self._adapter_registry.register(self._i2p_adapter)
+            logger.debug("Registered I2P adapter with AdapterRegistry")
+
+        if self._ygg_adapter is not None:
+            self._adapter_registry.register(self._ygg_adapter)
+            logger.debug("Registered Yggdrasil adapter with AdapterRegistry")
+
+        if not self._adapter_registry.adapter_ids():
+            logger.debug("No adapters registered; probe loop will not start")
+            return
+
+        self._adapter_probe_task = asyncio.ensure_future(
+            self._adapter_probe_loop()
+        )
+        logger.info(
+            "Adapter probe loop started (interval=%.0fs, adapters=%s)",
+            self._ADAPTER_PROBE_INTERVAL,
+            self._adapter_registry.adapter_ids(),
+        )
+
+    async def _adapter_probe_loop(self) -> None:
+        """Poll every registered adapter and emit ``adapter_changed`` on transitions.
+
+        The first iteration always emits for every adapter regardless of state
+        change — this seeds any connected TUI clients with initial adapter state
+        so they don't show "no adapters registered" until the next transition.
+        Subsequent iterations emit only on state transitions.
+        """
+        from styrened.services.adapter_registry import AdapterState
+
+        first_iteration = True
+        # Short initial delay so RNS/LXMF settle before first probe,
+        # then fall into the normal cadence.
+        next_sleep = 3.0
+        while True:
+            await asyncio.sleep(next_sleep)
+            next_sleep = self._ADAPTER_PROBE_INTERVAL
+
+            for aid in list(self._adapter_registry.adapter_ids()):
+                adapter = self._adapter_registry.get_adapter(aid)
+                if adapter is None:
+                    continue
+
+                # Remember previous state before the probe
+                prev_record = self._adapter_registry.get(aid)
+                prev_state = prev_record.state if prev_record else AdapterState.PROBING
+
+                try:
+                    new_state = await adapter.probe()
+                    details = await adapter.gather_details()
+                except Exception as exc:
+                    logger.warning("Adapter probe failed for %r: %s", aid, exc)
+                    new_state = AdapterState.DEGRADED
+                    details = {}
+
+                # Update registry with the latest state
+                self._adapter_registry.update_state(
+                    aid, new_state, details=details,
+                )
+
+                # Emit on state transitions, or unconditionally on first iteration
+                # to seed TUI clients that connected after startup.
+                if new_state != prev_state or first_iteration:
+                    if new_state != prev_state:
+                        logger.info(
+                            "Adapter state transition: %s %s → %s",
+                            aid, prev_state.value, new_state.value,
+                        )
+                    try:
+                        await self.event_bus.emit(
+                            "adapter_changed",
+                            action=new_state.value,
+                            adapter_name=aid,
+                            prev=prev_state.value,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to emit adapter_changed for %r: %s", aid, exc
+                        )
+                    # Also route through NotificationService so the event
+                    # reaches IPC clients (TUI) via EVENT_ACTIVITY.
+                    # event_bus.emit above is internal-only; IPC consumers
+                    # never see it unless we bridge it here.
+                    # Include "type" key for the TUI's event.get("type") lookup.
+                    # Use "adapter_name" to match AdapterStatusTracker.ingest().
+                    self._emit_activity_event(
+                        "adapter_changed",
+                        metadata={
+                            "type": "adapter_changed",
+                            "adapter_name": aid,
+                            "state": new_state.value,
+                            "prev": prev_state.value,
+                        },
+                    )
+
+            first_iteration = False
 
     def _start_auto_reply(self) -> None:
         """Start the auto-reply handler for LXMF chat messages.
@@ -1773,6 +1899,9 @@ class StyreneDaemon:
             relay_config = getattr(self.config, "relay", None)
             if relay_config is None:
                 return
+            if not relay_config.enabled:
+                logger.debug("Relay service disabled (relay.enabled=false)")
+                return
 
             self._relay_service = RelayService(relay_config)
 
@@ -1786,6 +1915,7 @@ class StyreneDaemon:
             )
         except Exception as e:
             logger.error(f"Failed to start relay service: {e}")
+            raise
 
     def _on_datalink_established(self, link: Any) -> None:
         """Log when a peer establishes a direct data link to us."""
@@ -2011,6 +2141,10 @@ class StyreneDaemon:
 
         RBAC: PEER+ required (relay.request capability).
         """
+        # Fast-path: relay disabled check before any capability leak via RBAC
+        if self._relay_service is None:
+            return json.dumps({"error": "relay.disabled"}).encode("utf-8")
+
         identity_hex = self._datalink_identity_hex(remote_identity)
         if not self._datalink_rl.check(identity_hex):
             return json.dumps({"error": "rate_limited"}).encode("utf-8")
@@ -2020,9 +2154,7 @@ class StyreneDaemon:
         role = self._datalink_rbac_role(identity_hex)
         if role <= int(Role.BLOCKED):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
-        if self.config.rbac and not self.config.rbac.has_capability(
-            identity_hex, Capability.RELAY_REQUEST
-        ):
+        if not self.config.rbac.has_capability(identity_hex, Capability.RELAY_REQUEST):
             return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Parse request
@@ -2039,9 +2171,11 @@ class StyreneDaemon:
         if not target_hash:
             return json.dumps({"error": "missing_target_hash"}).encode("utf-8")
 
-        # Check relay service
-        if self._relay_service is None:
-            return json.dumps({"error": "relay_disabled"}).encode("utf-8")
+        # Defense-in-depth: check relay.request_permanent when permanent is requested
+        if permanent and not self.config.rbac.has_capability(
+            identity_hex, Capability.RELAY_REQUEST_PERMANENT
+        ):
+            return json.dumps({"error": "unauthorized"}).encode("utf-8")
 
         # Check target is connected via DirectLink
         if self._direct_link_service:
@@ -2054,7 +2188,6 @@ class StyreneDaemon:
             import asyncio
 
             from styrened.models.relay import (
-                RelayDisabled,
                 RelayError,
             )
 
@@ -2071,9 +2204,15 @@ class StyreneDaemon:
                 loop,
             )
             session = future.result(timeout=5.0)
+            # Mark the target link as RELAYED in DirectLinkService
+            if self._direct_link_service:
+                from styrened.models.relay import LinkType
+                self._direct_link_service.set_link_type(target_hash, LinkType.RELAYED)
+            import uuid
+            session_id = str(getattr(session, "session_id", None) or uuid.uuid4())
             return json.dumps({
                 "status": "established",
-                "session_id": id(session),
+                "session_id": session_id,
                 "requester_hash": session.requester_hash,
                 "target_hash": session.target_hash,
                 "is_permanent": session.is_permanent,
@@ -2551,8 +2690,22 @@ class StyreneDaemon:
 
         # Stop relay service
         if self._relay_service:
+            try:
+                for session_id in list(self._relay_service._sessions.keys()):
+                    await self._relay_service.teardown_session(session_id)
+            except Exception as e:
+                logger.error(f"Error tearing down relay sessions: {e}")
             self._relay_service = None
             logger.info("Relay service stopped")
+
+        # Stop adapter probe loop
+        if self._adapter_probe_task is not None:
+            self._adapter_probe_task.cancel()
+            try:
+                await self._adapter_probe_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._adapter_probe_task = None
 
         # Stop optional I2P adapter
         await self._stop_i2p_adapter()

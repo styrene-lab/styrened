@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 
-import time
-from datetime import datetime
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -178,10 +178,14 @@ class TestRelaySession:
         from styrened.models.relay import RelaySession
 
         s = RelaySession(requester_hash="aaa", target_hash="bbb")
-        before = s.last_activity
-        time.sleep(0.01)
-        s.record_bytes(1024)
+        before = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        s.last_activity = before
+        fixed_now = datetime(2000, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+        with patch("styrened.models.relay.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed_now
+            s.record_bytes(1024)
         assert s.bytes_forwarded == 1024
+        assert s.last_activity == fixed_now
         assert s.last_activity > before
 
     def test_record_bytes_accumulates(self):
@@ -191,6 +195,22 @@ class TestRelaySession:
         s.record_bytes(100)
         s.record_bytes(200)
         assert s.bytes_forwarded == 300
+
+    def test_record_bytes_negative_raises(self):
+        from styrened.models.relay import RelaySession
+
+        s = RelaySession(requester_hash="aaa", target_hash="bbb")
+        with pytest.raises(ValueError):
+            s.record_bytes(-1)
+
+    def test_session_id_present_and_unique(self):
+        from styrened.models.relay import RelaySession
+
+        s1 = RelaySession(requester_hash="aaa", target_hash="bbb")
+        s2 = RelaySession(requester_hash="aaa", target_hash="bbb")
+        assert isinstance(s1.session_id, str)
+        assert len(s1.session_id) > 0
+        assert s1.session_id != s2.session_id
 
 
 class TestLinkType:

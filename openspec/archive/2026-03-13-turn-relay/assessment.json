@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "changeName": "turn-relay",
+  "assessmentKind": "cleave",
+  "outcome": "pass",
+  "timestamp": "2026-03-13T12:09:31.131Z",
+  "summary": "tasks.md reconciled — all 25 tasks marked complete.",
+  "snapshot": {
+    "gitHead": "c538169fc9235ba30f090b1484d4b97495fdeaa7",
+    "fingerprint": "a2cd0fae72745ad2c3c5d7efa73faa467a9f5d7745b82b3148d435e1d1df5fc5",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/turn-relay/design.md",
+        "exists": true,
+        "size": 2298,
+        "sha256": "d1e12d5ee6b619aae5efb37512e3931affd79fb68ec5abdfb59958c4da2965e7"
+      },
+      {
+        "path": "openspec/changes/turn-relay/proposal.md",
+        "exists": true,
+        "size": 299,
+        "sha256": "535536283de891f7b6d9f27c316a1fd47752f1350750a3e9914c71f16fc212b7"
+      },
+      {
+        "path": "openspec/changes/turn-relay/specs/relay/config.md",
+        "exists": true,
+        "size": 1339,
+        "sha256": "8c6031acd7dcedf24914d29999ef2893e6dd64a82453aa3a5500ec3ad655547e"
+      },
+      {
+        "path": "openspec/changes/turn-relay/specs/relay/models.md",
+        "exists": true,
+        "size": 1818,
+        "sha256": "b403da46c4960e3c1ec3ceb6970d7b81fb169087d1292c75e4e4305adc1cb758"
+      },
+      {
+        "path": "openspec/changes/turn-relay/specs/relay/rbac.md",
+        "exists": true,
+        "size": 2244,
+        "sha256": "eaf33db2040e96e1dc722c43e6a7d75d37a70dff1dbd44ada623f03c384f62ee"
+      },
+      {
+        "path": "openspec/changes/turn-relay/specs/relay/service.md",
+        "exists": true,
+        "size": 2950,
+        "sha256": "a24e4fa6b313b3caae49666bfb3aa59e4debd55f40b868e34db1ea429f197311"
+      },
+      {
+        "path": "openspec/changes/turn-relay/tasks.md",
+        "exists": true,
+        "size": 4503,
+        "sha256": "8828ce09d34841345e663b650cf96e4b363628868944900e34ac42869d48d548"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/turn-relay/tasks.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
