@@ -1,7 +1,7 @@
 ---
 id: cop-adapter-status
 title: COP Adapter Status — Extensible Overlay Service Health Surface
-status: implementing
+status: implemented
 parent: tui-home-cop
 tags: [tui, cop, adapters, i2p, yggdrasil, overlay, health, dashboard]
 open_questions: []
@@ -77,6 +77,13 @@ Surface the readiness state of optional overlay adapters (I2P, Yggdrasil, and fu
 - `src/styrened/tui/widgets/adapter_status_bar.py` (new) — AdapterStatusBar widget — presentation-only, apply_snapshot()
 - `src/styrened/tui/screens/dashboard.py` (modified) — Wire AdapterStatusTracker, on_daemon_event adapter_changed handling
 - `src/styrened/services/event_bus.py` (modified) — Add adapter_changed as 6th EventBus type
+- `src/styrened/daemon.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `src/styrened/ipc/bridge.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `src/styrened/ipc/client.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `src/styrened/ipc/handlers.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `src/styrened/ipc/messages.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `src/styrened/ipc/protocol.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `src/styrened/ipc/server.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
