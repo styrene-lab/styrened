@@ -64,37 +64,37 @@ class RelayError(Exception):
 
 
 class RelayDisabled(RelayError):
-    error_code = "relay_disabled"
+    error_code = "relay.disabled"
 
 class RelayMaxSessions(RelayError):
-    error_code = "relay_max_sessions"
+    error_code = "relay.max_sessions"
 
 class RelayMaxPerIdentity(RelayError):
-    error_code = "relay_max_per_identity"
+    error_code = "relay.max_per_identity"
 
 class RelayByteLimitExceeded(RelayError):
-    error_code = "relay_byte_limit_exceeded"
+    error_code = "relay.byte_limit"
 
 class RelayIdleTimeout(RelayError):
-    error_code = "relay_idle_timeout"
+    error_code = "relay.idle_timeout"
 
 class RelayUnauthorized(RelayError):
-    error_code = "relay_unauthorized"
+    error_code = "relay.unauthorized"
 
 class RelayPermanentDenied(RelayError):
-    error_code = "relay_permanent_denied"
+    error_code = "relay.permanent_denied"
 
 class RelayTargetRejected(RelayError):
-    error_code = "relay_target_rejected"
+    error_code = "relay.target_rejected"
 
 class RelayTargetOffline(RelayError):
-    error_code = "relay_target_offline"
+    error_code = "relay.target_offline"
 
 class RelayPermanentConsentDenied(RelayError):
-    error_code = "relay_permanent_consent_denied"
+    error_code = "relay.consent_denied"
 
 class RelayEvicted(RelayError):
-    error_code = "relay_evicted"
+    error_code = "relay.evicted"
 
 class RelayBridgeDenied(RelayError):
-    error_code = "relay_bridge_denied"
+    error_code = "relay.bridge_denied"
