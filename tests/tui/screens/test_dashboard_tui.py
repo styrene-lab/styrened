@@ -350,9 +350,7 @@ class TestDashboardActivitySubscription:
             await screen._subscribe_activity()
 
         bridge.subscribe_activity.assert_awaited_once_with()
-        activity_widget.add_ephemeral.assert_called_once_with(
-            "announce_sent",
-            {"type": "announce_sent"},
-        )
-        # DaemonEvent posted to app
+        # add_ephemeral no longer called — routing goes through DaemonEvent → on_daemon_event
+        activity_widget.add_ephemeral.assert_not_called()
+        # DaemonEvent posted to app for the EVENT_ACTIVITY item
         mock_app.post_message.assert_called_once()

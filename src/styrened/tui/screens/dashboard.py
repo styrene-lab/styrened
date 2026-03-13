@@ -18,6 +18,7 @@ from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
 from styrened.services.hub_connection import HubStatus
+from styrened.tui.models.cop_situation import CopSituationTracker
 from styrened.tui.models.events import DaemonEvent
 from styrened.tui.services.config import load_config
 
@@ -69,6 +70,7 @@ class DashboardScreen(Screen[None]):
         super().__init__(*args, **kwargs)
         self._hub_retry_timer: Timer | None = None
         self._activity_worker: Worker | None = None
+        self._situation_tracker = CopSituationTracker()
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -141,12 +143,23 @@ class DashboardScreen(Screen[None]):
     _EVENT_COOLDOWN: float = 5.0  # seconds — absorb rapid event bursts
 
     def on_daemon_event(self, event: DaemonEvent) -> None:
-        """Handle daemon events — trigger immediate refresh for relevant types.
+        """Handle daemon events — ingest ephemerals immediately, debounce poll refresh.
 
-        Debounces rapid events so fleet-boot bursts don't spawn redundant
-        workers.  First event refreshes immediately; subsequent events
-        within _EVENT_COOLDOWN are absorbed.
+        Ephemeral events (file transfers, PQC) are fed into the tracker and
+        pushed to the COP widget immediately — no poll required.
+
+        Store-backed events (node changes, messages, hub) debounce to avoid
+        spawning redundant refresh workers during fleet-boot bursts.
         """
+        # Always feed the tracker — it ignores events it doesn't care about
+        self._situation_tracker.ingest(event)
+        try:
+            cop = self.query_one(CopActivitySummary)
+            cop.apply_snapshot(self._situation_tracker.snapshot())
+        except Exception:
+            pass
+
+        # Store-backed events trigger a full poll refresh (debounced)
         if event.event_type not in ("node_changed", "message_changed", "hub_changed"):
             return
 
@@ -235,9 +248,10 @@ class DashboardScreen(Screen[None]):
     def action_refresh(self) -> None:
         """Refresh Home status panels."""
         try:
+            # Clear ephemeral state on manual refresh then re-render
+            self._situation_tracker = CopSituationTracker()
             cop_summary = self.query_one(CopActivitySummary)
-            cop_summary._ephemeral_events.clear()
-            cop_summary.refresh()
+            cop_summary.apply_snapshot(self._situation_tracker.snapshot())
         except Exception:
             pass
 
@@ -375,10 +389,9 @@ class DashboardScreen(Screen[None]):
 
                 table.update_nodes(nodes, unread_map)
 
-                # Update COP activity summary from current state
+                # Update COP activity summary via tracker → snapshot
                 try:
                     cop_summary = self.query_one(CopActivitySummary)
-                    # Build identity_hash → name map for unread attribution
                     name_map: dict[str, str] = {}
                     for node in nodes:
                         ih = getattr(node, "identity_hash", "")
@@ -386,7 +399,6 @@ class DashboardScreen(Screen[None]):
                         if ih and name:
                             name_map[ih] = name
 
-                    # Hub status string
                     hub_str = ""
                     try:
                         bar = self.query_one(HomeStatusBar)
@@ -394,12 +406,13 @@ class DashboardScreen(Screen[None]):
                     except Exception:
                         pass
 
-                    cop_summary.update_from_state(
+                    self._situation_tracker.update_from_state(
                         nodes=nodes,
                         unread_map=unread_map,
                         hub_status=hub_str,
                         node_name_map=name_map,
                     )
+                    cop_summary.apply_snapshot(self._situation_tracker.snapshot())
                 except Exception:
                     pass
 
@@ -435,17 +448,12 @@ class DashboardScreen(Screen[None]):
             async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
                 if event_type != IPCMessageType.EVENT_ACTIVITY:
                     continue
-                # Post DaemonEvent to app so any screen can handle it
+                # Post DaemonEvent — on_daemon_event handles tracker + COP update
                 evt_type = event.get("type", "unknown")
                 self.app.post_message(DaemonEvent(
                     event_type=_ipc_type_to_bus_type(evt_type),
                     action=evt_type,
                     data=event,
                 ))
-                try:
-                    cop_summary = self.query_one(CopActivitySummary)
-                    cop_summary.add_ephemeral(evt_type, event)
-                except Exception:
-                    pass
         except Exception:
             pass
