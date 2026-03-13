@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 from styrened.models.config import CoreConfig, YggdrasilConfig
+from styrened.services.adapter_registry import (
+    AdapterProtocol,
+    AdapterState,
+    WarmupBehavior,
+)
 from styrened.services.binary_errors import BinaryIntegrityError
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode
 
@@ -50,8 +55,11 @@ NIX_STORE_PREFIXES = [
 _STYRENE_BIN = Path.home() / ".styrene" / "bin"
 
 
-class YggdrasilAdapter(DaemonAdapter):
+class YggdrasilAdapter(DaemonAdapter, AdapterProtocol):
     """Adapter for the Yggdrasil overlay network daemon.
+
+    Implements both :class:`DaemonAdapter` (lifecycle management) and
+    :class:`AdapterProtocol` (registry / probe interface).
 
     warm_up_seconds = 30.0 — Yggdrasil bootstraps quickly; 30 s is
     enough time for the admin socket to become available and for initial
@@ -59,6 +67,48 @@ class YggdrasilAdapter(DaemonAdapter):
     """
 
     warm_up_seconds: float = 30.0
+
+    # AdapterProtocol metadata
+    display_name: str = "Yggdrasil"
+    short_label: str = "YGG"
+
+    # ------------------------------------------------------------------
+    # AdapterProtocol implementation
+    # ------------------------------------------------------------------
+
+    @property
+    def adapter_id(self) -> str:
+        """Stable registry identifier."""
+        return "ygg"
+
+    @property
+    def warmup_behavior(self) -> WarmupBehavior:
+        """Yggdrasil warms up quickly; warm-up is not operator-actionable."""
+        return WarmupBehavior(
+            expected_seconds=self.warm_up_seconds,
+            actionable=False,
+            description="Yggdrasil is establishing peer connections (~30 s).",
+        )
+
+    async def probe(self) -> AdapterState:
+        """Map the low-level socket probe result to an :class:`AdapterState`.
+
+        State mapping:
+        - DISABLED mode → :attr:`AdapterState.DISABLED`
+        - MANAGED and warming up → :attr:`AdapterState.WARMING`
+        - Probe succeeds → :attr:`AdapterState.READY`
+        - Probe fails (but mode is ADOPT/MANAGED) → :attr:`AdapterState.DEGRADED`
+        """
+        if self.mode == DaemonMode.DISABLED:
+            return AdapterState.DISABLED
+        if self.mode == DaemonMode.MANAGED and self.is_warming_up:
+            return AdapterState.WARMING
+        reachable = await self._probe()
+        return AdapterState.READY if reachable else AdapterState.DEGRADED
+
+    async def gather_details(self) -> dict:
+        """Return cached Yggdrasil details for the registry record."""
+        return await self._gather_details()
 
     def __init__(
         self,
