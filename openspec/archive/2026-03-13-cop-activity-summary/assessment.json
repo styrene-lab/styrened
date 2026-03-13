@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "changeName": "cop-activity-summary",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-13T00:25:40.014Z",
+  "summary": "18/18 spec scenarios passing. CopSituationTracker extraction complete, CopActivitySummary is presentation-only, DashboardScreen wired to tracker+snapshot model. 99 tests passing. All daemon emit sites were pre-existing.",
+  "snapshot": {
+    "gitHead": "eb4b153f718b7bf37d5bdf1f2e6cfd36c6853f1c",
+    "fingerprint": "fc0345ca1c464122b46e46079d4f8562d3964747c4279234f51bbca49a7a864b",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/cop-activity-summary/design.md",
+        "exists": true,
+        "size": 4098,
+        "sha256": "fff92f2cae27a38617d71bfe1fabf4e698d1e21249606d0d7ca51c61d055ea49"
+      },
+      {
+        "path": "openspec/changes/cop-activity-summary/proposal.md",
+        "exists": true,
+        "size": 278,
+        "sha256": "102f86bed26262b1f876e3d838d2c4cfca6de473872494cc222ea73fb74da1c9"
+      },
+      {
+        "path": "openspec/changes/cop-activity-summary/specs/cop-activity.md",
+        "exists": true,
+        "size": 5719,
+        "sha256": "1777c458dc6585a467cdd025ad954919bdd6df332aebe8ee2aa3611796c01a07"
+      },
+      {
+        "path": "openspec/changes/cop-activity-summary/tasks.md",
+        "exists": true,
+        "size": 2851,
+        "sha256": "cd3905247e277680d3da625e541e9f9be7854752b4ee3ce091c5a69008055436"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

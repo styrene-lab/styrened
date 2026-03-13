@@ -1,7 +1,7 @@
 ---
 id: i2p-integration
 title: I2P Integration
-status: implementing
+status: implemented
 parent: overlay-network-integration
 dependencies: [optional-daemon-adoption-model, styrene-identity]
 tags: [i2p, i2pd, eepsite, anonymity, page-browser, hidden-service]
