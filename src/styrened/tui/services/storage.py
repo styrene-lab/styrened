@@ -24,7 +24,7 @@ class StorageDevice:
     """
 
     device: str
-    size_gb: int
+    size_gb: float
     type: Literal["sd", "usb", "internal"]
     mounted: bool
     label: str | None = None
@@ -69,22 +69,7 @@ async def _detect_storage_macos() -> list[StorageDevice]:
         List of external/removable storage devices.
     """
     try:
-        # Run diskutil list -plist to get structured output
-        proc = await asyncio.create_subprocess_exec(
-            "diskutil",
-            "list",
-            "-plist",
-            "external",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode != 0:
-            raise RuntimeError(f"diskutil failed: {stderr.decode() if stderr else 'unknown error'}")
-
-        # Parse plist output (simplified - actual implementation would use plistlib)
-        # For now, we'll use diskutil list and parse text output
+        # Run diskutil list (text output) to enumerate external disks
         proc = await asyncio.create_subprocess_exec(
             "diskutil",
             "list",

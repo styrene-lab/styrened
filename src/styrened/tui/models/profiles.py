@@ -28,8 +28,8 @@ class Profile:
 
     def is_verified_for_hardware(self, hardware_ids: list[str]) -> bool:
         """Check if this hardware combination is verified for this profile."""
-        hardware_set = set(hardware_ids)
-        return any(hardware_set == set(combo) for combo in self.verified)
+        sorted_input = sorted(hardware_ids)
+        return any(sorted(combo) == sorted_input for combo in self.verified)
 
     def requires_hardware_count(self) -> int:
         """Return the number of hardware devices required.
@@ -42,8 +42,8 @@ class Profile:
         """
         if not self.verified:
             return len(self.roles)  # Fallback to role count
-        # Return the most common hardware count from verified combinations
-        return max((len(combo) for combo in self.verified), default=1)
+        # Return the minimum hardware count across verified combinations
+        return min((len(combo) for combo in self.verified), default=1)
 
     def is_multi_device(self) -> bool:
         """Check if profile requires multiple devices.
