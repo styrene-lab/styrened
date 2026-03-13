@@ -23,7 +23,6 @@ Dependencies:
 """
 from __future__ import annotations
 
-
 import asyncio
 import json
 import logging
@@ -404,7 +403,7 @@ class StyreneDaemon:
         except RuntimeError:
             pass
 
-    def _on_device_discovered(self, device: "MeshDevice") -> None:
+    def _on_device_discovered(self, device: MeshDevice) -> None:
         """Handle discovered device.
 
         Args:
@@ -559,7 +558,7 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to initialize PQC session service: {e}")
 
-    def _maybe_initiate_pqc(self, device: "MeshDevice") -> None:
+    def _maybe_initiate_pqc(self, device: MeshDevice) -> None:
         """Auto-initiate PQC session with a newly discovered Styrene node.
 
         Args:
@@ -693,7 +692,7 @@ class StyreneDaemon:
         except Exception as e:
             logger.error(f"Failed to initialize read receipt protocol: {e}")
 
-    def _handle_read_receipt_message(self, lxmf_message: "LXMF.LXMessage") -> None:
+    def _handle_read_receipt_message(self, lxmf_message: LXMF.LXMessage) -> None:
         """Handle incoming LXMF message that might be a read receipt.
 
         Routes read receipt protocol messages to the ReadReceiptProtocol handler.
@@ -774,7 +773,7 @@ class StyreneDaemon:
             logger.error(f"Failed to send read receipts: {e}")
             return False
 
-    def _handle_chat_message_for_conversation(self, lxmf_message: "LXMF.LXMessage") -> None:
+    def _handle_chat_message_for_conversation(self, lxmf_message: LXMF.LXMessage) -> None:
         """Handle incoming LXMF message for conversation service.
 
         Saves chat messages to the conversation service for history tracking,
@@ -1333,7 +1332,7 @@ class StyreneDaemon:
 
     def _handle_styrene_message_dispatch(
         self, styrene_protocol: Any
-    ) -> Callable[["LXMF.LXMessage"], None]:
+    ) -> Callable[[LXMF.LXMessage], None]:
         """Create a callback to dispatch LXMF messages to StyreneProtocol.
 
         This bridges the LXMFService callback mechanism with StyreneProtocol's
@@ -1349,7 +1348,7 @@ class StyreneDaemon:
 
         from styrened.protocols.base import LXMFMessage
 
-        def callback(lxmf_message: "LXMF.LXMessage") -> None:
+        def callback(lxmf_message: LXMF.LXMessage) -> None:
             # Wrap raw LXMF message in our LXMFMessage dataclass
             wrapped = LXMFMessage(
                 source_hash=lxmf_message.source_hash.hex(),
@@ -2189,7 +2188,6 @@ class StyreneDaemon:
             import asyncio
 
             from styrened.models.relay import (
-                RelayDisabled,
                 RelayError,
             )
 

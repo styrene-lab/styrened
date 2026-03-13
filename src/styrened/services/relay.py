@@ -4,24 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from styrened.models.relay import (
-    RelayConfig,
-    RelaySession,
-    RelayDisabled,
-    RelayMaxSessions,
-    RelayMaxPerIdentity,
-    RelayByteLimitExceeded,
-    RelayIdleTimeout,
-    RelayPermanentDenied,
-    RelayTargetOffline,
-    RelayTargetRejected,
-    RelayPermanentConsentDenied,
-    RelayUnauthorized,
-    RelayEvicted,
-)
+from datetime import UTC, datetime
 
 from styrened.models.rbac import RBACPolicy
+from styrened.models.relay import (
+    RelayByteLimitExceeded,
+    RelayConfig,
+    RelayDisabled,
+    RelayEvicted,
+    RelayMaxPerIdentity,
+    RelayMaxSessions,
+    RelayPermanentConsentDenied,
+    RelayPermanentDenied,
+    RelaySession,
+    RelayTargetOffline,
+    RelayTargetRejected,
+    RelayUnauthorized,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +224,7 @@ class RelayService:
 
     async def idle_check(self) -> None:
         """Scan sessions and tear down idle non-permanent ones."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with self._lock:
             to_remove = []
             for sid, session in self._sessions.items():

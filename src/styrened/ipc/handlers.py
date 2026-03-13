@@ -11,7 +11,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import base64
 import logging
@@ -97,7 +96,7 @@ class IPCHandlers:
         daemon: Reference to the StyreneDaemon instance (may be None during tests).
     """
 
-    def __init__(self, daemon: "StyreneDaemon | None") -> None:
+    def __init__(self, daemon: StyreneDaemon | None) -> None:
         """Initialize handlers.
 
         Args:
@@ -497,8 +496,9 @@ class IPCHandlers:
 
         try:
             import tempfile
-            import yaml
             from pathlib import Path
+
+            import yaml
 
             from styrened import paths
             from styrened.services.config import load_core_config, save_core_config

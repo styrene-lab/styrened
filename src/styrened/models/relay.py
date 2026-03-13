@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-
 
 # ---------------------------------------------------------------------------
 # LinkType
@@ -47,8 +46,8 @@ class RelaySession:
     bytes_forwarded: int = 0
     is_permanent: bool = False
     is_priority: bool = False
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_activity: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def record_bytes(self, n: int) -> None:
         """Record n bytes forwarded and update last_activity.
@@ -58,7 +57,7 @@ class RelaySession:
         if n < 0:
             raise ValueError(f"record_bytes() requires non-negative value, got {n}")
         self.bytes_forwarded += n
-        self.last_activity = datetime.now(timezone.utc)
+        self.last_activity = datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -70,38 +69,41 @@ class RelayError(Exception):
     error_code: str = "relay_error"
 
 
-class RelayDisabled(RelayError):
+# Relay error subclasses use domain-name convention (Relay<Condition>) rather
+# than the PEP-8 *Error suffix because they carry structured error_code strings
+# consumed by protocol handlers and TUI.  N818 suppressed intentionally.
+class RelayDisabled(RelayError):  # noqa: N818
     error_code = "relay.disabled"
 
-class RelayMaxSessions(RelayError):
+class RelayMaxSessions(RelayError):  # noqa: N818
     error_code = "relay.max_sessions"
 
-class RelayMaxPerIdentity(RelayError):
+class RelayMaxPerIdentity(RelayError):  # noqa: N818
     error_code = "relay.max_per_identity"
 
-class RelayByteLimitExceeded(RelayError):
+class RelayByteLimitExceeded(RelayError):  # noqa: N818
     error_code = "relay.byte_limit"
 
-class RelayIdleTimeout(RelayError):
+class RelayIdleTimeout(RelayError):  # noqa: N818
     error_code = "relay.idle_timeout"
 
-class RelayUnauthorized(RelayError):
+class RelayUnauthorized(RelayError):  # noqa: N818
     error_code = "relay.unauthorized"
 
-class RelayPermanentDenied(RelayError):
+class RelayPermanentDenied(RelayError):  # noqa: N818
     error_code = "relay.permanent_denied"
 
-class RelayTargetRejected(RelayError):
+class RelayTargetRejected(RelayError):  # noqa: N818
     error_code = "relay.target_rejected"
 
-class RelayTargetOffline(RelayError):
+class RelayTargetOffline(RelayError):  # noqa: N818
     error_code = "relay.target_offline"
 
-class RelayPermanentConsentDenied(RelayError):
+class RelayPermanentConsentDenied(RelayError):  # noqa: N818
     error_code = "relay.consent_denied"
 
-class RelayEvicted(RelayError):
+class RelayEvicted(RelayError):  # noqa: N818
     error_code = "relay.evicted"
 
-class RelayBridgeDenied(RelayError):
+class RelayBridgeDenied(RelayError):  # noqa: N818
     error_code = "relay.bridge_denied"

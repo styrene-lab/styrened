@@ -10,7 +10,6 @@ store-and-forward overhead.
 """
 from __future__ import annotations
 
-
 import asyncio
 import json
 import logging
@@ -174,7 +173,7 @@ class LinkInfo:
 class _LinkEntry:
     """Internal link tracking."""
 
-    link: "RNS.Link"
+    link: RNS.Link
     destination_hash: str  # keyed by LXMF dest hash (user-facing ID)
     datalink_hash: str  # the ("styrene","datalink") destination hash
     established: bool = False
@@ -743,9 +742,9 @@ class DirectLinkService:
     async def _create_link(
         self,
         lxmf_destination_hash: str,
-        datalink_dest: "RNS.Destination",
+        datalink_dest: RNS.Destination,
         datalink_hash: str,
-    ) -> "RNS.Link | None":
+    ) -> RNS.Link | None:
         """Create and cache a new RNS.Link."""
         import RNS
 
@@ -757,7 +756,7 @@ class DirectLinkService:
         )
         link = RNS.Link(datalink_dest)
 
-        def on_established(lnk: "RNS.Link") -> None:
+        def on_established(lnk: RNS.Link) -> None:
             logger.info(f"Datalink ESTABLISHED to {lxmf_destination_hash[:16]}...")
             if self._event_loop:
                 asyncio.run_coroutine_threadsafe(
@@ -765,7 +764,7 @@ class DirectLinkService:
                     self._event_loop,
                 )
 
-        def on_closed(lnk: "RNS.Link") -> None:
+        def on_closed(lnk: RNS.Link) -> None:
             logger.info(f"Datalink CLOSED to {lxmf_destination_hash[:16]}...")
             self._links.pop(lxmf_destination_hash, None)
             if self._event_loop and not established_future.done():
