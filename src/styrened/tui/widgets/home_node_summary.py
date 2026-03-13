@@ -10,7 +10,11 @@ from textual.widgets import DataTable, Static
 from styrened.models.mesh_device import MeshDevice, NodeStatus
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
-__all__ = ["HomeNodeSummaryTable", "format_relative_time"]
+__all__ = ["HomeNodeSummaryTable", "format_relative_time", "MAX_VISIBLE_ROWS"]
+
+# Maximum number of node rows shown before the overflow affordance is appended.
+# Keeps the NODES panel compact without masking fleet-scale awareness.
+MAX_VISIBLE_ROWS: int = 10
 
 # Abnormal-first sort order: LOST > STALE > PENDING > ONLINE
 # Unknown/future statuses sort between STALE and ACTIVE (abnormal-first).
@@ -78,11 +82,24 @@ class HomeNodeSummaryTable(DataTable[str]):
             super().__init__()
             self.identity_hash = identity_hash
 
+    class OverflowSelected(Message):
+        """Posted when the overflow affordance row is selected.
+
+        Callers (e.g. DashboardScreen) should navigate to the Nodes workspace
+        so the operator can see the full fleet list.
+        """
+
     def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         super().__init__(*args, **kwargs)
         self.cursor_type = "row"
         self.zebra_stripes = True
         self._empty: bool = True
+        self._overflow_count: int = 0
+
+    @property
+    def overflow_count(self) -> int:
+        """Number of nodes hidden behind the overflow affordance (0 = none)."""
+        return self._overflow_count
 
     def on_mount(self) -> None:
         """Set up columns on mount."""
@@ -154,6 +171,13 @@ class HomeNodeSummaryTable(DataTable[str]):
             ),
         )
 
+        # Clamp to viewport budget and track hidden surplus for overflow affordance
+        if len(sorted_nodes) > MAX_VISIBLE_ROWS:
+            self._overflow_count = len(sorted_nodes) - MAX_VISIBLE_ROWS
+            sorted_nodes = sorted_nodes[:MAX_VISIBLE_ROWS]
+        else:
+            self._overflow_count = 0
+
         for device in sorted_nodes:
             status = device.status
             symbol = _STATUS_SYMBOLS.get(status, "?")
@@ -188,9 +212,20 @@ class HomeNodeSummaryTable(DataTable[str]):
                 key=device.identity_hash,
             )
 
+        # Overflow affordance — shown when the fleet is larger than the viewport budget
+        if self._overflow_count > 0:
+            n = self._overflow_count
+            noun = "node" if n == 1 else "nodes"
+            label = f"[{cascade.dim}]  + {n} more {noun} — press N to browse all  [/]"
+            self.add_row(label, "", "", "", "", key="__overflow__")
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Post NodeSelected when a row is selected."""
+        """Post NodeSelected (or OverflowSelected) when a row is activated."""
         if self._empty:
             return
-        if event.row_key and event.row_key.value:
-            self.post_message(self.NodeSelected(str(event.row_key.value)))
+        key_value = event.row_key.value if event.row_key else None
+        if key_value == "__overflow__":
+            self.post_message(self.OverflowSelected())
+            return
+        if key_value:
+            self.post_message(self.NodeSelected(str(key_value)))

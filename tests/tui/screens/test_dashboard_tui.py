@@ -216,7 +216,8 @@ class TestDashboardTimerLifecycle:
         screen = DashboardScreen()
         screen._hub_retry_timer = Mock()
         screen.query = Mock(return_value=[])
-        worker_results = [Mock(), Mock()]
+        # on_screen_resume calls run_worker 3 times: status, adapters, activity
+        worker_results = [Mock(), Mock(), Mock()]
         screen.run_worker = Mock(side_effect=worker_results)
 
         with (
@@ -226,7 +227,7 @@ class TestDashboardTimerLifecycle:
         ):
             screen.on_screen_resume(MagicMock())
 
-        assert screen.run_worker.call_count == 2
+        assert screen.run_worker.call_count == 3
         assert screen._activity_worker is worker_results[-1]
 
     def test_on_unmount_stops_hub_timer_and_activity_worker(self):
@@ -354,6 +355,21 @@ class TestDashboardActivitySubscription:
         activity_widget.add_ephemeral.assert_not_called()
         # DaemonEvent posted to app for the EVENT_ACTIVITY item
         mock_app.post_message.assert_called_once()
+
+
+class TestDashboardOverflowWiring:
+    """Test Home overflow affordance → Nodes workspace navigation."""
+
+    def test_overflow_selected_calls_open_exploration(self):
+        """OverflowSelected event on the node table triggers action_open_exploration."""
+        from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+
+        screen = DashboardScreen()
+        with patch.object(screen, "action_open_exploration") as mock_open:
+            screen.on_home_node_summary_table_overflow_selected(
+                HomeNodeSummaryTable.OverflowSelected()
+            )
+        mock_open.assert_called_once_with()
 
 
 class TestDashboardAdapterWiring:

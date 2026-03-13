@@ -267,6 +267,12 @@ class DashboardScreen(Screen[None]):
 
         self.app.push_screen(MeshDeviceDetailScreen(device_identity=event.identity_hash))
 
+    def on_home_node_summary_table_overflow_selected(
+        self, event: HomeNodeSummaryTable.OverflowSelected
+    ) -> None:
+        """Navigate to the Nodes workspace when the overflow affordance is activated."""
+        self.action_open_exploration()
+
     def action_open_exploration(self) -> None:
         """Open the canonical Nodes workspace."""
         self.app.action_open_nodes()  # type: ignore[union-attr]
