@@ -1,0 +1,11 @@
+roles:
+  styrene-node:
+    label: "Styrene Node"
+    description: "Runs the styrened daemon on a mesh node."
+    activity: nixos-direct
+    provides: [mesh, rpc, lxmf]
+  mesh-router:
+    label: "Mesh Router"
+    description: "Routes RNS traffic on the mesh."
+    activity: nixos-direct
+    provides: [mesh, routing]

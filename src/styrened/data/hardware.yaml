@@ -1,0 +1,22 @@
+hardware:
+  rpi4:
+    label: "Raspberry Pi 4"
+    arch: aarch64
+    boot: uboot
+    activity: nixos-direct
+    traits: [low_power, gpio, wifi]
+    type: sbc
+  rpi-zero2w:
+    label: "Raspberry Pi Zero 2W"
+    arch: aarch64
+    boot: uboot
+    activity: nixos-direct
+    traits: [low_power, gpio, wifi]
+    type: sbc
+  x86-generic:
+    label: "Generic x86_64"
+    arch: x86_64
+    boot: uefi64
+    activity: nixos-installer
+    traits: []
+    type: server
