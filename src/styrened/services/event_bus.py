@@ -5,11 +5,12 @@ fire-and-forget via ``asyncio.create_task`` — emit never blocks the
 caller.  One subscriber exception does not affect others.
 
 Event types are coarse strings with an ``action`` field for granularity:
-  - node_changed   / announced, stale, lost, updated
+  - node_changed    / announced, stale, lost, updated
   - message_changed / received, delivered, read
-  - hub_changed    / connected, disconnected, disabled
-  - link_changed   / established, lost
-  - config_changed / saved, adapter_toggled
+  - hub_changed     / connected, disconnected, disabled
+  - link_changed    / established, lost
+  - config_changed  / saved, adapter_toggled
+  - adapter_changed / ready, warming, degraded, probing, disabled
 
 Events carry minimal payload — consumers re-read from stores for full state.
 
