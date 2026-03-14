@@ -245,11 +245,23 @@ class MeshDeviceDetailScreen(Screen[None]):
 
     def _find_live_device(self) -> MeshDevice | None:
         """Find the device in current live discovery, if present."""
-        # Read from the shared app-level DeviceCache
-        cache = getattr(self.app, "device_cache", None)
+        live_nodes: list[MeshDevice] = []
+
+        try:
+            cache = getattr(self.app, "device_cache", None)
+        except Exception:
+            cache = None
+
         if cache is not None:
-            live_nodes: list[MeshDevice] = cache.get()
-        else:
+            try:
+                live_nodes = list(cache.get())
+            except Exception:
+                live_nodes = []
+
+        # An existing cache may still be unprimed on first detail-screen mount.
+        # Fall back to direct discovery rather than treating empty cache state as
+        # authoritative absence.
+        if not live_nodes:
             live_nodes = discover_devices()
 
         for device in live_nodes:
@@ -385,10 +397,13 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         from styrened.models.mesh_device import DeviceType
 
-        # Check live discovered devices via the shared DeviceCache
+        # Check live discovered devices via the shared DeviceCache first, but
+        # do not treat an empty cache as authoritative absence during startup.
         try:
             cache = getattr(self.app, "device_cache", None)
-            live_nodes: list = cache.get() if cache is not None else discover_devices()
+            live_nodes: list[MeshDevice] = list(cache.get()) if cache is not None else []
+            if not live_nodes:
+                live_nodes = discover_devices()
             for node in live_nodes:
                 if (
                     node.identity_hash == target_identity

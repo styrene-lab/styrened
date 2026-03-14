@@ -935,17 +935,37 @@ class ExplorationScreen(Screen[None]):
         return None
 
     def _load_all_devices(self) -> tuple[list[MeshDevice], list[MeshDevice]]:
-        """Load and deduplicate all devices from the shared app-level DeviceCache.
+        """Load and deduplicate devices, tolerating an unprimed shared cache.
 
         Returns:
             Tuple of (exploration devices with LXMF shadows filtered, all merged devices).
         """
-        cache = getattr(self.app, "device_cache", None)
+        raw: list[MeshDevice] = []
+
+        try:
+            cache = getattr(self.app, "device_cache", None)
+        except Exception:
+            cache = None
+
         if cache is not None:
-            raw = cache.get()
+            try:
+                cached = cache.get()
+            except Exception:
+                cached = []
+            if cached:
+                raw = list(cached)
+            else:
+                # The cache may exist but still be unprimed on first render.
+                # Fall back to live discovery so the Nodes workspace does not
+                # render an authoritative empty state solely because the shared
+                # cache has not populated yet.
+                raw = list(discover_devices())
         else:
-            # Fallback: read legacy per-screen cache if still present
-            raw = getattr(self, "_live_nodes_cache", [])
+            # Fallback: read legacy per-screen cache if still present, then try
+            # live discovery if that cache is also empty.
+            raw = list(getattr(self, "_live_nodes_cache", []))
+            if not raw:
+                raw = list(discover_devices())
 
         all_merged = list({n.destination_hash: n for n in raw}.values())
 
