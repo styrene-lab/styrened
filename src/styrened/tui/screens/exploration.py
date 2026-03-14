@@ -725,22 +725,12 @@ class ExplorationScreen(Screen[None]):
     _discovery_debounce_seconds: float = 2.0
 
     def _start_node_refresh(self):
-        """Start or replace the live node refresh worker."""
-        self._node_refresh_worker = self.run_worker(
-            self._async_load_all_nodes(),
-            group="node-discovery",
-            exclusive=True,
-        )
-        return self._node_refresh_worker
-
-    def _start_stored_node_load(self):
-        """Start or replace the deferred stored-node hydration worker."""
-        self._stored_nodes_worker = self.run_worker(
-            self._async_load_stored_nodes(),
-            group="stored-nodes",
-            exclusive=True,
-        )
-        return self._stored_nodes_worker
+        """Request an on-demand cache refresh via the app-level DeviceCache."""
+        cache = getattr(self.app, "device_cache", None)
+        if cache is not None:
+            self._node_refresh_worker = self.run_worker(
+                cache.refresh(), group="node-discovery", exclusive=True
+            )
 
     def on_mount(self) -> None:
         """Start device discovery and load initial data."""
@@ -749,25 +739,22 @@ class ExplorationScreen(Screen[None]):
         except Exception:
             pass
 
-        # Try IPC-based discovery first, fallback to direct discovery
-        app = self.app
-        bridge = getattr(getattr(app, "services", None), "bridge", None)
-        if bridge is not None:
-            # IPC-managed mode: use periodic bridge calls instead of direct discovery
+        cache = getattr(self.app, "device_cache", None)
+        if cache is not None:
+            # Cache-managed mode: populate immediately from shared cache, then
+            # request a fresh pull.  DevicesUpdated messages keep us reactive;
+            # the periodic timer below provides a safety-net fallback.
+            self._refresh_announce_tables()
+            self._start_node_refresh()
             self._refresh_timer = self.set_interval(
                 self._REFRESH_INTERVAL, self._auto_refresh_via_bridge
             )
-            # Fetch initial data via IPC
-            self._start_node_refresh()
         else:
-            # Legacy/non-managed mode: use direct discovery
+            # Legacy/no-cache fallback: use direct discovery
             start_discovery(callback=self._on_device_discovered)
             self._refresh_timer = self.set_interval(
                 self._REFRESH_INTERVAL, self._auto_refresh_announce
             )
-            # Fetch stored nodes via IPC (async), then refresh tables
-            self._start_stored_node_load()
-            # Initial load with live-only (stored nodes arrive async)
             self._refresh_announce_tables()
         # 1s countdown ticker for status bar "next refresh" indicator
         self._seconds_until_refresh = self._REFRESH_INTERVAL
@@ -794,6 +781,9 @@ class ExplorationScreen(Screen[None]):
             self._refresh_timer.resume()
         if self._countdown_timer is not None:
             self._countdown_timer.resume()
+        # Repopulate from shared cache immediately (no blank screen on resume),
+        # then request a fresh pull.
+        self._refresh_announce_tables()
         self._start_node_refresh()
         # Re-focus table so Footer picks up screen bindings
         self.call_after_refresh(self._focus_active_table)
@@ -813,57 +803,9 @@ class ExplorationScreen(Screen[None]):
             self._stored_nodes_worker.cancel()
             self._stored_nodes_worker = None
 
-    async def _async_load_stored_nodes(self) -> None:
-        """Historical node hydration is deferred during Nodes migration.
-
-        Exploration is currently kept live-biased so the in-progress Nodes
-        workspace reflects current discovery rather than daemon history.
-        """
-        self._stored_nodes_cache = []
-    
-    async def _async_load_all_nodes(self) -> None:
-        """Refresh nodes — prefer IPC bridge, fallback to direct discovery.
-
-        Retries up to 3 times on failure with exponential backoff (1s, 2s, 4s)
-        to handle transient IPC reconnection after daemon restart.
-        """
-        import logging
-        _log = logging.getLogger(__name__)
-
-        max_retries = 3
-        for attempt in range(max_retries + 1):
-            try:
-                bridge = getattr(getattr(self.app, "services", None), "bridge", None)
-                if bridge is not None:
-                    from styrened.tui.utils import device_info_to_mesh
-
-                    device_infos = await bridge.get_devices()
-                    devices = [device_info_to_mesh(d) for d in device_infos]
-                    self._stored_nodes_cache = []
-                    self._live_nodes_cache = devices
-                else:
-                    live_nodes = discover_devices()
-                    self._stored_nodes_cache = []
-                    self._live_nodes_cache = live_nodes
-                self._refresh_announce_tables()
-                if attempt > 0:
-                    _log.info("Node load succeeded on retry %d", attempt)
-                return
-            except Exception:
-                if attempt < max_retries:
-                    delay = 2 ** attempt  # 1s, 2s, 4s
-                    _log.debug(
-                        "Node load attempt %d/%d failed, retrying in %ds",
-                        attempt + 1, max_retries + 1, delay,
-                        exc_info=True,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    _log.warning(
-                        "Node load failed after %d attempts — will retry at next interval",
-                        max_retries + 1,
-                        exc_info=True,
-                    )
+    def on_device_cache_devices_updated(self, message: "Any") -> None:
+        """React to the app-level DeviceCache refresh — re-populate tables."""
+        self._refresh_announce_tables()
     
     def _refresh_via_bridge(self) -> None:
         """Periodic refresh using IPC bridge data."""
@@ -993,20 +935,19 @@ class ExplorationScreen(Screen[None]):
         return None
 
     def _load_all_devices(self) -> tuple[list[MeshDevice], list[MeshDevice]]:
-        """Load and deduplicate all devices, returning (exploration, all_merged).
-
-        Uses cached stored nodes from the last async IPC fetch (populated
-        by ``_async_load_stored_nodes``).  Falls back to live-only when
-        the cache is empty.
+        """Load and deduplicate all devices from the shared app-level DeviceCache.
 
         Returns:
             Tuple of (exploration devices with LXMF shadows filtered, all merged devices).
         """
-        # Exploration/Nodes is currently live-biased; broader stored history is
-        # being pushed toward canonical node browsing flows incrementally.
-        live_nodes = getattr(self, "_live_nodes_cache", [])
+        cache = getattr(self.app, "device_cache", None)
+        if cache is not None:
+            raw = cache.get()
+        else:
+            # Fallback: read legacy per-screen cache if still present
+            raw = getattr(self, "_live_nodes_cache", [])
 
-        all_merged = list({n.destination_hash: n for n in live_nodes}.values())
+        all_merged = list({n.destination_hash: n for n in raw}.values())
 
         styrene_identities = {
             d.identity_hash
@@ -1038,7 +979,7 @@ class ExplorationScreen(Screen[None]):
         # any STYRENE_NODE that carries a nomadnet_destination_hash (e.g. the
         # Styrene Community Hub) so operators can browse their pages from here.
         pages_devices = [
-            d for d in all_merged
+            d for d in all_devices
             if d.device_type == DeviceType.NOMADNET_NODE
             or (
                 d.device_type == DeviceType.STYRENE_NODE

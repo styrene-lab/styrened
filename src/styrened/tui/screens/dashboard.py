@@ -309,7 +309,6 @@ class DashboardScreen(Screen[None]):
             "status": asyncio.create_task(bridge.get_status()),
             "hub": asyncio.create_task(bridge.get_hub_status()),
             "config": asyncio.create_task(bridge.get_core_config()),
-            "mesh_devices": asyncio.create_task(bridge.get_devices(styrene_only=False)),
             "conversations": asyncio.create_task(bridge.get_conversations()),
         }
 
@@ -318,7 +317,10 @@ class DashboardScreen(Screen[None]):
                 status = await tasks["status"]
                 hub_data = await tasks["hub"]
                 core_config = await tasks["config"]
-                all_devices = await tasks["mesh_devices"]
+                # Device list comes from the shared app-level DeviceCache —
+                # no separate IPC call needed on every dashboard poll cycle.
+                cache = getattr(self.app, "device_cache", None)
+                all_devices = cache.get() if cache is not None else []
             except Exception:
                 try:
                     bar = self.query_one(HomeStatusBar)
@@ -360,11 +362,23 @@ class DashboardScreen(Screen[None]):
                 total_count = 0
                 device_list: list[Any] = []
                 if isinstance(all_devices, list):
+                    from styrened.models.mesh_device import DeviceType, MeshDevice
+
                     device_list = all_devices
                     total_count = len(device_list)
+                    _styrene_enum_types = {DeviceType.STYRENE_NODE}
+                    # DeviceInfo dicts from IPC bridge use the enum .value string
+                    _styrene_str_types = {t.value for t in _styrene_enum_types} | {
+                        "styrene_node", "styrene_hub",
+                    }
                     styrene_count = sum(
                         1 for d in device_list
-                        if _get(d, "device_type") in ("styrene_node", "styrene_hub", "styrene")
+                        if (
+                            isinstance(d, MeshDevice) and d.device_type in _styrene_enum_types
+                        ) or (
+                            not isinstance(d, MeshDevice)
+                            and _get(d, "device_type") in _styrene_str_types
+                        )
                     )
                 bar.styrene_mesh_count = styrene_count
                 bar.total_device_count = total_count

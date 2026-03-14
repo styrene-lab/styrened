@@ -20,12 +20,136 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
+from textual.reactive import reactive
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Label, Static
 
 from styrened.tui.widgets.glitch_logo import GlitchLogoWidget
+
+# ---------------------------------------------------------------------------
+# Imperial CRT palette (mirrors glitch_logo constants)
+# ---------------------------------------------------------------------------
+_TEAL   = "#5af0ce"
+_DIM    = "#1e6e5a"
+_ACCENT = "#a0fbe8"
+_ERR    = "#ff6b6b"
+
+# ---------------------------------------------------------------------------
+# Startup checklist widget
+# ---------------------------------------------------------------------------
+_CHECKLIST_ITEMS = [
+    "reticulum transport",
+    "mesh discovery",
+    "lxmf routing",
+    "hub connection",
+]
+
+_HIDDEN  = "hidden"
+_PENDING = "pending"
+_ACTIVE  = "active"
+_DONE    = "done"
+_FAILED  = "failed"
+
+# Scan sequence cycled while an item is ACTIVE — CRT noise feel
+_SCAN_FRAMES = ["░  ", "▒  ", "▓  ", "▒  ", "░  ", "▸  ", "▸  ", "▸  "]
+# Flash sequence played on DONE transition before settling on ✓
+_DONE_FLASH  = ["▓  ", "▒  ", "✓  "]
+
+_SCAN_INTERVAL = 0.10   # seconds per scan frame (~10 fps)
+
+
+class StartupChecklist(Widget):
+    """Animated startup progress list shown below the logo.
+
+    Each item cycles through a CRT-scan sequence while ACTIVE, then plays a
+    brief flash when it transitions to DONE.  Drives its own timer.
+    """
+
+    DEFAULT_CSS = """
+    StartupChecklist {
+        width: auto;
+        height: auto;
+        content-align: center middle;
+    }
+    """
+
+    _states: reactive[tuple[str, ...]] = reactive(
+        tuple(_HIDDEN for _ in _CHECKLIST_ITEMS)
+    )
+    _scan_frame: reactive[int] = reactive(0, layout=False)
+    # per-item flash counter: -1 = not flashing, 0..N = flash frame index
+    _flash: reactive[tuple[int, ...]] = reactive(
+        tuple(-1 for _ in _CHECKLIST_ITEMS)
+    )
+
+    def on_mount(self) -> None:
+        self.set_interval(_SCAN_INTERVAL, self._tick)
+
+    def _tick(self) -> None:
+        self._scan_frame = (self._scan_frame + 1) % len(_SCAN_FRAMES)
+        # Advance any in-progress done flashes
+        flash = list(self._flash)
+        changed = False
+        for i, f in enumerate(flash):
+            if 0 <= f < len(_DONE_FLASH) - 1:
+                flash[i] = f + 1
+                changed = True
+        if changed:
+            self._flash = tuple(flash)
+        self.refresh()
+
+    def render(self) -> Text:
+        text = Text(no_wrap=True)
+        for i, (label, state) in enumerate(zip(_CHECKLIST_ITEMS, self._states)):
+            if state == _HIDDEN:
+                continue
+            flash_f = self._flash[i]
+            if state == _PENDING:
+                ind, ind_colour = "  ·  ", _DIM
+            elif state == _ACTIVE:
+                ind = "  " + _SCAN_FRAMES[self._scan_frame]
+                ind_colour = _TEAL
+            elif state == _DONE:
+                if 0 <= flash_f < len(_DONE_FLASH):
+                    ind = "  " + _DONE_FLASH[flash_f]
+                    ind_colour = _ACCENT
+                else:
+                    ind, ind_colour = "  ✓  ", _ACCENT
+            elif state == _FAILED:
+                ind, ind_colour = "  ✗  ", _ERR
+            else:
+                ind, ind_colour = "  ·  ", _DIM
+
+            text.append(ind, style=ind_colour)
+            label_colour = _TEAL if state in (_ACTIVE, _DONE) else _DIM
+            text.append(label, style=label_colour)
+            text.append("\n")
+        return text
+
+    def set_item(self, index: int, state: str) -> None:
+        """Transition one item to a new state."""
+        states = list(self._states)
+        states[index] = state
+        self._states = tuple(states)
+        # Trigger done flash
+        if state == _DONE:
+            flash = list(self._flash)
+            flash[index] = 0
+            self._flash = tuple(flash)
+
+    def finish_all(self) -> None:
+        for i in range(len(_CHECKLIST_ITEMS)):
+            self.set_item(i, _DONE)
+
+    def fail_active(self) -> None:
+        self._states = tuple(
+            _FAILED if s == _ACTIVE else s for s in self._states
+        )
+
 
 # Status messages shown while polling
 _STATUS_INIT       = "initialising…"
@@ -61,10 +185,8 @@ class SplashScreen(Screen[bool]):
         margin-bottom: 2;
     }
 
-    #tagline {
+    StartupChecklist {
         width: auto;
-        text-align: center;
-        color: $primary-darken-2;
         margin-bottom: 1;
     }
 
@@ -101,7 +223,7 @@ class SplashScreen(Screen[bool]):
     def compose(self) -> ComposeResult:
         with Static(id="splash-container"):
             yield GlitchLogoWidget(id="logo")
-            yield Label("mesh communications · reticulum network", id="tagline")
+            yield StartupChecklist(id="checklist")
             yield Label(_STATUS_INIT, id="status")
             yield Label("press any key to skip", id="hint")
 
@@ -129,39 +251,61 @@ class SplashScreen(Screen[bool]):
 
     @work(exclusive=True)
     async def _poll_daemon(self) -> None:
-        """Mirror of app._check_daemon() with status label updates."""
-        status = self.query_one("#status", Label)
+        """Mirror of app._check_daemon() with checklist + status updates."""
+        status    = self.query_one("#status", Label)
+        checklist = self.query_one(StartupChecklist)
 
-        # Fast path — already running?
-        if await self._ping_daemon():
+        # Reveal all items as pending, then drive them active one by one
+        for i in range(len(_CHECKLIST_ITEMS)):
+            checklist.set_item(i, _PENDING)
+
+        checklist.set_item(0, _ACTIVE)   # reticulum transport
+        status.update(_STATUS_INIT)
+
+        # Fast path — already running? (generous timeout, only called once)
+        if await self._ping_daemon(timeout=3.0):
             self._daemon_ok = True
+            # Give each item a minimum visible dwell even on fast path
+            for i in range(len(_CHECKLIST_ITEMS)):
+                checklist.set_item(i, _ACTIVE)
+                await asyncio.sleep(0.35)
+                checklist.set_item(i, _DONE)
             status.update(_STATUS_LOADING)
             self._finish_daemon()
             return
 
         # Try auto-start
+        checklist.set_item(0, _DONE)
+        checklist.set_item(1, _ACTIVE)   # mesh discovery
         status.update(_STATUS_STARTING)
         await self._auto_start_daemon()
 
+        checklist.set_item(1, _DONE)
+        checklist.set_item(2, _ACTIVE)   # lxmf routing
         status.update(_STATUS_CONNECTING)
+
         for i in range(16):
             await asyncio.sleep(0.5)
-            if await self._ping_daemon():
+            # Short timeout — we're polling rapidly, no need to wait long
+            if await self._ping_daemon(timeout=0.8):
                 self._daemon_ok = True
+                checklist.finish_all()
                 status.update(_STATUS_LOADING)
-                # Small extra delay so the label reads naturally
                 await asyncio.sleep(0.4)
                 status.update(_STATUS_DONE)
                 self._finish_daemon()
                 return
-            # Intermediate feedback
-            if i == 6:
+            # Advance checklist as polling drags on
+            if i == 5:
+                checklist.set_item(2, _DONE)
+                checklist.set_item(3, _ACTIVE)   # hub connection
                 status.update("still connecting…")
             if i == 12:
                 status.update("taking longer than usual…")
 
         # Timed out
         self._daemon_ok = False
+        checklist.fail_active()
         status.update(_STATUS_FAILED)
         await asyncio.sleep(0.8)
         self._finish_daemon()
@@ -194,17 +338,21 @@ class SplashScreen(Screen[bool]):
     # IPC helpers (duplicated from app so the screen is self-contained)
     # ------------------------------------------------------------------
 
-    async def _ping_daemon(self) -> bool:
+    async def _ping_daemon(self, timeout: float = 2.0) -> bool:
+        """Ping the daemon socket.  ``timeout`` caps the entire attempt."""
         try:
             from styrened.ipc import ControlClient, get_default_socket_path
 
             socket_path = get_default_socket_path()
             if not socket_path.exists():
                 return False
-            client = ControlClient(socket_path=socket_path, timeout=3.0)
+            # Use a short connect + ping timeout so polling loops stay snappy.
+            connect_t = min(timeout * 0.6, 1.0)
+            ping_t    = min(timeout * 0.4, 0.8)
+            client = ControlClient(socket_path=socket_path, timeout=connect_t)
             try:
                 await client.connect()
-                return await client.ping(timeout=2.0)
+                return await client.ping(timeout=ping_t)
             finally:
                 await client.disconnect()
         except Exception:

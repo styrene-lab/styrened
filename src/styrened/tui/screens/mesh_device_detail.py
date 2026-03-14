@@ -245,12 +245,11 @@ class MeshDeviceDetailScreen(Screen[None]):
 
     def _find_live_device(self) -> MeshDevice | None:
         """Find the device in current live discovery, if present."""
-        # Prefer the exploration screen's cache (populated via IPC bridge)
-        live_nodes: list[MeshDevice] = []
-        exploration = self.app.get_screen("exploration") if "exploration" in self.app.SCREENS else None
-        if exploration is not None:
-            live_nodes = getattr(exploration, "_live_nodes_cache", [])
-        if not live_nodes:
+        # Read from the shared app-level DeviceCache
+        cache = getattr(self.app, "device_cache", None)
+        if cache is not None:
+            live_nodes: list[MeshDevice] = cache.get()
+        else:
             live_nodes = discover_devices()
 
         for device in live_nodes:
@@ -386,14 +385,10 @@ class MeshDeviceDetailScreen(Screen[None]):
 
         from styrened.models.mesh_device import DeviceType
 
-        # Check live discovered devices (prefer exploration cache)
+        # Check live discovered devices via the shared DeviceCache
         try:
-            live_nodes: list = []
-            exploration = self.app.get_screen("exploration") if "exploration" in self.app.SCREENS else None
-            if exploration is not None:
-                live_nodes = getattr(exploration, "_live_nodes_cache", [])
-            if not live_nodes:
-                live_nodes = discover_devices()
+            cache = getattr(self.app, "device_cache", None)
+            live_nodes: list = cache.get() if cache is not None else discover_devices()
             for node in live_nodes:
                 if (
                     node.identity_hash == target_identity

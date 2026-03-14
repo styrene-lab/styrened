@@ -55,13 +55,13 @@ class HomeStatusBar(Static):
         c = get_color_cascade()
         segments: list[Text] = []
 
-        # RNS status
+        # ── RNS ───────────────────────────────────────────────────────────
+        # Bright when confirmed online; danger/warning when offline.
         if self.rns_online:
-            segments.append(Text("RNS ● online", style=c.dim))
+            segments.append(Text("RNS ● online", style=c.bright))
         else:
             style = f"bold {c.color_danger}" if self.error_state else f"bold {c.color_warning}"
-            label = "RNS ○ offline"
-            seg = Text(label, style=style)
+            seg = Text("RNS ○ offline", style=style)
             if self.error_state and self.error_state.message:
                 msg = self.error_state.message
                 if len(msg) > _MAX_ERROR_MSG_LEN:
@@ -69,39 +69,56 @@ class HomeStatusBar(Static):
                 seg.append(f" ({msg})", style=style)
             segments.append(seg)
 
-        # Interfaces
-        segments.append(Text(f"IF {self.interface_count}", style=c.dim))
+        # ── Interfaces ────────────────────────────────────────────────────
+        # Warning when zero (nothing to communicate over).
+        if self.interface_count == 0:
+            segments.append(Text("IF 0", style=f"bold {c.color_warning}"))
+        else:
+            segments.append(Text(f"IF {self.interface_count}", style=c.dim))
 
-        # Hub status
+        # ── Hub ───────────────────────────────────────────────────────────
+        # Bright = confirmed connected; dark = intentionally disabled (not a
+        # problem, just off); warning = unexpected loss; medium = in-progress.
         if self.hub_status == HubStatus.CONNECTED:
-            segments.append(Text("HUB ●", style=c.dim))
+            segments.append(Text("HUB ●", style=c.bright))
         elif self.hub_status == HubStatus.DISABLED:
-            segments.append(Text("HUB —", style=c.dim))
+            segments.append(Text("HUB —", style=c.dark))
         elif self.hub_status == HubStatus.DISCONNECTED:
             segments.append(Text("HUB ○ lost", style=f"bold {c.color_warning}"))
         elif self.hub_status == HubStatus.WAITING:
-            segments.append(Text("HUB ◐ connecting", style=c.medium))
+            segments.append(Text("HUB ◐", style=c.medium))
 
-        # Mesh count — show styrene/total if total differs
-        if self.total_device_count > self.styrene_mesh_count:
-            segments.append(Text(f"MESH {self.styrene_mesh_count}/{self.total_device_count}", style=c.dim))
+        # ── Mesh ──────────────────────────────────────────────────────────
+        # Styrene peer count bright when > 0; dark when isolated.
+        # Total RNS count always dim (informational only).
+        if self.styrene_mesh_count == 0:
+            mesh_style = c.dark
         else:
-            segments.append(Text(f"MESH {self.styrene_mesh_count}", style=c.dim))
+            mesh_style = c.bright
+        if self.total_device_count > self.styrene_mesh_count:
+            seg = Text(style=mesh_style)
+            seg.append(f"MESH {self.styrene_mesh_count}", style=mesh_style)
+            seg.append(f"/{self.total_device_count}", style=c.dim)
+            segments.append(seg)
+        else:
+            segments.append(Text(f"MESH {self.styrene_mesh_count}", style=mesh_style))
 
-        # Transport/Propagation roles — only show when enabled (operator needs to know)
+        # ── Transport / Propagation roles ────────────────────────────────
         roles = []
         if self.transport_enabled:
             roles.append("T")
         if self.propagation_enabled:
             roles.append("P")
         if roles:
-            segments.append(Text(f"{''.join(roles)}", style=c.medium))
+            segments.append(Text("".join(roles), style=c.medium))
 
-        # Active links — only show when non-zero
+        # ── Active links ──────────────────────────────────────────────────
         if self.active_links > 0:
             segments.append(Text(f"LNK {self.active_links}", style=c.medium))
 
-        # Daemon — highlight recently-restarted (< 5 min) as a heads-up
+        # ── IPC ───────────────────────────────────────────────────────────
+        # Warning when disconnected; warning when recently restarted (< 5 min)
+        # as a heads-up that the daemon may still be settling; dim otherwise.
         if self.daemon_connected:
             uptime_str = self._format_uptime(self.daemon_uptime)
             if self.daemon_uptime > 0 and self.daemon_uptime < 300:
@@ -111,7 +128,7 @@ class HomeStatusBar(Static):
         else:
             segments.append(Text("IPC ○", style=f"bold {c.color_warning}"))
 
-        # Unread
+        # ── Unread ────────────────────────────────────────────────────────
         if self.unread_count > 0:
             segments.append(Text(f"✉ {self.unread_count}", style=f"bold {c.bright}"))
 

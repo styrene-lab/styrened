@@ -234,9 +234,13 @@ class ReticulumPanel(Static):
         # Get status-aware hub state
         self.hub_status = hub_connection.status
 
-        # Get styrene mesh count from discovered devices
-        devices = discover_devices()
-        self.styrene_mesh_count = len([d for d in devices if d.is_styrene_node])
+        # Get styrene mesh count — prefer app-level DeviceCache over direct discovery
+        cache = getattr(getattr(self, "app", None), "device_cache", None)
+        if cache is not None:
+            self.styrene_mesh_count = len(cache.get_styrene())
+        else:
+            devices = discover_devices()
+            self.styrene_mesh_count = len([d for d in devices if d.is_styrene_node])
 
     def refresh_data(self) -> None:
         """Refresh Reticulum data."""

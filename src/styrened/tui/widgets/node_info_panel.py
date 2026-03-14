@@ -597,11 +597,17 @@ class NodeInfoPanel(Static):
     async def _load_mesh_count_via_bridge(self) -> None:
         """Load mesh device count via IPC bridge."""
         try:
+            cache = getattr(self.app, "device_cache", None)
+            if cache is not None:
+                styrene_devices = cache.get_styrene()
+                self._apply_mesh_catalog_count(tuple(styrene_devices))
+                return
+
             bridge = self._bridge
             if bridge is None:
                 return
 
-            # Get only Styrene nodes using canonical node catalog normalization
+            # Fallback: direct bridge call (pre-cache path)
             device_infos = await bridge.get_devices(styrene_only=True)
             self._apply_mesh_catalog_count(tuple(device_infos))
         except Exception:

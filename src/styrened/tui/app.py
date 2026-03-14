@@ -31,6 +31,7 @@ from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
 from styrened.tui.services.app_lifecycle import StyreneLifecycle
+from styrened.tui.services.device_cache import DeviceCache
 from styrened.ipc.bridge import IPCBridge
 from styrened.tui.services.config import (
     ensure_directories,
@@ -376,6 +377,9 @@ class StyreneApp(App[None]):
         self.local_identity_hash = ""
         self._daemon_manager_from_setup: Any = None  # Set by DaemonSetupScreen
 
+        # Unified device cache — started in _initialize_services once bridge is up.
+        self.device_cache: DeviceCache = DeviceCache(bridge=None)
+
         # Create lifecycle manager (does not initialize services yet)
         self._lifecycle = StyreneLifecycle(self.config)
 
@@ -487,6 +491,10 @@ class StyreneApp(App[None]):
 
         # All RPC/chat flows through the IPC bridge.
         self.log.info("IPC mode active — all service calls via IPCBridge")
+
+        # Start the unified device cache now that we have a bridge reference.
+        self.device_cache.update_bridge(self.bridge)
+        self.device_cache.start(self)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -789,12 +797,31 @@ class StyreneApp(App[None]):
         for panel in self.query(NodeInfoPanel):
             panel.refresh_data()
 
+    def on_device_cache_devices_updated(self, message: "DeviceCache.DevicesUpdated") -> None:
+        """Fan-out DevicesUpdated to all mounted screens.
+
+        DeviceCache.post_message delivers to the App widget only — Textual
+        messages bubble up, not down.  This handler re-posts to every Screen
+        currently in the DOM so each can react independently.
+        """
+        from textual.screen import Screen
+
+        for screen in self.query(Screen):
+            try:
+                screen.post_message(message.__class__(message.devices))
+            except Exception:
+                pass
+
     async def on_shutdown(self) -> None:
         """Cleanup on app exit.
 
         Stops discovery, disconnects from hub, and shuts down RNS service.
         Uses async shutdown to properly clean up IPC connections.
         """
+        try:
+            self.device_cache.stop()
+        except Exception:
+            pass
         try:
             await self._lifecycle.shutdown_async()
         except Exception as e:

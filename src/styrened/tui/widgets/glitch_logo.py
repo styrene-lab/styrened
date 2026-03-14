@@ -10,6 +10,7 @@ unlock it shows the final logo character.
 from __future__ import annotations
 
 import random
+import shutil
 from typing import ClassVar
 
 from rich.text import Text
@@ -39,36 +40,86 @@ _ACCENT = "#a0fbe8"   # bright highlight — wordmark
 
 _BRAILLE_BLANK = "\u2800"  # ⠀ — background cell
 
-LOGO_LINES: list[str] = [
-    # ── molecule mark (10 rows) ───────────────────────────────────────────
-    '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⡤⠴⠖⠲⠤⢤⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⠤⠶⠒⠦⢤⣄⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    '⠀⠀⠀⠀⠀⠀⢀⣀⣠⠤⠶⠒⠛⠉⠁⠀⠀⠀⠀⠙⠒⠶⠤⣭⣉⡛⠒⠦⢤⣄⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣠⡤⠴⠖⠚⠉⠉⠀⠀⠀⠀⠉⠓⠲⠦⢬⣍⣙⠒⠲⠤⣤⣀⣀⠀⠀⠀⠀⠀⠀',
-    '⠀⢠⠤⠖⠚⠋⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠓⠲⠦⢬⣍⣙⠒⠲⢤⡤⠶⠒⠋⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠛⠒⠶⠤⣍⣉⡓⠲⠦⠄⠀',
-    '⠀⢸⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠁⠀⢸⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠀⠀⠀',
-    '⠀⢸⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    '⠀⢸⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    '⠀⢸⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡀⠀⢸⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    '⠀⠘⠲⠦⢤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⡤⠴⠖⢚⣋⣩⡤⠴⠚⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    '⠀⠀⠀⠀⠀⠀⠈⠉⠙⠒⠶⠤⣄⣀⡀⠀⠀⠀⠀⣠⠤⠴⠒⣛⣉⣭⠤⠖⠒⠋⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠓⠲⠦⠴⠒⠚⠉⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
-    # ── spacer (2 blank lines) ────────────────────────────────────────────
-    '                                                                        ',
-    '                                                                        ',
-    # ── wordmark (9 rows) ─────────────────────────────────────────────────
-    '            ...#@@@=                                                                      ',
-    '...      . ...@@@@@=....   . . .    ...   .. ......   . .. ....   ..  .   ..  .......  ...',
-    '@@@@@@@@@@@..=@@@@@@@..@@@@@@.#@@@@@..@@@@@@@@@..@@@@@@@@@@@+..@@@@@@@@@@@@+..=@@@@@@@@@@@',
-    '@@@@@#   ...  @@@@@= . @@@@@@.#@@@@@. @@@@@@@@@. @@@@@,.@@@@@ .@@@@@# =@@@@@  @@@@@#.@@@@@',
-    '#@@@@@@@@@@#  @@@@@= . @@@@@@.#@@@@@. @@@@@@...  @@@@@@@@@@@@ .@@@@@# =@@@@@  @@@@@@@@@@@@',
-    ',,,,,,#@@@@#  @@@@@= ..@@@@@@.#@@@@@. @@@@@@.    @@@@@-,,,,,,. @@@@@# =@@@@@  @@@@@@,,,,,,',
-    '#@@@@@@@@@@....@@@@@@,..@@@@@@@@@@@@..@@@@@@.   .X@@@@@@@@@@@..@@@@@#.=@@@@@..=@@@@@@@@@@@',
-    '...      ...... ..   ...++++++@@@@@@...   ...   ...         ...   ... ..   . ....         ',
-    '                       ,@@@@@@@@@@+.                                                      ',
+_LARGE_LINES: list[str] = [
+    # ── styrene logo mark (26 rows) ─────────────────────────────────────────────
+    '                    :@@@*                                       .+@@@:.                   ',
+    '              ...@@@@@@@@@@@...                             ..@@@@@@@@@@@..               ',
+    '           ..=@@@@@@@:.-@@@@@@@..                        . @@@@@@@-.-@@@@@@@=.            ',
+    '          @@@@@@@@....:@.. @@@@@@@@                   .@@@@@@@@..  #@...@@@@@@@@.         ',
+    '    ..-@@@@@@@..      :@@@@:..:@@@@@@@:.          .:@@@@@@@-.      .@@@@...*@@@@@@@-.     ',
+    '  .@@@@@@@@..        ...@@@@@@%...@@@@@@@@.    .@@@@@@@@..         ..@@@@@@#...@@@@@@@@.  ',
+    '@@@@@@@:          ...@@..  @@@@@@@...#@@@@@@@@@@@@@@:.    ...@@@:..    .%@@@@@@...-@@@@@@@',
+    '@@@@..          .-@%   ..@@  ..@@@@@@@.. @@@@@@@@..    ..+@@..  .%@@..    ..@@@@@@%...%.  ',
+    '@@@@.=@..  ...@@.          .@@....@@@@.  @@@@+..   .. @@+...     . . @@=..    .@@@@@.     ',
+    '@@@@ =@@@ +@@.                .:@%       @@@@   ..#@@.             @@ ..@@@..       .     ',
+    '@@@@ =@@@ @                      @       @@@@  .@*...              @@@@..@..@.      @     ',
+    '@@@@ =@@@ @                      @       @@@@   @                  @@@@  @  @.      @.@.  ',
+    '@@@@ =@@@ @                      @       @@@@   @                  @@@@  @  @.      @.@.  ',
+    '@@@@ =@@@ @                      @       @@@@   @                  @@@@  @  @.      @.@.  ',
+    '@@@@ =@@@ @                      @       @@@@   @                  @@@@  @  @.       .@.  ',
+    '@@@@ =@@@ @                      @       @@@@   @                  @@@@  @  @.       .@.  ',
+    '@@@@ =@@@ .@%...              .%@%  .    @@@@   @                  @@@@..@  @.      .@@.  ',
+    '@@@@ =#..  ...@@.          .@@...=@@@@@  @@@@   @                  @@@@  @  @.       @@.  ',
+    '@@@@+..          .@%....=@#...@@@@@@@...%@@@@  .@@...              @@@@ .@.@@. ...   @@.  ',
+    '@@@@@@@@.           .@@...+@@@@@@-...@@@@@@@@     .@@%.            @@@@:@@.  .+@@@  .-.   ',
+    ' ..:@@@@@@@#..        .@@@@@@@...@@@@@@@@#.           .@@...     . @@@@....@@@@@@@        ',
+    '      .@@@@@@@@..     :@@@*...@@@@@@@@..                 .@@%...-@@.  .=@@@@@@*           ',
+    '        ..-@@@@@@@-. .:...+@@@@@@@=..                       ..@%.  .@@@@@@@..             ',
+    '             .@@@@@@@@.@@@@@@@@                                 .@@@@@@#.                 ',
+    '                .#@@@@@@@@@+..                                     ..                     ',
+    '                   ..@@@...                                                               ',
+    # ── spacer (3 blank lines) ───────────────────────────────────────────────
+    '                                                                                          ',
+    '                                                                                          ',
+    '                                                                                          ',
+    # ── wordmark (7 rows) ─────────────────────────────────────────────────────
+    '              ..    .  .+@....     .. ...... .  ..   .    ....  .      ..                 ',
+    '             ..@@@@@@  %@@@@..@=.  .@@.. @.@@@...@@@@@:   @@.@@@@#    #@@@@@.             ',
+    '              @@.       @@    -@.  .@-   @@. . .@.. ..@   @@-.. .@  .@@.. .%@.            ',
+    '              .@@@@@@   @@     @@..@@    @      @@@@@@@   @@    .@   @@@@@@@@.            ',
+    '                  .+@   @@.    .@@@@.    @      @@.       @@    .@   @@:.                 ',
+    '              ++++++     .++     @@     .+.     .++++++   ++.   .+.    ++++++.            ',
+    '                               .*@..                                                      ',
 ]
 
-_MARK_ROWS  = 10   # number of molecule mark rows
-_LINE_WIDTH = max(len(ln) for ln in LOGO_LINES)
-LOGO_LINES  = [ln.ljust(_LINE_WIDTH) for ln in LOGO_LINES]
+_LARGE_MARK_ROWS: int = 26
+_LARGE_WIDTH: int = max(len(ln) for ln in _LARGE_LINES)
+_LARGE_LINES = [ln.ljust(_LARGE_WIDTH) for ln in _LARGE_LINES]
+
+# ── medium variant (16-row mark + 5-row wordmark, 55 cols) ─────────────────
+_MEDIUM_MARK_ROWS: int = 16
+_MEDIUM_LINES: list[str] = [
+    '          ..****.                     .****.           ',
+    '       .,****.*****.               .***** ****,.       ',
+    '    .*****.   **..****.         .****.   **..*****     ',
+    '..****..     ..****..*****  .*****..  .  .*****..****.. ',
+    '***.     ..*, **..****`.,*****`   ..*. ,* .  .**** .*` ',
+    '**.**. .*.      ..*. .,  ***   .**.      ..*.   .*.    ',
+    '**.** *             *    *** *..         ****.*.   *   ',
+    '**.** *             *    *** *           **** *.   * . ',
+    '**.** *             *    *** *           **** *.   . . ',
+    '**.** *             *    *** *           **** *.     . ',
+    '**.**..**.        **. `  *** *           **,* *.   .*. ',
+    '***.      .*...* .****,..*** **.         **,*.*. .  *. ',
+    ' *****..      .****..*****.     .*..     ***...***     ',
+    '   ..*****    **..*****.           .*,.*`..****..      ',
+    '      ..***** *****.                  . ****           ',
+    '           .****.                                      ',
+    '                                                       ',
+    '                                                       ',
+    '               |                                       ',
+    '        <**** *+* *.  *  r** .***.  r***. .***.        ',
+    '        ^---.  |   \\v/*  *   *****  *   * *****.       ',
+    '        -.__>  |   .v.   *   ^._.   *   * ^._.         ',
+    '                  .**                                  ',
+]
+_MEDIUM_WIDTH: int = max(len(ln) for ln in _MEDIUM_LINES)
+_MEDIUM_LINES = [ln.ljust(_MEDIUM_WIDTH) for ln in _MEDIUM_LINES]
+
+# Back-compat alias used by module-level _assign_unlock_frames call
+LOGO_LINES = _LARGE_LINES
+_MARK_ROWS = _LARGE_MARK_ROWS
+_LINE_WIDTH = _LARGE_WIDTH
 
 # ---------------------------------------------------------------------------
 # Noise palette — CRT phosphor aesthetic
@@ -79,39 +130,45 @@ _NOISE_CHARS: str = "▓▒░█▄▀▌▐▊▋▍▎▏◆■□▪◇┼�
 # Animation parameters
 # ---------------------------------------------------------------------------
 FRAME_INTERVAL_S: float = 0.045   # ~22 fps
-TOTAL_FRAMES: int       = 36      # ~1.6 s to full resolution
+TOTAL_FRAMES: int       = 42      # ~1.9 s to full resolution
 HOLD_FRAMES: int        = 8       # frames to hold clean logo before dismiss
 
 
-def _assign_unlock_frames(lines: list[str], total: int) -> list[list[int]]:
-    """Assign a random unlock frame to each character position.
+def _assign_unlock_frames(
+    lines: list[str], total: int
+) -> list[list[tuple[int, int]]]:
+    """Assign (appear_frame, unlock_frame) to every character position.
 
-    Outer characters resolve first; centre characters resolve last — matching
-    how a CRT phosphor would converge from the edges inward to reveal the logo.
+    Two-phase cascade + glitch animation:
+      - appear_frame : row sweeps in top-to-bottom over the first 55 % of
+                       total frames, with ±2-frame per-character jitter.
+      - unlock_frame : how many frames after appearing the character spends
+                       as CRT noise before resolving to its final glyph.
+                       Centre columns glitch longest; edges resolve faster.
 
-    Blank cells (braille ⠀ or ASCII space) are always unlocked (frame 0).
+    Blank / space cells always get (0, 0) — rendered as spaces throughout.
     """
-    height = len(lines)
-    width  = _LINE_WIDTH
-    cx, cy = width / 2, height / 2
+    height      = len(lines)
+    cascade_end = int(total * 0.55)          # cascade finishes here
+    max_glitch  = int(total * 0.40)          # max noise window after appear
 
-    frame_map: list[list[int]] = []
+    frame_map: list[list[tuple[int, int]]] = []
     for y, line in enumerate(lines):
-        row_frames: list[int] = []
+        row: list[tuple[int, int]] = []
+        base_appear = int((y / max(height - 1, 1)) * cascade_end)
+        cx = len(line) / 2.0
         for x, ch in enumerate(line):
             if ch in (" ", _BRAILLE_BLANK):
-                row_frames.append(0)
+                row.append((0, 0))
             else:
-                # Normalised distance from centre: ~0 at edge, ~1 at centre
-                dist = (
-                    (x - cx) ** 2 / cx ** 2
-                    + (y - cy) ** 2 / cy ** 2
-                ) ** 0.5
-                # Edge chars unlock early, centre chars unlock late
-                max_frame = int(total * 0.25 + dist * total * 0.55)
-                max_frame = min(max_frame, total - 4)
-                row_frames.append(random.randint(0, max(1, max_frame)))
-        frame_map.append(row_frames)
+                appear = base_appear + random.randint(0, 2)
+                # Centre columns linger in glitch longer — more dramatic
+                dist_from_cx = abs(x - cx) / max(cx, 1.0)
+                hi = max(4, int(max_glitch * (0.35 + 0.65 * (1.0 - dist_from_cx))))
+                lo = max(3, int(hi * 0.25))
+                unlock = min(appear + random.randint(lo, hi), total - 2)
+                row.append((appear, unlock))
+        frame_map.append(row)
     return frame_map
 
 
@@ -142,9 +199,30 @@ class GlitchLogoWidget(Widget):
         super().__init__(**kwargs)
         GlitchLogoWidget._rng_seed = random.randint(0, 2**31)
         random.seed(GlitchLogoWidget._rng_seed)
-        self._unlock_map = _assign_unlock_frames(LOGO_LINES, TOTAL_FRAMES)
+        # Variant auto-selected: large requires ≥160 cols (reliable proxy for
+        # 4K / wide-format terminals); medium is the default everywhere else.
+        w = self._detect_cols()
+        if w >= 220:
+            self._lines: list[str] = _LARGE_LINES
+            self._mark_rows: int   = _LARGE_MARK_ROWS
+            self._line_width: int  = _LARGE_WIDTH
+        else:
+            self._lines: list[str] = _MEDIUM_LINES
+            self._mark_rows: int   = _MEDIUM_MARK_ROWS
+            self._line_width: int  = _MEDIUM_WIDTH
+        self._unlock_map = _assign_unlock_frames(self._lines, TOTAL_FRAMES)
         self._timer      = None
         self._noise_seed = random.randint(0, 2**31)
+
+
+
+    @staticmethod
+    def _detect_cols() -> int:
+        """Return terminal width in columns via OS query (pre-Textual layout)."""
+        try:
+            return shutil.get_terminal_size(fallback=(80, 24)).columns
+        except Exception:
+            return 80
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,19 +261,32 @@ class GlitchLogoWidget(Widget):
         text = Text(no_wrap=True, overflow="fold")
 
         for y, (line, row_frames) in enumerate(
-            zip(LOGO_LINES, self._unlock_map)
+            zip(self._lines, self._unlock_map)
         ):
-            for x, (ch, unlock) in enumerate(zip(line, row_frames)):
+            for x, (ch, (appear, unlock)) in enumerate(
+                zip(line, row_frames)
+            ):
                 if ch in (" ", _BRAILLE_BLANK):
                     text.append(ch)
+                elif frame < appear:
+                    # Not yet reached by the cascade — invisible
+                    text.append(" ")
                 elif frame >= unlock:
+                    # Fully resolved — clean glyph
                     colour = self._char_colour(y, x, ch)
                     text.append(ch, style=colour)
                 else:
-                    # Glitching — CRT noise character
-                    noise = rng.choice(_NOISE_CHARS)
-                    progress = frame / max(1, unlock)
-                    noise_colour = _DIM if progress > 0.7 else "#2a3a32"
+                    # Glitching — CRT noise
+                    noise    = rng.choice(_NOISE_CHARS)
+                    progress = (frame - appear) / max(1, unlock - appear)
+                    if frame == appear:
+                        # Bright arrival flash
+                        noise_colour = _ACCENT
+                    elif progress > 0.65:
+                        # Dimming as it converges
+                        noise_colour = _DIM
+                    else:
+                        noise_colour = _TEAL
                     text.append(noise, style=noise_colour)
             text.append("\n")
 
@@ -203,8 +294,8 @@ class GlitchLogoWidget(Widget):
 
     def _char_colour(self, y: int, x: int, ch: str) -> str:  # noqa: ARG002
         """Map a resolved character to its display colour."""
-        # Wordmark rows (after mark rows + 2 blank lines)
-        if y >= _MARK_ROWS + 2:
+        # Wordmark rows (after logo mark rows + 2 blank spacer lines)
+        if y >= self._mark_rows + 2:
             return f"bold {_ACCENT}"
-        # Molecule mark — uniform phosphor teal
+        # Logo mark — flat phosphor teal (art is dense; gradient adds noise)
         return _TEAL

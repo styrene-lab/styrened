@@ -345,14 +345,11 @@ class ExchangeScreen(Screen[None]):
             self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
 
     async def _refresh_pages_table(self) -> None:
-        """Populate #table-pages with NomadNet-browsable nodes from the IPC bridge."""
-        from styrened.tui.utils import device_info_to_mesh
-
+        """Populate #table-pages with NomadNet-browsable nodes from the device cache."""
         try:
-            bridge = self._ipc_bridge
-            if bridge is not None:
-                device_infos = await bridge.get_devices()
-                all_devices = [device_info_to_mesh(d) for d in device_infos]
+            cache = getattr(self.app, "device_cache", None)
+            if cache is not None:
+                all_devices = cache.get()
             else:
                 from styrened.tui.services.reticulum import discover_devices
                 all_devices = discover_devices()

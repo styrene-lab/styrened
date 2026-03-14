@@ -195,7 +195,8 @@ class ContactsScreen(Screen[None]):
         conv_map: dict[str, dict[str, Any]] = {}
 
         try:
-            devices = await bridge.get_devices()
+            cache = getattr(self.app, "device_cache", None)
+            devices = cache.get() if cache is not None else await bridge.get_devices()
             for dev in devices:
                 d = dev if isinstance(dev, dict) else dev.to_dict()
                 for key in (d.get("lxmf_destination_hash"), d.get("destination_hash")):

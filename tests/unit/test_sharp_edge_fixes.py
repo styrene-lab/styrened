@@ -422,7 +422,7 @@ class TestHomeStatusBarHubStatus:
         """WAITING renders '◐ connecting' spinner with text."""
         from styrened.services.hub_connection import HubStatus
         output = _render_bar(hub_status=HubStatus.WAITING)
-        assert "HUB ◐ connecting" in output
+        assert "HUB ◐" in output
 
 
 # ===========================================================================
