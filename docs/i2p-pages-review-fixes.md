@@ -1,11 +1,12 @@
 ---
 id: i2p-pages-review-fixes
 title: "I2P pages: adversarial review remediations"
-status: exploring
+status: decided
 parent: i2p-pages-strategy
 dependencies: [i2p-transport-selector]
 tags: [security, bug, tui, daemon]
 open_questions: []
+openspec_change: i2p-review-fixes
 ---
 
 # I2P pages: adversarial review remediations

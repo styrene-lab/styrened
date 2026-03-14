@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "changeName": "i2p-review-fixes",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-14T03:39:14.622Z",
+  "summary": "All 31 spec scenarios verified against implementation. 3569 tests pass, 0 regressions. C1 Rich markup injection fixed, C2 image regex fixed, C3 .i2p proxy rewrite, C4 double-fetch eliminated, C5 URL scheme validation, W1 micron heuristic tightened, W2 content-kind unconditional, W3 port range, W4 set_mesh_device on fresh mount, W5/W6 check_action for headless.",
+  "snapshot": {
+    "gitHead": "b41c057c9117ba96d718b12c8b04e35528f0e45e",
+    "fingerprint": "be313d5e24932233eadd937e90be1d85f7e5cfc4645fc000645c2aca74a5022a",
+    "dirty": true,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/i2p-review-fixes/design.md",
+        "exists": true,
+        "size": 1097,
+        "sha256": "e1464cd59f41b499abf70130bfed67d25d18b2df2a7c97fcca92d0c8667980c7"
+      },
+      {
+        "path": "openspec/changes/i2p-review-fixes/proposal.md",
+        "exists": true,
+        "size": 545,
+        "sha256": "7bbe19c4bf43880631a35e42c2e85a73b73530dff632237207825647ad03f4de"
+      },
+      {
+        "path": "openspec/changes/i2p-review-fixes/specs/daemon-validation.md",
+        "exists": true,
+        "size": 3110,
+        "sha256": "04b0631208eb0f467e4f0857f713bda6d2e7d3fef0aded5d9c82b905bba9107e"
+      },
+      {
+        "path": "openspec/changes/i2p-review-fixes/specs/html-renderer-security.md",
+        "exists": true,
+        "size": 4065,
+        "sha256": "be1c637faee18beaf895ae360492db6eeeb159e605b9c7a5ff43da2d3686fca5"
+      },
+      {
+        "path": "openspec/changes/i2p-review-fixes/specs/transport-browser.md",
+        "exists": true,
+        "size": 3599,
+        "sha256": "1845cd574a699fb7bc811afa49effb77847581cb8cbd5726f051db525fa6f82d"
+      },
+      {
+        "path": "openspec/changes/i2p-review-fixes/tasks.md",
+        "exists": true,
+        "size": 4133,
+        "sha256": "cd622d6f7e84650abe8ed3602d2bcd4f62585edab742537b9a9176ea0031aa1f"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
