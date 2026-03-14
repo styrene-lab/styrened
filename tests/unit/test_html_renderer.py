@@ -5,6 +5,7 @@ import pytest
 
 from styrened.tui.widgets.html_renderer import (
     ContentKind,
+    _escape_rich_markup,
     _postprocess_links,
     detect_content_type,
     render_html_to_rich,
@@ -184,6 +185,118 @@ class TestRenderHtmlToRich:
         plain = result.plain
         assert "Hello" in plain
         assert "World" in plain
+
+
+class TestEscapeRichMarkup:
+    """_escape_rich_markup() prevents injection of Rich markup tokens."""
+
+    def test_escapes_open_bracket(self):
+        assert _escape_rich_markup("[bold]hi[/bold]") == "\\[bold]hi\\[/bold]"
+
+    def test_close_bracket_not_escaped(self):
+        # Rich only requires escaping '['; ']' needs no escaping.
+        assert _escape_rich_markup("a]b") == "a]b"
+
+    def test_escapes_click_action(self):
+        raw = '[@click="evil"]pwned[/]'
+        escaped = _escape_rich_markup(raw)
+        assert "\\[@click" in escaped
+        assert "\\[/" in escaped
+
+    def test_escapes_bold_red(self):
+        raw = "[bold red]injected[/bold red]"
+        escaped = _escape_rich_markup(raw)
+        assert escaped == "\\[bold red]injected\\[/bold red]"
+
+    def test_plain_text_unchanged(self):
+        text = "Hello world, no brackets here."
+        assert _escape_rich_markup(text) == text
+
+    def test_empty_string(self):
+        assert _escape_rich_markup("") == ""
+
+
+class TestPostprocessLinksImageRejection:
+    """Image syntax and empty-label links must not be converted."""
+
+    def test_image_syntax_not_converted(self):
+        md = "![logo](https://example.com/img.png)"
+        result = _postprocess_links(md)
+        assert "navigate_link" not in result
+
+    def test_empty_label_not_converted(self):
+        md = "[](https://example.com)"
+        result = _postprocess_links(md)
+        assert "navigate_link" not in result
+
+    def test_normal_link_adjacent_to_image_converted(self):
+        md = "![img](https://example.com/img.png) and [click](https://example.com)"
+        result = _postprocess_links(md)
+        # Image NOT converted — no navigate_link for the image URL
+        assert "navigate_link('https://example.com/img.png')" not in result
+        # Normal link converted
+        assert "navigate_link('https://example.com')" in result
+        assert "▸ click" in result
+
+    def test_image_with_alt_text_not_converted(self):
+        md = "![alt text](https://example.com/photo.jpg)"
+        result = _postprocess_links(md)
+        assert "navigate_link" not in result
+
+
+class TestRichMarkupInjectionPrevention:
+    """render_html_to_rich() must escape markup tokens in page content."""
+
+    def test_click_injection_escaped(self):
+        html = '<p>[@click="evil"]pwned[/]</p>'
+        result = render_html_to_rich(html)
+        from rich.text import Text
+        assert isinstance(result, Text)
+        plain = result.plain
+        # Literal text must appear in plain output
+        assert "pwned" in plain
+        # No click action should have been registered
+        spans_with_click = [
+            s for s in result._spans
+            if "navigate_link" in repr(s.style)
+        ]
+        assert not spans_with_click
+
+    def test_bold_markup_escaped(self):
+        html = "<p>[bold red]injected[/bold red]</p>"
+        result = render_html_to_rich(html)
+        plain = result.plain
+        assert "injected" in plain
+        # No red/bold styling should have been applied to 'injected'
+        # The literal bracket tokens appear in plain text (not consumed as markup)
+        assert "[bold red]" in plain
+
+    def test_legitimate_link_still_works(self):
+        html = '<p><a href="https://example.com">click here</a></p>'
+        result = render_html_to_rich(html)
+        from rich.text import Text
+        assert isinstance(result, Text)
+        plain = result.plain
+        assert "click here" in plain
+        # There should be a navigate_link @click action on the link span.
+        # Rich stores @click in Style.meta; repr() exposes it (str() renders as 'none').
+        spans_with_action = [
+            s for s in result._spans
+            if "navigate_link" in repr(s.style)
+        ]
+        assert spans_with_action, "Expected navigate_link action on link span"
+
+    def test_image_link_in_html_not_navigable(self):
+        html = '<img src="https://example.com/img.png" alt="logo">'
+        result = render_html_to_rich(html)
+        from rich.text import Text
+        assert isinstance(result, Text)
+        # No navigate_link action should appear for an image
+        spans_with_action = [
+            s for s in result._spans
+            if "navigate_link" in repr(s.style)
+        ]
+        assert not spans_with_action
 
 
 class TestRenderHtmlLinksNavigable:
