@@ -256,7 +256,7 @@ class TestDashboardStatusBarWiring:
         node_table = MagicMock()
 
         bridge.get_status = AsyncMock(return_value={
-            "rns_online": True,
+            "rns_initialized": True,
             "interfaces": [{"name": "tcp0"}, {"name": "auto0"}],
             "uptime": 3600,
             "transport_enabled": False,
@@ -282,7 +282,14 @@ class TestDashboardStatusBarWiring:
                 return node_table
             return MagicMock()
 
+        app = MagicMock()
+        app.device_cache.get.return_value = [
+            {"device_type": "styrene_node", "identity_hash": "abc", "destination_hash": "abc", "name": "Alpha", "last_announce": 1},
+            {"device_type": "lxmf_peer", "identity_hash": "def", "destination_hash": "def", "name": "Bravo", "last_announce": 1},
+        ]
+
         with (
+            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=app),
             patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
             patch.object(screen, "query_one", side_effect=query_one_side_effect),
         ):

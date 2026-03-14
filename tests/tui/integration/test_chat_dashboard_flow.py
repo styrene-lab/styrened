@@ -1,59 +1,39 @@
-"""End-to-end integration tests for chat workflow via device detail screen.
-
-These tests verify the complete user journey:
-1. User sees unread message indicators on dashboard
-2. User opens device detail (enter key)
-3. User accesses Chat tab
-4. User sends/receives messages
-5. User returns to dashboard with updated state
-"""
+"""Integration-oriented TUI tests for current peer-workspace chat flow."""
 from __future__ import annotations
 
-
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
-from textual.widgets import DataTable
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
-from styrened.models.messages import Message, init_db
 from styrened.tui.app import StyreneApp
-from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
+from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+from styrened.ui_state import WorkspaceId
 
 
 @pytest.fixture(autouse=True)
-def mock_node_store():
-    """Suppress start_discovery's direct daemon-service call.
+def mock_reticulum_for_tests(tmp_path):
+    fake_config = tmp_path / "reticulum_config"
+    fake_config.mkdir()
+    (fake_config / "config").write_text("")
 
-    DashboardScreen.on_mount() calls start_discovery() which previously injected
-    get_node_store() from the daemon layer.  Device data now flows via
-    bridge.get_devices(), so we no-op start_discovery at the dashboard module level
-    to prevent stale daemon-layer access in unit/integration tests.
-    """
-    with patch("styrened.tui.screens.dashboard.start_discovery"):
-        yield  # yields None — autouse only, not intended to be referenced by name
-
-
-@pytest.fixture
-def message_db(tmp_path):
-    """Create test message database."""
-    db_path = tmp_path / "messages.db"
-    engine = init_db(str(db_path))
-    return engine
-
-
-@pytest.fixture
-def mock_local_identity():
-    """Mock local identity hash."""
-    return "local_identity_hash_1234"
+    with (
+        patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
+        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
+        patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
+        patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
+        patch("styrened.tui.screens.dashboard.start_discovery"),
+    ):
+        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
+        mock_app_lifecycle.return_value.ipc_bridge = None
+        yield
 
 
 @pytest.fixture
 def sample_devices():
-    """Create sample mesh devices for testing."""
     now = int(datetime.now().timestamp())
     return [
         MeshDevice(
@@ -75,254 +55,82 @@ def sample_devices():
     ]
 
 
-def add_messages_to_db(engine, messages_data: list[dict]) -> list[int]:
-    """Helper to add test messages to database."""
-    message_ids = []
-    with Session(engine) as session:
-        for msg_data in messages_data:
-            msg = Message(
-                source_hash=msg_data["source_hash"],
-                destination_hash=msg_data["destination_hash"],
-                timestamp=msg_data.get("timestamp", datetime.now().timestamp()),
-                content=msg_data.get("content", "Test message"),
-                protocol_id="chat",
-                status=msg_data.get("status", "pending"),
-            )
-            session.add(msg)
-            session.flush()
-            message_ids.append(msg.id)
-        session.commit()
-    return message_ids
-
-
-def count_unread_messages(engine, source_hash: str, local_hash: str) -> int:
-    """Count unread (pending) messages from a source."""
-    with Session(engine) as session:
-        return (
-            session.query(Message)
-            .filter(
-                Message.source_hash == source_hash,
-                Message.destination_hash == local_hash,
-                Message.status == "pending",
-            )
-            .count()
-        )
-
-
-def count_total_messages(engine, peer_hash: str, local_hash: str) -> int:
-    """Count total messages in conversation with peer."""
-    with Session(engine) as session:
-        return (
-            session.query(Message)
-            .filter(
-                (
-                    (Message.source_hash == peer_hash)
-                    & (Message.destination_hash == local_hash)
-                )
-                | (
-                    (Message.source_hash == local_hash)
-                    & (Message.destination_hash == peer_hash)
-                )
-            )
-            .count()
-        )
-
-
-@pytest.fixture(autouse=True)
-def mock_reticulum_for_tests(tmp_path):
-    """Mock Reticulum initialization for all tests."""
-    fake_config = tmp_path / "reticulum_config"
-    fake_config.mkdir()
-    (fake_config / "config").write_text("")
-
-    with (
-        patch(
-            "styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config
-        ),
-        patch("styrened.tui.app.find_reticulum_config", return_value=fake_config),
-        patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
-        patch("styrened.tui.app.StyreneLifecycle") as mock_app_lifecycle,
-        patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
-    ):
-        mock_app_lifecycle.return_value.initialize_async = AsyncMock(return_value=True)
-        mock_app_lifecycle.return_value.ipc_bridge = None
-        yield
-
-
 class TestDeviceDetailChatFlow:
-    """Tests for accessing chat via device detail screen."""
+    def test_dashboard_overflow_still_routes_to_nodes(self):
+        from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
 
-    def test_action_select_opens_device_detail_with_tabs(self, sample_devices):
-        """action_select_device should open device detail with tabbed layout."""
         screen = DashboardScreen()
-        fake_app = MagicMock()
+        screen.action_open_exploration = Mock()
 
+        screen.on_home_node_summary_table_overflow_selected(HomeNodeSummaryTable.OverflowSelected())
+
+        screen.action_open_exploration.assert_called_once_with()
+
+    def test_select_device_opens_peer_workspace_from_nodes_context(self, sample_devices):
+        from styrened.tui.screens.exploration import ExplorationScreen
+
+        screen = ExplorationScreen()
+        fake_app = MagicMock()
         with (
-            patch.object(DashboardScreen, "_get_selected_identity", return_value=sample_devices[0].destination_hash),
-            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=fake_app),
+            patch.object(ExplorationScreen, "_get_selected_identity", return_value=sample_devices[0].identity_hash),
+            patch.object(ExplorationScreen, "_find_device_by_identity", return_value=sample_devices[0]),
+            patch.object(ExplorationScreen, "app", new_callable=PropertyMock, return_value=fake_app),
         ):
             screen.action_select_device()
 
-        fake_app.push_screen.assert_called_once()
-        pushed_screen = fake_app.push_screen.call_args.args[0]
-        assert isinstance(pushed_screen, MeshDeviceDetailScreen)
-        assert pushed_screen.device_identity == sample_devices[0].destination_hash
+        pushed = fake_app.push_screen.call_args.args[0]
+        assert isinstance(pushed, MeshDeviceDetailScreen)
+        assert pushed.origin_workspace == WorkspaceId.NODES
 
-    @pytest.mark.asyncio
-    async def test_device_detail_has_chat_tab(self, sample_devices):
-        """Device detail screen should have a Chat tab."""
-        app = StyreneApp()
-
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=sample_devices,
-        ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                app.push_screen(
-                    MeshDeviceDetailScreen(
-                        device_identity=sample_devices[0].destination_hash,
-                    )
-                )
-                await pilot.pause()
-
-                assert isinstance(app.screen, MeshDeviceDetailScreen), (
-                    f"Expected MeshDeviceDetailScreen, got {type(app.screen).__name__}"
-                )
-
-                from textual.widgets import TabPane
-
-                panes = list(app.screen.query(TabPane))
-                pane_ids = {p.id for p in panes}
-                assert "chat" in pane_ids, f"Missing Chat tab. Found: {pane_ids}"
-
-    @pytest.mark.asyncio
-    async def test_escape_from_detail_returns_to_dashboard(self, sample_devices):
-        """Going back from detail screen should return to dashboard."""
-        app = StyreneApp()
-
-        with patch(
-            "styrened.tui.screens.mesh_device_detail.discover_devices",
-            return_value=sample_devices,
-        ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                app.push_screen(
-                    MeshDeviceDetailScreen(
-                        device_identity=sample_devices[0].destination_hash,
-                    )
-                )
-                await pilot.pause()
-
-                assert isinstance(app.screen, MeshDeviceDetailScreen)
-
-                app.screen.action_go_back()
-                await pilot.pause()
-
-                assert isinstance(app.screen, DashboardScreen)
+    def test_chat_tab_can_be_requested_for_peer_workspace(self, sample_devices):
+        screen = MeshDeviceDetailScreen(
+            device_identity=sample_devices[0].identity_hash,
+            device=sample_devices[0],
+            initial_tab="chat",
+            origin_workspace=WorkspaceId.NODES,
+        )
+        assert screen.initial_tab == "chat"
+        assert screen.origin_workspace == WorkspaceId.NODES
 
 
 class TestDashboardUnreadDisplay:
-    """Tests for unread count display on dashboard."""
-
     @pytest.mark.asyncio
-    async def test_dashboard_shows_correct_unread_counts_for_all_devices(
-        self, sample_devices, message_db, mock_local_identity
-    ):
-        """Dashboard should show correct unread counts for each device."""
-        # Setup different unread counts
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-            ],
-        )
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": "node02_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-            ],
-        )
-
+    async def test_dashboard_status_fetch_updates_total_unread_count_from_conversations(self, sample_devices):
         app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
+        app.device_cache.get = Mock(return_value=sample_devices)  # type: ignore[method-assign]
 
-        with patch(
-            "styrened.tui.screens.dashboard.discover_devices", return_value=sample_devices
-        ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
+        screen = DashboardScreen()
+        bar = MagicMock()
+        table = MagicMock()
+        cop = MagicMock()
+        bridge = MagicMock()
+        bridge.get_status = AsyncMock(return_value={"rns_initialized": True, "interfaces": [], "uptime": 10, "active_links": 0})
+        bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
+        bridge.get_core_config = AsyncMock(return_value={})
+        bridge.get_conversations = AsyncMock(return_value=[
+            {"identity_hash": sample_devices[0].identity_hash, "unread_count": 3},
+            {"identity_hash": sample_devices[1].identity_hash, "unread_count": 1},
+        ])
 
-                tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
+        def query_one_side_effect(widget_type):
+            from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
+            from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+            from styrened.tui.widgets.home_status_bar import HomeStatusBar
 
-                # The tree should reflect the discovered device set.
-                assert len(tree._device_cache) == len(sample_devices)
-
-    @pytest.mark.asyncio
-    async def test_dashboard_refreshes_on_screen_resume(
-        self, sample_devices, message_db, mock_local_identity
-    ):
-        """Dashboard should refresh device table on screen resume."""
-        add_messages_to_db(
-            message_db,
-            [
-                {
-                    "source_hash": "node01_identity_hash",
-                    "destination_hash": mock_local_identity,
-                    "status": "pending",
-                },
-            ],
-        )
-
-        app = StyreneApp()
-        app.db_engine = message_db
-        app.local_identity_hash = mock_local_identity
+            if widget_type is HomeStatusBar:
+                return bar
+            if widget_type is HomeNodeSummaryTable:
+                return table
+            if widget_type is CopActivitySummary:
+                return cop
+            raise AssertionError(widget_type)
 
         with (
-            patch(
-                "styrened.tui.screens.dashboard.discover_devices",
-                return_value=sample_devices,
-            ),
-            patch(
-                "styrened.tui.screens.mesh_device_detail.discover_devices",
-                return_value=sample_devices,
-            ),
+            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
+            patch.object(screen, "query_one", side_effect=query_one_side_effect),
         ):
-            async with app.run_test() as pilot:
-                await pilot.pause()
+            await screen._fetch_daemon_status()
 
-                # Open detail
-                tree = app.screen.query_one("#mesh-device-tree", MeshDeviceTree)
-                tree._select_by_identity(sample_devices[0].destination_hash)
-                app.screen.action_select_device()
-                await pilot.pause()
-
-                assert isinstance(app.screen, MeshDeviceDetailScreen)
-
-                # Return to dashboard
-                app.screen.action_go_back()
-                await pilot.pause()
-
-                assert isinstance(app.screen, DashboardScreen)
-                # Dashboard should have refreshed via on_screen_resume
+        assert bar.unread_count == 4
+        table.update_nodes.assert_called_once()
