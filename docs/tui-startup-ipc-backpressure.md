@@ -31,6 +31,10 @@ The preferred implementation sequence is: (1) make first paint depend only on a 
 
 A clean way to satisfy both responsiveness and richer situational awareness is to separate COP surfaces by cost and ambition. Home should remain the lean, always-available summary layer optimized for constrained devices and first paint. A dedicated TUI Global COP surface can become the place for broader fleet views, richer drill-downs, and optional heavy hydration once the daemon and UI are already stable. A later web UI can sit above that as the highest-capability tier for systems that can afford full visualizations and more expensive data presentation. This creates a graceful-degradation ladder: Home COP → TUI Global COP → richer web UI.
 
+### Single-bridge request fan-out is itself a pressure source
+
+Live probing against the dev daemon showed that issuing multiple IPC requests concurrently through a single `ControlClient`/`IPCBridge` connection is unreliable under load: even cheap `query_status`/`get_hub_status`/`get_unread_counts` requests timed out when fanned out on the same connection, while the same requests succeeded sequentially. Stage-one Home refresh therefore switched not only to cheaper queries but also to a short sequential summary path, avoiding same-connection burst fan-out as an additional pressure source.
+
 ## Decisions
 
 ### Decision: Prioritize startup demand shaping before adding IPC lane parallelism
