@@ -345,23 +345,18 @@ class DashboardScreen(Screen[None]):
         if bridge is None:
             return
 
-        import asyncio
-
         def _get(obj: Any, key: str, default: Any = None) -> Any:
             if isinstance(obj, dict):
                 return obj.get(key, default)
             return getattr(obj, key, default)
 
-        tasks = {
-            "status": asyncio.create_task(bridge.get_status()),
-            "hub": asyncio.create_task(bridge.get_hub_status()),
-            "unread_counts": asyncio.create_task(bridge.get_unread_counts()),
-        }
-
         try:
             try:
-                status = await tasks["status"]
-                hub_data = await tasks["hub"]
+                # The shared IPC bridge/client is not a good fit for bursty
+                # same-connection fan-out at startup. Keep Home on a short,
+                # sequential summary path so first paint stays truthful.
+                status = await bridge.get_status()
+                hub_data = await bridge.get_hub_status()
             except Exception:
                 try:
                     bar = self.query_one(HomeStatusBar)
@@ -383,7 +378,7 @@ class DashboardScreen(Screen[None]):
             unread_map: dict[str, int] = {}
             ipc_backpressured = False
             try:
-                unread_counts = await tasks["unread_counts"]
+                unread_counts = await bridge.get_unread_counts()
                 if isinstance(unread_counts, dict):
                     counts = unread_counts.get("counts", unread_counts)
                     if isinstance(counts, dict):
@@ -416,6 +411,15 @@ class DashboardScreen(Screen[None]):
                     )
                 )
 
+                # Home should remain truthful before the shared cache is primed.
+                # If cache-backed detail is not ready yet, fall back to the cheap
+                # daemon status counts instead of showing a misleading zero-fleet view.
+                if not device_list:
+                    styrene_count = int(_get(status, "styrene_node_count", 0))
+                    total_count = int(_get(status, "device_count", 0))
+                else:
+                    total_count = len(device_list)
+
                 bar = self.query_one(HomeStatusBar)
                 bar.daemon_connected = True
                 bar.ipc_backpressured = ipc_backpressured
@@ -427,7 +431,7 @@ class DashboardScreen(Screen[None]):
                 bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
                 bar.active_links = int(_get(status, "active_links", 0))
                 bar.styrene_mesh_count = styrene_count
-                bar.total_device_count = len(device_list)
+                bar.total_device_count = total_count
                 bar.unread_count = sum(unread_map.values())
 
                 if isinstance(hub_data, dict):
@@ -496,12 +500,8 @@ class DashboardScreen(Screen[None]):
                     pass
             except Exception:
                 pass
-        finally:
-            pending = [t for t in tasks.values() if not t.done()]
-            for t in pending:
-                t.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+        except Exception:
+            pass
 
     async def _fetch_adapter_state(self) -> None:
         """Pull current adapter states from daemon on connect.

@@ -374,7 +374,13 @@ class TestDashboardStatusBarWiring:
         app.device_cache.refresh = AsyncMock(return_value=None)
         screen.run_worker = MagicMock()
 
-        bridge.get_status = AsyncMock(return_value={"rns_initialized": True, "interfaces": [], "uptime": 60})
+        bridge.get_status = AsyncMock(return_value={
+            "rns_initialized": True,
+            "interfaces": [],
+            "uptime": 60,
+            "styrene_node_count": 7,
+            "device_count": 42,
+        })
         bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
         bridge.get_unread_counts = AsyncMock(return_value={"counts": {}})
 
@@ -395,6 +401,8 @@ class TestDashboardStatusBarWiring:
             await screen._fetch_daemon_status()
 
         assert status_bar.daemon_connected is True
+        assert status_bar.styrene_mesh_count == 7
+        assert status_bar.total_device_count == 42
         assert screen.run_worker.call_count == 1
         args, kwargs = screen.run_worker.call_args
         assert kwargs["group"] == "dashboard-device-prime"
