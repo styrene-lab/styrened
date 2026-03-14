@@ -21,6 +21,14 @@ Repair the regressions introduced during the DeviceCache migration and splash-fi
 
 The Home overflow affordance tests are green, but the shared device-cache migration is not fully behaviorally reconciled. ExplorationScreen and MeshDeviceDetailScreen now prefer app.device_cache whenever the app object exists, even when the cache is present but empty or unprimed, which causes empty node tables and unresolved peer detail in tests and likely in startup/race windows. DashboardScreen._fetch_daemon_status similarly touches self.app.device_cache inside an exception boundary that can mark the daemon disconnected in unmounted test contexts. Separately, splash-first startup changed the app contract so app-level tests that assumed immediate DashboardScreen availability are now stale. Legacy tests importing MeshDeviceTree from dashboard are also stale because peer browsing belongs to Nodes/Exploration now.
 
+### Implementation and verification after regression-fix pass
+
+Runtime consumers now distinguish cache availability from cache readiness. Dashboard status refresh reads cached devices through a helper that swallows bare-screen app access failures rather than reporting false daemon disconnects. ExplorationScreen and MeshDeviceDetailScreen fall back to direct discovery when the shared cache exists but is still empty/unprimed, preserving startup-race and direct test contexts without reintroducing per-screen shadow caches. Targeted verification passed: 228 tests across Home summary, sharp-edge regressions, dashboard, Nodes, peer detail, COP activity summary, app startup, navigation workflows, and chat integration.
+
+### Lifecycle closure state
+
+OpenSpec change `tui-device-cache-regression-fixes` has been archived after a passing spec assessment. Baseline spec was emitted under `openspec/baseline/tui/device-cache.md`, and the change moved to `openspec/archive/2026-03-14-tui-device-cache-regression-fixes/`. The design-tree node still requires the external design-assessment gate before `set_status(decided)` will be accepted by the tool, so lifecycle closure is complete in OpenSpec but status reconciliation remains tool-gated.
+
 ## Decisions
 
 ### Decision: Cache consumers must distinguish cache availability from cache readiness

@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tui-device-cache-regression-fixes",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-14T17:40:30.228Z",
+  "summary": "All 5 spec scenarios pass. ExplorationScreen falls back to discover_devices() when DeviceCache exists but is empty; MeshDeviceDetailScreen falls back to non-cache sources when the cache is unprimed; DashboardScreen guards cache access so successful bridge calls do not report a false disconnect; app tests now expect SplashScreen first; and legacy dashboard MeshDeviceTree imports were removed from navigation/integration tests with collection succeeding.",
+  "snapshot": {
+    "gitHead": "af3ef876c26bdca0daa7922767925c6520f04c2b",
+    "fingerprint": "d953aaec4840f382db5c9def8322fe47020605ec1904f5add05eda2bce59eb24",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/tui/screens/dashboard.py",
+      "src/styrened/tui/screens/exploration.py",
+      "src/styrened/tui/screens/mesh_device_detail.py",
+      "tests/tui/integration/test_chat_dashboard_flow.py",
+      "tests/tui/screens/test_dashboard_tui.py",
+      "tests/tui/screens/test_device_detail_tui.py",
+      "tests/tui/screens/test_exploration.py",
+      "tests/tui/test_app.py",
+      "tests/tui/test_navigation_workflows.py",
+      "tests/tui/widgets/test_cop_activity_summary.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/tui-device-cache-regression-fixes/design.md",
+        "exists": true,
+        "size": 2641,
+        "sha256": "25abed046431e2e0824a3cc88d7c926a1543ca3da464f3eb2d3c173560eae724"
+      },
+      {
+        "path": "openspec/changes/tui-device-cache-regression-fixes/proposal.md",
+        "exists": true,
+        "size": 533,
+        "sha256": "98b7403d977e60f87038336595c6c95ef2c4a83b737193211e2658094ce6ee34"
+      },
+      {
+        "path": "openspec/changes/tui-device-cache-regression-fixes/specs/tui/device-cache.md",
+        "exists": true,
+        "size": 2695,
+        "sha256": "d7b4c71243a7103d0d928563d25f6242c203e8165df77f88ca1c7b53bca09c71"
+      },
+      {
+        "path": "openspec/changes/tui-device-cache-regression-fixes/tasks.md",
+        "exists": true,
+        "size": 931,
+        "sha256": "9d7ce2cf7d2f3ee0f8cc640d4c7072d031a9b97f94dc2f4e02f55eca60fdc23b"
+      },
+      {
+        "path": "src/styrened/tui/screens/dashboard.py",
+        "exists": true,
+        "size": 22805,
+        "sha256": "7b5da9ed1d74787a2ce13756f38d06296884c60eee9f6805f66e11615efafbdd"
+      },
+      {
+        "path": "src/styrened/tui/screens/exploration.py",
+        "exists": true,
+        "size": 53627,
+        "sha256": "2b86a9c3632a5a63d56bfbca27d82627dd3525d90b223ea2ac0d2217c14aec9b"
+      },
+      {
+        "path": "src/styrened/tui/screens/mesh_device_detail.py",
+        "exists": true,
+        "size": 33287,
+        "sha256": "d0aeabf5c723ec404873870f5904740042d77dbb40bcfd8779a1030e034b0962"
+      },
+      {
+        "path": "tests/tui/integration/test_chat_dashboard_flow.py",
+        "exists": true,
+        "size": 5582,
+        "sha256": "a42696f8ed3d99a970deab80e0fb78b9d27bfb3167cc4e9c626a6cde055d4120"
+      },
+      {
+        "path": "tests/tui/screens/test_dashboard_tui.py",
+        "exists": true,
+        "size": 21886,
+        "sha256": "2dac18255309adbe13b1142f795a008391cb7503961cea103b42ef7a64f652f1"
+      },
+      {
+        "path": "tests/tui/screens/test_device_detail_tui.py",
+        "exists": true,
+        "size": 11960,
+        "sha256": "f72b269e9c34033dc02e46086ebd9e2f1e6f1aad31f2f387c5bca46f189bec18"
+      },
+      {
+        "path": "tests/tui/screens/test_exploration.py",
+        "exists": true,
+        "size": 11196,
+        "sha256": "d2efcad451313fdb1d5d9ab977e4fef5674963c16556839a305940a6e65a335a"
+      },
+      {
+        "path": "tests/tui/test_app.py",
+        "exists": true,
+        "size": 3426,
+        "sha256": "5e63ccb3bcbc42bcdfce1831cea4eb4426c5e095ca2dc3a57e32f03395294a40"
+      },
+      {
+        "path": "tests/tui/test_navigation_workflows.py",
+        "exists": true,
+        "size": 4087,
+        "sha256": "d50822702006943875b67afb64315afc07f3dc179a70f669c2ae0bc312ec4b48"
+      },
+      {
+        "path": "tests/tui/widgets/test_cop_activity_summary.py",
+        "exists": true,
+        "size": 16100,
+        "sha256": "c5f213a4155cdca42e765ee2619927d6cced6208546f9c7d43ad4c1ac5d631dc"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/tui/screens/dashboard.py",
+      "src/styrened/tui/screens/exploration.py",
+      "src/styrened/tui/screens/mesh_device_detail.py",
+      "tests/tui/screens/test_dashboard_tui.py",
+      "tests/tui/screens/test_exploration.py",
+      "tests/tui/screens/test_device_detail_tui.py",
+      "tests/tui/test_app.py",
+      "tests/tui/test_navigation_workflows.py",
+      "tests/tui/integration/test_chat_dashboard_flow.py"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

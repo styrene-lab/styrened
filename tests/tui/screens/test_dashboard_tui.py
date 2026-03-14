@@ -222,6 +222,7 @@ class TestDashboardTimerLifecycle:
         with (
             patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=Mock()),
             patch.object(DashboardScreen, "_fetch_daemon_status", new=lambda self: None),
+            patch.object(DashboardScreen, "_fetch_adapter_state", new=lambda self: None),
             patch.object(DashboardScreen, "_subscribe_activity", new=lambda self: None),
         ):
             screen.on_screen_resume(MagicMock())

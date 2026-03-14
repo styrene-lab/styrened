@@ -1,6 +1,7 @@
 """Tests for the main Styrene application."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -51,8 +52,9 @@ async def test_app_initializes_reticulum_on_startup():
         assert all(c in "0123456789abcdef" for c in identity)
 
 
-def test_app_uses_existing_operator_identity():
+def test_app_uses_existing_operator_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Verify app reuses existing operator identity if present."""
+    monkeypatch.setenv("STYRENE_CONFIG_DIR", str(tmp_path / "config"))
     test_identity = b"test_identity_123456789012345678"
     paths.identity_file().parent.mkdir(parents=True, exist_ok=True)
     paths.identity_file().write_bytes(test_identity)
