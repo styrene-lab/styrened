@@ -1,9 +1,10 @@
 ---
 id: tui-startup-ipc-backpressure
 title: TUI Startup IPC Backpressure and Demand Shaping
-status: exploring
+status: implemented
 parent: tui-device-cache-regression-fixes
 open_questions: []
+openspec_change: tui-startup-ipc-backpressure-fix
 issue_type: bug
 priority: 1
 ---

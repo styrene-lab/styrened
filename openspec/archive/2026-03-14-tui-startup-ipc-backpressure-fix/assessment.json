@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tui-startup-ipc-backpressure-fix",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-14T22:06:55.698Z",
+  "summary": "Manual spec verification passed: all 4 startup IPC scenarios are satisfied by staged DeviceCache startup after first paint, sequential Home summary IPC, unread-count summary hydration, and distinct backpressured vs disconnected Home status. Targeted verification passed (53 tests across tests/tui/test_app.py, tests/tui/screens/test_dashboard_tui.py, tests/tui/widgets/test_home_status_bar.py), and live dev-daemon sequential IPC checks succeeded against STYRENE_HOME=/Users/cwilson/.styrene-dev for status, hub, unread-count, and bulk devices queries.",
+  "snapshot": {
+    "gitHead": "5fe41510e1f5812f64d4f5c59f0a42332dccf28e",
+    "fingerprint": "ea79e5d954d7ffaebb80badf62e45334deb6014b4bcf432bc893923d55428fd8",
+    "dirty": false,
+    "scopedPaths": [
+      "src/styrened/tui/app.py",
+      "src/styrened/tui/screens/dashboard.py",
+      "src/styrened/tui/services/device_cache.py",
+      "src/styrened/tui/widgets/home_status_bar.py",
+      "tests/tui/screens/test_dashboard_tui.py",
+      "tests/tui/test_app.py",
+      "tests/tui/widgets/test_home_status_bar.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/tui-startup-ipc-backpressure-fix/design.md",
+        "exists": true,
+        "size": 1865,
+        "sha256": "1fcd33a06ef01a56a595be5360819fda7a0941f2e87b6d79dd8ae19373b1d6ef"
+      },
+      {
+        "path": "openspec/changes/tui-startup-ipc-backpressure-fix/proposal.md",
+        "exists": true,
+        "size": 1023,
+        "sha256": "be26ec26a7ce1510da88feb20d754a3d86d4f2c373058336cd8a75460145057b"
+      },
+      {
+        "path": "openspec/changes/tui-startup-ipc-backpressure-fix/specs/tui/startup-ipc.md",
+        "exists": true,
+        "size": 2448,
+        "sha256": "92ff59d01923e2dd06b440f5c02406178d33009a20215b40a2e7c382c55039c0"
+      },
+      {
+        "path": "openspec/changes/tui-startup-ipc-backpressure-fix/tasks.md",
+        "exists": true,
+        "size": 623,
+        "sha256": "24f4b441aa5d0dc9ca59715cdba5a97145aa2aa59066456f4e5bf3ff3d1d82b1"
+      },
+      {
+        "path": "src/styrened/tui/app.py",
+        "exists": true,
+        "size": 33121,
+        "sha256": "ac1355a40abf039d6439064c8f68292ce29c8bc8cc8d466f2ff4abf030e8d004"
+      },
+      {
+        "path": "src/styrened/tui/screens/dashboard.py",
+        "exists": true,
+        "size": 22876,
+        "sha256": "ee81504acad6aabdca1049c537d7a737997b24a51dd6422a73aa5634ef5f69e8"
+      },
+      {
+        "path": "src/styrened/tui/services/device_cache.py",
+        "exists": true,
+        "size": 9205,
+        "sha256": "e5dbc550c8db73a3a84f525cbcdc807375b529e42512740f8c04c896e9225ec9"
+      },
+      {
+        "path": "src/styrened/tui/widgets/home_status_bar.py",
+        "exists": true,
+        "size": 8406,
+        "sha256": "4158f94ef3a49ec04f93986c08650836cdb95b7a30f2077821848413e531fa49"
+      },
+      {
+        "path": "tests/tui/screens/test_dashboard_tui.py",
+        "exists": true,
+        "size": 25720,
+        "sha256": "8a4ca44a5c6bbb940378ad1f373f07b218cdc4270f6970fdc54d1773587f9979"
+      },
+      {
+        "path": "tests/tui/test_app.py",
+        "exists": true,
+        "size": 4946,
+        "sha256": "0b9dfc0c8e646a05c98408dc37cd2e40acbdaaf70a35b50287b4a5dd900d25f2"
+      },
+      {
+        "path": "tests/tui/widgets/test_home_status_bar.py",
+        "exists": true,
+        "size": 9592,
+        "sha256": "dd13556fb1203a9648e873366282a7ebdaed41ad190e5ae76b0a978819415166"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
