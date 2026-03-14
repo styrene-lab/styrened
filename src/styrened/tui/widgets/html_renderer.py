@@ -41,7 +41,9 @@ _HTML_SIGNATURES = (b"<!doctype", b"<html", b"<head", b"<body")
 _DEFINITIVE_MARKERS = ("#!c=", "#!md", "-=-")
 
 # Ambiguous markers: require ≥2 distinct types in first 20 lines → MICRON
-_AMBIGUOUS_MARKERS = (">", "`", "-=")
+# Note: "-=" is intentionally excluded — its superset "-=-" is a definitive marker,
+# and a bare "-=" is not a valid standalone micron syntax element.
+_AMBIGUOUS_MARKERS = (">", "`")
 
 
 class ContentKind(Enum):
@@ -90,14 +92,14 @@ def detect_content_type(
     lines = content.split("\n", 20)
     ambiguous_found: set[str] = set()
     for line in lines[:20]:
-        stripped = line.strip()
-        # Definitive markers → MICRON immediately
+        # Micron requires markers at column 0 — do NOT strip leading whitespace.
+        # Indented content (e.g. "   #!c=3600") must not trigger false positives.
         for marker in _DEFINITIVE_MARKERS:
-            if stripped.startswith(marker):
+            if line.startswith(marker):
                 return ContentKind.MICRON
-        # Ambiguous markers: collect distinct types
+        # Ambiguous markers: collect distinct types (also column-0 only)
         for marker in _AMBIGUOUS_MARKERS:
-            if stripped.startswith(marker):
+            if line.startswith(marker):
                 ambiguous_found.add(marker)
 
     # Two or more distinct ambiguous marker types → MICRON

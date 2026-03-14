@@ -35,6 +35,21 @@ class TestDetectContentType:
         content = "Just some plain text with no special markers."
         assert detect_content_type(content, "text/plain") == ContentKind.PLAIN
 
+    def test_text_plain_header_with_ambiguous_markers_reaches_heuristic(self):
+        """text/plain falls through to heuristic; 2 distinct ambiguous markers → MICRON."""
+        content = ">Page Heading\n`Literal block line"
+        assert detect_content_type(content, "text/plain") == ContentKind.MICRON
+
+    def test_text_plain_header_with_single_ambiguous_marker_is_plain(self):
+        """text/plain falls through to heuristic; single ambiguous marker type → PLAIN."""
+        content = "> Quoted line one\n> Quoted line two"
+        assert detect_content_type(content, "text/plain") == ContentKind.PLAIN
+
+    def test_text_plain_header_with_definitive_marker_is_micron(self):
+        """text/plain falls through to heuristic; definitive marker → MICRON immediately."""
+        content = "#!c=3600\nSome content here"
+        assert detect_content_type(content, "text/plain") == ContentKind.MICRON
+
     def test_heuristic_html_doctype(self):
         content = "<!DOCTYPE html>\n<html><body>hello</body></html>"
         assert detect_content_type(content) == ContentKind.HTML
@@ -54,13 +69,14 @@ class TestDetectContentType:
         assert detect_content_type(content) == ContentKind.MICRON
 
     def test_heuristic_micron_literal(self):
-        # Single backtick is ambiguous — needs a second distinct marker.
-        content = "`Preformatted text block\n-= Section =-"
+        # Single backtick is ambiguous — needs a second distinct marker (e.g. >).
+        content = "`Preformatted text block\n>Heading"
         assert detect_content_type(content) == ContentKind.MICRON
 
     def test_heuristic_micron_separator(self):
-        # Single -= is ambiguous — needs a second distinct marker.
-        content = "-= Section Break =-\n>Heading"
+        # Micron separator is definitive (-=-), so one occurrence → MICRON.
+        # "-=" alone is not a standalone micron element; use -=- which is definitive.
+        content = "-=-\n>Heading"
         assert detect_content_type(content) == ContentKind.MICRON
 
     def test_heuristic_micron_cache_directive(self):
@@ -99,6 +115,18 @@ class TestDetectContentType:
         """-=- is definitive — MICRON without any other markers."""
         content = "-=-\nSome content\n-=-"
         assert detect_content_type(content) == ContentKind.MICRON
+
+    def test_triple_dash_not_confused_with_ambiguous_dash_eq(self):
+        """-=- triggers definitive MICRON; removing '-=' from ambiguous list
+        eliminates the dual-membership fragility (W2 guard test)."""
+        # Only one ambiguous marker type (>) — would be PLAIN if -=- weren't definitive
+        content = "-=-\n>Some heading"
+        assert detect_content_type(content) == ContentKind.MICRON
+
+    def test_indented_definitive_marker_does_not_trigger_micron(self):
+        """Markers not at column 0 must not cause false MICRON detection (W1 guard)."""
+        content = "   #!c=3600\nSome indented code comment"
+        assert detect_content_type(content) == ContentKind.PLAIN
 
     def test_two_distinct_ambiguous_markers_is_micron(self):
         """Two distinct ambiguous marker types in first 20 lines → MICRON."""
