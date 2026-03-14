@@ -417,21 +417,16 @@ class TestDashboardDaemonEventRouting:
             yield (IPCMessageType.EVENT_ACTIVITY, {"type": "pqc_established", "peer_name": "test"})
 
         bridge.iter_events = _iter_events
-        mock_app = MagicMock()
-        mock_app.post_message = MagicMock()
+        screen.post_message = MagicMock()
 
-        with (
-            patch.object(
-                DashboardScreen, "_ipc_bridge",
-                new_callable=PropertyMock, return_value=bridge,
-            ),
-            patch.object(type(screen), "app",
-                         new_callable=PropertyMock, return_value=mock_app),
+        with patch.object(
+            DashboardScreen, "_ipc_bridge",
+            new_callable=PropertyMock, return_value=bridge,
         ):
             await screen._subscribe_activity()
 
-        mock_app.post_message.assert_called_once()
-        posted = mock_app.post_message.call_args[0][0]
+        screen.post_message.assert_called_once()
+        posted = screen.post_message.call_args[0][0]
         assert isinstance(posted, DaemonEvent)
         assert posted.event_type == "link_changed"
         assert posted.action == "pqc_established"
