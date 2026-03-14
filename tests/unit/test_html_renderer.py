@@ -139,6 +139,29 @@ class TestPostprocessLinks:
         result = _postprocess_links(md)
         assert "\\\\" in result  # backslash should be escaped
 
+    def test_angle_bracket_url_stripped(self):
+        """html2text protect_links=True wraps URLs in <…>; angle brackets must be stripped."""
+        md = "[text](<https://example.com>)"
+        result = _postprocess_links(md)
+        assert "navigate_link('https://example.com')" in result
+        assert "<" not in result.split("navigate_link")[1].split(")")[0]
+
+    def test_url_with_double_quote_escaped(self):
+        """Double-quote in URL must be escaped to avoid terminating @click attribute."""
+        md = '[link](https://example.com/search?q="hello")'
+        result = _postprocess_links(md)
+        assert '\\"hello\\"' in result
+        assert "navigate_link" in result
+
+    def test_url_with_double_quote_does_not_break_markup(self):
+        """Rendered markup must be parseable even when URL contains a double-quote."""
+        md = '[link](https://example.com/search?q="test")'
+        result = _postprocess_links(md)
+        from rich.text import Text
+        # Should not raise
+        text = Text.from_markup(result)
+        assert "▸ link" in text.plain
+
 
 class TestRenderHtmlToRich:
     """End-to-end HTML → Rich rendering."""

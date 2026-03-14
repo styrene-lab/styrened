@@ -123,7 +123,8 @@ def _postprocess_links(markdown: str) -> str:
     Scans *markdown* for ``[text](url)`` patterns.  For each match:
 
     * Image syntax ``![alt](url)`` is skipped (negative lookbehind in ``_MD_LINK_RE``).
-    * Empty-label links ``[](url)`` are skipped.
+    * Empty-label links ``[](url)`` are rejected by ``_MD_LINK_RE`` which requires
+      ``[^\\[\\]]+`` (one or more non-bracket characters) in the label group.
     * Real links are converted to::
 
           [@click="navigate_link('url')"][underline #5ac8fa]▸ text[/][/]
@@ -152,12 +153,14 @@ def _postprocess_links(markdown: str) -> str:
 
         text = match.group(1).strip()
         url = match.group(2).strip()
-        if not text:
-            # Empty label — treat as literal text
-            parts.append(_escape_rich_markup(match.group(0)))
-            continue
-        # Escape URL for Rich markup safety
-        url_safe = url.replace("\\", "\\\\").replace("'", "\\'")
+        # Strip angle brackets added by html2text's protect_links=True.
+        # html2text wraps URLs as <https://example.com> to prevent breakage;
+        # _MD_LINK_RE captures them verbatim via [^)]+ — strip before use.
+        if url.startswith("<") and url.endswith(">"):
+            url = url[1:-1]
+        # Escape URL for Rich markup safety: backslash, single-quote, double-quote.
+        # An unescaped `"` would terminate the [@click="..."] attribute early.
+        url_safe = url.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
         # Match micron_parser.py link format exactly
         parts.append(
             f'[@click="navigate_link(\'{url_safe}\')"]'
