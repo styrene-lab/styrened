@@ -492,9 +492,10 @@ class StyreneApp(App[None]):
         # All RPC/chat flows through the IPC bridge.
         self.log.info("IPC mode active — all service calls via IPCBridge")
 
-        # Start the unified device cache now that we have a bridge reference.
+        # Wire the unified device cache to the live bridge.
+        # Bulk priming is started after the initial screen paints so Home
+        # liveness/status work is not coupled to startup hydration.
         self.device_cache.update_bridge(self.bridge)
-        self.device_cache.start(self)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -673,6 +674,12 @@ class StyreneApp(App[None]):
             )
         else:
             self.push_screen("dashboard")
+
+        self.call_after_refresh(self._start_device_cache)
+
+    def _start_device_cache(self) -> None:
+        """Start shared device cache priming after initial UI paint."""
+        self.device_cache.start(self)
 
     def _on_wizard_complete(self, result: bool | None) -> None:
         """Handle wizard completion.

@@ -19,14 +19,13 @@ Usage::
 Lifecycle::
 
     cache = DeviceCache(bridge=..., interval=15.0)
-    cache.start(app)   # registers refresh timer; reads initial data
-    cache.stop()       # cancels timer
+    cache.start(app)   # registers delayed initial refresh + periodic updates
+    cache.stop()       # cancels timers
     await cache.refresh()  # on-demand immediate refresh
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +39,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _DEFAULT_INTERVAL = 15.0   # seconds between background refreshes
+_DEFAULT_PRIME_DELAY = 0.25  # seconds after first paint before cache priming starts
 
 
 class DeviceCache:
@@ -74,32 +74,35 @@ class DeviceCache:
         self,
         bridge: Any | None = None,
         interval: float = _DEFAULT_INTERVAL,
+        prime_delay: float = _DEFAULT_PRIME_DELAY,
     ) -> None:
         self._bridge = bridge
         self._interval = interval
+        self._prime_delay = prime_delay
         self._devices: list[MeshDevice] = []
         self._app: App | None = None
         self._timer: Any = None
+        self._prime_timer: Any = None
 
     # -------------------------------------------------------------------------
     # Lifecycle
     # -------------------------------------------------------------------------
 
     def start(self, app: "App") -> None:
-        """Attach to *app*, run an immediate first refresh, and schedule periodic updates.
+        """Attach to *app* and schedule delayed priming after first paint.
 
         Idempotent — safe to call again on IPC reconnect; cancels any existing
-        timer before starting a new one.
+        timers before starting new ones.
         """
-        if self._timer is not None:
-            self._timer.stop()
-            self._timer = None
+        self.stop()
         self._app = app
-        # Fire-and-forget initial load; timer starts after it completes.
-        app.run_worker(self._initial_load(), exclusive=False, group="device-cache")
+        app.call_after_refresh(self._schedule_initial_load)
 
     def stop(self) -> None:
-        """Cancel the refresh timer."""
+        """Cancel the refresh timers."""
+        if self._prime_timer is not None:
+            self._prime_timer.stop()
+            self._prime_timer = None
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
@@ -135,10 +138,25 @@ class DeviceCache:
         """On-demand refresh — fetches immediately and posts DevicesUpdated."""
         await self._do_refresh()
 
+    def _schedule_initial_load(self) -> None:
+        """Schedule the first bulk refresh after the app has painted once."""
+        app = self._app
+        if app is None:
+            return
+        self._prime_timer = app.set_timer(self._prime_delay, self._run_initial_refresh)
+
+    def _run_initial_refresh(self) -> None:
+        """Kick off delayed bulk hydration in a background worker."""
+        self._prime_timer = None
+        app = self._app
+        if app is None:
+            return
+        app.run_worker(self._initial_load(), exclusive=False, group="device-cache")
+
     async def _initial_load(self) -> None:
         """Initial fetch; schedule the periodic timer afterwards."""
         await self._do_refresh()
-        if self._app is not None:
+        if self._app is not None and self._timer is None:
             self._timer = self._app.set_interval(self._interval, self._on_timer)
 
     def _on_timer(self) -> None:
