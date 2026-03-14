@@ -48,20 +48,67 @@ class TestDetectContentType:
         assert detect_content_type(content) == ContentKind.HTML
 
     def test_heuristic_micron_heading(self):
-        content = ">Welcome to My Page\n\nSome text here."
+        # Single > is ambiguous — needs a second distinct marker for MICRON.
+        # A heading plus a literal block qualifies.
+        content = ">Welcome to My Page\n`Literal block here"
         assert detect_content_type(content) == ContentKind.MICRON
 
     def test_heuristic_micron_literal(self):
-        content = "`Preformatted text block"
+        # Single backtick is ambiguous — needs a second distinct marker.
+        content = "`Preformatted text block\n-= Section =-"
         assert detect_content_type(content) == ContentKind.MICRON
 
     def test_heuristic_micron_separator(self):
-        content = "-= Section Break =-"
+        # Single -= is ambiguous — needs a second distinct marker.
+        content = "-= Section Break =-\n>Heading"
         assert detect_content_type(content) == ContentKind.MICRON
 
     def test_heuristic_micron_cache_directive(self):
+        # #!c= is a definitive marker — MICRON on its own.
         content = "#!c=3600\n>Page Title"
         assert detect_content_type(content) == ContentKind.MICRON
+
+    # --- Spec scenarios: micron heuristic false-positive reduction ---
+
+    def test_email_quote_single_gt_is_plain(self):
+        """Email quotes (> prefix) with no other micron markers → PLAIN."""
+        content = "> On Tuesday, Bob wrote:\n> This is a quoted email"
+        assert detect_content_type(content) == ContentKind.PLAIN
+
+    def test_code_fence_single_backtick_is_plain(self):
+        """Code fences (backtick prefix) with no other micron markers → PLAIN."""
+        content = "```python\nprint(\"hello\")\n```"
+        assert detect_content_type(content) == ContentKind.PLAIN
+
+    def test_single_gt_no_other_markers_is_plain(self):
+        """A lone > with no other markers must not be mistaken for micron."""
+        content = ">Just a blockquote\n\nNothing else here"
+        assert detect_content_type(content) == ContentKind.PLAIN
+
+    def test_definitive_marker_alone_is_micron(self):
+        """#!c= is definitive — MICRON without any other markers."""
+        content = "#!c=3600\n>Page Title\n\nSome text"
+        assert detect_content_type(content) == ContentKind.MICRON
+
+    def test_definitive_marker_md_alone_is_micron(self):
+        """#!md is definitive — MICRON without any other markers."""
+        content = "#!md\nSome text here"
+        assert detect_content_type(content) == ContentKind.MICRON
+
+    def test_definitive_marker_triple_dash_alone_is_micron(self):
+        """-=- is definitive — MICRON without any other markers."""
+        content = "-=-\nSome content\n-=-"
+        assert detect_content_type(content) == ContentKind.MICRON
+
+    def test_two_distinct_ambiguous_markers_is_micron(self):
+        """Two distinct ambiguous marker types in first 20 lines → MICRON."""
+        content = ">Page Title\n-= Section =-\n`Literal block`"
+        assert detect_content_type(content) == ContentKind.MICRON
+
+    def test_same_ambiguous_marker_repeated_is_plain(self):
+        """Repeated occurrences of the same ambiguous marker type → PLAIN."""
+        content = "> Quote one\n> Quote two\n> Quote three"
+        assert detect_content_type(content) == ContentKind.PLAIN
 
     def test_heuristic_plain_default(self):
         content = "This is just ordinary text without any markers."

@@ -36,7 +36,12 @@ _MD_LINK_RE = re.compile(
 
 # Content-type detection patterns
 _HTML_SIGNATURES = (b"<!doctype", b"<html", b"<head", b"<body")
-_MICRON_MARKERS = ("`", ">", "-=", "-=-", "#!c=", "#!md")
+
+# Definitive micron markers: any single occurrence → MICRON
+_DEFINITIVE_MARKERS = ("#!c=", "#!md", "-=-")
+
+# Ambiguous markers: require ≥2 distinct types in first 20 lines → MICRON
+_AMBIGUOUS_MARKERS = (">", "`", "-=")
 
 
 class ContentKind(Enum):
@@ -81,13 +86,23 @@ def detect_content_type(
         if sig in sample:
             return ContentKind.HTML
 
-    # Heuristic: check for micron markers in first few lines
+    # Heuristic: check for micron markers in first 20 lines
     lines = content.split("\n", 20)
+    ambiguous_found: set[str] = set()
     for line in lines[:20]:
         stripped = line.strip()
-        for marker in _MICRON_MARKERS:
+        # Definitive markers → MICRON immediately
+        for marker in _DEFINITIVE_MARKERS:
             if stripped.startswith(marker):
                 return ContentKind.MICRON
+        # Ambiguous markers: collect distinct types
+        for marker in _AMBIGUOUS_MARKERS:
+            if stripped.startswith(marker):
+                ambiguous_found.add(marker)
+
+    # Two or more distinct ambiguous marker types → MICRON
+    if len(ambiguous_found) >= 2:
+        return ContentKind.MICRON
 
     # Default: treat as plain text
     return ContentKind.PLAIN
