@@ -265,14 +265,7 @@ class TestDashboardStatusBarWiring:
             "active_links": 2,
         })
         bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
-        bridge.get_core_config = AsyncMock(return_value={})
-        bridge.get_devices = AsyncMock(return_value=[
-            {"device_type": "styrene_node", "identity_hash": "abc"},
-            {"device_type": "lxmf_peer", "identity_hash": "def"},
-        ])
-        bridge.get_conversations = AsyncMock(return_value=[
-            {"identity_hash": "abc", "unread_count": 3},
-        ])
+        bridge.get_unread_counts = AsyncMock(return_value={"counts": {"abc": 3}})
 
         def query_one_side_effect(widget_type):
             from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
@@ -297,11 +290,13 @@ class TestDashboardStatusBarWiring:
             await screen._fetch_daemon_status()
 
         assert status_bar.daemon_connected is True
+        assert status_bar.ipc_backpressured is False
         assert status_bar.rns_online is True
         assert status_bar.interface_count == 2
         assert status_bar.daemon_uptime == 3600.0
         assert status_bar.active_links == 2
         assert status_bar.unread_count == 3
+        bridge.get_unread_counts.assert_awaited_once_with()
 
     @pytest.mark.asyncio
     async def test_fetch_daemon_status_marks_disconnected_on_failure(self):
@@ -312,9 +307,7 @@ class TestDashboardStatusBarWiring:
 
         bridge.get_status = AsyncMock(side_effect=RuntimeError("boom"))
         bridge.get_hub_status = AsyncMock(return_value={})
-        bridge.get_core_config = AsyncMock(return_value={})
-        bridge.get_devices = AsyncMock(return_value=[])
-        bridge.get_conversations = AsyncMock(return_value=[])
+        bridge.get_unread_counts = AsyncMock(return_value={})
 
         with (
             patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
@@ -323,6 +316,90 @@ class TestDashboardStatusBarWiring:
             await screen._fetch_daemon_status()
 
         assert status_bar.daemon_connected is False
+        assert status_bar.ipc_backpressured is False
+
+    @pytest.mark.asyncio
+    async def test_fetch_daemon_status_keeps_connected_when_unread_summary_backpressured(self):
+        """Unread summary lag should degrade IPC, not mark the daemon disconnected."""
+        screen = DashboardScreen()
+        bridge = MagicMock()
+        status_bar = MagicMock()
+        node_table = MagicMock()
+
+        bridge.get_status = AsyncMock(return_value={
+            "rns_initialized": True,
+            "interfaces": [{"name": "tcp0"}],
+            "uptime": 600,
+            "transport_enabled": False,
+            "propagation_enabled": False,
+            "active_links": 1,
+        })
+        bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
+        bridge.get_unread_counts = AsyncMock(side_effect=RuntimeError("slow summary path"))
+
+        def query_one_side_effect(widget_type):
+            from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+            from styrened.tui.widgets.home_status_bar import HomeStatusBar
+            if widget_type is HomeStatusBar or widget_type == HomeStatusBar:
+                return status_bar
+            if widget_type is HomeNodeSummaryTable or widget_type == HomeNodeSummaryTable:
+                return node_table
+            return MagicMock()
+
+        app = MagicMock()
+        app.device_cache.get.return_value = [
+            {"device_type": "styrene_node", "identity_hash": "abc", "destination_hash": "abc", "name": "Alpha", "last_announce": 1},
+        ]
+
+        with (
+            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
+            patch.object(screen, "query_one", side_effect=query_one_side_effect),
+        ):
+            await screen._fetch_daemon_status()
+
+        assert status_bar.daemon_connected is True
+        assert status_bar.ipc_backpressured is True
+        assert status_bar.unread_count == 0
+
+    @pytest.mark.asyncio
+    async def test_fetch_daemon_status_primes_device_cache_in_background(self):
+        """Empty cache should trigger async priming without blocking status success."""
+        screen = DashboardScreen()
+        bridge = MagicMock()
+        status_bar = MagicMock()
+        node_table = MagicMock()
+        app = MagicMock()
+        app.device_cache.get.return_value = []
+        app.device_cache.refresh = AsyncMock(return_value=None)
+        screen.run_worker = MagicMock()
+
+        bridge.get_status = AsyncMock(return_value={"rns_initialized": True, "interfaces": [], "uptime": 60})
+        bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
+        bridge.get_unread_counts = AsyncMock(return_value={"counts": {}})
+
+        def query_one_side_effect(widget_type):
+            from styrened.tui.widgets.home_node_summary import HomeNodeSummaryTable
+            from styrened.tui.widgets.home_status_bar import HomeStatusBar
+            if widget_type is HomeStatusBar or widget_type == HomeStatusBar:
+                return status_bar
+            if widget_type is HomeNodeSummaryTable or widget_type == HomeNodeSummaryTable:
+                return node_table
+            return MagicMock()
+
+        with (
+            patch.object(DashboardScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(DashboardScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge),
+            patch.object(screen, "query_one", side_effect=query_one_side_effect),
+        ):
+            await screen._fetch_daemon_status()
+
+        assert status_bar.daemon_connected is True
+        assert screen.run_worker.call_count == 1
+        args, kwargs = screen.run_worker.call_args
+        assert kwargs["group"] == "dashboard-device-prime"
+        assert kwargs["exclusive"] is True
+        args[0].close()
 
 
 class TestDashboardActivitySubscription:

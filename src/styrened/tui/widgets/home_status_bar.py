@@ -43,6 +43,7 @@ class HomeStatusBar(Static):
     styrene_mesh_count: reactive[int] = reactive(0)
     total_device_count: reactive[int] = reactive(0)
     daemon_connected: reactive[bool] = reactive(True)
+    ipc_backpressured: reactive[bool] = reactive(False)
     daemon_uptime: reactive[float] = reactive(0.0)
     unread_count: reactive[int] = reactive(0)
     error_state: reactive[RNSErrorState | None] = reactive(None)
@@ -117,11 +118,12 @@ class HomeStatusBar(Static):
             segments.append(Text(f"LNK {self.active_links}", style=c.medium))
 
         # ── IPC ───────────────────────────────────────────────────────────
-        # Warning when disconnected; warning when recently restarted (< 5 min)
-        # as a heads-up that the daemon may still be settling; dim otherwise.
+        # Distinguish hard disconnect from backpressured/degraded bulk paths.
         if self.daemon_connected:
             uptime_str = self._format_uptime(self.daemon_uptime)
-            if self.daemon_uptime > 0 and self.daemon_uptime < 300:
+            if self.ipc_backpressured:
+                segments.append(Text(f"IPC ◐ {uptime_str}", style=f"bold {c.color_warning}"))
+            elif self.daemon_uptime > 0 and self.daemon_uptime < 300:
                 segments.append(Text(f"IPC ● {uptime_str}", style=f"bold {c.color_warning}"))
             else:
                 segments.append(Text(f"IPC ● {uptime_str}", style=c.dim))
@@ -178,6 +180,9 @@ class HomeStatusBar(Static):
         self._rerender()
 
     def watch_daemon_connected(self) -> None:
+        self._rerender()
+
+    def watch_ipc_backpressured(self) -> None:
         self._rerender()
 
     def watch_daemon_uptime(self) -> None:

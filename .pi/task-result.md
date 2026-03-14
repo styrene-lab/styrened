@@ -2,32 +2,31 @@
 
 **Status:** SUCCESS
 
-**Summary:** Repaired runtime cache-readiness handling in the Home, Nodes, and peer detail screens so an existing-but-unprimed `DeviceCache` no longer forces empty-state or not-found behavior, and dashboard status refresh no longer reports a false daemon disconnect when bare-screen app access to `device_cache` is unavailable.
+**Summary:** Refactored Home startup refresh to use cheap summary IPC for first paint, switched unread hydration from full conversation enumeration to unread-count summaries, and separated degraded/backpressured IPC from hard disconnects in the Home status bar.
 
 **Artifacts:**
-- `src/styrened/tui/screens/dashboard.py` — added guarded cache access helper used by `_fetch_daemon_status()` so cache lookup failures do not trip the disconnected path
-- `src/styrened/tui/screens/exploration.py` — `_load_all_devices()` now falls back to `discover_devices()` when the shared cache exists but is empty/unprimed
-- `src/styrened/tui/screens/mesh_device_detail.py` — live peer lookup and NomadNet destination resolution now fall back to `discover_devices()` when cache state is empty
+- `src/styrened/tui/screens/dashboard.py` — first-paint refresh now relies on `get_status()`, `get_hub_status()`, and `get_unread_counts()`; background device-cache priming is kicked off when cache is empty; unread-summary failures mark IPC as backpressured without forcing disconnect
+- `src/styrened/tui/widgets/home_status_bar.py` — added distinct `ipc_backpressured` state and rendering (`IPC ◐ ...`) separate from disconnected (`IPC ○`)
+- `tests/tui/screens/test_dashboard_tui.py` — updated status wiring tests for unread summary hydration, degraded-vs-disconnected behavior, and async device-cache priming
+- `tests/tui/widgets/test_home_status_bar.py` — added coverage for the new backpressured IPC indicator
 
 **Decisions Made:**
-- Treat an empty shared `DeviceCache` as "not ready yet" rather than authoritative absence for discovery-backed screen flows
-- Keep dashboard status connectivity driven by successful bridge calls; cache access is now best-effort auxiliary data only
-- Prefer localized runtime fallbacks inside the affected screens instead of changing `DeviceCache` service semantics in this task
+- Treat daemon liveness as driven only by cheap status/hub IPC calls; unread hydration and cache priming are non-critical follow-up paths
+- Use `get_unread_counts()` instead of `get_conversations()` for Home summary state so slow conversation enumeration cannot stall first paint
+- Prime `DeviceCache` in the background when empty instead of blocking Home status refresh on a bulk device fetch
 
 **Assumptions:**
-- `discover_devices()` remains a valid fallback data source in the startup/test contexts covered by the regression spec
-- An empty cache during first render is more likely to mean "unprimed" than "the mesh is definitively empty"
+- An empty shared `DeviceCache` during startup means “not primed yet” often enough to justify opportunistic background refresh
+- `get_unread_counts()` may return either `{counts: ...}` or a raw mapping, so Home accepts both shapes defensively
 
 **Interfaces Published:**
-- None
+- `HomeStatusBar.ipc_backpressured` reactive flag for degraded/backpressured IPC rendering
 
 **Verification:**
-- Command: `python3 -m pytest tests/tui/screens/test_dashboard_tui.py -k 'fetch_daemon_status' -q`
-- Output: `2 passed, 22 deselected in 0.35s`
-- Command: `python3 -m pytest tests/tui/screens/test_device_detail_tui.py -k 'device_not_found_in_either_source or device_loaded_from_live_discovery_when_cache_empty' -q`
-- Output: `1 passed, 36 deselected in 0.21s`
-- Command: `python3 -m pytest tests/tui/screens/test_exploration.py -k 'screen_resume_resumes_refresh_timer_and_refreshes_nodes or each_tab_has_table' -q`
-- Output: `2 passed, 26 deselected in 1.37s`
+- Command: `python3 -m pytest tests/tui/widgets/test_home_status_bar.py tests/tui/screens/test_dashboard_tui.py -q`
+- Output: `42 passed in 6.38s`
+- Command: `python3 -m py_compile src/styrened/tui/screens/dashboard.py src/styrened/tui/widgets/home_status_bar.py tests/tui/screens/test_dashboard_tui.py tests/tui/widgets/test_home_status_bar.py`
+- Output: `(no output)`
 - Command: `mypy .`
-- Output: `Failed with 483 pre-existing errors outside task scope (examples: src/styrened/ipc/bridge.py, src/styrened/tui/widgets/glitch_logo.py, src/styrened/tui/screens/settings.py). The three scoped screen edits did not introduce the reported repository-wide failures.`
-- Edge cases: bare-screen/unit contexts without mounted app trees; cache present but empty on first render; peer detail/NomadNet resolution when cache exists but has not populated yet
+- Output: `Failed with 482 pre-existing repository-wide errors, including existing failures in src/styrened/ipc/bridge.py, src/styrened/tui/widgets/glitch_logo.py, src/styrened/tui/screens/settings.py, and many test modules outside this task scope. Scoped dashboard/home-status changes were validated with targeted pytest and py_compile, but the required repo-wide mypy gate is not currently green in this worktree.`
+- Edge cases: unread-summary IPC failure after successful daemon status; empty/unprimed device cache on first Home paint; repeated device-cache updates triggering Home refresh without blocking initial status render
