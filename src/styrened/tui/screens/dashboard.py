@@ -84,6 +84,23 @@ class DashboardScreen(Screen[None]):
         except Exception:
             return None
 
+    def _get_cached_devices(self) -> list[Any]:
+        """Return cached devices without letting bare-screen app access fail status refresh."""
+        try:
+            cache = getattr(self.app, "device_cache", None)
+        except Exception:
+            return []
+
+        if cache is None:
+            return []
+
+        try:
+            devices = cache.get()
+        except Exception:
+            return []
+
+        return devices if isinstance(devices, list) else []
+
     def on_mount(self) -> None:
         """Initialise Home: start discovery, then fetch daemon state."""
         start_discovery()
@@ -317,10 +334,10 @@ class DashboardScreen(Screen[None]):
                 status = await tasks["status"]
                 hub_data = await tasks["hub"]
                 core_config = await tasks["config"]
-                # Device list comes from the shared app-level DeviceCache —
-                # no separate IPC call needed on every dashboard poll cycle.
-                cache = getattr(self.app, "device_cache", None)
-                all_devices = cache.get() if cache is not None else []
+                # Device list comes from the shared app-level DeviceCache when
+                # available, but cache access must not poison status refresh in
+                # bare-screen unit contexts.
+                all_devices = self._get_cached_devices()
             except Exception:
                 try:
                     bar = self.query_one(HomeStatusBar)
