@@ -638,7 +638,7 @@ class ExchangeScreen(Screen[None]):
                     classes="explore-inline-browser",
                 )
                 if device is not None:
-                    browser._mesh_device = device
+                    browser.set_mesh_device(device)
                 browser_section.mount(browser)
         except Exception as exc:
             logger.warning("action_preview_page failed: %s", exc)

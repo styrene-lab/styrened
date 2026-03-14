@@ -256,3 +256,219 @@ class TestLabelsAndIndicators:
         assert _TRANSPORT_LABELS[Transport.NOMADNET] == "NomadNet"
         assert _TRANSPORT_LABELS[Transport.I2P] == "I2P"
         assert _TRANSPORT_LABELS[Transport.HTTPS] == "HTTPS"
+
+
+# ---------------------------------------------------------------------------
+# check_action — headless gating
+# ---------------------------------------------------------------------------
+
+class TestCheckAction:
+    """check_action returns False for open_in_browser when headless."""
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=True)
+    def test_headless_hides_open_in_browser(self, _mock):
+        w = PageBrowserWidget()
+        result = w.check_action("open_in_browser", ())
+        assert result is False
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=False)
+    def test_non_headless_shows_open_in_browser(self, _mock):
+        w = PageBrowserWidget()
+        result = w.check_action("open_in_browser", ())
+        assert result is True
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=True)
+    def test_headless_allows_other_actions(self, _mock):
+        w = PageBrowserWidget()
+        assert w.check_action("reload", ()) is True
+        assert w.check_action("go_back", ()) is True
+        assert w.check_action("cycle_transport", ()) is True
+
+    @mock.patch.dict(os.environ, {"SSH_CONNECTION": "1.2.3.4 22 5.6.7.8 22"}, clear=True)
+    @mock.patch("os.uname")
+    def test_macos_ssh_check_action_returns_true(self, mock_uname):
+        """macOS is never headless, so check_action returns True."""
+        mock_uname.return_value = mock.Mock(sysname="Darwin")
+        w = PageBrowserWidget()
+        assert w.check_action("open_in_browser", ()) is True
+
+    @mock.patch.dict(os.environ, {"SSH_CONNECTION": "1.2.3.4 22 5.6.7.8 22"}, clear=True)
+    @mock.patch("os.uname")
+    def test_linux_ssh_no_display_check_action_returns_false(self, mock_uname):
+        """Linux over SSH without display returns False."""
+        mock_uname.return_value = mock.Mock(sysname="Linux")
+        w = PageBrowserWidget()
+        assert w.check_action("open_in_browser", ()) is False
+
+
+# ---------------------------------------------------------------------------
+# action_open_in_browser URL rewriting
+# ---------------------------------------------------------------------------
+
+class TestOpenInBrowserUrlRewriting:
+    """action_open_in_browser rewrites .i2p URLs to localhost proxy."""
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=False)
+    def test_i2p_url_rewritten_to_proxy(self, _mock):
+        w = PageBrowserWidget(external_url="http://something.b32.i2p/page")
+        w._external_url = "http://something.b32.i2p/page"
+        opened_urls = []
+        fake_app = mock.Mock()
+        fake_app.open_url = lambda u: opened_urls.append(u)
+        with mock.patch.object(type(w), "app", new_callable=lambda: property(lambda self: fake_app)):
+            w.action_open_in_browser()
+        assert len(opened_urls) == 1
+        assert opened_urls[0] == "http://localhost:4444/http://something.b32.i2p/page"
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=False)
+    def test_https_url_passed_through_unchanged(self, _mock):
+        w = PageBrowserWidget(external_url="https://styrene.dev/docs")
+        w._external_url = "https://styrene.dev/docs"
+        opened_urls = []
+        fake_app = mock.Mock()
+        fake_app.open_url = lambda u: opened_urls.append(u)
+        with mock.patch.object(type(w), "app", new_callable=lambda: property(lambda self: fake_app)):
+            w.action_open_in_browser()
+        assert opened_urls == ["https://styrene.dev/docs"]
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=False)
+    def test_nomadnet_path_shows_notification_no_url_opened(self, _mock):
+        w = PageBrowserWidget(destination_hash="a" * 32, initial_path="/page/index.mu")
+        w._external_url = ""
+        w.current_path = "/page/index.mu"
+        notifications = []
+        fake_app = mock.Mock()
+        w.notify = lambda msg, **kw: notifications.append(msg)
+        with mock.patch.object(type(w), "app", new_callable=lambda: property(lambda self: fake_app)):
+            w.action_open_in_browser()
+        assert any("NomadNet" in n for n in notifications)
+        fake_app.open_url.assert_not_called()
+
+    @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=True)
+    def test_headless_shows_warning_no_url_opened(self, _mock):
+        w = PageBrowserWidget(external_url="https://example.com")
+        w._external_url = "https://example.com"
+        notifications = []
+        w.notify = lambda msg, **kw: notifications.append(msg)
+        fake_app = mock.Mock()
+        with mock.patch.object(type(w), "app", new_callable=lambda: property(lambda self: fake_app)):
+            w.action_open_in_browser()
+        assert any("headless" in n.lower() or "browser" in n.lower() for n in notifications)
+        assert fake_app.open_url.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# action_cycle_transport — single worker, direct field assignment
+# ---------------------------------------------------------------------------
+
+class TestCycleTransportFields:
+    """action_cycle_transport sets fields directly without calling set_external_url."""
+
+    def _make_widget_with_nomadnet_and_i2p(self):
+        w = PageBrowserWidget(destination_hash="nomadnet_dest_hash")
+        w._external_url = ""
+        w._active_transport = Transport.NOMADNET
+        dev = _FakeDevice(
+            nomadnet_destination_hash="nomadnet_dest_hash",
+            b32_address="something.b32.i2p",
+        )
+        w._mesh_device = dev
+        return w
+
+    def test_cycle_to_i2p_sets_external_url_directly(self):
+        w = self._make_widget_with_nomadnet_and_i2p()
+        workers_started = []
+        w.run_worker = lambda coro, **kw: workers_started.append(coro)
+        # set_external_url would also call run_worker — track that it's NOT called
+        set_external_url_calls = []
+        w.set_external_url = lambda u: set_external_url_calls.append(u)
+
+        w.notify = mock.Mock()
+        w.action_cycle_transport()
+
+        assert w._active_transport == Transport.I2P
+        assert w._external_url == "http://something.b32.i2p/"
+        assert w.destination_hash == ""
+        assert w._history == []
+        # Exactly one worker started (no double dispatch from set_external_url)
+        assert len(workers_started) == 1
+        assert len(set_external_url_calls) == 0
+
+    def test_cycle_to_nomadnet_sets_destination_directly(self):
+        w = PageBrowserWidget(external_url="http://something.b32.i2p/")
+        w._external_url = "http://something.b32.i2p/"
+        w._active_transport = Transport.I2P
+        dev = _FakeDevice(
+            nomadnet_destination_hash="nomadnet_dest_hash",
+            b32_address="something.b32.i2p",
+        )
+        w._mesh_device = dev
+        workers_started = []
+        w.run_worker = lambda coro, **kw: workers_started.append(coro)
+        set_external_url_calls = []
+        w.set_external_url = lambda u: set_external_url_calls.append(u)
+        w.notify = mock.Mock()
+
+        w.action_cycle_transport()
+
+        assert w._active_transport == Transport.NOMADNET
+        assert w._external_url == ""
+        assert w.destination_hash == "nomadnet_dest_hash"
+        assert w._history == []
+        assert len(workers_started) == 1
+        assert len(set_external_url_calls) == 0
+
+    def test_cycle_clears_history(self):
+        w = self._make_widget_with_nomadnet_and_i2p()
+        w._history = ["/page/a.mu", "/page/b.mu"]
+        w.run_worker = lambda coro, **kw: None
+        w.notify = mock.Mock()
+        w.action_cycle_transport()
+        assert w._history == []
+
+
+# ---------------------------------------------------------------------------
+# _last_content_kind set on all render paths
+# ---------------------------------------------------------------------------
+
+class TestContentKindUnconditional:
+    """_last_content_kind is set even when structured renderer is used."""
+
+    def test_detect_content_type_called_before_structured_render(self):
+        """The content-type detection runs unconditionally, not only on fallback path."""
+        from styrened.tui.widgets.page_browser import detect_content_type
+        import asyncio
+
+        w = PageBrowserWidget(destination_hash="a" * 32)
+        # Simulate a result with both structured_data AND content_type
+        fake_result = {
+            "status": "ok",
+            "content": "<html><body>hi</body></html>",
+            "content_type": "text/html",
+            "transfer_time": 0.1,
+            "content_length": 26,
+            "structured_data": {"title": "Test"},
+            "page_metadata": {"page_type": "node_info"},
+        }
+        detected_kinds = []
+
+        original_detect = detect_content_type
+
+        def _tracking_detect(content, ct):
+            kind = original_detect(content, ct)
+            detected_kinds.append(kind)
+            return kind
+
+        bridge = mock.AsyncMock()
+        bridge.fetch_page = mock.AsyncMock(return_value=fake_result)
+
+        with mock.patch("styrened.tui.widgets.page_browser.detect_content_type", _tracking_detect):
+            with mock.patch("styrened.tui.widgets.page_browser.render_structured_page", return_value="rendered"):
+                with mock.patch.object(type(w), "_ipc_bridge", new_callable=lambda: property(lambda self: bridge)):
+                    with mock.patch.object(w, "query_one", side_effect=Exception("no DOM")):
+                        asyncio.run(w._load_page("/page/index.mu"))
+
+        # detect_content_type was called exactly once
+        assert len(detected_kinds) == 1
+        assert detected_kinds[0] == ContentKind.HTML
+        assert w._last_content_kind == ContentKind.HTML
