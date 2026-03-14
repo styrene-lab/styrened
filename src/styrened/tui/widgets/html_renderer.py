@@ -5,9 +5,13 @@ suitable for display in PageBrowserWidget's _PageBody static widget.
 
 The pipeline:
     1. html2text converts HTML → Markdown (preserving links, headings, emphasis)
-    2. Post-processing converts Markdown [text](url) links into
-       [@click="navigate_link('url')"] Rich markup for internal TUI navigation
-    3. Rich.Markdown renders the final markup
+    2. _escape_rich_markup() escapes ``[`` and ``]`` in the html2text output so
+       that any Rich markup tokens embedded in the page content (e.g. ``[@click]``
+       or ``[bold red]``) are treated as literal text rather than as markup.
+    3. Post-processing converts Markdown ``[text](url)`` links into
+       ``[@click="navigate_link('url')"]`` Rich markup for internal TUI navigation.
+       Image syntax ``![alt](url)`` and empty-label links ``[](url)`` are skipped.
+    4. Rich Text.from_markup renders the final string.
 
 This reuses the existing link navigation infrastructure in PageBrowserWidget:
     _PageBody.action_navigate_link → _LinkClicked message → re-fetch through pipeline
@@ -28,10 +32,12 @@ if TYPE_CHECKING:
 _LINK_STYLE = "underline #5ac8fa"
 
 # Regex to find markdown links: [text](url)
-# Handles nested brackets in text, non-greedy url match
+# Negative lookbehind (?<!!) rejects image syntax ![alt](url).
+# Requires a non-empty label (text group cannot be empty).
 _MD_LINK_RE = re.compile(
-    r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\]"  # [text] with possible nested []
-    r"\(([^)]+)\)"  # (url)
+    r"(?<!!)"                                      # reject image syntax  ![alt](url)
+    r"\[([^\[\]]+(?:\[[^\[\]]*\][^\[\]]*)*)\]"     # [text] — non-empty label
+    r"\(([^)]+)\)"                                 # (url)
 )
 
 # Content-type detection patterns
@@ -93,41 +99,84 @@ def detect_content_type(
     return ContentKind.PLAIN
 
 
+def _escape_rich_markup(text: str) -> str:
+    """Escape ``[`` in plain text so Rich does not interpret it as markup.
+
+    Used internally by ``render_html_to_rich()`` — applied to non-link spans only
+    via ``_postprocess_links()``'s split-and-escape strategy.  Exposed here for
+    unit testing.
+
+    Rich's convention: ``\\[`` renders as a literal ``[`` character.
+
+    Args:
+        text: Raw text fragment that must not contain Rich markup.
+
+    Returns:
+        String with all ``[`` → ``\\[``.
+    """
+    return text.replace("[", "\\[")
+
+
 def _postprocess_links(markdown: str) -> str:
     """Convert Markdown links to Rich @click markup for TUI navigation.
 
-    Transforms ``[text](url)`` into:
-        ``[@click="navigate_link('url')"][underline #5ac8fa]▸ text[/][/]``
+    Scans *markdown* for ``[text](url)`` patterns.  For each match:
+
+    * Image syntax ``![alt](url)`` is skipped (negative lookbehind in ``_MD_LINK_RE``).
+    * Empty-label links ``[](url)`` are rejected by ``_MD_LINK_RE`` which requires
+      ``[^\\[\\]]+`` (one or more non-bracket characters) in the label group.
+    * Real links are converted to::
+
+          [@click="navigate_link('url')"][underline #5ac8fa]▸ text[/][/]
+
+    All *non-link* spans between matches are passed through
+    ``_escape_rich_markup()`` so that any stray ``[…]`` tokens in the page
+    content are rendered as literal characters rather than Rich markup.
 
     This plugs into PageBrowserWidget's existing link navigation:
     _PageBody handles action_navigate_link → posts _LinkClicked → re-fetch.
 
     Args:
-        markdown: Markdown string from html2text.
+        markdown: Raw Markdown string from html2text.
 
     Returns:
-        String with links converted to Rich @click markup.
+        String with real Markdown links converted to Rich @click markup and
+        all other content safely escaped.
     """
+    parts: list[str] = []
+    last_end = 0
 
-    def _replace_link(match: re.Match) -> str:
+    for match in _MD_LINK_RE.finditer(markdown):
+        # Escape the literal text between the previous match and this one
+        parts.append(_escape_rich_markup(markdown[last_end:match.start()]))
+        last_end = match.end()
+
         text = match.group(1).strip()
         url = match.group(2).strip()
-        # Escape for Rich markup safety
-        url_safe = url.replace("\\", "\\\\").replace("'", "\\'")
+        # Strip angle brackets added by html2text's protect_links=True.
+        # html2text wraps URLs as <https://example.com> to prevent breakage;
+        # _MD_LINK_RE captures them verbatim via [^)]+ — strip before use.
+        if url.startswith("<") and url.endswith(">"):
+            url = url[1:-1]
+        # Escape URL for Rich markup safety: backslash, single-quote, double-quote.
+        # An unescaped `"` would terminate the [@click="..."] attribute early.
+        url_safe = url.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
         # Match micron_parser.py link format exactly
-        return (
+        parts.append(
             f'[@click="navigate_link(\'{url_safe}\')"]'
             f"[{_LINK_STYLE}]▸ {text}[/{_LINK_STYLE}]"
             f"[/]"
         )
 
-    return _MD_LINK_RE.sub(_replace_link, markdown)
+    # Escape any trailing literal text after the last match
+    parts.append(_escape_rich_markup(markdown[last_end:]))
+    return "".join(parts)
 
 
 def render_html_to_rich(html_content: str) -> "RenderableType":
     """Convert HTML to a Rich renderable for display in TUI.
 
-    Pipeline: html2text → link post-processing → Rich Text
+    Pipeline: html2text → escape Rich markup → link post-processing → Rich Text
 
     If html2text is not installed, returns a message directing the user
     to install styrened[tui] or use the O key to open in browser.
@@ -161,7 +210,9 @@ def render_html_to_rich(html_content: str) -> "RenderableType":
     # Convert HTML → Markdown
     markdown = converter.handle(html_content)
 
-    # Post-process links for TUI navigation
+    # Post-process links for TUI navigation.
+    # _postprocess_links() escapes all non-link spans via _escape_rich_markup()
+    # before injecting Rich markup, preventing injection attacks from page content.
     markup = _postprocess_links(markdown)
 
     # Render as Rich Text with markup
