@@ -147,6 +147,92 @@ class TestValidateMetaResponseOverlayFields:
         assert "ip_address" not in meta
 
 
+class TestValidateMetaWebUrlScheme:
+    """web_url scheme validation in _validate_meta_response."""
+
+    def _call(self, web_url: str):
+        from styrened.services.direct_link import _validate_meta_response
+        return _validate_meta_response({"styrene_version": "0.16.0", "web_url": web_url})
+
+    def test_https_url_accepted(self):
+        meta = self._call("https://styrene.dev")
+        assert meta is not None
+        assert meta["web_url"] == "https://styrene.dev"
+
+    def test_http_url_accepted(self):
+        meta = self._call("http://my-node.local:8080")
+        assert meta is not None
+        assert "web_url" in meta
+
+    def test_https_mixed_case_accepted(self):
+        meta = self._call("HTTPS://styrene.dev")
+        assert meta is not None
+        assert "web_url" in meta
+
+    def test_javascript_url_rejected(self):
+        meta = self._call("javascript:alert(1)")
+        assert meta is not None
+        assert "web_url" not in meta
+
+    def test_file_url_rejected(self):
+        meta = self._call("file:///etc/passwd")
+        assert meta is not None
+        assert "web_url" not in meta
+
+    def test_data_url_rejected(self):
+        meta = self._call("data:text/html,<script>alert(1)</script>")
+        assert meta is not None
+        assert "web_url" not in meta
+
+    def test_empty_string_excluded(self):
+        meta = self._call("")
+        assert meta is not None
+        assert "web_url" not in meta
+
+
+class TestValidateMetaYggPortRange:
+    """ygg_port range validation in _validate_meta_response."""
+
+    def _call(self, ygg_port):
+        from styrened.services.direct_link import _validate_meta_response
+        return _validate_meta_response({"styrene_version": "0.16.0", "ygg_port": ygg_port})
+
+    def test_valid_port_accepted(self):
+        meta = self._call(9002)
+        assert meta is not None
+        assert meta["ygg_port"] == 9002
+
+    def test_port_1_accepted(self):
+        meta = self._call(1)
+        assert meta is not None
+        assert meta["ygg_port"] == 1
+
+    def test_port_65535_accepted(self):
+        meta = self._call(65535)
+        assert meta is not None
+        assert meta["ygg_port"] == 65535
+
+    def test_negative_port_rejected(self):
+        meta = self._call(-1)
+        assert meta is not None
+        assert "ygg_port" not in meta
+
+    def test_port_zero_rejected(self):
+        meta = self._call(0)
+        assert meta is not None
+        assert "ygg_port" not in meta
+
+    def test_port_above_max_rejected(self):
+        meta = self._call(99999)
+        assert meta is not None
+        assert "ygg_port" not in meta
+
+    def test_string_port_rejected(self):
+        meta = self._call("9002")
+        assert meta is not None
+        assert "ygg_port" not in meta
+
+
 class TestMeshDeviceWebUrl:
     """MeshDevice.web_url field."""
 
