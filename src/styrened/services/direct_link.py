@@ -138,14 +138,16 @@ def _validate_meta_response(data: dict[str, Any]) -> dict[str, Any] | None:
         if addr:
             result["ygg_address"] = addr
     if "ygg_port" in data and isinstance(data["ygg_port"], int):
-        result["ygg_port"] = data["ygg_port"]
+        port = data["ygg_port"]
+        if 1 <= port <= 65535:
+            result["ygg_port"] = port
     if "b32_address" in data:
         addr = _sanitize_str(data["b32_address"], _MAX_ADDRESS_LEN)
         if addr:
             result["b32_address"] = addr
     if "web_url" in data:
         url = _sanitize_str(data["web_url"], _MAX_URL_LEN)
-        if url:
+        if url and url.lower().startswith(("https://", "http://")):
             result["web_url"] = url
     return result if result else None
 
