@@ -22,7 +22,10 @@ import logging
 import os
 import urllib.parse
 from enum import Enum, auto
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from rich.console import RenderableType
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -300,7 +303,7 @@ class PageBrowserWidget(Widget):
                 # Try structured data rendering first
                 structured_data = result.get("structured_data")
                 page_metadata = result.get("page_metadata")
-                rendered = None
+                rendered: RenderableType | None = None
 
                 if structured_data and page_metadata:
                     page_type = page_metadata.get("page_type", "")
@@ -323,7 +326,8 @@ class PageBrowserWidget(Widget):
                 # Update display
                 try:
                     body = self.query_one("#page-body", _PageBody)
-                    body.update(rendered)
+                    if rendered is not None:
+                        body.update(rendered)
                     body.remove_class("placeholder-text")
                 except Exception:
                     pass
@@ -480,9 +484,9 @@ class PageBrowserWidget(Widget):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Hide the open_in_browser action in headless environments."""
-        if action == "open_in_browser" and _is_headless():
-            return False
-        return True
+        if action == "open_in_browser":
+            return False if _is_headless() else True
+        return None
 
     def action_open_in_browser(self) -> None:
         """Open the current page in the system browser.
@@ -553,7 +557,6 @@ class PageBrowserWidget(Widget):
             nomadnet_dest = getattr(self._mesh_device, "nomadnet_destination_hash", "")
             self._external_url = ""
             self.destination_hash = nomadnet_dest
-            self._history.clear()
             self.notify(f"Switched to {label} transport")
             self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
 
@@ -563,7 +566,6 @@ class PageBrowserWidget(Widget):
             url = f"http://{b32}/"
             self._external_url = url
             self.destination_hash = ""
-            self._history.clear()
             self.notify(f"Switched to {label} transport")
             self.run_worker(self._load_page(url), exclusive=True)
 
@@ -572,7 +574,6 @@ class PageBrowserWidget(Widget):
             web_url = getattr(self._mesh_device, "web_url", "")
             self._external_url = web_url
             self.destination_hash = ""
-            self._history.clear()
             self.notify(f"Switched to {label} transport")
             self.run_worker(self._load_page(web_url), exclusive=True)
 

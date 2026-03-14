@@ -279,10 +279,11 @@ class TestCheckAction:
 
     @mock.patch("styrened.tui.widgets.page_browser._is_headless", return_value=True)
     def test_headless_allows_other_actions(self, _mock):
+        # check_action returns None for unknown actions (delegate to base class)
         w = PageBrowserWidget()
-        assert w.check_action("reload", ()) is True
-        assert w.check_action("go_back", ()) is True
-        assert w.check_action("cycle_transport", ()) is True
+        assert w.check_action("reload", ()) is None
+        assert w.check_action("go_back", ()) is None
+        assert w.check_action("cycle_transport", ()) is None
 
     @mock.patch.dict(os.environ, {"SSH_CONNECTION": "1.2.3.4 22 5.6.7.8 22"}, clear=True)
     @mock.patch("os.uname")

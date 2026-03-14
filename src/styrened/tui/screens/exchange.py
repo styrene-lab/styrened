@@ -615,7 +615,7 @@ class ExchangeScreen(Screen[None]):
         nomadnet_dest = dest_hash
         if device is not None:
             if getattr(device, "nomadnet_destination_hash", None):
-                nomadnet_dest = device.nomadnet_destination_hash
+                nomadnet_dest = device.nomadnet_destination_hash or nomadnet_dest
             elif device.device_type == DeviceType.NOMADNET_NODE:
                 nomadnet_dest = device.destination_hash
 
