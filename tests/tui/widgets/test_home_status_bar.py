@@ -20,6 +20,7 @@ _DEFAULTS = {
     "interface_count": 0,
     "styrene_mesh_count": 0,
     "daemon_connected": True,
+    "ipc_backpressured": False,
     "daemon_uptime": 0.0,
     "unread_count": 0,
     "error_state": None,
@@ -259,6 +260,19 @@ class TestDaemonDisconnected:
         bar = _make_bar(daemon_connected=False)
         text = _render_rich(bar)
         assert "IPC ○" in text.plain
+
+        ipc_start = text.plain.index("IPC")
+        found_bold = False
+        for start, end, style in text._spans:
+            if start <= ipc_start < end and "bold" in str(style):
+                found_bold = True
+        assert found_bold
+
+    def test_ipc_backpressured_distinct_from_disconnected(self) -> None:
+        bar = _make_bar(daemon_connected=True, ipc_backpressured=True, daemon_uptime=600)
+        text = _render_rich(bar)
+        assert "IPC ◐ 10m" in text.plain
+        assert "IPC ○" not in text.plain
 
         ipc_start = text.plain.index("IPC")
         found_bold = False

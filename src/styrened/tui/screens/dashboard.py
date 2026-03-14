@@ -314,97 +314,133 @@ class DashboardScreen(Screen[None]):
         except Exception:
             pass
 
+    def on_device_cache_devices_updated(self, message: Any) -> None:
+        """Refresh Home when background device-cache priming completes."""
+        if self._ipc_bridge is not None:
+            self.run_worker(
+                self._fetch_daemon_status(),
+                group="dashboard-status",
+                exclusive=True,
+            )
+
+    async def _prime_device_cache_in_background(self) -> None:
+        """Kick the shared device cache without blocking first paint."""
+        try:
+            cache = getattr(self.app, "device_cache", None)
+        except Exception:
+            return
+
+        if cache is None:
+            return
+
+        refresh = getattr(cache, "refresh", None)
+        if refresh is None:
+            return
+
+        await refresh()
+
     async def _fetch_daemon_status(self) -> None:
-        """Fetch Home status from daemon and push into status bar + node table."""
+        """Fetch Home status using cheap summary IPC for first paint."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
 
         import asyncio
 
+        def _get(obj: Any, key: str, default: Any = None) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+
         tasks = {
             "status": asyncio.create_task(bridge.get_status()),
             "hub": asyncio.create_task(bridge.get_hub_status()),
-            "config": asyncio.create_task(bridge.get_core_config()),
-            "conversations": asyncio.create_task(bridge.get_conversations()),
+            "unread_counts": asyncio.create_task(bridge.get_unread_counts()),
         }
 
         try:
             try:
                 status = await tasks["status"]
                 hub_data = await tasks["hub"]
-                core_config = await tasks["config"]
-                # Device list comes from the shared app-level DeviceCache when
-                # available, but cache access must not poison status refresh in
-                # bare-screen unit contexts.
-                all_devices = self._get_cached_devices()
             except Exception:
                 try:
                     bar = self.query_one(HomeStatusBar)
                     bar.daemon_connected = False
+                    bar.ipc_backpressured = False
                 except Exception:
                     pass
                 return
 
-            # --- Update HomeStatusBar ---
+            all_devices = self._get_cached_devices()
+            if not all_devices and not getattr(self, "_device_cache_prime_requested", False):
+                self._device_cache_prime_requested = True
+                self.run_worker(
+                    self._prime_device_cache_in_background(),
+                    group="dashboard-device-prime",
+                    exclusive=True,
+                )
+
+            unread_map: dict[str, int] = {}
+            ipc_backpressured = False
             try:
+                unread_counts = await tasks["unread_counts"]
+                if isinstance(unread_counts, dict):
+                    counts = unread_counts.get("counts", unread_counts)
+                    if isinstance(counts, dict):
+                        unread_map = {
+                            str(identity_hash): int(count or 0)
+                            for identity_hash, count in counts.items()
+                            if identity_hash and int(count or 0) > 0
+                        }
+            except Exception:
+                ipc_backpressured = True
+
+            device_list: list[Any] = all_devices if isinstance(all_devices, list) else []
+
+            try:
+                from styrened.models.mesh_device import DeviceType, MeshDevice
+
+                styrene_enum_types = {DeviceType.STYRENE_NODE}
+                styrene_str_types = {t.value for t in styrene_enum_types} | {
+                    "styrene_node", "styrene_hub",
+                }
+                styrene_count = sum(
+                    1
+                    for d in device_list
+                    if (
+                        isinstance(d, MeshDevice) and d.device_type in styrene_enum_types
+                    )
+                    or (
+                        not isinstance(d, MeshDevice)
+                        and _get(d, "device_type") in styrene_str_types
+                    )
+                )
+
                 bar = self.query_one(HomeStatusBar)
                 bar.daemon_connected = True
+                bar.ipc_backpressured = ipc_backpressured
+                bar.rns_online = bool(_get(status, "rns_initialized", True))
+                ifaces = _get(status, "interfaces", [])
+                bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
+                bar.daemon_uptime = float(_get(status, "uptime", 0))
+                bar.transport_enabled = bool(_get(status, "transport_enabled", False))
+                bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
+                bar.active_links = int(_get(status, "active_links", 0))
+                bar.styrene_mesh_count = styrene_count
+                bar.total_device_count = len(device_list)
+                bar.unread_count = sum(unread_map.values())
 
-                # RNS status — handle both dict and dataclass (DaemonStatus)
-                def _get(obj: Any, key: str, default: Any = None) -> Any:
-                    if isinstance(obj, dict):
-                        return obj.get(key, default)
-                    return getattr(obj, key, default)
-
-                if status is not None:
-                    bar.rns_online = bool(_get(status, "rns_initialized", True))
-                    ifaces = _get(status, "interfaces", [])
-                    bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
-                    bar.daemon_uptime = float(_get(status, "uptime", 0))
-                    bar.transport_enabled = bool(_get(status, "transport_enabled", False))
-                    bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
-                    bar.active_links = int(_get(status, "active_links", 0))
-
-                # Hub status
                 if isinstance(hub_data, dict):
                     hub_str = hub_data.get("status", "unknown")
                     try:
                         bar.hub_status = HubStatus(hub_str)
                     except (ValueError, KeyError):
                         bar.hub_status = HubStatus.UNKNOWN
-
-                # Mesh counts
-                styrene_count = 0
-                total_count = 0
-                device_list: list[Any] = []
-                if isinstance(all_devices, list):
-                    from styrened.models.mesh_device import DeviceType, MeshDevice
-
-                    device_list = all_devices
-                    total_count = len(device_list)
-                    _styrene_enum_types = {DeviceType.STYRENE_NODE}
-                    # DeviceInfo dicts from IPC bridge use the enum .value string
-                    _styrene_str_types = {t.value for t in _styrene_enum_types} | {
-                        "styrene_node", "styrene_hub",
-                    }
-                    styrene_count = sum(
-                        1 for d in device_list
-                        if (
-                            isinstance(d, MeshDevice) and d.device_type in _styrene_enum_types
-                        ) or (
-                            not isinstance(d, MeshDevice)
-                            and _get(d, "device_type") in _styrene_str_types
-                        )
-                    )
-                bar.styrene_mesh_count = styrene_count
-                bar.total_device_count = total_count
             except Exception:
                 pass
 
-            # --- Update HomeNodeSummaryTable ---
             try:
-                from styrened.models.mesh_device import MeshDevice
+                from styrened.models.mesh_device import DeviceType, MeshDevice
 
                 table = self.query_one(HomeNodeSummaryTable)
                 nodes = []
@@ -413,10 +449,8 @@ class DashboardScreen(Screen[None]):
                         if isinstance(d, MeshDevice):
                             nodes.append(d)
                         else:
-                            # DeviceInfo dataclass or dict from IPC bridge
                             dt_str = _get(d, "device_type", "unknown")
                             try:
-                                from styrened.models.mesh_device import DeviceType
                                 dt = DeviceType(dt_str)
                             except (ValueError, KeyError):
                                 dt = DeviceType.UNKNOWN
@@ -433,26 +467,8 @@ class DashboardScreen(Screen[None]):
                     except Exception:
                         pass
 
-                # Build unread map from conversations
-                unread_map: dict[str, int] = {}
-                try:
-                    convs = await tasks["conversations"]
-                    if isinstance(convs, list):
-                        for c in convs:
-                            if isinstance(c, dict):
-                                ih = c.get("identity_hash", "")
-                                unread = c.get("unread_count", 0)
-                            else:
-                                ih = getattr(c, "identity_hash", "")
-                                unread = getattr(c, "unread_count", 0)
-                            if ih and unread:
-                                    unread_map[ih] = unread
-                except Exception:
-                    pass
-
                 table.update_nodes(nodes, unread_map)
 
-                # Update COP activity summary via tracker → snapshot
                 try:
                     cop_summary = self.query_one(CopActivitySummary)
                     name_map: dict[str, str] = {}
@@ -478,16 +494,8 @@ class DashboardScreen(Screen[None]):
                     cop_summary.apply_snapshot(self._situation_tracker.snapshot())
                 except Exception:
                     pass
-
-                # Update unread count on status bar
-                try:
-                    bar = self.query_one(HomeStatusBar)
-                    bar.unread_count = sum(unread_map.values())
-                except Exception:
-                    pass
             except Exception:
                 pass
-
         finally:
             pending = [t for t in tasks.values() if not t.done()]
             for t in pending:
