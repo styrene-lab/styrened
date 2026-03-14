@@ -309,6 +309,8 @@ class IdentityConfig:
             Claimed by the node, not globally unique. 3-20 chars, lowercase alphanumeric + hyphens.
         provider: Identity provider type ("file" or "yubikey").
         yubikey: YubiKey-specific configuration (used when provider is "yubikey").
+        web_url: Optional HTTPS URL for this node's web presence (e.g., "https://styrene.dev").
+            Advertised in /meta responses so TUI clients can offer transport switching.
     """
 
     display_name: str = "Anonymous Styrene"
@@ -316,6 +318,7 @@ class IdentityConfig:
     short_name: str | None = None
     provider: str = "file"
     yubikey: YubiKeyConfig = field(default_factory=YubiKeyConfig)
+    web_url: str = ""
 
 
 @dataclass
@@ -931,6 +934,8 @@ class CoreConfig:
                 "rp_id": self.identity.yubikey.rp_id,
                 "require_touch": self.identity.yubikey.require_touch,
             }
+        if self.identity.web_url:
+            identity_dict["web_url"] = self.identity.web_url
 
         # RPC section
         rpc_dict: dict[str, Any] = {

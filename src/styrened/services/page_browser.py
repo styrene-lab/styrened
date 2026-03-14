@@ -71,6 +71,7 @@ class PageResponse:
     error_message: str | None = None
     structured_data: dict[str, Any] | None = None
     page_metadata: "PageMetadata | None" = None
+    content_type: str | None = None
 
 
 @dataclass
@@ -373,6 +374,7 @@ class PageBrowserService:
             cache_ttl=cache_ttl,
             structured_data=structured_data,
             page_metadata=page_metadata,
+            content_type="text/x-micron",
         )
 
     async def fetch_url(
@@ -427,7 +429,7 @@ class PageBrowserService:
                     error_message="I2P is enabled but the HTTP proxy is not ready yet.",
                 )
 
-        def _fetch() -> tuple[bytes, str]:
+        def _fetch() -> tuple[bytes, str, str]:
             handlers: list[urllib.request.BaseHandler] = []
             if proxy_url is not None:
                 handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
@@ -438,10 +440,11 @@ class PageBrowserService:
             )
             with opener.open(req, timeout=timeout) as resp:
                 charset = resp.headers.get_content_charset() or "utf-8"
-                return resp.read(), charset
+                content_type = resp.headers.get_content_type() or ""
+                return resp.read(), charset, content_type
 
         try:
-            response_data, charset = await asyncio.to_thread(_fetch)
+            response_data, charset, fetched_content_type = await asyncio.to_thread(_fetch)
         except urllib.error.HTTPError as e:
             return PageResponse(
                 content="",
@@ -478,6 +481,7 @@ class PageBrowserService:
             path=parsed.path or "/",
             transfer_time=time.time() - start_time,
             content_length=len(response_data),
+            content_type=fetched_content_type or None,
         )
 
     async def disconnect(self, destination_hash: str) -> bool:

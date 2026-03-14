@@ -5,7 +5,6 @@ Peer browsing (MeshDeviceTree) belongs in ExplorationScreen (Nodes workspace).
 """
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
@@ -335,8 +334,7 @@ class TestDashboardActivitySubscription:
         bridge.iter_events = _iter_events
         activity_widget = MagicMock()
 
-        mock_app = MagicMock()
-        mock_app.post_message = MagicMock()
+        screen.post_message = MagicMock()
 
         with (
             patch.object(
@@ -346,15 +344,14 @@ class TestDashboardActivitySubscription:
                 return_value=bridge,
             ),
             patch.object(screen, "query_one", return_value=activity_widget),
-            patch.object(type(screen), "app", new_callable=PropertyMock, return_value=mock_app),
         ):
             await screen._subscribe_activity()
 
         bridge.subscribe_activity.assert_awaited_once_with()
         # add_ephemeral no longer called — routing goes through DaemonEvent → on_daemon_event
         activity_widget.add_ephemeral.assert_not_called()
-        # DaemonEvent posted to app for the EVENT_ACTIVITY item
-        mock_app.post_message.assert_called_once()
+        # DaemonEvent posted to the screen message pump for the EVENT_ACTIVITY item
+        screen.post_message.assert_called_once()
 
 
 class TestDashboardOverflowWiring:
@@ -375,7 +372,7 @@ class TestDashboardOverflowWiring:
 class TestDashboardAdapterWiring:
     """Test adapter_changed event wiring into DashboardScreen."""
 
-    def _make_event(self, adapter_name: str, state: str, detail: str = "") -> "DaemonEvent":
+    def _make_event(self, adapter_name: str, state: str, detail: str = ""):
         from styrened.tui.models.events import DaemonEvent
         return DaemonEvent(
             event_type="adapter_changed",
@@ -386,9 +383,10 @@ class TestDashboardAdapterWiring:
     def test_adapter_changed_updates_adapter_status_bar(self):
         """adapter_changed event feeds AdapterStatusTracker and pushes snapshot to AdapterStatusBar."""
         from unittest.mock import MagicMock, patch
+
+        from styrened.tui.models.adapter_status import AdapterDisplayState
         from styrened.tui.screens.dashboard import DashboardScreen
         from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
-        from styrened.tui.models.adapter_status import AdapterDisplayState
 
         screen = DashboardScreen()
         mock_bar = MagicMock(spec=AdapterStatusBar)
@@ -412,10 +410,11 @@ class TestDashboardAdapterWiring:
     def test_ready_to_degraded_injects_anomaly_situation_line(self):
         """READY→DEGRADED transition should inject an ANOMALY situation line into COP feed."""
         from unittest.mock import MagicMock, patch
+
+        from styrened.tui.models.cop_situation import SituationPriority
         from styrened.tui.screens.dashboard import DashboardScreen
         from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
         from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
-        from styrened.tui.models.cop_situation import SituationPriority
 
         screen = DashboardScreen()
         mock_bar = MagicMock(spec=AdapterStatusBar)
@@ -441,16 +440,18 @@ class TestDashboardAdapterWiring:
             line for line in snap.lines
             if line.priority == SituationPriority.ANOMALY
         ]
-        assert any("degraded" in line.message.lower() for line in anomaly_lines), \
-            f"Expected anomaly line about degraded, got: {[l.message for l in snap.lines]}"
+        assert any("degraded" in line.message.lower() for line in anomaly_lines), (
+            f"Expected anomaly line about degraded, got: {[line.message for line in snap.lines]}"
+        )
 
     def test_warming_to_ready_injects_informational_situation_line(self):
         """WARMING→READY transition should inject an INFO situation line into COP feed."""
         from unittest.mock import MagicMock, patch
+
+        from styrened.tui.models.cop_situation import SituationPriority
         from styrened.tui.screens.dashboard import DashboardScreen
         from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
         from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
-        from styrened.tui.models.cop_situation import SituationPriority
 
         screen = DashboardScreen()
         mock_bar = MagicMock(spec=AdapterStatusBar)
@@ -470,13 +471,17 @@ class TestDashboardAdapterWiring:
             line for line in snap.lines
             if line.priority == SituationPriority.INFO
         ]
-        assert any("ready" in line.message.lower() or "ygg" in line.message.lower()
-                   for line in info_lines), \
-            f"Expected info line about ready, got: {[l.message for l in snap.lines]}"
+        assert any(
+            "ready" in line.message.lower() or "ygg" in line.message.lower()
+            for line in info_lines
+        ), (
+            f"Expected info line about ready, got: {[line.message for line in snap.lines]}"
+        )
 
     def test_disabled_to_probing_generates_no_situation_line(self):
         """DISABLED→PROBING transitions generate no situation line in COP feed."""
         from unittest.mock import MagicMock, patch
+
         from styrened.tui.screens.dashboard import DashboardScreen
         from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
         from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
@@ -499,10 +504,10 @@ class TestDashboardAdapterWiring:
         # from the adapter transition (DISABLED origin → no situation)
         if mock_cop.apply_snapshot.called:
             snap = mock_cop.apply_snapshot.call_args[0][0]
-            from styrened.tui.models.cop_situation import SituationPriority
             adapter_lines = [
                 line for line in snap.lines
                 if "i2p" in line.message.lower()
             ]
-            assert len(adapter_lines) == 0, \
-                f"Expected no i2p situation lines, got: {[l.message for l in adapter_lines]}"
+            assert len(adapter_lines) == 0, (
+                f"Expected no i2p situation lines, got: {[line.message for line in adapter_lines]}"
+            )

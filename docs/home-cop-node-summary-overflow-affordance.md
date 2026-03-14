@@ -4,8 +4,7 @@ title: Home COP Node Summary Overflow Affordance
 status: exploring
 parent: tui-home-cop
 tags: [tui, cop, ux, dashboard, nodes, overflow]
-open_questions:
-  - "Should the Home COP NODES panel explicitly show an overflow affordance (for example '+24 more', '2 of 64 visible', or a footer hint to press n) when the table viewport cannot display the full non-lost set?"
+open_questions: []
 ---
 
 # Home COP Node Summary Overflow Affordance
@@ -29,7 +28,7 @@ Current implementation uses HomeNodeSummaryTable inside DashboardScreen as a com
 
 ## Open Questions
 
-- Should the Home COP NODES panel explicitly show an overflow affordance (for example '+24 more', '2 of 64 visible', or a footer hint to press n) when the table viewport cannot display the full non-lost set?
+*No open questions.*
 
 ## Implementation Notes
 

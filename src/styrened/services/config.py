@@ -512,6 +512,9 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
                 require_touch=_parse_bool(yk.get("require_touch", False)),
             )
 
+        if "web_url" in ident and ident["web_url"]:
+            config.identity.web_url = str(ident["web_url"])
+
     # Parse notifications section
     if "notifications" in data and isinstance(data["notifications"], dict):
         notif = data["notifications"]

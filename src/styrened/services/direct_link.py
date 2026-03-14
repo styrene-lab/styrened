@@ -56,6 +56,8 @@ _MAX_CAP_LEN = 64
 _MAX_NAME_LEN = 64
 _MAX_LABEL_LEN = 64
 _MAX_CAPS_COUNT = 32
+_MAX_ADDRESS_LEN = 128  # Ygg IPv6 / I2P b32 addresses
+_MAX_URL_LEN = 256  # web_url (HTTPS URL)
 
 # Compiled pattern strips all Rich/Textual markup tags ([tag], [/tag], [#hex]).
 _RICH_MARKUP_RE = re.compile(r"\[/?[^\]]{0,64}\]")
@@ -130,6 +132,21 @@ def _validate_meta_response(data: dict[str, Any]) -> dict[str, Any] | None:
         result["arch"] = _sanitize_str(data["arch"], _MAX_ARCH_LEN)
     if "os_id" in data:
         result["os_id"] = _sanitize_str(data["os_id"], _MAX_OSID_LEN)
+    # Overlay network addresses — sanitize but allow through
+    if "ygg_address" in data:
+        addr = _sanitize_str(data["ygg_address"], _MAX_ADDRESS_LEN)
+        if addr:
+            result["ygg_address"] = addr
+    if "ygg_port" in data and isinstance(data["ygg_port"], int):
+        result["ygg_port"] = data["ygg_port"]
+    if "b32_address" in data:
+        addr = _sanitize_str(data["b32_address"], _MAX_ADDRESS_LEN)
+        if addr:
+            result["b32_address"] = addr
+    if "web_url" in data:
+        url = _sanitize_str(data["web_url"], _MAX_URL_LEN)
+        if url:
+            result["web_url"] = url
     return result if result else None
 
 

@@ -1,22 +1,27 @@
 """Page browser widget for NomadNet, HTTPS, and I2P page viewing.
 
 Embeddable widget that fetches and displays pages via IPCBridge.
-Used primarily for NomadNet today, with explicit external URL support for
-HTTPS and I2P eepsites.
+Supports multiple transports per node (NomadNet/I2P/HTTPS) with
+content-type-aware rendering (micron native, html2text, plaintext).
 
 Features:
 - URL bar showing current destination:path or explicit URL
-- Scrollable content area with rendered micron markup
+- Scrollable content area with rendered micron or HTML content
+- Content-type-aware renderer dispatch (micron → native, HTML → html2text)
+- Transport selector (T key) to cycle NomadNet/I2P/HTTPS for multi-transport nodes
+- Browser delegation (O key) to open current page in system browser
 - Back navigation with history stack
 - Reload current page
-- Link click navigation
-- Status bar with transfer time and content size
+- Link click navigation (works for both micron and html2text links)
+- Status bar with transfer time, content size, and content type indicator
 """
 from __future__ import annotations
 
 
 import logging
+import os
 import urllib.parse
+from enum import Enum, auto
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -27,11 +32,53 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
+from styrened.tui.widgets.html_renderer import ContentKind, detect_content_type, render_html_to_rich
 from styrened.tui.widgets.micron_parser import parse_micron, render_to_rich
 from styrened.tui.widgets.page_renderers import render_structured_page
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
+
+
+class Transport(Enum):
+    """Available page transport types for a node."""
+
+    NOMADNET = auto()
+    I2P = auto()
+    HTTPS = auto()
+
+
+# Content-type indicator for URL bar
+_CONTENT_INDICATORS: dict[ContentKind, str] = {
+    ContentKind.MICRON: "📄 micron",
+    ContentKind.HTML: "🌐 HTML",
+    ContentKind.PLAIN: "📝 text",
+}
+
+# Transport labels for status display
+_TRANSPORT_LABELS: dict[Transport, str] = {
+    Transport.NOMADNET: "NomadNet",
+    Transport.I2P: "I2P",
+    Transport.HTTPS: "HTTPS",
+}
+
+
+def _is_headless() -> bool:
+    """Detect if running in a headless environment (no browser available).
+
+    Checks for SSH session without display server — common on edge devices.
+    """
+    has_display = bool(
+        os.environ.get("DISPLAY")
+        or os.environ.get("WAYLAND_DISPLAY")
+        or os.environ.get("BROWSER")
+    )
+    is_ssh = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT"))
+    # macOS always has a browser available (even in SSH, `open` works)
+    is_macos = os.uname().sysname == "Darwin"
+    if is_macos:
+        return False
+    return is_ssh and not has_display
 
 
 class _LinkClicked(Message):
@@ -86,6 +133,8 @@ class PageBrowserWidget(Widget):
         Binding("backspace", "go_back", "Back", show=True),
         Binding("f5", "reload", "Reload", show=True),
         Binding("u", "focus_url", "URL", show=True),
+        Binding("o", "open_in_browser", "Browser", show=True),
+        Binding("t", "cycle_transport", "Transport", show=True),
         Binding("s", "save_site", "Save Site", show=True),
         Binding("c", "crawl_site", "Crawl", show=True),
     ]
@@ -122,6 +171,9 @@ class PageBrowserWidget(Widget):
         self._history: list[str] = []
         self._page_content: str = ""
         self._form_fields: dict[str, str] = {}  # field_name -> current_value
+        self._mesh_device: Any | None = None  # MeshDevice for transport selector
+        self._active_transport: Transport | None = None
+        self._last_content_kind: ContentKind = ContentKind.MICRON
 
     @property
     def _ipc_bridge(self) -> Any | None:
@@ -135,11 +187,45 @@ class PageBrowserWidget(Widget):
     def _is_external_mode(self) -> bool:
         return bool(self._external_url)
 
+    def set_mesh_device(self, device: Any) -> None:
+        """Set the MeshDevice for transport selector.
+
+        Called by ExplorationScreen/ExchangeScreen when a node is selected.
+        Determines available transports from the device's declared endpoints.
+
+        Args:
+            device: MeshDevice instance with endpoint fields.
+        """
+        self._mesh_device = device
+        transports = self._get_available_transports()
+        if transports and self._active_transport not in transports:
+            self._active_transport = transports[0]
+
+    def _get_available_transports(self) -> list[Transport]:
+        """Get transports declared by the current node."""
+        if self._mesh_device is None:
+            return []
+        transports: list[Transport] = []
+        if getattr(self._mesh_device, "nomadnet_destination_hash", None):
+            transports.append(Transport.NOMADNET)
+        if getattr(self._mesh_device, "b32_address", None):
+            transports.append(Transport.I2P)
+        if getattr(self._mesh_device, "web_url", None):
+            transports.append(Transport.HTTPS)
+        return transports
+
     def _display_location(self, path_or_url: str | None = None) -> str:
         target = path_or_url or self._external_url or self._initial_path
+        indicator = _CONTENT_INDICATORS.get(self._last_content_kind, "")
+        transport_label = ""
+        if self._active_transport:
+            transports = self._get_available_transports()
+            if len(transports) > 1:
+                transport_label = f"  T: {_TRANSPORT_LABELS[self._active_transport]}"
+        suffix = f"  {indicator}{transport_label}" if indicator else ""
         if self._is_external_mode:
-            return f"  {target}"
-        return f"  {self.destination_hash[:16]}...:{target}"
+            return f"  {target}{suffix}"
+        return f"  {self.destination_hash[:16]}...:{target}{suffix}"
 
     def compose(self) -> ComposeResult:
         """Compose widget layout."""
@@ -153,7 +239,17 @@ class PageBrowserWidget(Widget):
             yield Static("", id="page-status")
 
     def on_mount(self) -> None:
-        """Load initial page on mount."""
+        """Load initial page on mount.
+
+        Skipped when both ``destination_hash`` and ``_external_url`` are empty
+        so that an inline browser widget constructed without a target (e.g. the
+        Pages tab placeholder in ExplorationScreen) doesn't fire a spurious IPC
+        call on every screen mount.  The caller is expected to invoke
+        :meth:`set_destination` or :meth:`set_external_url` to trigger the
+        first load.
+        """
+        if not self.destination_hash and not self._external_url:
+            return  # deferred — waiting for set_destination() / set_external_url()
         target = self._external_url or self._initial_path
         self.run_worker(self._load_page(target), exclusive=True)
 
@@ -194,6 +290,7 @@ class PageBrowserWidget(Widget):
                 content = result.get("content", "")
                 transfer_time = result.get("transfer_time", 0.0)
                 content_length = result.get("content_length", 0)
+                content_type = result.get("content_type")
 
                 # Try structured data rendering first
                 structured_data = result.get("structured_data")
@@ -204,12 +301,19 @@ class PageBrowserWidget(Widget):
                     page_type = page_metadata.get("page_type", "")
                     rendered = render_structured_page(page_type, structured_data)
 
-                # Fall back to micron rendering
+                # Content-type-aware rendering dispatch
                 if rendered is None:
-                    elements = parse_micron(content)
-                    # Reset form fields on new page load
-                    self._form_fields = {}
-                    rendered = render_to_rich(elements, form_state=self._form_fields)
+                    kind = detect_content_type(content, content_type)
+                    self._last_content_kind = kind
+
+                    if kind == ContentKind.HTML:
+                        rendered = render_html_to_rich(content)
+                    else:
+                        # Micron or plain text — use existing parser
+                        elements = parse_micron(content)
+                        # Reset form fields on new page load
+                        self._form_fields = {}
+                        rendered = render_to_rich(elements, form_state=self._form_fields)
 
                 self._page_content = content
                 self.current_path = path
@@ -228,7 +332,9 @@ class PageBrowserWidget(Widget):
                 else:
                     size_str = f"{content_length}B"
 
-                self._set_status(f"{size_str} in {transfer_time:.1f}s")
+                kind_label = _CONTENT_INDICATORS.get(self._last_content_kind, "")
+                self._set_status(f"{size_str} in {transfer_time:.1f}s  {kind_label}")
+                self._update_url_bar(path)
 
             elif status in ("path_not_found", "timeout", "link_failed", "not_found", "error"):
                 # Check for cached fallback from daemon
@@ -369,6 +475,87 @@ class PageBrowserWidget(Widget):
     def action_reload(self) -> None:
         """Reload the current page."""
         self.run_worker(self._load_page(self.current_path), exclusive=True)
+
+    def action_open_in_browser(self) -> None:
+        """Open the current page in the system browser.
+
+        For .i2p URLs, constructs a proxy URL through localhost:4444.
+        Hidden/no-op when in a headless environment.
+        """
+        if _is_headless():
+            self.notify("No browser available (headless environment)", severity="warning")
+            return
+
+        url = self._external_url or self.current_path
+        if not url:
+            return
+
+        # For .i2p URLs, construct the proxy URL for the browser
+        if ".i2p" in url and not url.startswith("http"):
+            url = f"http://{url}"
+
+        # For NomadNet paths (not URLs), there's no browser-accessible equivalent
+        if url.startswith("/page/"):
+            self.notify("NomadNet pages are only viewable in the TUI", severity="information")
+            return
+
+        try:
+            self.app.open_url(url)
+        except Exception as e:
+            self.notify(f"Failed to open browser: {e}", severity="error")
+
+    def action_cycle_transport(self) -> None:
+        """Cycle through available transports for the current node.
+
+        Only available when the selected node has multiple declared endpoints.
+        Clears history and re-fetches from the root path of the new transport.
+        """
+        transports = self._get_available_transports()
+        if len(transports) <= 1:
+            if not transports:
+                self.notify("No transport information available", severity="information")
+            else:
+                self.notify(
+                    f"Only {_TRANSPORT_LABELS[transports[0]]} transport available",
+                    severity="information",
+                )
+            return
+
+        # Cycle to next transport
+        current_idx = (
+            transports.index(self._active_transport)
+            if self._active_transport in transports
+            else -1
+        )
+        next_idx = (current_idx + 1) % len(transports)
+        self._active_transport = transports[next_idx]
+
+        # Clear history and load root of new transport
+        self._history.clear()
+        label = _TRANSPORT_LABELS[self._active_transport]
+
+        if self._active_transport == Transport.NOMADNET:
+            # Switch to NomadNet mode
+            nomadnet_dest = getattr(self._mesh_device, "nomadnet_destination_hash", "")
+            self._external_url = ""
+            self.destination_hash = nomadnet_dest
+            self.notify(f"Switched to {label} transport")
+            self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
+
+        elif self._active_transport == Transport.I2P:
+            # Switch to I2P mode
+            b32 = getattr(self._mesh_device, "b32_address", "")
+            url = f"http://{b32}/"
+            self.set_external_url(url)
+            self.notify(f"Switched to {label} transport")
+            self.run_worker(self._load_page(url), exclusive=True)
+
+        elif self._active_transport == Transport.HTTPS:
+            # Switch to HTTPS mode
+            web_url = getattr(self._mesh_device, "web_url", "")
+            self.set_external_url(web_url)
+            self.notify(f"Switched to {label} transport")
+            self.run_worker(self._load_page(web_url), exclusive=True)
 
     def action_focus_url(self) -> None:
         """Open a URL entry modal for manual navigation.

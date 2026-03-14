@@ -3,6 +3,7 @@ id: meshtastic-bridge
 title: Meshtastic Bridge Service
 status: decided
 parent: cop-activity-summary
+related: [meshtastic-canary-shape]
 tags: [transport, meshtastic, bridge, lora]
 open_questions: []
 ---

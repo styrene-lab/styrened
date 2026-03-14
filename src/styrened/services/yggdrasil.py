@@ -38,9 +38,21 @@ MANAGED_PORT = 9002
 MANAGED_ADMIN_SOCKET = Path.home() / ".styrene" / "yggdrasil" / "yggdrasil.sock"
 
 # Fallback socket paths to check when probing an adopted instance.
+# Ordered: styrened-managed first (works for both managed and adopt modes
+# when yggdrasil was originally provisioned by styrened), then common system
+# paths across Linux and macOS.
 SYSTEM_SOCKET_PATHS = [
+    # styrened-managed socket — always try first regardless of mode.
+    # A user might adopt a previously-managed yggdrasil, or the managed
+    # socket may be the only one present on this machine.
+    MANAGED_ADMIN_SOCKET,
+    # Linux systemd / distro package paths
     Path("/var/run/yggdrasil/yggdrasil.sock"),
     Path("/run/yggdrasil.sock"),
+    # macOS Homebrew (brew install yggdrasil)
+    Path("/usr/local/var/run/yggdrasil.sock"),
+    Path(os.path.expanduser("~/Library/Application Support/yggdrasil/yggdrasil.sock")),
+    # Generic fallback
     Path("/tmp/yggdrasil.sock"),
 ]
 
@@ -282,13 +294,20 @@ class YggdrasilAdapter(DaemonAdapter, AdapterProtocol):
         """
         candidates: list[Path] = []
 
-        # Managed socket takes priority.
+        # Build candidate list.
+        # MANAGED: use the daemon-owned socket path first.
+        # ADOPT: if the operator explicitly configured a socket path, try it
+        #        first before falling through to the platform-aware defaults.
         if self._config.mode == DaemonMode.MANAGED:
             candidates.append(self._managed_socket_path())
-        elif self._config.admin_socket:
+        elif self._config.admin_socket and self._config.admin_socket.strip():
             candidates.append(Path(self._config.admin_socket))
 
-        candidates.extend(SYSTEM_SOCKET_PATHS)
+        # Always extend with platform-aware fallbacks (MANAGED_ADMIN_SOCKET
+        # is included in SYSTEM_SOCKET_PATHS so it's tried for ADOPT mode too).
+        for p in SYSTEM_SOCKET_PATHS:
+            if p not in candidates:
+                candidates.append(p)
 
         for sock_path in candidates:
             try:

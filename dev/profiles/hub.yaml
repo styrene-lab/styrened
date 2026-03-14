@@ -1,0 +1,36 @@
+# Hub profile — standard install with LXMF propagation enabled.
+# AutoInterface on, Styrene Community Hub as propagation node.
+# Use for: testing Hub status semantics, HubConnection state machine,
+#           COP hub indicator (WAITING → CONNECTED transitions).
+
+reticulum:
+  mode: standalone
+  enable_transport: true
+  announce_interval: 60
+  interfaces:
+    auto: true
+    server:
+      enabled: false
+    peers:
+      - host: rns.styrene.io
+        port: 4242
+        name: "Styrene Community Hub"
+        enabled: true
+
+lxmf:
+  autopeer: true
+  propagation_node:
+    enabled: true
+    destination: 6fc8bf22aa293588c9bf8d7488102e95
+
+api:
+  enabled: false
+
+i2p:
+  mode: disabled
+
+yggdrasil:
+  mode: disabled
+
+mesh_vpn:
+  enable: false

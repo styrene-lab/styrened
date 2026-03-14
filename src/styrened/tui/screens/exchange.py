@@ -43,7 +43,11 @@ from styrened.ui_state import (
     build_mail_index,
 )
 
-_PAGES_TYPES = frozenset({DeviceType.NOMADNET_NODE})
+# Pages tab shows NomadNet nodes AND Styrene nodes that carry a NomadNet
+# destination (e.g. the Styrene Community Hub).  The table accepts both
+# device types; _refresh_pages_table pre-filters to the exact browsable set.
+_PAGES_BROWSABLE_TYPES = frozenset({DeviceType.NOMADNET_NODE, DeviceType.STYRENE_NODE})
+_PAGES_TYPES = _PAGES_BROWSABLE_TYPES  # backward-compat alias used in compose
 
 logger = logging.getLogger(__name__)
 
@@ -324,12 +328,52 @@ class ExchangeScreen(Screen[None]):
         table.add_row("…", f"[{get_color_cascade().dim}]loading…[/]", "-", "-", "-")
         self.run_worker(self._load_conversations())
         self.run_worker(self._load_auto_reply_state())
+        self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
         table.focus()
 
     def on_screen_resume(self) -> None:
         """Refresh Mail conversations when returning from another screen."""
         if self._ipc_bridge is not None:
             self.run_worker(self._load_conversations())
+        self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        """Refresh Pages table when the Pages tab is first opened."""
+        if getattr(event.tab, "id", None) == f"tab-{TAB_PAGES}":  # "tab-pages"
+            self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
+
+    async def _refresh_pages_table(self) -> None:
+        """Populate #table-pages with NomadNet-browsable nodes from the IPC bridge."""
+        from styrened.tui.utils import device_info_to_mesh
+
+        try:
+            bridge = self._ipc_bridge
+            if bridge is not None:
+                device_infos = await bridge.get_devices()
+                all_devices = [device_info_to_mesh(d) for d in device_infos]
+            else:
+                from styrened.tui.services.reticulum import discover_devices
+                all_devices = discover_devices()
+        except Exception as exc:
+            logger.debug("_refresh_pages_table: device fetch failed: %s", exc)
+            return
+
+        pages_devices = [
+            d for d in all_devices
+            if d.device_type == DeviceType.NOMADNET_NODE
+            or (
+                d.device_type == DeviceType.STYRENE_NODE
+                and d.nomadnet_destination_hash
+            )
+        ]
+
+        try:
+            table = self.query_one("#table-pages", ReticumAnnounceTable)
+            table.load_from_devices(pages_devices)
+        except Exception as exc:
+            logger.debug("_refresh_pages_table: table update failed: %s", exc)
 
     # -------------------------------------------------------------------------
     # Mail-tab: data loading (preserved 1-to-1 from InboxScreen)
@@ -552,6 +596,29 @@ class ExchangeScreen(Screen[None]):
 
         from styrened.tui.widgets.page_browser import PageBrowserWidget
 
+        # Look up full device for transport selector
+        device = None
+        try:
+            table = self.query_one("#table-pages", ReticumAnnounceTable)
+            if hasattr(table, "_all_devices"):
+                for d in table._all_devices:
+                    if d.identity_hash == dest_hash or d.destination_hash == dest_hash:
+                        device = d
+                        break
+                    if getattr(d, "nomadnet_destination_hash", None) == dest_hash:
+                        device = d
+                        break
+        except Exception:
+            pass
+
+        # Resolve NomadNet destination hash for browsing
+        nomadnet_dest = dest_hash
+        if device is not None:
+            if getattr(device, "nomadnet_destination_hash", None):
+                nomadnet_dest = device.nomadnet_destination_hash
+            elif device.device_type == DeviceType.NOMADNET_NODE:
+                nomadnet_dest = device.destination_hash
+
         try:
             placeholder = self.query_one("#pages-browser-placeholder", Static)
             placeholder.add_class("hidden")
@@ -561,12 +628,17 @@ class ExchangeScreen(Screen[None]):
 
             existing = browser_section.query(PageBrowserWidget)
             if existing:
-                existing.first().set_destination(dest_hash)
+                browser_widget = existing.first()
+                if device is not None:
+                    browser_widget.set_mesh_device(device)
+                browser_widget.set_destination(nomadnet_dest)
             else:
                 browser = PageBrowserWidget(
-                    destination_hash=dest_hash,
+                    destination_hash=nomadnet_dest,
                     classes="explore-inline-browser",
                 )
+                if device is not None:
+                    browser._mesh_device = device
                 browser_section.mount(browser)
         except Exception as exc:
             logger.warning("action_preview_page failed: %s", exc)

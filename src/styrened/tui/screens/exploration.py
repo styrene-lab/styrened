@@ -38,6 +38,7 @@ from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.screens.exploration_projection import build_styrene_fleet_projection
 from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
+from styrened.tui.widgets.page_browser import PageBrowserWidget
 from styrened.ui_state import WorkspaceId
 
 # Device types shown on the exploration screen (non-Styrene announces)
@@ -54,6 +55,11 @@ _EXPLORATION_TYPES = frozenset({
 _STYRENE_TYPES = frozenset({DeviceType.STYRENE_NODE})
 _LXMF_TYPES = frozenset({DeviceType.LXMF_PEER})
 _PAGES_TYPES = frozenset({DeviceType.NOMADNET_NODE})
+# Pages tab shows NomadNet nodes AND Styrene nodes that have an embedded
+# NomadNet destination hash (e.g. the Styrene Community Hub).  The table
+# accepts both device types; the feed pre-filters to the exact set so
+# "bare" Styrene nodes without a pages endpoint are never shown here.
+_PAGES_BROWSABLE_TYPES = frozenset({DeviceType.NOMADNET_NODE, DeviceType.STYRENE_NODE})
 _INFRA_TYPES = frozenset({DeviceType.PROPAGATION_NODE, DeviceType.RNODE})
 _OTHER_TYPES = frozenset({DeviceType.GENERIC, DeviceType.UNKNOWN})
 
@@ -711,7 +717,7 @@ class ExplorationScreen(Screen[None]):
         Binding("h", "toggle_hide_lost", "Hide Lost"),
         Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),
-
+        Binding("u", "open_url", "URL", show=False),
     ]
 
     # Debounce settings for discovery callbacks
@@ -932,6 +938,25 @@ class ExplorationScreen(Screen[None]):
                         device_types=_OTHER_TYPES,
                         classes="explore-tab-table",
                     )
+                with TabPane("Pages", id="tab-pages"):
+                    with Vertical(id="pages-pane-content"):
+                        with Vertical(id="pages-table-section"):
+                            yield ReticumAnnounceTable(
+                                id="table-pages",
+                                device_types=_PAGES_BROWSABLE_TYPES,
+                                classes="explore-tab-table",
+                            )
+                        with Vertical(id="pages-browser-section", classes="hidden"):
+                            yield PageBrowserWidget(
+                                destination_hash="",
+                                id="pages-inline-browser",
+                                classes="explore-inline-browser",
+                            )
+                        with Vertical(id="pages-browser-placeholder"):
+                            yield Static(
+                                "Select a NomadNet node above to browse its pages — or press U to enter an I2P / HTTPS URL",
+                                id="pages-browser-hint",
+                            )
                 with TabPane("Diagnostics", id="tab-diagnostics"):
                     yield ActivityFeedWidget(id="explore-activity-feed")
             yield Static("", id="explore-count")
@@ -939,7 +964,7 @@ class ExplorationScreen(Screen[None]):
 
     def _get_all_tables(self) -> list[DataTable]:
         """Get all announce tables across tabs (both ReticumAnnounceTable and StyreneFleetTable)."""
-        table_ids = ["#table-styrene", "#table-lxmf", "#table-infra", "#table-other"]
+        table_ids = ["#table-styrene", "#table-lxmf", "#table-infra", "#table-other", "#table-pages"]
         tables = []
         for tid in table_ids:
             try:
@@ -958,6 +983,7 @@ class ExplorationScreen(Screen[None]):
                 "tab-lxmf": "#table-lxmf",
                 "tab-infra": "#table-infra",
                 "tab-other": "#table-other",
+                "tab-pages": "#table-pages",
             }
             table_id = table_map.get(active_id)
             if table_id:
@@ -1007,10 +1033,24 @@ class ExplorationScreen(Screen[None]):
         except Exception:
             pass
 
-        # Feed exploration tables from filtered list
+        # Feed exploration tables from filtered list.
+        # Pages table gets a special superset: all NOMADNET_NODE entries PLUS
+        # any STYRENE_NODE that carries a nomadnet_destination_hash (e.g. the
+        # Styrene Community Hub) so operators can browse their pages from here.
+        pages_devices = [
+            d for d in all_merged
+            if d.device_type == DeviceType.NOMADNET_NODE
+            or (
+                d.device_type == DeviceType.STYRENE_NODE
+                and d.nomadnet_destination_hash
+            )
+        ]
         for table in self._get_all_tables():
             if isinstance(table, ReticumAnnounceTable):
-                table.load_from_devices(exploration_devices)
+                if getattr(table, "id", None) == "table-pages":
+                    table.load_from_devices(pages_devices)
+                else:
+                    table.load_from_devices(exploration_devices)
 
         self._update_tab_labels()
         self._update_status_bar()
@@ -1022,6 +1062,7 @@ class ExplorationScreen(Screen[None]):
             "#table-lxmf": ("tab-lxmf", "LXMF"),
             "#table-infra": ("tab-infra", "Infra"),
             "#table-other": ("tab-other", "Other"),
+            "#table-pages": ("tab-pages", "Pages"),
         }
         try:
             tabs_widget = self.query_one("#explore-tabs", TabbedContent)
@@ -1118,17 +1159,55 @@ class ExplorationScreen(Screen[None]):
         return None
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle DataTable enter key — navigate to device detail screen."""
-        if event.row_key and event.row_key.value and event.row_key.value != "-":
-            device_identity = str(event.row_key.value)
-            device = self._find_device_by_identity(device_identity)
-            from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+        """Handle DataTable enter key — navigate to device detail OR load inline browser."""
+        if not (event.row_key and event.row_key.value and event.row_key.value != "-"):
+            return
+        device_identity = str(event.row_key.value)
 
-            self.app.push_screen(MeshDeviceDetailScreen(
-                device_identity=device_identity,
-                device=device,
-                origin_workspace=WorkspaceId.NODES,
-            ))
+        # Pages tab: load selected NomadNet node into the inline browser
+        if getattr(event.data_table, "id", None) == "table-pages":
+            self._load_pages_browser(device_identity)
+            return
+
+        device = self._find_device_by_identity(device_identity)
+        from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
+
+        self.app.push_screen(MeshDeviceDetailScreen(
+            device_identity=device_identity,
+            device=device,
+            origin_workspace=WorkspaceId.NODES,
+        ))
+
+    def _load_pages_browser(self, device_identity: str) -> None:
+        """Load a NomadNet destination into the inline Pages tab browser."""
+        device = self._find_device_by_identity(device_identity)
+        dest_hash: str | None = None
+
+        if device is not None:
+            if device.device_type == DeviceType.NOMADNET_NODE:
+                dest_hash = device.destination_hash
+            elif device.nomadnet_destination_hash:
+                # STYRENE_NODE with embedded NomadNet destination (e.g. Community Hub)
+                dest_hash = device.nomadnet_destination_hash
+
+        if not dest_hash:
+            self.notify("No NomadNet destination for this node", severity="warning")
+            return
+
+        try:
+            browser = self.query_one("#pages-inline-browser", PageBrowserWidget)
+            placeholder = self.query_one("#pages-browser-placeholder", Vertical)
+            browser_section = self.query_one("#pages-browser-section", Vertical)
+            # Swap placeholder for browser
+            placeholder.add_class("hidden")
+            browser_section.remove_class("hidden")
+            # Pass full device for transport selector (T key)
+            if device is not None:
+                browser.set_mesh_device(device)
+            # Navigate to the node's index page
+            browser.set_destination(dest_hash)
+        except Exception as exc:
+            self.notify(f"Could not open browser: {exc}", severity="error")
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         """Handle column header click — sort by that column."""
@@ -1236,6 +1315,29 @@ class ExplorationScreen(Screen[None]):
                     origin_workspace=WorkspaceId.NODES,
                 )
             )
+
+    def action_open_url(self) -> None:
+        """Open a URL in the inline Pages tab browser (I2P / HTTPS / NomadNet).
+
+        If the Pages tab is not currently active, switches to it first so the
+        result is immediately visible to the operator.
+        """
+        try:
+            tabs = self.query_one("#explore-tabs", TabbedContent)
+            if tabs.active != "tab-pages":
+                tabs.active = "tab-pages"
+        except Exception:
+            return
+
+        try:
+            browser = self.query_one("#pages-inline-browser", PageBrowserWidget)
+            placeholder = self.query_one("#pages-browser-placeholder", Vertical)
+            browser_section = self.query_one("#pages-browser-section", Vertical)
+            placeholder.add_class("hidden")
+            browser_section.remove_class("hidden")
+            browser.action_focus_url()
+        except Exception as exc:
+            self.notify(f"Could not open URL dialog: {exc}", severity="error")
 
     def action_toggle_hide_lost(self) -> None:
         """Toggle visibility of LOST nodes."""

@@ -37,7 +37,8 @@ reticulum:
 lxmf:
   autopeer: true
   propagation_node:
-    enabled: false    # not a propagation node, but peered with all hubs
+    enabled: true
+    destination: 6fc8bf22aa293588c9bf8d7488102e95
 
 api:
   enabled: true

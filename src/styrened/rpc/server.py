@@ -1406,6 +1406,7 @@ class RPCServer:
         - ygg_address: Yggdrasil IPv6 address (only when adapter is running)
         - ygg_port: Yggdrasil TCP listen port (only when adapter is running)
         - b32_address: I2P base32 address (only when adapter knows it)
+        - web_url: Operator-declared HTTPS URL (only when configured)
 
         Deliberately excluded: hostname, IP address, uptime, disk usage,
         nixos_generation, operator identity, peer list.
@@ -1478,6 +1479,12 @@ class RPCServer:
             meta["ygg_port"] = ygg_port
         if b32_address is not None:
             meta["b32_address"] = b32_address
+
+        # Web URL — operator-declared HTTPS presence for transport switching.
+        if config is not None:
+            web_url = getattr(getattr(config, "identity", None), "web_url", "")
+            if web_url:
+                meta["web_url"] = web_url
 
         return meta
 

@@ -106,9 +106,18 @@ _dev_home := env_var_or_default("STYRENE_HOME", env_var("HOME") + "/.styrene-dev
 # before launching. Use profile= to select a profile (default: standard).
 # Use ephemeral=true to run with a temp identity discarded on exit.
 #
+# Profiles:
+#   standard (default) — AutoInterface + Styrene hub, no extras
+#   hub                — standard + LXMF propagation enabled (tests hub status)
+#   overlay            — hub + yggdrasil/i2p in adopt mode (tests COP adapter row)
+#   full               — all well-known hubs + hub propagation + API
+#   minimal            — RNS + LXMF only, low-noise baseline
+#
 # Examples:
 #   just dev-daemon                    # standard profile, persistent QA identity
-#   just dev-daemon profile=full       # all interfaces up
+#   just dev-daemon profile=hub        # with LXMF propagation → hub status visible
+#   just dev-daemon profile=overlay    # hub + ygg + i2p adapt (requires local daemons)
+#   just dev-daemon profile=full       # all hubs up, API on
 #   just dev-daemon profile=minimal    # RNS + LXMF only
 #   just dev-daemon ephemeral=true     # throwaway identity, standard profile
 dev-daemon profile="standard" ephemeral="false":
@@ -126,7 +135,7 @@ dev-daemon profile="standard" ephemeral="false":
         echo "→ Ephemeral mode: dev home at $DEV_HOME (discarded on exit)"
     fi
 
-    CONFIG_OUT="$DEV_HOME/config/core-config.yaml"
+    CONFIG_OUT="$DEV_HOME/config/config.yaml"
 
     echo "→ Stopping system service (if any)..."
     if [[ "$(uname)" == "Darwin" ]]; then

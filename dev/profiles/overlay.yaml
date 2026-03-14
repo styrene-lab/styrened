@@ -1,0 +1,41 @@
+# Overlay profile — hub + Yggdrasil + I2P adapters in adopt mode.
+# Requires both daemons running locally before launching:
+#   yggdrasil: brew services start yggdrasil  (or systemctl start yggdrasil)
+#   i2pd:      brew services start i2pd       (or systemctl start i2pd)
+# Use for: testing the COP adapter status row, HUB + YGG + I2P indicators,
+#           WARMING → READY transitions, DEGRADED detection.
+
+reticulum:
+  mode: standalone
+  enable_transport: true
+  announce_interval: 60
+  interfaces:
+    auto: true
+    server:
+      enabled: false
+    peers:
+      - host: rns.styrene.io
+        port: 4242
+        name: "Styrene Community Hub"
+        enabled: true
+
+lxmf:
+  autopeer: true
+  propagation_node:
+    enabled: true
+    destination: 6fc8bf22aa293588c9bf8d7488102e95
+
+i2p:
+  mode: adopt                  # detect i2pd HTTP proxy (defaults: 127.0.0.1:4444)
+                               # Override http_proxy_host/http_proxy_port if non-standard.
+
+yggdrasil:
+  mode: adopt                  # auto-detects socket: ~/.styrene/yggdrasil/yggdrasil.sock,
+                               # /var/run/yggdrasil/yggdrasil.sock, brew paths, etc.
+                               # Set admin_socket explicitly to override.
+
+api:
+  enabled: false
+
+mesh_vpn:
+  enable: false

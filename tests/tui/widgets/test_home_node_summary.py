@@ -9,9 +9,9 @@ from textual.app import App, ComposeResult
 
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.widgets.home_node_summary import (
+    _UNKNOWN_STATUS_SORT_KEY,
     MAX_VISIBLE_ROWS,
     HomeNodeSummaryTable,
-    _UNKNOWN_STATUS_SORT_KEY,
     format_relative_time,
 )
 
@@ -344,7 +344,7 @@ class TestHomeNodeSummaryTableWidget:
 
 
 class TestOverflowAffordance:
-    """Tests for the +N more nodes overflow indicator."""
+    """Tests for the Home summary overflow indicator."""
 
     def _make_n_devices(self, count: int, *, now: float | None = None) -> list[MeshDevice]:
         if now is None:
@@ -371,40 +371,21 @@ class TestOverflowAffordance:
             table = pilot.app.query_one(HomeNodeSummaryTable)
             devices = self._make_n_devices(MAX_VISIBLE_ROWS + 3)
             table.update_nodes(devices)
-            assert table.overflow_count == 3
-            # Rows = MAX_VISIBLE_ROWS node rows + 1 overflow row
-            assert table.row_count == MAX_VISIBLE_ROWS + 1
+            # One row is reserved for the affordance itself.
+            assert table.overflow_count == 4
+            assert table.row_count == MAX_VISIBLE_ROWS
 
     @pytest.mark.asyncio
-    async def test_overflow_row_text_contains_count(self) -> None:
-        """Overflow row label includes the hidden-node count."""
+    async def test_overflow_row_text_contains_shown_and_total_counts(self) -> None:
+        """Overflow row label includes both the visible and total counts."""
         async with _TestApp().run_test() as pilot:
             table = pilot.app.query_one(HomeNodeSummaryTable)
             devices = self._make_n_devices(MAX_VISIBLE_ROWS + 5)
             table.update_nodes(devices)
             overflow_cell = str(table.get_cell("__overflow__", "name"))
-            assert "5" in overflow_cell
-
-    @pytest.mark.asyncio
-    async def test_overflow_row_text_singular_noun(self) -> None:
-        """Exactly 1 hidden node uses singular 'node' in label."""
-        async with _TestApp().run_test() as pilot:
-            table = pilot.app.query_one(HomeNodeSummaryTable)
-            devices = self._make_n_devices(MAX_VISIBLE_ROWS + 1)
-            table.update_nodes(devices)
-            overflow_cell = str(table.get_cell("__overflow__", "name"))
-            assert "1 more node" in overflow_cell
-            assert "nodes" not in overflow_cell
-
-    @pytest.mark.asyncio
-    async def test_overflow_row_text_plural_noun(self) -> None:
-        """More than 1 hidden node uses plural 'nodes' in label."""
-        async with _TestApp().run_test() as pilot:
-            table = pilot.app.query_one(HomeNodeSummaryTable)
-            devices = self._make_n_devices(MAX_VISIBLE_ROWS + 2)
-            table.update_nodes(devices)
-            overflow_cell = str(table.get_cell("__overflow__", "name"))
-            assert "nodes" in overflow_cell
+            assert "showing" in overflow_cell.lower()
+            assert "9" in overflow_cell
+            assert str(MAX_VISIBLE_ROWS + 5) in overflow_cell
 
     @pytest.mark.asyncio
     async def test_overflow_row_key_is_double_underscore_overflow(self) -> None:
@@ -421,9 +402,9 @@ class TestOverflowAffordance:
         """Calling update_nodes with fewer nodes clears the overflow affordance."""
         async with _TestApp().run_test() as pilot:
             table = pilot.app.query_one(HomeNodeSummaryTable)
-            # First update — triggers overflow
+            # First update — triggers overflow (9 visible + 1 affordance row)
             table.update_nodes(self._make_n_devices(MAX_VISIBLE_ROWS + 4))
-            assert table.overflow_count == 4
+            assert table.overflow_count == 5
 
             # Second update — no overflow
             table.update_nodes(self._make_n_devices(3))

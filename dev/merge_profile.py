@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge dev profile overlays into a target core-config.yaml.
+"""Merge dev profile overlays into a target config.yaml.
 
 Usage:
     python dev/merge_profile.py <profile> <output_path>
@@ -7,6 +7,9 @@ Usage:
 Loads dev/profiles/_base.yaml, then deep-merges dev/profiles/<profile>.yaml
 on top, writing the result to <output_path>.  Lists are replaced wholesale
 (not appended) so peer lists in profiles are authoritative.
+
+Note: the daemon reads paths.config_file() → <config_dir>/config.yaml.
+The output_path must point to config.yaml, not core-config.yaml.
 """
 from __future__ import annotations
 

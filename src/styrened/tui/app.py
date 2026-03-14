@@ -24,6 +24,7 @@ from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.exchange import ExchangeScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
+from styrened.tui.screens.splash import SplashScreen
 from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.screens.exploration import ExplorationScreen
 from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
@@ -501,7 +502,13 @@ class StyreneApp(App[None]):
             4. If daemon OK → initialize services → FirstRunWizard or Dashboard
         """
         self._check_for_updates()
-        daemon_ok = await self._check_daemon()
+        # Show intro animation while daemon connection is established.
+        # SplashScreen runs _check_daemon() internally and dismisses with
+        # True (daemon ok) or False (timed out → setup needed).
+        self.push_screen(SplashScreen(), callback=self._on_splash_complete)
+
+    async def _on_splash_complete(self, daemon_ok: bool) -> None:
+        """Called when SplashScreen dismisses."""
         if not daemon_ok:
             self.log.info("No daemon detected - launching setup screen")
             self.push_screen(

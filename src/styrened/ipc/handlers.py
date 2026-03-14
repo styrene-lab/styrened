@@ -2425,6 +2425,8 @@ class IPCHandlers:
                 "content_length": response.content_length,
                 "cache_ttl": response.cache_ttl,
             }
+            if response.content_type:
+                data["content_type"] = response.content_type
             if response.error_message:
                 data["error_message"] = response.error_message
 
