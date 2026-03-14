@@ -22,7 +22,10 @@ import logging
 import os
 import urllib.parse
 from enum import Enum, auto
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from rich.console import RenderableType
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -292,20 +295,22 @@ class PageBrowserWidget(Widget):
                 content_length = result.get("content_length", 0)
                 content_type = result.get("content_type")
 
+                # Detect content type unconditionally so _last_content_kind
+                # is always set (even when the structured renderer is used).
+                kind = detect_content_type(content, content_type)
+                self._last_content_kind = kind
+
                 # Try structured data rendering first
                 structured_data = result.get("structured_data")
                 page_metadata = result.get("page_metadata")
-                rendered = None
+                rendered: RenderableType | None = None
 
                 if structured_data and page_metadata:
                     page_type = page_metadata.get("page_type", "")
                     rendered = render_structured_page(page_type, structured_data)
 
-                # Content-type-aware rendering dispatch
+                # Content-type-aware rendering dispatch (fallback when no structured render)
                 if rendered is None:
-                    kind = detect_content_type(content, content_type)
-                    self._last_content_kind = kind
-
                     if kind == ContentKind.HTML:
                         rendered = render_html_to_rich(content)
                     else:
@@ -321,7 +326,8 @@ class PageBrowserWidget(Widget):
                 # Update display
                 try:
                     body = self.query_one("#page-body", _PageBody)
-                    body.update(rendered)
+                    if rendered is not None:
+                        body.update(rendered)
                     body.remove_class("placeholder-text")
                 except Exception:
                     pass
@@ -476,6 +482,12 @@ class PageBrowserWidget(Widget):
         """Reload the current page."""
         self.run_worker(self._load_page(self.current_path), exclusive=True)
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Hide the open_in_browser action in headless environments."""
+        if action == "open_in_browser":
+            return False if _is_headless() else True
+        return None
+
     def action_open_in_browser(self) -> None:
         """Open the current page in the system browser.
 
@@ -490,15 +502,21 @@ class PageBrowserWidget(Widget):
         if not url:
             return
 
-        # For .i2p URLs, construct the proxy URL for the browser
-        if ".i2p" in url and not url.startswith("http"):
-            url = f"http://{url}"
-
-        # For NomadNet paths (not URLs), there's no browser-accessible equivalent
-        if url.startswith("/page/"):
+        # NomadNet paths have no browser-accessible equivalent
+        if url.startswith("/"):
             self.notify("NomadNet pages are only viewable in the TUI", severity="information")
             return
 
+        # .i2p URLs must be proxied through the local I2P HTTP proxy
+        if ".i2p" in url:
+            proxy_url = f"http://localhost:4444/{url}"
+            try:
+                self.app.open_url(proxy_url)
+            except Exception as e:
+                self.notify(f"Failed to open browser: {e}", severity="error")
+            return
+
+        # HTTPS and other clear URLs pass through directly
         try:
             self.app.open_url(url)
         except Exception as e:
@@ -535,7 +553,7 @@ class PageBrowserWidget(Widget):
         label = _TRANSPORT_LABELS[self._active_transport]
 
         if self._active_transport == Transport.NOMADNET:
-            # Switch to NomadNet mode
+            # Switch to NomadNet mode — set fields directly, one worker
             nomadnet_dest = getattr(self._mesh_device, "nomadnet_destination_hash", "")
             self._external_url = ""
             self.destination_hash = nomadnet_dest
@@ -543,17 +561,19 @@ class PageBrowserWidget(Widget):
             self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
 
         elif self._active_transport == Transport.I2P:
-            # Switch to I2P mode
+            # Switch to I2P mode — set fields directly, one worker
             b32 = getattr(self._mesh_device, "b32_address", "")
             url = f"http://{b32}/"
-            self.set_external_url(url)
+            self._external_url = url
+            self.destination_hash = ""
             self.notify(f"Switched to {label} transport")
             self.run_worker(self._load_page(url), exclusive=True)
 
         elif self._active_transport == Transport.HTTPS:
-            # Switch to HTTPS mode
+            # Switch to HTTPS mode — set fields directly, one worker
             web_url = getattr(self._mesh_device, "web_url", "")
-            self.set_external_url(web_url)
+            self._external_url = web_url
+            self.destination_hash = ""
             self.notify(f"Switched to {label} transport")
             self.run_worker(self._load_page(web_url), exclusive=True)
 
