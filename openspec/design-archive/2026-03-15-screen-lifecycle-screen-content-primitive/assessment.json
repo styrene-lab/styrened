@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "nodeId": "screen-lifecycle-screen-content-primitive",
+  "assessmentKind": "design",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T06:30:23.311497Z",
+  "summary": "Manual design assessment passed. The node now defines a parent-owned screen-content host that forwards activate/deactivate/resume/suspend/cleanup transitions to embedded live panes, keeps shared-bridge ownership at the parent screen, and requires lazy activation so hidden panes do not add startup pressure.",
+  "checks": [
+    "Research explains why embedded live panes need tab-activation lifecycle separate from whole-screen resume semantics.",
+    "Decisions choose a parent-owned host/controller instead of a heavyweight screen base or pane-owned ambient lifecycle.",
+    "Acceptance criteria cover initial active-pane-only load, tab-switch deactivation ordering, and suspend/unmount cleanup without stealing shared-bridge ownership.",
+    "Implementation notes identify Exchange as the proving ground and connect pane-local resources back to WidgetResourceScope."
+  ]
+}
