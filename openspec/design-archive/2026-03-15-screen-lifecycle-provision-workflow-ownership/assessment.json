@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "nodeId": "screen-lifecycle-provision-workflow-ownership",
+  "assessmentKind": "design",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T14:40:13.436908Z",
+  "summary": "Manual design assessment passed. The node now treats Provision as a workflow-owned lifecycle surface, keeps ForgeLog responsible for widget-local timer cleanup, and narrows the follow-up to callable worker scheduling plus explicit teardown of bootstrap, disk-detect, flash, and post-flash watch boundaries.",
+  "checks": [
+    "Research explains why Provision differs from aggregate refresh surfaces and why naive StyreneScreen resume refresh would replay bootstrap at the wrong workflow moments.",
+    "Decisions keep ProvisionScreen workflow-oriented, choose screen-local resource ownership plus callable worker scheduling, and preserve ForgeLog as the timer owner.",
+    "Acceptance criteria require cancellable bootstrap, callable scheduling for detect/flash work, and post-flash watch teardown that ends with the workflow.",
+    "Implementation notes keep the file scope narrow to Provision and only add forge-log or reticulum support changes if concrete cleanup needs require them."
+  ]
+}
