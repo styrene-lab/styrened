@@ -131,6 +131,7 @@ class IPCMessageType(IntEnum):
 
     # Boundary logging (0x70-0x7F)
     CMD_BOUNDARY_SNAPSHOT = 0x70  # Return ring-buffer snapshot of boundary log records
+    GET_ACTIVITY_HISTORY = 0x73   # Return recent activity event ring buffer
 
     # Subscription requests (0x30-0x3F) - for TUI
     SUB_DEVICES = 0x30

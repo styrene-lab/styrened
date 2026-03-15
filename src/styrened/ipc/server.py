@@ -273,6 +273,7 @@ class ControlServer:
             IPCMessageType.SAVE_CORE_CONFIG: self._handlers.handle_save_core_config,
             IPCMessageType.GET_HUB_STATUS: self._handlers.handle_get_hub_status,
             IPCMessageType.GET_ADAPTER_STATE: self._handlers.handle_get_adapter_state,
+            IPCMessageType.GET_ACTIVITY_HISTORY: self._handlers.handle_get_activity_history,
             IPCMessageType.GET_UNREAD_COUNTS: self._handlers.handle_get_unread_counts,
             # Blocklist
             IPCMessageType.CMD_BLOCK_PEER: self._handlers.handle_cmd_block_peer,

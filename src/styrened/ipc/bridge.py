@@ -655,6 +655,10 @@ class IPCBridge:
         """Get current state of all registered adapters."""
         return await self._call("get_adapter_state")
 
+    async def get_activity_history(self, limit: int = 200) -> list[dict]:
+        """Get the daemon's activity event ring buffer for feed backfill."""
+        return await self._call("get_activity_history", limit=limit)
+
     # ── Direct data link methods ──────────────────────────────────
 
     async def block_peer(

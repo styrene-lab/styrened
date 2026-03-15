@@ -199,6 +199,10 @@ class StyreneDaemon:
         self._datalink_rl: _DataLinkRateLimiter = _DataLinkRateLimiter()
         self._adapter_probe_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
+        # Activity event ring buffer — last 200 events for TUI backfill
+        # Stored as plain dicts matching the EVENT_ACTIVITY wire format.
+        self._activity_ring: deque[dict] = deque(maxlen=200)
+
         # Central event bus — the daemon's nervous system
         from styrened.services.event_bus import EventBus
         self.event_bus: EventBus = EventBus()
@@ -406,6 +410,14 @@ class StyreneDaemon:
             peer_hash: LXMF hash of the peer (if applicable).
             metadata: Additional event-specific data.
         """
+        # Append to ring buffer for TUI backfill (always, regardless of notification service)
+        self._activity_ring.append({
+            "event_type": event_type,
+            "peer_hash": peer_hash,
+            "timestamp": time.time(),
+            **(metadata or {}),
+        })
+
         # Bridge to EventBus (even if notification service is down)
         self._bridge_to_event_bus(event_type, peer_hash, metadata)
 

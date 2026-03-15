@@ -634,6 +634,22 @@ class GetAdapterStateRequest(IPCRequest):
 
 
 @dataclass
+class GetActivityHistoryRequest(IPCRequest):
+    """Request the recent activity event ring buffer.
+
+    Returns the last N events recorded by the daemon since startup,
+    allowing TUI clients to backfill the activity feed on connect
+    without waiting for new live events.
+    """
+
+    MSG_TYPE = IPCMessageType.GET_ACTIVITY_HISTORY
+    limit: int = 200
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"limit": self.limit}
+
+
+@dataclass
 class CmdBlockPeerRequest(IPCRequest):
     """Block a peer — silently drop all future messages from them."""
 
@@ -1663,6 +1679,8 @@ def create_request(msg_type: IPCMessageType, payload: dict[str, Any]) -> IPCRequ
         return GetUnreadCountsRequest()
     elif msg_type == IPCMessageType.GET_ADAPTER_STATE:
         return GetAdapterStateRequest()
+    elif msg_type == IPCMessageType.GET_ACTIVITY_HISTORY:
+        return GetActivityHistoryRequest(limit=int(payload.get("limit", 200)))
     elif msg_type == IPCMessageType.CMD_BLOCK_PEER:
         return CmdBlockPeerRequest.from_payload(payload)
     elif msg_type == IPCMessageType.CMD_UNBLOCK_PEER:

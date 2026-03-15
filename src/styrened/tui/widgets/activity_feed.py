@@ -161,3 +161,25 @@ class ActivityFeedWidget(Widget):
             log.write(line)
         except Exception:
             pass
+
+    def backfill_history(self, events: list[dict[str, Any]]) -> None:
+        """Seed the feed with historical events from the daemon ring buffer.
+
+        Called once on connect so the feed isn't empty when the operator
+        first opens the Diagnostics tab. Historical events are written
+        before any live events and are visually dimmed to distinguish them.
+        """
+        if not events:
+            return
+        try:
+            log = self.query_one("#activity-log", RichLog)
+            cascade = get_color_cascade()
+            log.write(f"[{cascade.dim}]── history ──[/]")
+            for event in events:
+                event_type = event.get("event_type", "unknown")
+                line = _format_event(event_type, event)
+                # Dim historical events relative to live ones
+                log.write(f"[{cascade.dim}]{line}[/]")
+            log.write(f"[{cascade.dim}]── live ──[/]")
+        except Exception:
+            pass

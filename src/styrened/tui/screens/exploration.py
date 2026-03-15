@@ -761,6 +761,11 @@ class ExplorationScreen(Screen[None]):
         self._countdown_timer = self.set_interval(1.0, self._tick_countdown)
         # Focus active table after TabbedContent is ready
         self.call_after_refresh(self._focus_active_table)
+        # Subscribe to activity feed at mount (not lazily on tab click) and
+        # backfill with daemon ring buffer so Diagnostics isn't empty on first open.
+        if self._ipc_bridge is not None and not self._diagnostics_subscribed:
+            self._diagnostics_subscribed = True
+            self.run_worker(self._subscribe_and_backfill_activity(), exclusive=False)
 
     def on_screen_suspend(self, event: events.ScreenSuspend) -> None:
         """Pause periodic refresh while Nodes is not the active workspace."""
@@ -1062,11 +1067,7 @@ class ExplorationScreen(Screen[None]):
                     table.set_filter("")
         except Exception:
             pass
-        # Start activity subscription when Diagnostics tab is first activated
-        if getattr(event.tab, "id", None) == "tab-diagnostics":
-            if not self._diagnostics_subscribed:
-                self._diagnostics_subscribed = True
-                self.run_worker(self._subscribe_activity(), exclusive=False)
+        # Activity subscription starts at mount — nothing to do on tab click
         self._update_status_bar()
 
     def _tick_countdown(self) -> None:
@@ -1389,12 +1390,22 @@ class ExplorationScreen(Screen[None]):
         except Exception:
             return None
 
-    async def _subscribe_activity(self) -> None:
-        """Subscribe to activity events via IPC and push into ActivityFeedWidget."""
+    async def _subscribe_and_backfill_activity(self) -> None:
+        """Subscribe to live activity events and backfill from daemon ring buffer."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
         try:
+            # Backfill historical events first so the feed isn't empty on first open
+            try:
+                history = await bridge.get_activity_history(limit=200)
+                if history:
+                    activity_widget = self.query_one("#explore-activity-feed", ActivityFeedWidget)
+                    activity_widget.backfill_history(history)
+            except Exception:
+                pass
+
+            # Subscribe to live events
             await bridge.subscribe_activity()
             async for event_type, event in bridge.iter_events(IPCMessageType.EVENT_ACTIVITY):
                 if event_type != IPCMessageType.EVENT_ACTIVITY:

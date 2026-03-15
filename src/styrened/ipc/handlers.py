@@ -639,6 +639,35 @@ class IPCHandlers:
             logger.exception(f"Error getting adapter state: {e}")
             return ErrorResponse.internal_error(f"Failed to get adapter state: {e}")
 
+    async def handle_get_activity_history(self, request: IPCRequest) -> IPCResponse:
+        """Handle GET_ACTIVITY_HISTORY request.
+
+        Returns the daemon's activity event ring buffer so TUI clients can
+        backfill the activity feed on connect without waiting for new events.
+
+        Returns:
+            ResultResponse with {events: [...], count: int}.
+        """
+        try:
+            err = self._check_daemon()
+            if err:
+                return err
+            assert self.daemon is not None
+
+            from styrened.ipc.messages import GetActivityHistoryRequest
+            limit = request.limit if isinstance(request, GetActivityHistoryRequest) else 200
+
+            ring = getattr(self.daemon, "_activity_ring", None)
+            if ring is None:
+                return ResultResponse(data={"events": [], "count": 0})
+
+            events = list(ring)[-limit:]
+            return ResultResponse(data={"events": events, "count": len(events)})
+
+        except Exception as e:
+            logger.exception(f"Error getting activity history: {e}")
+            return ErrorResponse.internal_error(f"Failed to get activity history: {e}")
+
     # -------------------------------------------------------------------------
     # Command handlers
     # -------------------------------------------------------------------------

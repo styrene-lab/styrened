@@ -1161,6 +1161,17 @@ class ControlClient:
         data = await self._request(GetAdapterStateRequest())
         return cast(list[dict[str, Any]], data.get("adapters", []))
 
+    async def get_activity_history(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Get the daemon's activity event ring buffer for feed backfill.
+
+        Returns:
+            List of activity event dicts, oldest first.
+        """
+        from styrened.ipc.messages import GetActivityHistoryRequest
+
+        data = await self._request(GetActivityHistoryRequest(limit=limit))
+        return cast(list[dict[str, Any]], data.get("events", []))
+
     # -------------------------------------------------------------------------
     # Direct data link methods
     # -------------------------------------------------------------------------
