@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle-styrenescreen-migration-tail
 title: Remaining StyreneScreen migration tail
-status: decided
+status: implemented
 parent: screen-lifecycle
 tags: [tui, lifecycle, migration, screens]
 open_questions: []

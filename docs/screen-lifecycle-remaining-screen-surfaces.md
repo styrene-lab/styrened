@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle-remaining-screen-surfaces
 title: Remaining screen-surface lifecycle migration
-status: decided
+status: implemented
 parent: screen-lifecycle-styrenescreen-migration-tail
 open_questions: []
 issue_type: epic

@@ -32,6 +32,7 @@ class LocalDaemonState:
     daemon_running: bool
     local_identity_hash: str | None = None
     hub_connected: bool = False
+    hub_status: HubStatus = HubStatus.DISABLED
     hub_address: str | None = None
     hub_destination: str | None = None
     ygg: OverlayRuntimeState = field(default_factory=OverlayRuntimeState)
@@ -133,6 +134,10 @@ def build_local_daemon_state(inputs: LocalDaemonInputs) -> LocalDaemonState:
     daemon_running = daemon_status is not None and bool(getattr(daemon_status, "rns_initialized", False))
     local_identity_hash = getattr(identity_info, "identity_hash", None) if identity_info else None
     hub_connected = bool(hub_status.get("is_connected", False))
+    try:
+        hub_status_enum = HubStatus(hub_status.get("status", "disabled"))
+    except ValueError:
+        hub_status_enum = HubStatus.CONNECTED if hub_connected else HubStatus.DISABLED
 
     warnings: list[str] = []
     if daemon_status is not None and not bool(getattr(daemon_status, "lxmf_initialized", False)):
@@ -149,6 +154,7 @@ def build_local_daemon_state(inputs: LocalDaemonInputs) -> LocalDaemonState:
         daemon_running=daemon_running,
         local_identity_hash=local_identity_hash,
         hub_connected=hub_connected,
+        hub_status=hub_status_enum,
         hub_address=hub_status.get("hub_address") or getattr(daemon_status, "hub_address", None),
         hub_destination=hub_status.get("hub_destination"),
         ygg=_overlay_state(
@@ -224,7 +230,7 @@ def build_home_node_info_state(
         daemon_version=str(getattr(daemon_status, "daemon_version", "") or ""),
         daemon_uptime=float(getattr(daemon_status, "uptime", 0.0) or 0.0),
         local_identity_hash=daemon_state.local_identity_hash,
-        hub_status=HubStatus.CONNECTED if daemon_state.hub_connected else HubStatus.DISCONNECTED,
+        hub_status=daemon_state.hub_status,
         styrene_mesh_count=mesh_node_count,
         rns_online=bool(getattr(daemon_status, "rns_initialized", False)),
         interface_count=int(getattr(daemon_status, "interface_count", 0) or 0),

@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle-widget-refresh-tail
 title: Widget-owned refresh and lane-ownership tail
-status: decided
+status: implemented
 parent: screen-lifecycle-styrenescreen-migration-tail
 open_questions: []
 issue_type: task

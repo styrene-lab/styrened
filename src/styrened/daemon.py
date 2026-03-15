@@ -250,6 +250,11 @@ class StyreneDaemon:
         # Start auto-reply handler for chat messages
         self._start_auto_reply()
 
+        # Mark hub as configured when enabled hub peers exist in config so
+        # the status surface shows WAITING (not DISABLED) on first boot before
+        # the first announce arrives from the Community Hub.
+        self._configure_hub_status()
+
         # Start device discovery with NodeStore for persistence
         # This ensures discovered devices are persisted and their identity_hash
         # mappings are available for identity resolution when sending messages
@@ -294,6 +299,25 @@ class StyreneDaemon:
 
         # Main loop with periodic announces
         await self._run_loop()
+
+    def _configure_hub_status(self) -> None:
+        """Seed the hub configured flag from loaded config.
+
+        Called once at daemon startup after config is available.  Sets
+        HubConnection._hub_configured=True when any enabled hub peer exists so
+        the status surface shows WAITING instead of DISABLED while the first
+        announce from the Community Hub is still in transit.
+        """
+        try:
+            from styrened.services.hub_connection import get_hub_connection
+
+            has_hub_peers = any(
+                p.enabled for p in self.config.reticulum.interfaces.peers
+            )
+            get_hub_connection().set_configured(has_hub_peers)
+            logger.debug(f"Hub configured={has_hub_peers} ({len(self.config.reticulum.interfaces.peers)} peers)")
+        except Exception as e:
+            logger.warning(f"Could not set hub configured flag: {e}")
 
     def _inject_lxmf_rbac(self) -> None:
         """Inject RBAC policy into LXMFService for unified blocklist checks.

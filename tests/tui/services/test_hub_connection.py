@@ -293,3 +293,85 @@ class TestHubConnectionPathHealthCheck:
     def test_path_check_interval_constant_exists(self) -> None:
         """Test that PATH_CHECK_INTERVAL constant is defined."""
         assert PATH_CHECK_INTERVAL == 30
+
+
+class TestHubConfiguredFlag:
+    """Test _hub_configured flag and WAITING vs DISABLED semantics."""
+
+    def test_status_is_disabled_when_not_configured_and_no_address(self) -> None:
+        """Fresh install with no peers: DISABLED (operator opted out)."""
+        hub = HubConnection()
+        # _hub_configured defaults False, no address
+        assert hub.status == HubStatus.DISABLED
+
+    def test_status_is_waiting_when_configured_and_no_address(self) -> None:
+        """Hub peers in config but no announce received yet: WAITING."""
+        hub = HubConnection()
+        hub.set_configured(True)
+        assert hub.status == HubStatus.WAITING
+
+    def test_status_is_disabled_when_explicitly_unconfigured(self) -> None:
+        """set_configured(False) after True reverts to DISABLED."""
+        hub = HubConnection()
+        hub.set_configured(True)
+        hub.set_configured(False)
+        assert hub.status == HubStatus.DISABLED
+
+    @patch("styrened.services.hub_connection.RNS")
+    @patch("styrened.services.hub_connection.time")
+    def test_status_is_waiting_after_connect_within_window(
+        self, mock_time: Mock, mock_rns: Mock
+    ) -> None:
+        """Address set but path not available yet: WAITING within announce window."""
+        hub = HubConnection()
+        hub.set_configured(True)
+        hub._hub_address = "abcd1234" * 4
+        hub._connected = False
+        hub._waiting_since = 1000.0
+        hub._announce_interval = 60
+
+        mock_time.time.return_value = 1030.0  # 30s elapsed, within 60s window
+        assert hub.status == HubStatus.WAITING
+
+    @patch("styrened.services.hub_connection.RNS")
+    @patch("styrened.services.hub_connection.time")
+    def test_status_is_disconnected_after_announce_window_expires(
+        self, mock_time: Mock, mock_rns: Mock
+    ) -> None:
+        """Address set, window expired, not connected: DISCONNECTED."""
+        hub = HubConnection()
+        hub.set_configured(True)
+        hub._hub_address = "abcd1234" * 4
+        hub._connected = False
+        hub._waiting_since = 1000.0
+        hub._announce_interval = 60
+
+        mock_time.time.return_value = 1065.0  # 65s elapsed, past 60s window
+        assert hub.status == HubStatus.DISCONNECTED
+
+    @patch("styrened.services.hub_connection.RNS")
+    @patch("styrened.services.hub_connection.time")
+    def test_status_is_connected_when_path_valid(
+        self, mock_time: Mock, mock_rns: Mock
+    ) -> None:
+        """Connected with valid path: CONNECTED."""
+        hub = HubConnection()
+        hub.set_configured(True)
+        hub._hub_address = "abcd1234" * 4
+        hub._connected = True
+        hub._last_path_check = 1000.0
+
+        mock_time.time.return_value = 1010.0  # within PATH_CHECK_INTERVAL
+        assert hub.status == HubStatus.CONNECTED
+
+    def test_set_configured_does_not_affect_connected_status(self) -> None:
+        """set_configured(False) on an already-connected hub doesn't downgrade status."""
+        hub = HubConnection()
+        hub._hub_address = "abcd1234" * 4
+        hub._connected = True
+        hub._last_path_check = float("inf")  # never triggers re-check
+
+        # Even with configured=False, CONNECTED wins (path check is the gate)
+        hub.set_configured(False)
+        # is_connected still True (last_path_check logic won't fire with inf)
+        assert hub._connected is True

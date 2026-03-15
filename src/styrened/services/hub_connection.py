@@ -68,6 +68,7 @@ class HubConnection:
         self._connected = False
         self._hub_destination: RNS.Destination | None = None
         self._hub_address: str | None = None
+        self._hub_configured: bool = False  # True when hub peers present in config
         self._waiting_since: float | None = None
         self._announce_interval: int = 60  # Default 60 seconds
         self._last_path_check: float = 0.0
@@ -157,6 +158,21 @@ class HubConnection:
         """
         return self._hub_address
 
+    def set_configured(self, configured: bool) -> None:
+        """Mark whether a hub is present in operator config.
+
+        Called at daemon startup once config is loaded.  When True, the
+        status property returns WAITING instead of DISABLED while no
+        announce has been received yet — correctly reflecting that the
+        operator has a hub configured, not that they opted out of hub
+        connectivity.
+
+        Args:
+            configured: True if any enabled hub peer exists in config.
+        """
+        self._hub_configured = configured
+        logger.debug(f"Hub configured flag set to {configured}")
+
     def set_announce_interval(self, interval: int) -> None:
         """Set the hub's announce interval.
 
@@ -197,16 +213,21 @@ class HubConnection:
         Returns:
             HubStatus enum value.
         """
-        if not self._hub_address:
-            return HubStatus.DISABLED
-
         if self.is_connected:
             return HubStatus.CONNECTED
 
-        if self.is_within_announce_window():
+        # Hub address known but not yet connected — within or past announce window
+        if self._hub_address:
+            if self.is_within_announce_window():
+                return HubStatus.WAITING
+            return HubStatus.DISCONNECTED
+
+        # No address yet: WAITING if hub peers are configured, DISABLED if
+        # the operator has explicitly removed all hub peers.
+        if self._hub_configured:
             return HubStatus.WAITING
 
-        return HubStatus.DISCONNECTED
+        return HubStatus.DISABLED
 
     def connect(self, hub_address: str) -> bool:
         """Connect to a Styrene hub.
