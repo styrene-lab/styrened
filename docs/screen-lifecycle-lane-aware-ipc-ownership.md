@@ -3,7 +3,7 @@ id: screen-lifecycle-lane-aware-ipc-ownership
 title: Lane-aware IPC ownership for long-running UI work
 status: implemented
 parent: screen-lifecycle
-related: [tui-pages-browser-ipc-head-of-line-blocking, screen-lifecycle-widget-resource-primitives]
+related: [tui-pages-browser-ipc-head-of-line-blocking, screen-lifecycle-widget-resource-primitives, screen-lifecycle-aggregate-refresh-surfaces]
 tags: [tui, lifecycle, ipc, workers, pages]
 open_questions: []
 branches: ["feature/screen-lifecycle-lane-aware-ipc-ownership"]
