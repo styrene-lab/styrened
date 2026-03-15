@@ -549,7 +549,7 @@ class LXMFService:
             logger.error(f"Failed to send message: {e}")
             return None
 
-    def _resolve_identity(self, destination_hash: str) -> "RNS.Identity | None":
+    def _resolve_identity(self, destination_hash: str, *, network_resolve: bool = True) -> "RNS.Identity | None":
         """Resolve a destination hash to an RNS Identity.
 
         This method implements a multi-strategy lookup to find the identity:
@@ -650,11 +650,17 @@ class LXMFService:
             )
             return dest_identity
 
-        # Strategy 5: Request path and wait for identity to arrive via announce
-        # The node may be actively announcing but the identity cache was evicted.
-        # Requesting a path triggers the network to provide the identity.
-        # NOTE: This blocks the calling thread for up to 10s. The IPC handler
-        # runs send_message in a thread pool worker, so this is acceptable.
+        # Strategy 5: Request path and wait for identity to arrive via announce.
+        # Only performed when network_resolve=True (callers that explicitly want
+        # the blocking path-request, e.g. send_message).  Read-only callers such
+        # as conversation listing must pass network_resolve=False to avoid
+        # blocking the asyncio event loop for up to 10 s per peer.
+        if not network_resolve:
+            logger.debug(
+                f"[HASH] Skipping Strategy 5 (network_resolve=False) for {destination_hash[:16]}..."
+            )
+            return None
+
         logger.info(
             f"[HASH] All recall strategies failed for {destination_hash[:16]}... "
             f"Requesting path to trigger identity resolution..."

@@ -1013,7 +1013,7 @@ class IPCHandlers:
             return ErrorResponse.internal_error("Conversation service not initialized")
         return None
 
-    def _resolve_peer_hashes(self, peer_hash: str) -> list[str]:
+    def _resolve_peer_hashes(self, peer_hash: str, *, network_resolve: bool = False) -> list[str]:
         """Resolve a peer hash to all known hash types for the same identity.
 
         Device discovery uses operator destination hashes (e.g. styrene_node.operator)
@@ -1027,6 +1027,10 @@ class IPCHandlers:
 
         Args:
             peer_hash: Hash to resolve (operator or LXMF delivery hash).
+            network_resolve: Whether to attempt Strategy 5 (blocking 10 s path
+                request). Must be False for any call on the asyncio event loop.
+                Defaults to False — callers that explicitly want network
+                resolution must opt in.
 
         Returns:
             List of additional hashes (may be empty if resolution fails).
@@ -1043,10 +1047,13 @@ class IPCHandlers:
             if lxmf_service is None:
                 return additional
 
-            # Try to resolve identity from the peer_hash
+            # Try to resolve identity from the peer_hash.
+            # network_resolve=False: skip the 10-second blocking path-request
+            # (Strategy 5).  This runs on the asyncio event loop; blocking it
+            # for 10 s × N conversations is unacceptable for read-only listing.
             import RNS
 
-            identity = lxmf_service._resolve_identity(peer_hash)
+            identity = lxmf_service._resolve_identity(peer_hash, network_resolve=network_resolve)
             if identity is None:
                 # Don't cache misses — identity may appear later
                 return additional
