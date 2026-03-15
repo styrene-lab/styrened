@@ -1,7 +1,7 @@
 ---
 id: tui-pages-browser-ipc-head-of-line-blocking
 title: Pages browser IPC head-of-line blocking
-status: decided
+status: implemented
 parent: tui-startup-ipc-backpressure
 related: [screen-lifecycle, screen-lifecycle-lane-aware-ipc-ownership]
 tags: [tui, pages, ipc, bug]
@@ -37,11 +37,15 @@ The remaining pytest warning was not another IPC regression. `PageBrowserWidget`
 
 ### Implementation slice archived to OpenSpec baseline
 
-The implementation change `tui-pages-browser-ipc-isolation` has been archived and merged into `openspec/baseline/tui/pages-browser-ipc.md`. No active OpenSpec changes remain. The design-tree node itself is still gated from `set_status(decided)` by the explicit `/assess design` requirement enforced by the design-tree workflow.
+The implementation change `tui-pages-browser-ipc-isolation` has been archived and merged into `openspec/baseline/tui/pages-browser-ipc.md`. No active OpenSpec changes remain, and the corresponding design work is now implemented rather than still awaiting a design-gate transition.
 
 ### Page failures remain localized to the browser surface
 
 The isolated execution lane keeps slow or failed page work attached to PageBrowserWidget instead of the shared control plane. During live probing, stale-node page fetches continued on the execution lane while control-lane status requests remained immediate, which preserves truthful daemon liveness and prevents page-browser degradation from masquerading as a wider TUI disconnect.
+
+### Lifecycle reconciliation: page-browser IPC isolation is now implemented
+
+The dedicated execution-lane implementation (`IPCBridge.spawn_lane('execution')` plus lazy `PageBrowserWidget` ownership) has been archived to baseline, so this node now reflects implemented behavior rather than a pending design-only decision.
 
 ## Decisions
 

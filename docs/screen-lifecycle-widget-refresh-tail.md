@@ -31,6 +31,10 @@ The persistent-resource widgets do share a theme — they each own something tha
 
 Reassessing the widget tail suggests a middle path between hand-written cleanup everywhere and a heavy shared base. `ChatWidget`, `PageBrowserWidget`, `ForgeLog`, and `CommsSummaryWidget` all need explicit ownership of persistent resources, but the reusable layer can be a small composable toolkit: e.g. registries/helpers for timers, event subscriptions, worker callables, and auxiliary IPC lanes. That approach captures the shared lifecycle contract early, keeps local degradation visible, and avoids forcing unrelated widgets into an inheritance-heavy abstraction.
 
+### Widget helper proving ground is complete; remaining widget tail is lighter and more specialized
+
+`WidgetResourceScope` is now implemented and the initial persistent-resource widgets have migrated. The remaining widget-side lifecycle work is no longer generic cleanup boilerplate; it is narrower follow-up around specialized surfaces, lane-aware ownership patterns, or lower-priority one-shot/action-driven widgets.
+
 ## Decisions
 
 ### Decision: Prioritize widget migration only where the widget owns persistent runtime resources

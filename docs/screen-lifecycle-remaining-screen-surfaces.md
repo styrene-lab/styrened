@@ -31,6 +31,10 @@ There are two plausible directions for Exchange. A reusable helper would central
 
 On reassessment, the cost/benefit tilts toward introducing a small reusable screen-content lifecycle primitive before finishing Exchange-specific migration. Exchange is the clearest hotspot, but it already exposes the recurring shape we care about: a parent screen owns workspace navigation and control-lane access while embedded live panes need standardized mount/resume activation, refresh kickoff, and cleanup. A helper extracted at this layer can make parent-vs-pane ownership explicit rather than hidden, provided it stays composable and narrow instead of becoming a monolithic base class for every screen.
 
+### Exchange proving ground landed; remaining screen tail now narrows to standalone surfaces
+
+`ScreenContentHost` has now landed in Exchange, so the highest-value remaining screen-side lifecycle work is no longer the parent-plus-live-pane shape. The next screen-side follow-up set is the standalone aggregate/workflow surfaces that still own ad hoc mount/resume logic directly, especially `InboxScreen`, `ContactsScreen`, `CommsScreen`, and `ProvisionScreen`.
+
 ## Decisions
 
 ### Decision: Prioritize aggregate mail/comms surfaces before local-form or wizard screens
