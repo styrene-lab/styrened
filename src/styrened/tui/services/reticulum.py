@@ -11,7 +11,6 @@ TUI-specific additions:
 """
 from __future__ import annotations
 
-
 import logging
 import tempfile
 from collections.abc import Callable
@@ -54,6 +53,9 @@ from styrened.services.reticulum import (
 )
 from styrened.services.reticulum import (
     get_styrene_devices as get_styrene_devices_core,
+)
+from styrened.services.reticulum import (
+    is_discovery_running as is_discovery_running_core,
 )
 from styrened.services.reticulum import (
     is_reticulum_configured as is_reticulum_configured,
@@ -132,6 +134,11 @@ def start_discovery(callback: Callable[[MeshDevice], None] | None = None) -> Non
         callback=callback,
         node_store=node_store,
     )
+
+
+def is_discovery_running() -> bool:
+    """Return whether a global announce handler is currently registered."""
+    return is_discovery_running_core()
 
 
 # Conditional RNS import
@@ -219,7 +226,7 @@ def get_reticulum_status() -> dict[str, bool | int | str | None]:
     return status
 
 
-def generate_rns_config(config: "StyreneConfig") -> str:
+def generate_rns_config(config: StyreneConfig) -> str:
     """Generate Reticulum configuration from StyreneConfig (TUI wrapper).
 
     Converts StyreneConfig to CoreConfig and delegates to core implementation.
@@ -234,7 +241,7 @@ def generate_rns_config(config: "StyreneConfig") -> str:
     return generate_rns_config_from_core(config.core)
 
 
-def initialize_reticulum_with_config(config: "StyreneConfig") -> bool:
+def initialize_reticulum_with_config(config: StyreneConfig) -> bool:
     """Initialize RNS with configuration from StyreneConfig (TUI wrapper).
 
     Prefers existing RNS config if available, otherwise creates temporary

@@ -68,7 +68,6 @@ When we want to send to LXMF:
 """
 from __future__ import annotations
 
-
 import logging
 import re
 from collections.abc import Callable
@@ -1388,6 +1387,11 @@ def stop_discovery() -> None:
             logger.error(f"Failed to deregister announce handler: {e}")
         finally:
             _announce_handler = None
+
+
+def is_discovery_running() -> bool:
+    """Return whether the shared announce handler is currently active."""
+    return _announce_handler is not None
 
 
 def discover_devices() -> list[MeshDevice]:
