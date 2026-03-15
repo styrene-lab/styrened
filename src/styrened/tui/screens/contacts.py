@@ -4,9 +4,16 @@ from __future__ import annotations
 
 Provides a DataTable of contacts with add, edit, delete, and resolve actions.
 Uses IPCBridge for daemon communication and theme variables for styling.
+
+Lifecycle: inherits StyreneScreen — _load_data() is called on mount and
+resume; table bootstrap (columns, cursor type) is performed once on first
+_load_data() call; no-daemon placeholder is rendered screen-locally without
+depending on bridge availability; async follow-up actions (delete, save,
+resolve) use callable worker scheduling instead of eagerly created coroutines.
 """
 
 import datetime
+import functools
 import logging
 import time
 from typing import Any, ClassVar
@@ -15,16 +22,16 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Static
 
+from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
 
-class ContactsScreen(Screen[None]):
+class ContactsScreen(StyreneScreen[None]):
     """Contacts management screen.
 
     Displays a list of saved contacts (alias → peer hash) and provides
@@ -140,59 +147,59 @@ class ContactsScreen(Screen[None]):
             )
         yield Footer()
 
-    @property
-    def _ipc_bridge(self) -> Any:
-        """Get IPCBridge from app lifecycle."""
-        try:
-            return self.app.services.bridge
-        except Exception:
-            return None
+    # ------------------------------------------------------------------
+    # Table bootstrap — idempotent, called once per _load_data() entry
+    # ------------------------------------------------------------------
+
+    def _bootstrap_table(self) -> DataTable:
+        """Return the contacts DataTable, adding columns if not yet added."""
+        table = self.query_one("#contacts-table", DataTable)
+        if len(table.columns) == 0:
+            table.cursor_type = "row"
+            table.add_columns("ALIAS", "STATUS", "LAST MESSAGE", "PEER HASH")
+        return table
+
+    # ------------------------------------------------------------------
+    # StyreneScreen contract
+    # ------------------------------------------------------------------
 
     def on_mount(self) -> None:
-        """Load contacts on mount."""
-        table = self.query_one("#contacts-table", DataTable)
-        table.cursor_type = "row"
-        table.add_columns("ALIAS", "STATUS", "LAST MESSAGE", "PEER HASH")
+        """Bootstrap table synchronously, then start the async load worker."""
+        self._bootstrap_table()
+        super().on_mount()
 
-        if self._ipc_bridge is None:
-            table.add_row("-", "-", "-", f"[{get_color_cascade().dim}]Contacts require daemon mode[/]")
-            return
+    def _loading_message(self) -> str:
+        return "Loading contacts…"
 
-        self.run_worker(self._load_contacts())
+    async def _load_data(self) -> None:
+        """Fetch contacts enriched with presence and last-message data.
 
-    @staticmethod
-    def _relative_time(ts: float) -> str:
-        """Format a unix timestamp as a human-readable relative time."""
-        if not ts:
-            return ""
-        elapsed = int(time.time() - ts)
-        if elapsed < 0:
-            return "just now"
-        if elapsed < 60:
-            return "just now"
-        if elapsed < 3600:
-            return f"{elapsed // 60}m ago"
-        if elapsed < 86400:
-            return f"{elapsed // 3600}h ago"
-        if elapsed < 604800:
-            return f"{elapsed // 86400}d ago"
-        return datetime.datetime.fromtimestamp(ts).strftime("%b %d")
+        Renders a workspace-local daemon-required placeholder when the IPC
+        bridge is unavailable, without relying on any screen-owned shadow
+        cache or daemon-wide disconnect semantics.
+        """
+        table = self._bootstrap_table()
 
-    async def _load_contacts(self) -> None:
-        """Load contacts enriched with presence and last message data."""
-        bridge = self._ipc_bridge
-        if bridge is None:
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
+            # Screen-local placeholder — no daemon dependency.
+            table.clear()
+            table.add_row(
+                "-", "-", "-",
+                f"[{get_color_cascade().dim}]Contacts require daemon mode[/]",
+            )
             return
 
         try:
             contacts = await bridge.get_contacts()
         except Exception as e:
-            logger.warning(f"Failed to load contacts: {e}")
+            logger.warning("Failed to load contacts: %s", e)
             contacts = []
 
         # Fetch devices and conversations for cross-referencing
-        device_map: dict[str, dict[str, Any]] = {}
-        conv_map: dict[str, dict[str, Any]] = {}
+        device_map: dict[str, Any] = {}
+        conv_map: dict[str, Any] = {}
 
         try:
             cache = getattr(self.app, "device_cache", None)
@@ -214,11 +221,13 @@ class ContactsScreen(Screen[None]):
         except Exception:
             pass
 
-        table = self.query_one("#contacts-table", DataTable)
         table.clear()
 
         if not contacts:
-            table.add_row("-", "-", "-", f"[{get_color_cascade().dim}]No contacts saved[/]")
+            table.add_row(
+                "-", "-", "-",
+                f"[{get_color_cascade().dim}]No contacts saved[/]",
+            )
             return
 
         for contact in contacts:
@@ -241,10 +250,10 @@ class ContactsScreen(Screen[None]):
                 status_str = f"[{get_color_cascade().dim}]○ unknown[/]"
 
             # Last message from conversations
-            conv = conv_map.get(peer_hash)
-            if conv:
-                last_msg_time = conv.get("last_message_time", 0)
-                preview = conv.get("last_message_preview", "")
+            contact_conv: dict[str, Any] | None = conv_map.get(peer_hash)
+            if contact_conv:
+                last_msg_time = contact_conv.get("last_message_time", 0)
+                preview = contact_conv.get("last_message_preview", "")
                 if preview and len(preview) > 25:
                     preview = preview[:25] + "…"
                 if last_msg_time:
@@ -264,6 +273,28 @@ class ContactsScreen(Screen[None]):
                 key=peer_hash,
             )
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _relative_time(ts: float) -> str:
+        """Format a unix timestamp as a human-readable relative time."""
+        if not ts:
+            return ""
+        elapsed = int(time.time() - ts)
+        if elapsed < 0:
+            return "just now"
+        if elapsed < 60:
+            return "just now"
+        if elapsed < 3600:
+            return f"{elapsed // 60}m ago"
+        if elapsed < 86400:
+            return f"{elapsed // 3600}h ago"
+        if elapsed < 604800:
+            return f"{elapsed // 86400}d ago"
+        return datetime.datetime.fromtimestamp(ts).strftime("%b %d")
+
     def _get_selected_peer_hash(self) -> str | None:
         """Get the peer_hash of the currently selected contact row."""
         table = self.query_one("#contacts-table", DataTable)
@@ -276,6 +307,10 @@ class ContactsScreen(Screen[None]):
 
         return str(cell_key.row_key.value)
 
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle DataTable enter key - open chat with selected contact.
 
@@ -285,7 +320,9 @@ class ContactsScreen(Screen[None]):
         if event.row_key and event.row_key.value and event.row_key.value != "-":
             peer_hash = str(event.row_key.value)
 
-            if self._ipc_bridge is None:
+            try:
+                self.bridge  # raises if unavailable
+            except BridgeUnavailableError:
                 self.notify("Chat requires daemon mode", severity="warning")
                 return
 
@@ -298,6 +335,25 @@ class ContactsScreen(Screen[None]):
                 )
             )
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses.
+
+        Each async operation is dispatched as a callable worker (not a
+        pre-created coroutine) so Textual creates the coroutine only when the
+        worker actually starts.
+        """
+        btn_id = str(event.button.id)
+        if btn_id == "save-btn":
+            self.run_worker(self._save_contact, exclusive=False)  # type: ignore[arg-type]
+        elif btn_id == "cancel-btn":
+            self.query_one("#edit-form", Vertical).remove_class("visible")
+        elif btn_id == "resolve-btn":
+            self.run_worker(self._resolve_name, exclusive=False)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
     def action_open_chat(self) -> None:
         """Open chat with the selected contact.
 
@@ -308,7 +364,9 @@ class ContactsScreen(Screen[None]):
         if peer_hash is None:
             return
 
-        if self._ipc_bridge is None:
+        try:
+            self.bridge
+        except BridgeUnavailableError:
             self.notify("Chat requires daemon mode", severity="warning")
             return
 
@@ -378,7 +436,11 @@ class ContactsScreen(Screen[None]):
         alias_input.focus()
 
     def action_delete_contact(self) -> None:
-        """Delete selected contact."""
+        """Delete selected contact.
+
+        Passes a functools.partial callable into run_worker so the coroutine
+        is created only when the worker starts — not eagerly.
+        """
         table = self.query_one("#contacts-table", DataTable)
         if table.cursor_row is None or table.row_count == 0:
             return
@@ -388,12 +450,25 @@ class ContactsScreen(Screen[None]):
             return
 
         peer_hash = str(cell_key.row_key.value)
-        self.run_worker(self._delete_contact(peer_hash))
+        _worker_fn = functools.partial(self._delete_contact, peer_hash)
+        self.run_worker(_worker_fn, exclusive=False, group="contacts-delete")  # type: ignore[arg-type]
+
+    def action_resolve_name(self) -> None:
+        """Show resolve name panel."""
+        resolve_panel = self.query_one("#resolve-panel", Vertical)
+        resolve_panel.add_class("visible")
+        resolve_input = self.query_one("#resolve-input", Input)
+        resolve_input.focus()
+
+    # ------------------------------------------------------------------
+    # Async workers
+    # ------------------------------------------------------------------
 
     async def _delete_contact(self, peer_hash: str) -> None:
-        """Delete a contact via IPCBridge."""
-        bridge = self._ipc_bridge
-        if bridge is None:
+        """Delete a contact via IPCBridge, then refresh the table."""
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
             self.notify("Contacts require daemon mode", severity="warning")
             return
 
@@ -407,28 +482,13 @@ class ContactsScreen(Screen[None]):
             self.notify(f"Failed to remove contact: {e}", severity="error")
             return
 
-        await self._load_contacts()
-
-    def action_resolve_name(self) -> None:
-        """Show resolve name panel."""
-        resolve_panel = self.query_one("#resolve-panel", Vertical)
-        resolve_panel.add_class("visible")
-        resolve_input = self.query_one("#resolve-input", Input)
-        resolve_input.focus()
-
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses."""
-        if str(event.button.id) == "save-btn":
-            await self._save_contact()
-        elif str(event.button.id) == "cancel-btn":
-            self.query_one("#edit-form", Vertical).remove_class("visible")
-        elif str(event.button.id) == "resolve-btn":
-            await self._resolve_name()
+        self._start_load()
 
     async def _save_contact(self) -> None:
-        """Save contact from form inputs."""
-        bridge = self._ipc_bridge
-        if bridge is None:
+        """Save contact from form inputs, then refresh the table."""
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
             self.notify("Contacts require daemon mode", severity="warning")
             return
 
@@ -455,12 +515,13 @@ class ContactsScreen(Screen[None]):
             return
 
         self.query_one("#edit-form", Vertical).remove_class("visible")
-        await self._load_contacts()
+        self._start_load()
 
     async def _resolve_name(self) -> None:
         """Resolve a name to a peer hash."""
-        bridge = self._ipc_bridge
-        if bridge is None:
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
             self.notify("Resolve requires daemon mode", severity="warning")
             return
 
