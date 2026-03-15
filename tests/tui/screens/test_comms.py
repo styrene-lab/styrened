@@ -8,6 +8,7 @@ import pytest
 from textual.widgets import Input, Static, TabPane, TabbedContent
 
 from styrened.tui.app import StyreneApp
+from styrened.tui.screens.base import BridgeUnavailableError
 from styrened.tui.screens.comms import CommsScreen
 from styrened.ui_state import CommsMode
 
@@ -106,6 +107,16 @@ class TestCommsScreenStructure:
             screen = app.screen
             i2p_input = screen.query_one("#comms-i2p-url-input", Input)
             assert i2p_input is not None
+
+    def test_comms_screen_inherits_styrene_screen(self):
+        """CommsScreen must inherit StyreneScreen for shared lifecycle."""
+        from styrened.tui.screens.base import StyreneScreen
+        assert issubclass(CommsScreen, StyreneScreen)
+
+    def test_loading_message(self):
+        """_loading_message() returns a non-empty string."""
+        screen = CommsScreen()
+        assert "comms" in screen._loading_message().lower()
 
 
 class TestCommsCapabilityGating:
@@ -237,8 +248,8 @@ class TestCommsCapabilityGating:
         placeholder.remove_class.assert_called_once_with("hidden")
 
     @pytest.mark.asyncio
-    async def test_load_capabilities_calls_get_core_config_and_status(self):
-        """_load_capabilities() calls bridge.get_core_config() and get_status()."""
+    async def test_load_data_calls_get_core_config_and_status(self):
+        """_load_data() calls bridge.get_core_config() and get_status()."""
         screen = CommsScreen()
         bridge = MagicMock()
         bridge.get_core_config = AsyncMock(return_value={
@@ -250,8 +261,8 @@ class TestCommsCapabilityGating:
         apply_mock = MagicMock()
         screen._apply_capability_state = apply_mock
 
-        with patch.object(CommsScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge):
-            await screen._load_capabilities()
+        with patch.object(CommsScreen, "bridge", new_callable=PropertyMock, return_value=bridge):
+            await screen._load_data()
 
         bridge.get_core_config.assert_awaited_once()
         bridge.get_status.assert_awaited_once()
@@ -262,7 +273,7 @@ class TestCommsCapabilityGating:
         )
 
     @pytest.mark.asyncio
-    async def test_load_capabilities_handles_both_bridges_enabled(self):
+    async def test_load_data_handles_both_bridges_enabled(self):
         """Both Yggdrasil and I2P enabled → both sections visible."""
         screen = CommsScreen()
         bridge = MagicMock()
@@ -275,8 +286,8 @@ class TestCommsCapabilityGating:
         apply_mock = MagicMock()
         screen._apply_capability_state = apply_mock
 
-        with patch.object(CommsScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=bridge):
-            await screen._load_capabilities()
+        with patch.object(CommsScreen, "bridge", new_callable=PropertyMock, return_value=bridge):
+            await screen._load_data()
 
         apply_mock.assert_called_once_with(
             yggdrasil_enabled=True,
@@ -285,13 +296,16 @@ class TestCommsCapabilityGating:
         )
 
     @pytest.mark.asyncio
-    async def test_load_capabilities_gracefully_handles_missing_bridge(self):
+    async def test_load_data_gracefully_handles_missing_bridge(self):
         """No bridge → _apply_capability_state is never called."""
         screen = CommsScreen()
         apply_mock = MagicMock()
         screen._apply_capability_state = apply_mock
 
-        with patch.object(CommsScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=None):
-            await screen._load_capabilities()
+        with patch.object(
+            CommsScreen, "bridge", new_callable=PropertyMock,
+            side_effect=BridgeUnavailableError("no bridge"),
+        ):
+            await screen._load_data()
 
         apply_mock.assert_not_called()
