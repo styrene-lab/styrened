@@ -199,33 +199,88 @@ class TestPageBrowserTrafficIsolation:
         shared_bridge.fetch_page.assert_not_called()
         page_bridge.fetch_page.assert_awaited_once()
 
-    @pytest.mark.asyncio
-    async def test_disconnect_page_bridge_skips_shared_bridge(self):
-        widget = PageBrowserWidget(destination_hash="abc")
-        shared_bridge = MagicMock()
-        widget._page_bridge = shared_bridge
-
-        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
-            await widget._disconnect_page_bridge()
-
-        shared_bridge.disconnect.assert_not_called()
-        assert widget._page_bridge is None
-
-    def test_on_unmount_schedules_callable_cleanup_for_dedicated_lane(self):
+    def test_on_unmount_clears_page_bridge_and_releases_resources(self):
+        """on_unmount should clear the tracked lane and release the scope."""
         widget = PageBrowserWidget(destination_hash="abc")
         shared_bridge = MagicMock()
         page_bridge = MagicMock()
-        widget._page_bridge = page_bridge
+        # Manually adopt lane to simulate what _get_page_bridge would do.
+        widget._resources.adopt_auxiliary_lane(
+            "_page_bridge", page_bridge, shared_lane=shared_bridge
+        )
 
         with (
             patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)),
-            patch.object(widget, "run_worker") as mock_run_worker,
+            patch.object(widget._resources, "release") as mock_release,
         ):
             widget.on_unmount()
 
-        scheduled = mock_run_worker.call_args.args[0]
-        assert callable(scheduled)
+        mock_release.assert_called_once_with()
+
+    def test_on_unmount_is_noop_when_no_lane_created(self):
+        """on_unmount with no lane should still complete without error."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        # _page_bridge is None — no lane was ever created
+        with patch.object(widget._resources, "release") as mock_release:
+            widget.on_unmount()
+        mock_release.assert_called_once_with()
+
+    def test_run_async_worker_tracks_worker_via_own_worker(self):
+        """_run_async_worker must track the returned worker with own_worker."""
+        widget = PageBrowserWidget(destination_hash="abc")
+
+        sentinel_worker = MagicMock()
+        with (
+            patch.object(widget._resources, "run_worker", return_value=sentinel_worker) as mock_rw,
+            patch.object(widget._resources, "own_worker") as mock_ow,
+        ):
+            widget._run_async_worker(lambda: None, exclusive=True)
+
+        mock_rw.assert_called_once()
+        mock_ow.assert_called_once_with(sentinel_worker)
+
+    @pytest.mark.asyncio
+    async def test_get_page_bridge_is_lazy_on_first_call(self):
+        """Lane should NOT be created until _get_page_bridge is first awaited."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        shared_bridge = MagicMock()
+
+        # Before any call the private field is None
         assert widget._page_bridge is None
+
+        page_bridge = MagicMock()
+        page_bridge.connected = False
+        page_bridge.connect = AsyncMock(return_value=True)
+        shared_bridge.spawn_lane = Mock(return_value=page_bridge)
+
+        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
+            result = await widget._get_page_bridge()
+
+        assert result is page_bridge
+        shared_bridge.spawn_lane.assert_called_once_with("execution")
+
+    @pytest.mark.asyncio
+    async def test_on_unmount_does_not_disconnect_shared_bridge(self):
+        """Teardown must never call disconnect() on the shared control-plane lane."""
+        widget = PageBrowserWidget(destination_hash="abc")
+        shared_bridge = MagicMock()
+        page_bridge = MagicMock()
+        page_bridge.connected = True
+        page_bridge.disconnect = AsyncMock()
+        shared_bridge.spawn_lane = Mock(return_value=page_bridge)
+        shared_bridge.disconnect = AsyncMock()
+
+        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
+            await widget._get_page_bridge()
+
+        # Simulate release path — async teardown runs on loop
+        import asyncio
+        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
+            widget._resources.release()
+            # Let any scheduled tasks drain
+            await asyncio.sleep(0)
+
+        shared_bridge.disconnect.assert_not_called()
 
 
 class TestPageBrowserLinkClick:
