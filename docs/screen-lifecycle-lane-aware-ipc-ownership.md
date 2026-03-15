@@ -3,7 +3,7 @@ id: screen-lifecycle-lane-aware-ipc-ownership
 title: Lane-aware IPC ownership for long-running UI work
 status: exploring
 parent: screen-lifecycle
-related: [tui-pages-browser-ipc-head-of-line-blocking]
+related: [tui-pages-browser-ipc-head-of-line-blocking, screen-lifecycle-widget-resource-primitives]
 tags: [tui, lifecycle, ipc, workers, pages]
 open_questions:
   - How should StyreneScreen and screen-owned widgets expose a standard ownership pattern for auxiliary IPC lanes and the workers that depend on them?
