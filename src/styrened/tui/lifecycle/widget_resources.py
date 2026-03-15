@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
@@ -31,6 +31,7 @@ class _CloseState:
     cleanups: list[CleanupCallback]
     async_cleanups: list[CleanupCallback]
     auxiliary_lanes: list[tuple[str, Any | None, _AuxiliaryLaneEntry]]
+    workers: list[Any] = field(default_factory=list)
 
 
 class WidgetResourceScope:
@@ -47,6 +48,7 @@ class WidgetResourceScope:
         self._cleanups: list[CleanupCallback] = []
         self._async_cleanups: list[CleanupCallback] = []
         self._auxiliary_lanes: dict[str, _AuxiliaryLaneEntry] = {}
+        self._workers: list[Any] = []
 
     def run_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Any:
         """Schedule async work without eagerly creating coroutine objects."""
@@ -111,6 +113,33 @@ class WidgetResourceScope:
         """Register async cleanup without eagerly creating a coroutine object."""
         self._async_cleanups.append(callback)
         return callback
+
+    def own_worker(self, worker: Any) -> Any:
+        """Track a Textual Worker so it is cancelled before auxiliary lanes are disconnected.
+
+        The worker must have a ``.cancel()`` method (all Textual ``Worker``
+        objects do).  Cancelled workers are removed from tracking automatically
+        during the next teardown cycle.
+
+        Returns the worker unchanged so callers can use this as a one-liner::
+
+            self._resources.own_worker(self.run_worker(self._fetch))
+        """
+        self._workers.append(worker)
+        return worker
+
+    def cancel_workers(self) -> None:
+        """Cancel all tracked workers without disconnecting auxiliary lanes.
+
+        Useful when a suspend/pause event should halt in-flight work but lanes
+        should remain connected for a subsequent resume.
+        """
+        workers, self._workers = self._workers, []
+        for worker in workers:
+            try:
+                worker.cancel()
+            except Exception:
+                self._logger.debug("Failed to cancel tracked worker", exc_info=True)
 
     def own_subscription(
         self,
@@ -182,6 +211,9 @@ class WidgetResourceScope:
         async_cleanups = self._async_cleanups
         self._async_cleanups = []
 
+        workers = self._workers
+        self._workers = []
+
         auxiliary_lanes: list[tuple[str, Any | None, _AuxiliaryLaneEntry]] = []
         for attr_name, entry in self._auxiliary_lanes.items():
             auxiliary_lanes.append((attr_name, getattr(self._owner, attr_name, None), entry))
@@ -206,9 +238,18 @@ class WidgetResourceScope:
             cleanups=cleanups,
             async_cleanups=async_cleanups,
             auxiliary_lanes=auxiliary_lanes,
+            workers=workers,
         )
 
     def _close_sync(self, state: _CloseState) -> None:
+        # Cancel tracked workers first — they may hold references to auxiliary
+        # lanes and must be stopped before those lanes are disconnected.
+        for worker in state.workers:
+            try:
+                worker.cancel()
+            except Exception:
+                self._logger.debug("Failed to cancel tracked worker", exc_info=True)
+
         for attr_name, timer in state.timers.items():
             try:
                 timer.stop()

@@ -399,3 +399,144 @@ async def test_loading_message_used_in_indicator():
         assert indicators.first(StyreneLoadingIndicator).message == "Fetching mesh data…"
         load_proceed.set()
         await pilot.pause(0.2)
+
+
+# ---------------------------------------------------------------------------
+# Screen-level resource scope tests
+# ---------------------------------------------------------------------------
+
+
+class TestScreenResourceScope:
+    def test_screen_has_resources_scope(self):
+        """StyreneScreen should expose a _resources WidgetResourceScope."""
+        from styrened.tui.lifecycle.widget_resources import WidgetResourceScope
+
+        screen = _SimpleScreen()
+        assert isinstance(screen._resources, WidgetResourceScope)
+
+    def test_adopt_auxiliary_lane_convenience_wrapper(self):
+        """adopt_auxiliary_lane() should delegate to _resources."""
+        from unittest.mock import patch as _patch
+
+        screen = _SimpleScreen()
+        mock_lane = MagicMock()
+
+        with _patch.object(screen._resources, "adopt_auxiliary_lane", return_value=mock_lane) as mock_adopt:
+            result = screen.adopt_auxiliary_lane("_test_lane", mock_lane, shared_lane=None)
+
+        mock_adopt.assert_called_once_with("_test_lane", mock_lane, shared_lane=None, disconnect_method="disconnect")
+        assert result is mock_lane
+
+    def test_cleanup_releases_resources_scope(self):
+        """_cleanup() default impl should call _resources.release()."""
+
+        # Use a plain screen that does NOT override _cleanup() to exercise the
+        # default StyreneScreen implementation.
+        class _NakedScreen(StyreneScreen[None]):
+            def compose(self) -> ComposeResult:
+                yield Label("x")
+
+            async def _load_data(self) -> None:
+                pass
+
+        screen = _NakedScreen()
+
+        with patch.object(screen._resources, "release") as mock_release:
+            screen._cleanup()
+
+        mock_release.assert_called_once()
+
+    def test_subclass_cleanup_calls_super_for_scope_release(self):
+        """Subclasses that call super()._cleanup() will release _resources."""
+
+        class _WithOverride(StyreneScreen[None]):
+            def __init__(self):
+                super().__init__()
+                self.custom_cleanup_called = False
+
+            def compose(self) -> ComposeResult:
+                yield Label("x")
+
+            async def _load_data(self) -> None:
+                pass
+
+            def _cleanup(self) -> None:
+                self.custom_cleanup_called = True
+                super()._cleanup()
+
+        screen = _WithOverride()
+
+        with patch.object(screen._resources, "release") as mock_release:
+            screen._cleanup()
+
+        assert screen.custom_cleanup_called
+        mock_release.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_acquire_lanes_called_before_load_data():
+    """_acquire_lanes() should be invoked before _load_data() on each load cycle."""
+    call_order: list[str] = []
+    done = asyncio.Event()
+
+    class _TrackingScreen(StyreneScreen[None]):
+        def compose(self) -> ComposeResult:
+            yield Label("x")
+
+        async def _acquire_lanes(self) -> None:
+            call_order.append("acquire_lanes")
+
+        async def _load_data(self) -> None:
+            call_order.append("load_data")
+            done.set()
+
+    screen = _TrackingScreen()
+    app = _make_app()
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await app.push_screen(screen)
+        await asyncio.wait_for(done.wait(), timeout=5.0)
+        await pilot.pause(0.1)
+
+    # acquire_lanes must appear at least once before load_data.
+    assert "acquire_lanes" in call_order, f"acquire_lanes never called: {call_order}"
+    assert "load_data" in call_order, f"load_data never called: {call_order}"
+    first_acquire = call_order.index("acquire_lanes")
+    first_load = call_order.index("load_data")
+    assert first_acquire < first_load, (
+        f"Expected first acquire_lanes before first load_data, got: {call_order}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_auxiliary_lane_disconnected_on_unmount():
+    """Lanes registered via adopt_auxiliary_lane() should be disconnected on unmount."""
+    lane_disconnected = asyncio.Event()
+
+    class _LaneScreen(StyreneScreen[None]):
+        _lane_attr: object | None = None
+
+        def compose(self) -> ComposeResult:
+            yield Label("x")
+
+        async def _acquire_lanes(self) -> None:
+            fake_lane = MagicMock()
+
+            async def _disconnect():
+                lane_disconnected.set()
+
+            fake_lane.disconnect = _disconnect
+            self.adopt_auxiliary_lane("_lane_attr", fake_lane, shared_lane=None)
+
+        async def _load_data(self) -> None:
+            pass
+
+    screen = _LaneScreen()
+    app = _make_app()
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await app.push_screen(screen)
+        await asyncio.sleep(0.2)
+
+    # Lane should be disconnected after unmount
+    await asyncio.wait_for(lane_disconnected.wait(), timeout=3.0)

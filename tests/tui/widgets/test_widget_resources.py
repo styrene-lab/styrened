@@ -107,3 +107,87 @@ async def test_release_executes_sync_cleanup_and_schedules_async_teardown() -> N
     unsubscribe.assert_awaited_once_with()
     lane.disconnect.assert_awaited_once_with()
     assert owner._page_bridge is None
+
+
+# ---------------------------------------------------------------------------
+# Worker sequencing tests
+# ---------------------------------------------------------------------------
+
+
+def test_own_worker_returns_worker() -> None:
+    """own_worker() should return the worker unchanged for one-liner use."""
+    owner = _DummyOwner()
+    scope = WidgetResourceScope(owner)  # type: ignore[arg-type]
+
+    worker = Mock()
+    result = scope.own_worker(worker)
+    assert result is worker
+
+
+def test_cancel_workers_cancels_all_tracked_workers() -> None:
+    """cancel_workers() should cancel every worker registered via own_worker()."""
+    owner = _DummyOwner()
+    scope = WidgetResourceScope(owner)  # type: ignore[arg-type]
+
+    w1 = Mock()
+    w2 = Mock()
+    scope.own_worker(w1)
+    scope.own_worker(w2)
+
+    scope.cancel_workers()
+
+    w1.cancel.assert_called_once_with()
+    w2.cancel.assert_called_once_with()
+
+
+def test_cancel_workers_clears_worker_list() -> None:
+    """After cancel_workers(), re-calling it should not double-cancel."""
+    owner = _DummyOwner()
+    scope = WidgetResourceScope(owner)  # type: ignore[arg-type]
+
+    worker = Mock()
+    scope.own_worker(worker)
+
+    scope.cancel_workers()
+    scope.cancel_workers()  # second call — nothing to cancel
+
+    worker.cancel.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_aclose_cancels_workers_before_disconnecting_lanes() -> None:
+    """Workers must be cancelled before auxiliary lanes are disconnected during aclose()."""
+    owner = _DummyOwner()
+    call_order: list[str] = []
+
+    worker = Mock()
+    worker.cancel = Mock(side_effect=lambda: call_order.append("worker_cancel"))
+
+    lane = Mock()
+    async_disconnect = AsyncMock(side_effect=lambda: call_order.append("lane_disconnect"))
+    lane.disconnect = async_disconnect
+
+    scope = WidgetResourceScope(owner)  # type: ignore[arg-type]
+    scope.own_worker(worker)
+    scope.adopt_auxiliary_lane("_aux_lane", lane, shared_lane=object())
+
+    await scope.aclose()
+
+    assert call_order == ["worker_cancel", "lane_disconnect"], (
+        f"Expected [worker_cancel, lane_disconnect], got {call_order}"
+    )
+    assert owner._aux_lane is None
+
+
+@pytest.mark.asyncio
+async def test_aclose_workers_cancelled_even_when_no_lanes() -> None:
+    """Workers should be cancelled during aclose() even when there are no lanes."""
+    owner = _DummyOwner()
+
+    worker = Mock()
+    scope = WidgetResourceScope(owner)  # type: ignore[arg-type]
+    scope.own_worker(worker)
+
+    await scope.aclose()
+
+    worker.cancel.assert_called_once_with()

@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from textual.screen import Screen
 from textual.widgets import LoadingIndicator
 from textual.worker import Worker, WorkerState
+
+from styrened.tui.lifecycle.widget_resources import WidgetResourceScope
 
 if TYPE_CHECKING:
     from styrened.ipc.bridge import IPCBridge
@@ -22,7 +24,7 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-__all__ = ["StyreneScreen", "StyreneLoadingIndicator", "BridgeUnavailableError"]
+__all__ = ["StyreneScreen", "StyreneLoadingIndicator", "BridgeUnavailableError", "WidgetResourceScope"]
 
 _RETRY_DELAYS = (0.5, 1.0, 2.0)
 _MAX_ATTEMPTS = 3
@@ -86,6 +88,10 @@ class StyreneScreen(Screen[T], Generic[T]):
         self._load_worker: Worker | None = None
         self._first_load_done: bool = False
         self._loading_indicator: StyreneLoadingIndicator | None = None
+        self._resources: WidgetResourceScope = WidgetResourceScope(
+            self,  # type: ignore[arg-type]
+            owner_logger=log,
+        )
 
     # ------------------------------------------------------------------
     # Public hooks — subclasses implement / override these
@@ -102,6 +108,12 @@ class StyreneScreen(Screen[T], Generic[T]):
     def _cleanup(self) -> None:
         """Called on suspend and unmount. Override to cancel timers/resources.
 
+        The default implementation releases all resources registered via
+        ``self._resources`` (timers, cleanups, auxiliary lanes).  Subclasses
+        that override this method should call ``super()._cleanup()`` to ensure
+        screen-owned lanes and workers tracked through ``_resources`` are
+        properly sequenced and disconnected.
+
         WARNING: This method is called on *both* on_screen_suspend() and
         on_unmount().  A screen that is suspended and then unmounted (the normal
         navigation flow) will therefore receive two _cleanup() calls.
@@ -109,6 +121,52 @@ class StyreneScreen(Screen[T], Generic[T]):
         closed socket, cancelling an already-cancelled timer, or clearing an
         already-empty reference must all be no-ops.
         """
+        self._resources.release(group="screen-cleanup")
+
+    async def _acquire_lanes(self) -> None:
+        """Lazily acquire screen-owned auxiliary IPC lanes.
+
+        Called by the load worker on every mount and resume cycle *before*
+        ``_load_data()``.  Subclasses override this to call
+        ``self._resources.adopt_auxiliary_lane(...)`` with a freshly spawned
+        lane so that the lane is always re-acquired after a suspend/unmount
+        teardown.
+
+        The default implementation is a no-op.  Subclasses do not need to call
+        ``super()._acquire_lanes()`` unless they have a deep inheritance chain
+        that requires it.
+        """
+
+    def adopt_auxiliary_lane(
+        self,
+        attr_name: str,
+        lane: Any | None,
+        *,
+        shared_lane: Any | None = None,
+        disconnect_method: str = "disconnect",
+    ) -> Any | None:
+        """Register a screen-owned auxiliary IPC lane for sequenced teardown.
+
+        Convenience wrapper around ``self._resources.adopt_auxiliary_lane()``.
+        The lane will be disconnected (unless it is the shared control lane)
+        during suspend and unmount, *after* any tracked workers are cancelled.
+
+        Args:
+            attr_name: Widget attribute name that holds the lane reference.
+            lane: The lane object to register (may be ``None``).
+            shared_lane: If ``lane`` is the same object as ``shared_lane``, it
+                will not be disconnected on teardown (it is owned elsewhere).
+            disconnect_method: Name of the disconnect method on the lane object.
+
+        Returns:
+            The lane unchanged, allowing one-liner assignment.
+        """
+        return self._resources.adopt_auxiliary_lane(
+            attr_name,
+            lane,
+            shared_lane=shared_lane,
+            disconnect_method=disconnect_method,
+        )
 
     async def _on_error(self, error: Exception, attempt: int) -> None:
         """Called after retry exhaustion. Default notifies the user."""
@@ -164,6 +222,9 @@ class StyreneScreen(Screen[T], Generic[T]):
     async def _run_load(self) -> None:
         """Internal: run _load_data() with retry and backoff."""
         screen_name = type(self).__name__
+
+        # Acquire (or re-acquire) screen-owned auxiliary lanes before loading.
+        await self._acquire_lanes()
 
         # Show loading indicator before first successful load
         if not self._first_load_done:
@@ -221,6 +282,9 @@ class StyreneScreen(Screen[T], Generic[T]):
     def on_screen_suspend(self) -> None:
         screen_name = type(self).__name__
         log.debug("%s: on_screen_suspend — cancelling worker", screen_name)
+        # Cancel the load worker first; _cleanup() then disconnects any
+        # auxiliary lanes registered via _resources (which calls
+        # _resources.release(), cancelling tracked workers before lanes).
         if self._load_worker is not None and self._load_worker.state in (WorkerState.PENDING, WorkerState.RUNNING):
             self._load_worker.cancel()
         self._cleanup()
@@ -228,6 +292,8 @@ class StyreneScreen(Screen[T], Generic[T]):
     def on_unmount(self) -> None:
         screen_name = type(self).__name__
         log.debug("%s: on_unmount — cancelling all workers", screen_name)
+        # Same sequencing as suspend: cancel load worker, then release scope
+        # (which cancels other tracked workers, then disconnects lanes).
         if self._load_worker is not None and self._load_worker.state in (WorkerState.PENDING, WorkerState.RUNNING):
             self._load_worker.cancel()
         self._cleanup()

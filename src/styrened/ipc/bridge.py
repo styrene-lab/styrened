@@ -83,6 +83,13 @@ class IPCBridge:
         The new bridge is disconnected initially, so callers can lazily spin up
         a separate IPC lane for slower or differently-prioritized workloads
         without increasing baseline startup demand.
+
+        Ownership pattern — the caller is responsible for connecting and
+        disconnecting the returned lane.  Screen-level consumers should
+        register the returned lane with their ``_resources`` scope via
+        :py:meth:`~styrened.tui.screens.base.StyreneScreen.adopt_auxiliary_lane`
+        so that the lane is properly disconnected on suspend/unmount without
+        touching any global bridge state.
         """
         return IPCBridge(
             socket_path=self._socket_path,
