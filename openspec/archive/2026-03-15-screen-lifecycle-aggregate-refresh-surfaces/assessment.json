@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "changeName": "screen-lifecycle-aggregate-refresh-surfaces",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T14:18:35.988Z",
+  "summary": "Manual spec verification passed. Inbox, Contacts, and Comms now inherit from StyreneScreen and route daemon-backed refresh through the shared load/resume contract; Inbox and Contacts keep workspace-local daemon-required placeholders explicit; async Inbox/Contacts follow-up actions now use callable worker scheduling without eager coroutine creation. Verification: ruff check on the touched screen/test files passed, targeted pytest on tests/tui/screens/test_inbox.py tests/tui/screens/test_contacts.py tests/tui/screens/test_comms.py passed (56 passed), and code inspection confirmed no remaining eager run_worker(coroutine) usage in the migrated screens.",
+  "snapshot": {
+    "gitHead": "a3282b09c4f99f745ec5970ed97b4f90de15ffac",
+    "fingerprint": "3f942642c0a5875ef95226decde66ae5a4fb25db180f21f067aa3f30f93d9d80",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/tui/screens/comms.py",
+      "src/styrened/tui/screens/contacts.py",
+      "src/styrened/tui/screens/inbox.py",
+      "tests/tui/screens/test_comms.py",
+      "tests/tui/screens/test_contacts.py",
+      "tests/tui/screens/test_inbox.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/screen-lifecycle-aggregate-refresh-surfaces/design.md",
+        "exists": true,
+        "size": 5454,
+        "sha256": "0db2baa2709c149015f615f0c6e04020d03b4266273128cec0425b9ab87f2f83"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-aggregate-refresh-surfaces/proposal.md",
+        "exists": true,
+        "size": 828,
+        "sha256": "9788a10803cca53b5f869d6f31958278c79f790e978655d4fb08bc6dd2a1c6f8"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-aggregate-refresh-surfaces/specs/tui/aggregate-refresh-surfaces.md",
+        "exists": true,
+        "size": 2143,
+        "sha256": "fbafd2f4055b885f4939f64defef969df5b5605d7365cd983a39b8e4e0054288"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-aggregate-refresh-surfaces/tasks.md",
+        "exists": true,
+        "size": 2568,
+        "sha256": "695784ae98676c375a50fa463bc277dfcc2d17307483729bb2035e1077debcd6"
+      },
+      {
+        "path": "src/styrened/tui/screens/comms.py",
+        "exists": true,
+        "size": 7962,
+        "sha256": "25107500a9e3058333be717fa7954645e2cee92390ab1e885fa1c77f1ba64aa8"
+      },
+      {
+        "path": "src/styrened/tui/screens/contacts.py",
+        "exists": true,
+        "size": 19630,
+        "sha256": "eb5c9859411e6614c29d6d764d82be2533fcb6a9bb9c4dc8fdf4cbdf6ec5fd58"
+      },
+      {
+        "path": "src/styrened/tui/screens/inbox.py",
+        "exists": true,
+        "size": 27841,
+        "sha256": "ff2c20f1ada3585611f2dfed995ab88cf2df543e193293b521178d88423b17cf"
+      },
+      {
+        "path": "tests/tui/screens/test_comms.py",
+        "exists": true,
+        "size": 11149,
+        "sha256": "1ed94626e618d1c6ad4bbc43013f26b992c5ffcd7665ae13551e8a5a619a2408"
+      },
+      {
+        "path": "tests/tui/screens/test_contacts.py",
+        "exists": true,
+        "size": 17027,
+        "sha256": "aa1ea6b7e8e66d7487da902ae83ba6e131f2fae7454325c8820c56069002a80c"
+      },
+      {
+        "path": "tests/tui/screens/test_inbox.py",
+        "exists": true,
+        "size": 9572,
+        "sha256": "c56dcf40780d1c15816c74a9a7fea720cfffc491adb91310da772fc1dac63bed"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/tui/screens/inbox.py",
+      "src/styrened/tui/screens/contacts.py",
+      "src/styrened/tui/screens/comms.py",
+      "tests/tui/screens/test_inbox.py",
+      "tests/tui/screens/test_contacts.py",
+      "tests/tui/screens/test_comms.py"
+    ],
+    "constraints": [
+      "ProvisionScreen remains out of scope for this change.",
+      "The shared app bridge remains the control lane; no new ambient auxiliary lanes were introduced.",
+      "Workspace-local no-daemon placeholders remain explicit instead of relying on shadow caches or daemon-wide disconnect semantics.",
+      "Async action scheduling in Inbox and Contacts uses callable worker semantics to avoid unawaited coroutine warnings in tests."
+    ],
+    "recommendedAction": null
+  }
+}
