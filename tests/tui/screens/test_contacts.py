@@ -1,7 +1,7 @@
 """Tests for ContactsScreen."""
 from __future__ import annotations
 
-
+import functools
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -9,6 +9,7 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Input, Static
 
 from styrened.tui.app import StyreneApp
+from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.ui_state import WorkspaceId
@@ -307,6 +308,149 @@ class TestContactsLayeringAndForms:
 
             result = screen.query_one("#resolve-result", Static)
             assert "Resolved:" in str(result.render())
+
+
+class TestContactsScreenStyreneContract:
+    """Test StyreneScreen lifecycle contract for ContactsScreen."""
+
+    def test_inherits_styrene_screen(self):
+        """ContactsScreen must inherit from StyreneScreen, not Screen directly."""
+        assert issubclass(ContactsScreen, StyreneScreen)
+
+    @pytest.mark.asyncio
+    async def test_no_bridge_placeholder_renders_locally(self):
+        """With no bridge, _load_data should render a workspace-local placeholder.
+
+        The table must show the daemon-required message without raising and
+        without depending on any shadow cache or daemon-wide disconnect state.
+        """
+        app = StyreneApp()
+        # No _lifecycle set → app.services.bridge will be None → BridgeUnavailableError
+
+        async with app.run_test() as pilot:
+            await app.push_screen(ContactsScreen())
+            await pilot.pause()
+
+            screen = app.screen
+            assert isinstance(screen, ContactsScreen)
+            table = screen.query_one("#contacts-table", DataTable)
+            # At least one row should be present (placeholder row)
+            assert table.row_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_table_bootstrap_idempotent(self):
+        """Calling _bootstrap_table() twice should not duplicate columns."""
+        lifecycle = _make_mock_lifecycle([])
+        app = StyreneApp()
+        app._lifecycle = lifecycle
+
+        async with app.run_test() as pilot:
+            await app.push_screen(ContactsScreen())
+            await pilot.pause()
+
+            screen = app.screen
+            assert isinstance(screen, ContactsScreen)
+            col_count_first = len(screen.query_one("#contacts-table", DataTable).columns)
+            screen._bootstrap_table()
+            col_count_second = len(screen.query_one("#contacts-table", DataTable).columns)
+            assert col_count_first == col_count_second
+
+    def test_action_delete_schedules_callable_not_coroutine(self):
+        """action_delete_contact must pass a callable (partial) to run_worker.
+
+        Passing an eagerly created coroutine object risks leaving it un-awaited
+        if the worker is cancelled before it starts.
+        """
+        screen = ContactsScreen()
+        app = MagicMock()
+        app.services.bridge = MagicMock()
+
+        # Build a minimal mock table with a selected row
+        table = MagicMock()
+        table.cursor_row = 0
+        table.row_count = 1
+        cell_key = MagicMock()
+        cell_key.row_key = MagicMock()
+        cell_key.row_key.value = "abcdef1234567890"
+        table.coordinate_to_cell_key.return_value = cell_key
+
+        captured: list = []
+
+        def fake_run_worker(fn, **kwargs):
+            captured.append(fn)
+            return MagicMock()
+
+        with (
+            patch.object(ContactsScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "query_one", return_value=table),
+            patch.object(screen, "run_worker", side_effect=fake_run_worker),
+        ):
+            screen.action_delete_contact()
+
+        assert len(captured) == 1
+        fn = captured[0]
+        # Must be a callable (partial or method), NOT a coroutine object
+        import inspect
+        assert callable(fn)
+        assert not inspect.iscoroutine(fn), (
+            "action_delete_contact must pass a callable, not an eager coroutine"
+        )
+
+    def test_on_button_pressed_save_schedules_callable(self):
+        """on_button_pressed for save-btn must dispatch a callable worker."""
+        screen = ContactsScreen()
+        app = MagicMock()
+        app.services.bridge = MagicMock()
+
+        event = MagicMock()
+        event.button.id = "save-btn"
+
+        captured: list = []
+
+        def fake_run_worker(fn, **kwargs):
+            captured.append(fn)
+            return MagicMock()
+
+        with (
+            patch.object(ContactsScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "run_worker", side_effect=fake_run_worker),
+        ):
+            screen.on_button_pressed(event)
+
+        assert len(captured) == 1
+        import inspect
+        assert callable(captured[0])
+        assert not inspect.iscoroutine(captured[0]), (
+            "on_button_pressed save-btn must pass a callable, not an eager coroutine"
+        )
+
+    def test_on_button_pressed_resolve_schedules_callable(self):
+        """on_button_pressed for resolve-btn must dispatch a callable worker."""
+        screen = ContactsScreen()
+        app = MagicMock()
+        app.services.bridge = MagicMock()
+
+        event = MagicMock()
+        event.button.id = "resolve-btn"
+
+        captured: list = []
+
+        def fake_run_worker(fn, **kwargs):
+            captured.append(fn)
+            return MagicMock()
+
+        with (
+            patch.object(ContactsScreen, "app", new_callable=PropertyMock, return_value=app),
+            patch.object(screen, "run_worker", side_effect=fake_run_worker),
+        ):
+            screen.on_button_pressed(event)
+
+        assert len(captured) == 1
+        import inspect
+        assert callable(captured[0])
+        assert not inspect.iscoroutine(captured[0]), (
+            "on_button_pressed resolve-btn must pass a callable, not an eager coroutine"
+        )
 
 
 class TestContactsScreenRegistration:
