@@ -26,7 +26,6 @@ Usage::
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -34,8 +33,6 @@ from pathlib import Path
 from typing import Any
 
 from styrened.ipc.client import ControlClient, IPCConnectionError
-from styrened.ipc.protocol import IPCMessageType
-from styrened.ipc.server import get_default_socket_path
 from styrened.ipc.messages import (
     DaemonStatus,
     DeviceInfo,
@@ -45,6 +42,8 @@ from styrened.ipc.messages import (
     RemoteStatusInfo,
     SelfUpdateResultInfo,
 )
+from styrened.ipc.protocol import IPCMessageType
+from styrened.ipc.server import get_default_socket_path
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ class IPCBridge:
         self._connected = False
         self._reconnect_task: asyncio.Task | None = None
 
-    def spawn_lane(self, traffic_class: str) -> "IPCBridge":
+    def spawn_lane(self, traffic_class: str) -> IPCBridge:
         """Create a sibling bridge with the same transport settings.
 
         The new bridge is disconnected initially, so callers can lazily spin up
