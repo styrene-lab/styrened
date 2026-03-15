@@ -5,21 +5,21 @@ into standalone Widget subclasses for embedding in ExchangeScreen's TabbedConten
 """
 
 from __future__ import annotations
+
 import datetime
 import logging
 import time
 from typing import Any
 
-from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.widget import Widget
 from textual.widgets import Button, DataTable, Input, Label, Static
+from textual.worker import Worker, WorkerState
 
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel
-from styrened.ui_state import CommsMode
-from styrened.tui.widgets.highlighted_panel import get_color_cascade
+from styrened.tui.lifecycle import WidgetResourceScope
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,8 @@ class ExchangeDirectTab(Widget):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._caps_loaded = False
+        self._capability_worker: Worker | None = None
+        self._resources = WidgetResourceScope(self, owner_logger=logger)
 
     @property
     def _ipc_bridge(self) -> Any:
@@ -89,15 +91,55 @@ class ExchangeDirectTab(Widget):
                 id="comms-presence-placeholder",
             )
 
-    def on_mount(self) -> None:
-        """Fetch daemon capabilities and update capability-gated sections."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_capabilities(), group="comms-caps", exclusive=True)
+    def _run_async_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Worker:
+        """Schedule async work with callable-based worker semantics."""
+        return self._resources.run_worker(fn, *args, **worker_kwargs)
 
-    def on_screen_resume(self, event: events.ScreenResume) -> None:
-        """Refresh capability state when Exchange screen is resumed."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_capabilities(), group="comms-caps", exclusive=True)
+    def _cancel_capability_load(self) -> None:
+        """Cancel any in-flight capability refresh."""
+        if self._capability_worker is not None and self._capability_worker.state in (
+            WorkerState.PENDING,
+            WorkerState.RUNNING,
+        ):
+            self._capability_worker.cancel()
+        self._capability_worker = None
+
+    def _start_capability_load(self) -> None:
+        """Start or replace the capability refresh worker."""
+        if self._ipc_bridge is None:
+            return
+        self._cancel_capability_load()
+        self._capability_worker = self._run_async_worker(
+            self._load_capabilities,
+            group="comms-caps",
+            exclusive=True,
+        )
+
+    def activate_content(self, initial: bool) -> None:
+        """Activate the Direct pane and lazily refresh capability state."""
+        _ = initial
+        self._start_capability_load()
+
+    def resume_content(self) -> None:
+        """Refresh capability state when the parent screen resumes or re-enters."""
+        self._start_capability_load()
+
+    def deactivate_content(self) -> None:
+        """Pause any in-flight refresh when this pane is hidden."""
+        self._cancel_capability_load()
+
+    def suspend_content(self) -> None:
+        """Suspend in-flight refresh while the parent screen is inactive."""
+        self._cancel_capability_load()
+
+    def cleanup_content(self) -> None:
+        """Cancel work and release local resources on final teardown."""
+        self._cancel_capability_load()
+
+    def on_unmount(self) -> None:
+        """Release any widget-owned resources on unmount."""
+        self.cleanup_content()
+        self._resources.release()
 
     async def _load_capabilities(self) -> None:
         """Fetch core config + daemon status and apply capability visibility."""
@@ -285,6 +327,11 @@ class ExchangeContactsTab(Widget):
     }
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._contacts_worker: Worker | None = None
+        self._resources = WidgetResourceScope(self, owner_logger=logger)
+
     @property
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
@@ -336,21 +383,63 @@ class ExchangeContactsTab(Widget):
             )
 
     def on_mount(self) -> None:
-        """Load contacts on mount."""
+        """Prepare the contacts table without eagerly fetching hidden-pane data."""
         table = self.query_one("#contacts-table", DataTable)
         table.cursor_type = "row"
         table.add_columns("ALIAS", "STATUS", "LAST MESSAGE", "PEER HASH")
 
         if self._ipc_bridge is None:
             table.add_row("-", "-", "-", f"[{get_color_cascade().dim}]Contacts require daemon mode[/]")
+
+    def _run_async_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Worker:
+        """Schedule async work with callable-based worker semantics."""
+        return self._resources.run_worker(fn, *args, **worker_kwargs)
+
+    def _cancel_contacts_load(self) -> None:
+        """Cancel any in-flight contacts refresh."""
+        if self._contacts_worker is not None and self._contacts_worker.state in (
+            WorkerState.PENDING,
+            WorkerState.RUNNING,
+        ):
+            self._contacts_worker.cancel()
+        self._contacts_worker = None
+
+    def _start_contacts_load(self) -> None:
+        """Start or replace the contacts refresh worker."""
+        if self._ipc_bridge is None:
             return
+        self._cancel_contacts_load()
+        self._contacts_worker = self._run_async_worker(
+            self._load_contacts,
+            group="exchange-contacts-load",
+            exclusive=True,
+        )
 
-        self.run_worker(self._load_contacts())
+    def activate_content(self, initial: bool) -> None:
+        """Activate the Contacts pane and lazily refresh its data."""
+        _ = initial
+        self._start_contacts_load()
 
-    def on_screen_resume(self, event: events.ScreenResume) -> None:
-        """Reload contacts when Exchange screen is resumed."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_contacts())
+    def resume_content(self) -> None:
+        """Refresh contacts when the parent screen resumes or re-enters."""
+        self._start_contacts_load()
+
+    def deactivate_content(self) -> None:
+        """Pause in-flight work when the pane is hidden."""
+        self._cancel_contacts_load()
+
+    def suspend_content(self) -> None:
+        """Suspend in-flight work while the parent screen is inactive."""
+        self._cancel_contacts_load()
+
+    def cleanup_content(self) -> None:
+        """Cancel work and release local resources on final teardown."""
+        self._cancel_contacts_load()
+
+    def on_unmount(self) -> None:
+        """Release any widget-owned resources on unmount."""
+        self.cleanup_content()
+        self._resources.release()
 
     @staticmethod
     def _relative_time(ts: float) -> str:
@@ -553,7 +642,7 @@ class ExchangeContactsTab(Widget):
             return
 
         peer_hash = str(cell_key.row_key.value)
-        self.run_worker(self._delete_contact(peer_hash))
+        self._run_async_worker(self._delete_contact, peer_hash)
 
     async def _delete_contact(self, peer_hash: str) -> None:
         """Delete a contact via IPCBridge."""

@@ -1,4 +1,3 @@
-from __future__ import annotations
 """ExchangeScreen — tabbed workspace consolidating Mail, Direct, Pages, Contacts.
 
 Provides a single tabbed entry point for all communication workspaces.
@@ -9,8 +8,11 @@ Tabs:
   contacts — Contact directory   (lifted from ContactsScreen)
 """
 
+from __future__ import annotations
+
 import datetime
 import logging
+from functools import partial
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -19,22 +21,14 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import (
-    DataTable,
-    Footer,
-    Header,
-    Input,
-    Label,
-    Static,
-    Switch,
-    TabbedContent,
-    TabPane,
-)
+from textual.widgets import DataTable, Footer, Header, Input, Static, Switch, TabbedContent, TabPane
+from textual.worker import Worker, WorkerState
 
 from styrened.models.mesh_device import DeviceType
+from styrened.tui.lifecycle import ScreenContentHooks, ScreenContentHost
 from styrened.tui.screens.exchange_tabs import ExchangeContactsTab, ExchangeDirectTab
-from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.tui.screens.exploration import ReticumAnnounceTable
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import (
     ConversationScopeKind,
     MailIndexInputs,
@@ -232,6 +226,11 @@ class ExchangeScreen(Screen[None]):
         self._sort_mode: str = "time"
         self._conversations: list[dict[str, Any]] = []
         self._mail_index = MailIndexState(threads=(), by_thread_id={})
+        self._mail_load_worker: Worker | None = None
+        self._auto_reply_worker: Worker | None = None
+        self._pages_refresh_worker: Worker | None = None
+        self._content_host = ScreenContentHost(self, owner_logger=logger)
+        self._content_host_registered = False
 
     # -------------------------------------------------------------------------
     # Services accessor (TUIServices protocol)
@@ -244,6 +243,137 @@ class ExchangeScreen(Screen[None]):
             return self.app.services.bridge  # type: ignore[attr-defined]
         except Exception:
             return None
+
+    def _run_async_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Worker:
+        """Schedule async work with callable-based worker semantics."""
+        work = partial(fn, *args) if args else fn
+        return self.run_worker(work, **worker_kwargs)
+
+    def _cancel_worker(self, worker: Worker | None) -> None:
+        """Cancel an in-flight worker if it is still pending or running."""
+        if worker is not None and worker.state in (WorkerState.PENDING, WorkerState.RUNNING):
+            worker.cancel()
+
+    def _start_mail_load(self) -> None:
+        """Start or replace the Mail conversations refresh worker."""
+        if self._ipc_bridge is None:
+            return
+        self._cancel_worker(self._mail_load_worker)
+        self._mail_load_worker = self._run_async_worker(
+            self._load_conversations,
+            group="exchange-mail-load",
+            exclusive=True,
+        )
+
+    def _start_auto_reply_load(self) -> None:
+        """Start or replace the auto-reply state refresh worker."""
+        if self._ipc_bridge is None:
+            return
+        self._cancel_worker(self._auto_reply_worker)
+        self._auto_reply_worker = self._run_async_worker(
+            self._load_auto_reply_state,
+            group="exchange-auto-reply-load",
+            exclusive=True,
+        )
+
+    def _start_pages_refresh(self) -> None:
+        """Start or replace the Pages refresh worker."""
+        self._cancel_worker(self._pages_refresh_worker)
+        self._pages_refresh_worker = self._run_async_worker(
+            self._refresh_pages_table,
+            group="pages-refresh",
+            exclusive=True,
+        )
+
+    def _cancel_mail_content_workers(self) -> None:
+        """Cancel Mail-pane background work."""
+        self._cancel_worker(self._mail_load_worker)
+        self._cancel_worker(self._auto_reply_worker)
+        self._mail_load_worker = None
+        self._auto_reply_worker = None
+
+    def _cancel_pages_refresh(self) -> None:
+        """Cancel Pages-pane background work."""
+        self._cancel_worker(self._pages_refresh_worker)
+        self._pages_refresh_worker = None
+
+    def _register_content_slots(self) -> None:
+        """Register tab content lifecycle hooks once the DOM exists."""
+        if self._content_host_registered:
+            return
+
+        self._content_host.register(
+            TAB_MAIL,
+            hooks=ScreenContentHooks(
+                activate=self._activate_mail_content,
+                resume=self._resume_mail_content,
+                deactivate=self._deactivate_mail_content,
+                suspend=self._suspend_mail_content,
+                cleanup=self._cleanup_mail_content,
+            ),
+        )
+        self._content_host.register(
+            TAB_PAGES,
+            hooks=ScreenContentHooks(
+                activate=self._activate_pages_content,
+                resume=self._resume_pages_content,
+                deactivate=self._deactivate_pages_content,
+                suspend=self._suspend_pages_content,
+                cleanup=self._cleanup_pages_content,
+            ),
+        )
+        self._content_host.register(TAB_DIRECT, self.query_one(ExchangeDirectTab))
+        self._content_host.register(TAB_CONTACTS, self.query_one(ExchangeContactsTab))
+        self._content_host_registered = True
+
+    def _activate_mail_content(self, initial: bool) -> None:
+        """Activate the Mail pane and lazily refresh its data."""
+        self._start_mail_load()
+        self._start_auto_reply_load()
+        if initial:
+            try:
+                self.query_one("#conversation-table", DataTable).focus()
+            except Exception:
+                pass
+
+    def _resume_mail_content(self) -> None:
+        """Refresh Mail data after re-entry."""
+        self._start_mail_load()
+        self._start_auto_reply_load()
+
+    def _deactivate_mail_content(self) -> None:
+        """Deactivate the Mail pane without hiding parent ownership."""
+        self._cancel_delete_timer()
+        self._cancel_mail_content_workers()
+
+    def _suspend_mail_content(self) -> None:
+        """Suspend Mail-pane background work while the screen is inactive."""
+        self._deactivate_mail_content()
+
+    def _cleanup_mail_content(self) -> None:
+        """Release Mail-pane background work on final teardown."""
+        self._deactivate_mail_content()
+
+    def _activate_pages_content(self, initial: bool) -> None:
+        """Activate the Pages pane and lazily refresh its browsable nodes."""
+        _ = initial
+        self._start_pages_refresh()
+
+    def _resume_pages_content(self) -> None:
+        """Refresh Pages data after re-entry."""
+        self._start_pages_refresh()
+
+    def _deactivate_pages_content(self) -> None:
+        """Deactivate the Pages pane and cancel in-flight refresh work."""
+        self._cancel_pages_refresh()
+
+    def _suspend_pages_content(self) -> None:
+        """Suspend Pages-pane background work while the screen is inactive."""
+        self._deactivate_pages_content()
+
+    def _cleanup_pages_content(self) -> None:
+        """Release Pages-pane background work on final teardown."""
+        self._deactivate_pages_content()
 
     # -------------------------------------------------------------------------
     # Compose
@@ -305,7 +435,7 @@ class ExchangeScreen(Screen[None]):
     # -------------------------------------------------------------------------
 
     def on_mount(self) -> None:
-        """Initialise the Mail tab on first mount."""
+        """Initialise structure, then activate only the visible tab content."""
         # Set border titles on content containers
         try:
             self.query_one("#mail-content", Container).border_title = "CONVERSATIONS"
@@ -322,27 +452,33 @@ class ExchangeScreen(Screen[None]):
 
         if self._ipc_bridge is None:
             table.add_row("-", f"[{get_color_cascade().dim}]Chat requires daemon mode[/]", "-", "-", "-")
-            return
+        else:
+            # Show loading placeholder immediately so the screen feels responsive
+            table.add_row("…", f"[{get_color_cascade().dim}]loading…[/]", "-", "-", "-")
 
-        # Show loading placeholder immediately so the screen feels responsive
-        table.add_row("…", f"[{get_color_cascade().dim}]loading…[/]", "-", "-", "-")
-        self.run_worker(self._load_conversations())
-        self.run_worker(self._load_auto_reply_state())
-        self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
-        table.focus()
+        self._register_content_slots()
+        self._content_host.activate(self._initial_tab)
 
     def on_screen_resume(self) -> None:
-        """Refresh Mail conversations when returning from another screen."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_conversations())
-        self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
+        """Resume only the currently active tab content."""
+        self._content_host.resume_active()
+
+    def on_screen_suspend(self) -> None:
+        """Suspend only the currently active tab content."""
+        self._content_host.suspend_active()
+
+    def on_unmount(self) -> None:
+        """Fan out final cleanup to all registered tab content."""
+        self._content_host.cleanup_all()
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
     ) -> None:
-        """Refresh Pages table when the Pages tab is first opened."""
-        if getattr(event.tab, "id", None) == f"tab-{TAB_PAGES}":  # "tab-pages"
-            self.run_worker(self._refresh_pages_table(), group="pages-refresh", exclusive=True)
+        """Activate the newly selected tab's content slot."""
+        tab_id = getattr(event.tab, "id", None)
+        if not isinstance(tab_id, str) or not tab_id.startswith("tab-"):
+            return
+        self._content_host.activate(tab_id.removeprefix("tab-"))
 
     async def _refresh_pages_table(self) -> None:
         """Populate #table-pages with NomadNet-browsable nodes from the device cache."""
@@ -510,7 +646,7 @@ class ExchangeScreen(Screen[None]):
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if str(event.switch.id) == "ooo-switch":
-            self.run_worker(self._toggle_auto_reply(event.value))
+            self._run_async_worker(self._toggle_auto_reply, event.value)
 
     async def _toggle_auto_reply(self, enabled: bool) -> None:
         bridge = self._ipc_bridge
@@ -738,7 +874,7 @@ class ExchangeScreen(Screen[None]):
             return
         if self._delete_pending == peer_hash:
             self._cancel_delete_timer()
-            self.run_worker(self._execute_delete_conversation(peer_hash), group="exchange-delete")
+            self._run_async_worker(self._execute_delete_conversation, peer_hash, group="exchange-delete")
         else:
             self._delete_pending = peer_hash
             self.notify("Press d again to delete conversation", severity="warning")
@@ -791,14 +927,14 @@ class ExchangeScreen(Screen[None]):
             self.query_one("#inbox-search-count", Static).update("")
         except Exception:
             pass
-        self.run_worker(self._load_conversations())
+        self._run_async_worker(self._load_conversations)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "compose-input":
             value = event.value.strip()
             if not value:
                 return
-            self.run_worker(self._resolve_and_open(value), group="exchange-compose")
+            self._run_async_worker(self._resolve_and_open, value, group="exchange-compose")
             return
 
         if event.input.id != "inbox-search-input":
@@ -807,7 +943,7 @@ class ExchangeScreen(Screen[None]):
         query = event.value.strip()
         if len(query) < 2:
             return
-        self.run_worker(self._execute_search(query), group="exchange-search")
+        self._run_async_worker(self._execute_search, query, group="exchange-search")
 
     async def _resolve_and_open(self, value: str) -> None:
         import re
@@ -898,7 +1034,7 @@ class ExchangeScreen(Screen[None]):
             self.notify("Sync requires daemon mode", severity="warning")
             return
         self.notify("Syncing with propagation node...", severity="information")
-        self.run_worker(self._execute_sync(), group="exchange-sync")
+        self._run_async_worker(self._execute_sync, group="exchange-sync")
 
     async def _execute_sync(self) -> None:
         bridge = self._ipc_bridge
