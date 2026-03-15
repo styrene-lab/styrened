@@ -10,11 +10,11 @@ Given the shared lifecycle contract already absorbed Dashboard, Exploration, Mes
 When the current screen inventory is reviewed
 Then the active migration tail must be identified primarily in Inbox, Exchange, Contacts, Comms, embedded Exchange tab panes, and Provision rather than the mostly local wizard/settings screens
 
-### Scenario 2: Exchange lifecycle ownership is left explicit instead of hidden across parent and tab panes
+### Scenario 2: Exchange and its live tab panes migrate as one ownership cluster before helper extraction
 
 Given Exchange currently spreads refresh ownership across `ExchangeScreen`, `ExchangeDirectTab`, and `ExchangeContactsTab`
 When the follow-up migration is planned
-Then the design must keep the parent-vs-tab ownership boundary as an explicit question instead of silently treating those embedded panes as already normalized
+Then the parent screen and its live tab panes should be normalized together first, with any reusable screen-content helper deferred until another real use case proves the abstraction
 
 ### Scenario 3: The migration order favors the highest-duplication workspaces first
 

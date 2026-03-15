@@ -1,10 +1,9 @@
 ---
 id: screen-lifecycle-remaining-screen-surfaces
 title: Remaining screen-surface lifecycle migration
-status: exploring
+status: decided
 parent: screen-lifecycle-styrenescreen-migration-tail
-open_questions:
-  - "Should Exchange's embedded Direct and Contacts tab widgets migrate together with ExchangeScreen or behind a reusable screen-content lifecycle helper?"
+open_questions: []
 issue_type: epic
 priority: 1
 ---
@@ -24,6 +23,14 @@ priority: 1
 
 `InboxScreen`, `ExchangeScreen`, `ContactsScreen`, and `CommsScreen` still subclass `Screen` directly and each manually reimplement the same lifecycle shape the shared contract was meant to absorb: mount-time table bootstrapping, explicit `app.services.bridge` lookups, ad hoc `run_worker(...)` load kicks, and separate `on_screen_resume()` refresh paths. `ExchangeDirectTab` and `ExchangeContactsTab` duplicate the same refresh logic inside embedded widgets, so the Exchange workspace currently has lifecycle work split between the parent screen and child tab panes. `ProvisionScreen` is also still lifecycle-heavy because it performs async mount bootstrap and owns a long-running flash worker, but its provisioning-specific flow is narrower than the aggregate mail/comms surfaces. By contrast, `SettingsScreen`, `DaemonSetupScreen`, `FirstRunWizardScreen`, `DeviceConsoleScreen`, and `ConversationScreen` are presently lighter: they are mostly local-form, wizard, or action-driven screens whose screen-level lifecycle work is limited to UI setup, focus changes, or a single lightweight fetch delegated to widgets.
 
+### Exchange should migrate with its embedded Direct and Contacts panes before introducing a generic screen-content lifecycle helper
+
+There are two plausible directions for Exchange. A reusable helper would centralize mount/resume refresh kickoff, cancellation, and bridge access for embedded tab panes, but it would also freeze a new abstraction before the repo has multiple proven screen-with-live-tabs cases that need it. Today the concrete duplication is mostly inside one workspace (`ExchangeScreen` + `ExchangeDirectTab` + `ExchangeContactsTab`), and those panes are still tightly coupled to Exchange navigation, tab activation, and app-level bridge access. Migrating the parent screen and its live tab panes together keeps ownership visible, lets the team normalize refresh boundaries in one place, and preserves freedom to extract a helper later if Exchange and another aggregate workspace actually converge on the same contract.
+
+### The repeated parent-plus-live-pane shape is now strong enough to justify a reusable screen-content primitive first
+
+On reassessment, the cost/benefit tilts toward introducing a small reusable screen-content lifecycle primitive before finishing Exchange-specific migration. Exchange is the clearest hotspot, but it already exposes the recurring shape we care about: a parent screen owns workspace navigation and control-lane access while embedded live panes need standardized mount/resume activation, refresh kickoff, and cleanup. A helper extracted at this layer can make parent-vs-pane ownership explicit rather than hidden, provided it stays composable and narrow instead of becoming a monolithic base class for every screen.
+
 ## Decisions
 
 ### Decision: Prioritize aggregate mail/comms surfaces before local-form or wizard screens
@@ -31,44 +38,19 @@ priority: 1
 **Status:** decided
 **Rationale:** The main remaining contract violations are the screens that still duplicate mount/resume refresh behavior and bridge access across whole workspaces: Inbox, Exchange, Contacts, Comms, and the Exchange tab widgets that behave like embedded screens. These surfaces are where the shared lifecycle contract will eliminate the most duplicate refresh code and ownership ambiguity. Provision is a secondary lifecycle-heavy screen because of flash-worker ownership. Settings, DaemonSetup, FirstRunWizard, DeviceConsole, and Conversation can remain lower-priority cleanup until a concrete bug or refactor need appears.
 
+### Decision: Migrate Exchange and its live tab panes together before extracting any reusable screen-content helper
+
+**Status:** decided
+**Rationale:** The Exchange parent screen and its Direct/Contacts tab panes are the current concrete hotspot for split lifecycle ownership. Solving that cluster directly gives the cleanest signal about the real parent-vs-tab contract, avoids introducing a speculative helper for a single known case, and still leaves the code free to extract a helper later if another aggregate workspace proves the abstraction.
+
+### Decision: Start with a reusable screen-content lifecycle primitive before finishing Exchange-specific cleanup
+
+**Status:** decided
+**Rationale:** The repeated parent-screen plus live-pane shape is already concrete enough to justify a composable helper. A narrow screen-content primitive can standardize mount/resume activation, refresh kickoff, and cleanup for embedded live panes while still keeping ownership boundaries explicit. Exchange should become the proving ground for that helper rather than the reason to postpone it.
+
 ## Open Questions
 
-- Should Exchange's embedded Direct and Contacts tab widgets migrate together with ExchangeScreen or behind a reusable screen-content lifecycle helper?
-
-## Acceptance Criteria
-
-### Scenarios
-
-#### Scenario 1: The remaining screen-side tail is narrowed to the aggregate workspaces that still duplicate lifecycle logic
-
-Given the shared lifecycle contract already absorbed Dashboard, Exploration, MeshDeviceDetail, and NodeInfoPanel cleanup work  
-When the current screen inventory is reviewed  
-Then the active migration tail must be identified primarily in Inbox, Exchange, Contacts, Comms, embedded Exchange tab panes, and Provision rather than the mostly local wizard/settings screens
-
-#### Scenario 2: Exchange lifecycle ownership is left explicit instead of hidden across parent and tab panes
-
-Given Exchange currently spreads refresh ownership across `ExchangeScreen`, `ExchangeDirectTab`, and `ExchangeContactsTab`  
-When the follow-up migration is planned  
-Then the design must keep the parent-vs-tab ownership boundary as an explicit question instead of silently treating those embedded panes as already normalized
-
-#### Scenario 3: The migration order favors the highest-duplication workspaces first
-
-Given not every remaining screen has the same lifecycle risk  
-When implementation is staged  
-Then aggregate mail/comms surfaces should be prioritized ahead of mostly local-form, wizard, or action-driven screens unless a new bug changes that ordering
-
-### Falsifiability
-
-- This design is wrong if the remaining screen-side work still treats static wizards and local forms as equally urgent with aggregate mail/comms workspaces.
-- This design is wrong if Exchange's embedded tab panes are ignored even though they still own screen-like refresh behavior.
-- This design is wrong if the plan reopens already-cleaned Dashboard, Exploration, MeshDeviceDetail, or NodeInfoPanel work without new evidence.
-
-### Constraints
-
-- Do not reintroduce screen-owned shadow caches just to make migration easier.
-- Keep the shared app bridge as the control lane; screen migration should compose with auxiliary-lane ownership rather than bypass it.
-- Prefer converging duplicated mount/resume refresh logic before touching mostly static wizard or settings flows.
-- Preserve splash-first startup and the newer cache-readiness/backpressure distinctions while migrating aggregate workspaces.
+*No open questions.*
 
 ## Implementation Notes
 
@@ -87,3 +69,11 @@ Then aggregate mail/comms surfaces should be prioritized ahead of mostly local-f
 - Keep the shared app bridge as the control lane; screen migration should compose with auxiliary-lane ownership rather than bypass it.
 - Prefer converging duplicated mount/resume refresh logic before touching mostly static wizard or settings flows.
 - Preserve splash-first startup and the newer cache-readiness/backpressure distinctions while migrating aggregate workspaces.
+
+## Acceptance Criteria
+
+### Falsifiability
+
+- This decision is wrong if: This design is wrong if the remaining screen-side work still treats static wizards and local forms as equally urgent with aggregate mail/comms workspaces.
+- This decision is wrong if: This design is wrong if Exchange's embedded tab panes are ignored even though they still own screen-like refresh behavior.
+- This decision is wrong if: This design is wrong if the plan reopens already-cleaned Dashboard, Exploration, MeshDeviceDetail, or NodeInfoPanel work without new evidence.
