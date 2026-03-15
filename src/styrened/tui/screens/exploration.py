@@ -713,7 +713,7 @@ class ExplorationScreen(Screen[None]):
         Binding("enter", "select_device", "Select"),
         Binding("c", "open_chat", "Chat"),
         Binding("r", "refresh", "Refresh"),
-        Binding("n", "go_home", "Home", show=True),
+        Binding("escape", "go_home", "Home", show=False),
         Binding("h", "toggle_hide_lost", "Hide Lost"),
         Binding("H", "toggle_hide_stale", "Hide Stale", key_display="shift+h"),
         Binding("slash", "show_search", "Search", key_display="/", priority=True),

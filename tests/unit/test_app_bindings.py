@@ -18,12 +18,12 @@ def _binding_map() -> dict[str, Binding]:
 
 
 class TestHiddenBindings:
-    """Bindings for c, b, p must exist but be hidden (show=False)."""
+    """Power-user / legacy bindings must exist but stay hidden (show=False)."""
 
     @pytest.mark.parametrize("key,description", [
-        ("c", "Comms"),
-        ("b", "Contacts"),
         ("p", "Provision"),
+        ("x", "Exchange"),  # legacy alias for e
+        ("i", "Mail"),       # legacy alias for m
     ])
     def test_binding_exists_and_hidden(self, key: str, description: str) -> None:
         bmap = _binding_map()
@@ -37,8 +37,12 @@ class TestVisibleBindings:
     """Core navigation bindings must be visible (show=True)."""
 
     @pytest.mark.parametrize("key,description", [
+        ("g", "Global"),
         ("n", "Nodes"),
+        ("e", "Exchange"),
         ("m", "Mail"),
+        ("c", "Comms"),
+        ("b", "Contacts"),
         ("a", "Announce"),
     ])
     def test_binding_exists_and_visible(self, key: str, description: str) -> None:
@@ -57,5 +61,5 @@ class TestVisibleBindingCount:
             b for b in StyreneApp.BINDINGS
             if isinstance(b, Binding) and b.show
         ]
-        # Should be <= 8 visible bindings to fit in 80-col footer
-        assert len(visible) <= 8, f"Too many visible bindings: {len(visible)}"
+        # 9 visible: ?, `, g, n, e, m, c, b, a
+        assert len(visible) <= 10, f"Too many visible bindings: {len(visible)}"

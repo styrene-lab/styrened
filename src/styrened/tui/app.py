@@ -108,20 +108,22 @@ class StyreneApp(App[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority bindings (always work regardless of focus)
         Binding("ctrl+c", "interrupt", "Quit", show=False, priority=True),
-        # Global navigation
+        # Global navigation — single-letter mnemonics, shown in Footer
         Binding("?", "toggle_help", "Help", show=True),
         Binding("grave_accent", "open_admin", "Admin", show=True),
+        Binding("g", "open_global_cop", "Global", show=True),
         Binding("n", "open_nodes", "Nodes", show=True),
-        Binding("x", "open_exchange", "Exchange", show=True),
+        Binding("e", "open_exchange", "Exchange", show=True),
         Binding("m", "open_mail", "Mail", show=True),
-        Binding("c", "open_comms", "Comms", show=False),
-        Binding("b", "open_contacts", "Contacts", show=False),
-        # Backward-compatible / admin-adjacent shortcuts
-        Binding("i", "open_mail", "Mail", show=False),
-        # Screen shortcuts (can be overridden by screens)
+        Binding("c", "open_comms", "Comms", show=True),
+        Binding("b", "open_contacts", "Contacts", show=True),
+        Binding("a", "announce", "Announce", show=True),
+        # Power-user / hidden shortcuts
         Binding("p", "open_provision", "Provision", show=False),
         Binding("ctrl+r", "restart_daemon", "Restart Daemon", show=False),
-        Binding("a", "announce", "Announce", show=True),
+        # Legacy aliases — kept for muscle memory, not shown
+        Binding("x", "open_exchange", "Exchange", show=False),
+        Binding("i", "open_mail", "Mail", show=False),
     ]
 
     SCREENS: ClassVar[dict[str, type[Screen[Any]]]] = {  # type: ignore[assignment]
@@ -179,6 +181,10 @@ class StyreneApp(App[None]):
     def action_push_screen_settings(self) -> None:
         """Backward-compatible alias for action_open_admin."""
         self.action_open_admin()
+
+    def action_open_global_cop(self) -> None:
+        """Open the Global COP workspace (placeholder until screen is implemented)."""
+        self.notify("Global COP — coming soon", severity="information", timeout=2)
 
     def action_open_nodes(self) -> None:
         """Toggle the Mesh/Nodes workspace."""

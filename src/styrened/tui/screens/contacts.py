@@ -43,7 +43,7 @@ class ContactsScreen(StyreneScreen[None]):
         Binding("escape", "go_back", "Home"),
         Binding("enter", "open_chat", "Chat"),
         Binding("c", "open_chat", "Chat", show=False),
-        Binding("a", "add_contact", "Add"),
+        Binding("ctrl+n", "add_contact", "Add"),
         Binding("e", "edit_contact", "Edit"),
         Binding("delete", "delete_contact", "Delete"),
         Binding("r", "resolve_name", "Resolve"),

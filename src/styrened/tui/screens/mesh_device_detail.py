@@ -181,7 +181,7 @@ class MeshDeviceDetailScreen(Screen[None]):
         Binding("r", "refresh_status", "Refresh"),
         Binding("l", "establish_link", "Link"),
         Binding("t", "run_speedtest", "Speedtest"),
-        Binding("a", "add_contact", "Add Contact"),
+        Binding("ctrl+n", "add_contact", "Add Contact"),
         Binding("y", "copy_hash", "Copy Hash"),
     ]
 

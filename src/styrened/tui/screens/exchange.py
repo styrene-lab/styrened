@@ -83,11 +83,11 @@ class ExchangeScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "go_back", "Back"),
         # Mail-tab bindings (active when Mail tab is focused)
-        Binding("n", "compose_new", "New", show=True),
+        Binding("ctrl+n", "compose_new", "New", show=True),
         Binding("d", "delete_conversation", "Delete", show=True),
         Binding("slash", "search_messages", "Search", show=True),
         Binding("s", "sync_messages", "Sync", show=True),
-        Binding("o", "cycle_sort", "Sort", show=True),
+        Binding("t", "cycle_sort", "Sort", show=True),
         # Pages-tab bindings
         Binding("v", "preview_page", "View Page", show=True),
     ]

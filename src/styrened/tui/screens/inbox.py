@@ -75,11 +75,11 @@ class InboxScreen(StyreneScreen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "go_back", "Home"),
         Binding("enter", "open_conversation", "Open"),
-        Binding("n", "compose_new", "New", show=True),
+        Binding("ctrl+n", "compose_new", "New", show=True),
         Binding("d", "delete_conversation", "Delete", show=True),
         Binding("slash", "search_messages", "Search", show=True),
         Binding("s", "sync_messages", "Sync", show=True),
-        Binding("o", "cycle_sort", "Sort", show=True),
+        Binding("t", "cycle_sort", "Sort", show=True),
     ]
 
     # Sort modes: time (default), unread first, name
