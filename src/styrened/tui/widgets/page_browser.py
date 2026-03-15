@@ -840,6 +840,25 @@ class PageBrowserWidget(Widget):
                 if field_name:
                     form_data[field_name] = self._form_fields.get(field_name, "")
 
+        # LXMF "message me" links — NomadNet encodes these as lxmf@<dest_hash>.
+        # Route to a new conversation instead of trying to fetch it as a page.
+        if url.startswith("lxmf@"):
+            lxmf_hash = url[5:].strip()
+            if lxmf_hash:
+                try:
+                    from styrened.tui.screens.conversation import ConversationScreen
+                    self.app.push_screen(
+                        ConversationScreen(
+                            peer_hash=lxmf_hash,
+                            display_name=None,
+                            origin_workspace="pages",
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to open conversation for lxmf@%s: %s", lxmf_hash[:16], exc)
+                    self.notify(f"Could not open conversation: {exc}", severity="warning")
+            return
+
         if self._is_external_mode:
             if message.link_fields:
                 self.notify("Form submission is only supported for NomadNet pages", severity="warning")

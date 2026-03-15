@@ -483,11 +483,17 @@ class ExchangeScreen(Screen[None]):
     async def _refresh_pages_table(self) -> None:
         """Populate #table-pages with NomadNet-browsable nodes from the device cache."""
         try:
+            from styrened.tui.services.reticulum import discover_devices
+
             cache = getattr(self.app, "device_cache", None)
             if cache is not None:
                 all_devices = cache.get()
+                if not all_devices:
+                    # Cache exists but hasn't been primed yet — fall back to
+                    # live discovery so the Pages tab isn't permanently empty
+                    # just because the cache hasn't populated on this mount.
+                    all_devices = discover_devices()
             else:
-                from styrened.tui.services.reticulum import discover_devices
                 all_devices = discover_devices()
         except Exception as exc:
             logger.debug("_refresh_pages_table: device fetch failed: %s", exc)
