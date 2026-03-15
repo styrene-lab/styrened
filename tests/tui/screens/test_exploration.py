@@ -150,8 +150,8 @@ class TestExplorationTimerLifecycle:
 class TestExplorationRouting:
     def test_enter_from_nodes_workspace_sets_nodes_origin(self, sample_devices):
         screen = ExplorationScreen()
-        screen._get_selected_identity = Mock(return_value=sample_devices[0].identity_hash)
-        screen._find_device_by_identity = Mock(return_value=sample_devices[0])
+        screen._get_selected_row_key = Mock(return_value=sample_devices[0].identity_hash)
+        screen._find_device_by_selection_key = Mock(return_value=sample_devices[0])
         fake_app = Mock()
 
         with patch.object(ExplorationScreen, "app", new_callable=PropertyMock, return_value=fake_app):
@@ -159,6 +159,19 @@ class TestExplorationRouting:
 
         pushed_screen = fake_app.push_screen.call_args.args[0]
         assert pushed_screen.origin_workspace == WorkspaceId.NODES
+
+    def test_enter_routes_detail_by_identity_when_row_key_is_destination_hash(self, sample_devices):
+        screen = ExplorationScreen()
+        screen._get_selected_row_key = Mock(return_value=sample_devices[0].destination_hash)
+        screen._find_device_by_selection_key = Mock(return_value=sample_devices[0])
+        fake_app = Mock()
+
+        with patch.object(ExplorationScreen, "app", new_callable=PropertyMock, return_value=fake_app):
+            screen.action_select_device()
+
+        pushed_screen = fake_app.push_screen.call_args.args[0]
+        assert pushed_screen.device_identity == sample_devices[0].identity_hash
+        assert pushed_screen.device == sample_devices[0]
 
 
 class TestDevicesInCorrectTab:
@@ -238,6 +251,61 @@ class TestExplorationLxmfShadowFiltering:
 
             table = app.screen.query_one("#table-lxmf", ReticumAnnounceTable)
             assert table.device_count == 1
+
+
+class TestDuplicateIdentityRows:
+    @pytest.mark.asyncio
+    async def test_other_tab_allows_multiple_rows_with_same_identity(self):
+        now = int(datetime.now().timestamp())
+        shared_identity = "feed" * 8
+        devices = [
+            _make_device("Node A", DeviceType.UNKNOWN, dest_hash="1111" * 8, identity_hash=shared_identity, last_announce=now - 5),
+            _make_device("Node B", DeviceType.UNKNOWN, dest_hash="2222" * 8, identity_hash=shared_identity, last_announce=now - 10),
+        ]
+        app = StyreneApp()
+        app.device_cache.get = Mock(return_value=devices)  # type: ignore[method-assign]
+        app.device_cache.refresh = AsyncMock()  # type: ignore[method-assign]
+
+        async with app.run_test() as pilot:
+            await app.push_screen(ExplorationScreen())
+            await pilot.pause()
+
+            table = app.screen.query_one("#table-other", ReticumAnnounceTable)
+            assert table.device_count == 2
+            assert table.row_count == 2
+
+    @pytest.mark.asyncio
+    async def test_pages_tab_allows_nomadnet_and_styrene_rows_sharing_identity(self):
+        now = int(datetime.now().timestamp())
+        shared_identity = "cafe" * 8
+        devices = [
+            _make_device(
+                "Community Hub",
+                DeviceType.STYRENE_NODE,
+                dest_hash="3333" * 8,
+                identity_hash=shared_identity,
+                last_announce=now - 5,
+                nomadnet_destination_hash="4444" * 8,
+            ),
+            _make_device(
+                "Community Hub Pages",
+                DeviceType.NOMADNET_NODE,
+                dest_hash="5555" * 8,
+                identity_hash=shared_identity,
+                last_announce=now - 10,
+            ),
+        ]
+        app = StyreneApp()
+        app.device_cache.get = Mock(return_value=devices)  # type: ignore[method-assign]
+        app.device_cache.refresh = AsyncMock()  # type: ignore[method-assign]
+
+        async with app.run_test() as pilot:
+            await app.push_screen(ExplorationScreen())
+            await pilot.pause()
+
+            table = app.screen.query_one("#table-pages", ReticumAnnounceTable)
+            assert table.device_count == 2
+            assert table.row_count == 2
 
 
 class TestPagesTabPreview:

@@ -307,7 +307,7 @@ class ReticumAnnounceTable(DataTable[str]):
                 via_text,
                 status_text,
                 last_seen_text,
-                key=device.identity_hash,
+                key=device.destination_hash,
             )
 
         # Restore cursor selection if possible
@@ -550,7 +550,7 @@ class StyreneFleetTable(DataTable[str]):
                 via_text,
                 status_text,
                 last_seen_text,
-                key=device.identity_hash,
+                key=device.destination_hash,
             )
 
         # Restore selection
@@ -1110,12 +1110,21 @@ class ExplorationScreen(Screen[None]):
         self._reset_countdown()
         self._start_node_refresh()
 
-    def _find_device_by_identity(self, identity: str) -> MeshDevice | None:
-        """Look up a MeshDevice from the active table's device list."""
+    def _find_device_by_selection_key(self, selection_key: str) -> MeshDevice | None:
+        """Look up a MeshDevice from the active table's device list.
+
+        Table row keys use destination hashes so duplicate identities can render
+        without crashing. Downstream detail/chat flows remain identity-oriented,
+        so resolve the selected row back to its device by destination first and
+        then fall back to identity for older call paths and tests.
+        """
         table = self._get_active_table()
         if table and hasattr(table, "_all_devices"):
             for d in table._all_devices:
-                if d.identity_hash == identity:
+                if d.destination_hash == selection_key:
+                    return d
+            for d in table._all_devices:
+                if d.identity_hash == selection_key:
                     return d
         return None
 
@@ -1123,14 +1132,15 @@ class ExplorationScreen(Screen[None]):
         """Handle DataTable enter key — navigate to device detail OR load inline browser."""
         if not (event.row_key and event.row_key.value and event.row_key.value != "-"):
             return
-        device_identity = str(event.row_key.value)
+        selected_key = str(event.row_key.value)
 
         # Pages tab: load selected NomadNet node into the inline browser
         if getattr(event.data_table, "id", None) == "table-pages":
-            self._load_pages_browser(device_identity)
+            self._load_pages_browser(selected_key)
             return
 
-        device = self._find_device_by_identity(device_identity)
+        device = self._find_device_by_selection_key(selected_key)
+        device_identity = device.identity_hash if device is not None else selected_key
         from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
         self.app.push_screen(MeshDeviceDetailScreen(
@@ -1141,7 +1151,7 @@ class ExplorationScreen(Screen[None]):
 
     def _load_pages_browser(self, device_identity: str) -> None:
         """Load a NomadNet destination into the inline Pages tab browser."""
-        device = self._find_device_by_identity(device_identity)
+        device = self._find_device_by_selection_key(device_identity)
         dest_hash: str | None = None
 
         if device is not None:
@@ -1191,8 +1201,8 @@ class ExplorationScreen(Screen[None]):
         if event.input.id == "explore-search-bar":
             self._hide_search()
 
-    def _get_selected_identity(self) -> str | None:
-        """Get the identity of the currently selected row in the active tab."""
+    def _get_selected_row_key(self) -> str | None:
+        """Get the currently selected table row key in the active tab."""
         table = self._get_active_table()
         if table and table.cursor_row is not None:
             try:
@@ -1248,9 +1258,10 @@ class ExplorationScreen(Screen[None]):
 
     def action_select_device(self) -> None:
         """Handle device selection — navigate to device detail screen."""
-        device_identity = self._get_selected_identity()
-        if device_identity:
-            device = self._find_device_by_identity(device_identity)
+        selected_key = self._get_selected_row_key()
+        if selected_key:
+            device = self._find_device_by_selection_key(selected_key)
+            device_identity = device.identity_hash if device is not None else selected_key
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
             self.app.push_screen(
@@ -1263,9 +1274,10 @@ class ExplorationScreen(Screen[None]):
 
     def action_open_chat(self) -> None:
         """Open chat tab directly for the selected device."""
-        device_identity = self._get_selected_identity()
-        if device_identity:
-            device = self._find_device_by_identity(device_identity)
+        selected_key = self._get_selected_row_key()
+        if selected_key:
+            device = self._find_device_by_selection_key(selected_key)
+            device_identity = device.identity_hash if device is not None else selected_key
             from styrened.tui.screens.mesh_device_detail import MeshDeviceDetailScreen
 
             self.app.push_screen(

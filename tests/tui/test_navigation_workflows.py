@@ -66,7 +66,7 @@ class TestScreenNavigation:
             await pilot.pause()
 
             screen = app_with_cache.screen
-            with patch.object(screen, "_get_selected_identity", return_value=sample_device.identity_hash):
+            with patch.object(screen, "_get_selected_row_key", return_value=sample_device.identity_hash):
                 screen.action_select_device()
             await pilot.pause()
 

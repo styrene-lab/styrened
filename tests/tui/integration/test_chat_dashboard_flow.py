@@ -72,8 +72,8 @@ class TestDeviceDetailChatFlow:
         screen = ExplorationScreen()
         fake_app = MagicMock()
         with (
-            patch.object(ExplorationScreen, "_get_selected_identity", return_value=sample_devices[0].identity_hash),
-            patch.object(ExplorationScreen, "_find_device_by_identity", return_value=sample_devices[0]),
+            patch.object(ExplorationScreen, "_get_selected_row_key", return_value=sample_devices[0].identity_hash),
+            patch.object(ExplorationScreen, "_find_device_by_selection_key", return_value=sample_devices[0]),
             patch.object(ExplorationScreen, "app", new_callable=PropertyMock, return_value=fake_app),
         ):
             screen.action_select_device()
