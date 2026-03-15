@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle-aggregate-refresh-surfaces
 title: Aggregate refresh surfaces lifecycle migration
-status: implementing
+status: implemented
 parent: screen-lifecycle-remaining-screen-surfaces
 related: [screen-lifecycle-widget-resource-primitives, screen-lifecycle-lane-aware-ipc-ownership]
 open_questions: []
@@ -33,6 +33,10 @@ Narrow the remaining standalone screen lifecycle tail to the three aggregate ref
 ### Provisioning should stay a separate follow-up because its lifecycle debt is workflow-owned, not aggregate-refresh-owned
 
 `ProvisionScreen` differs materially from the mail/comms aggregate surfaces. Its main lifecycle risks are async mount bootstrap, disk-detect refresh ownership, and long-running flash worker cleanup rather than repeated resume-driven aggregate refresh. That makes it a poor proving ground for the aggregate refresh migration pattern and a better fit for its own child node.
+
+### Implementation validation: aggregate refresh screens now share StyreneScreen load/resume ownership
+
+`InboxScreen`, `ContactsScreen`, and `CommsScreen` now inherit from `StyreneScreen` and route daemon-backed refresh through `_load_data()` instead of duplicating their own `on_screen_resume()` refresh kickoff. Inbox now renders a workspace-local daemon-required placeholder when no bridge exists and uses callable worker scheduling plus screen-local timer ownership for its async actions; Contacts and Comms preserve explicit local bootstrap/render logic while relying on the shared screen lifecycle for refresh. Targeted verification passed with `ruff check` on the touched screen/test files and `.venv/bin/python -m pytest tests/tui/screens/test_inbox.py tests/tui/screens/test_contacts.py tests/tui/screens/test_comms.py -q` → 56 passed.
 
 ## Decisions
 
@@ -73,6 +77,10 @@ Narrow the remaining standalone screen lifecycle tail to the three aggregate ref
 - Bridge-unavailable behavior must stay local and truthful (workspace placeholder or warning) rather than reading as a daemon-wide disconnect if only one screen cannot load.
 - Use callable or `functools.partial(...)` worker scheduling for async actions so mock-heavy tests do not leak unawaited-coroutine warnings.
 - Keep the implementation slice narrow to Inbox, Contacts, and Comms; `ProvisionScreen` lifecycle ownership stays in its own follow-up node.
+- ProvisionScreen remains out of scope for this change.
+- The shared app bridge remains the control lane; no new ambient auxiliary lanes were introduced.
+- Workspace-local no-daemon placeholders remain explicit instead of relying on shadow caches or daemon-wide disconnect semantics.
+- Async action scheduling in Inbox and Contacts uses callable worker semantics to avoid unawaited coroutine warnings in tests.
 
 ## Acceptance Criteria
 
