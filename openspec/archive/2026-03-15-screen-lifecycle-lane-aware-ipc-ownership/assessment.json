@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "changeName": "screen-lifecycle-lane-aware-ipc-ownership",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T12:24:09.405Z",
+  "summary": "Manual verification passed for the lane-aware IPC ownership implementation. Verified the bridge/lifecycle/page-browser changes with focused regression coverage covering screen-owned lane acquisition, worker-before-lane teardown sequencing, and page-browser worker tracking, plus ruff on the touched bridge, lifecycle, screen, widget, and test files. Focused pytest batch passed: tests/tui/screens/test_screen_base.py tests/tui/widgets/test_widget_resources.py tests/tui/widgets/test_page_browser.py (57 passed).",
+  "snapshot": {
+    "gitHead": "54abebddd582552db59cf7c7940fbce5de178d67",
+    "fingerprint": "378063aa9036eeb2cd918f22fd1c91a6a473cc1a943227b92d18abd689754a32",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/ipc/bridge.py",
+      "src/styrened/tui/lifecycle/screen_content.py",
+      "src/styrened/tui/lifecycle/widget_resources.py",
+      "src/styrened/tui/screens/base.py",
+      "src/styrened/tui/widgets/page_browser.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/screen-lifecycle-lane-aware-ipc-ownership/design.md",
+        "exists": true,
+        "size": 4988,
+        "sha256": "e29f7c69165ee425da933dd9166d51ee3be91254b44eda9876e3ab0b00839086"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-lane-aware-ipc-ownership/proposal.md",
+        "exists": true,
+        "size": 372,
+        "sha256": "3846dc96e32860ce3717c204eb2f0c6773cdc597ffa4b5cbcd5770b427b660c9"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-lane-aware-ipc-ownership/tasks.md",
+        "exists": true,
+        "size": 2257,
+        "sha256": "b7a8edf3746aef4aab428948115c26f4547827a30c3ccf23028a04342e782316"
+      },
+      {
+        "path": "src/styrened/ipc/bridge.py",
+        "exists": true,
+        "size": 29412,
+        "sha256": "577a82e6cfe60cb38013b596a8d02af46fb4c0b39506bac58ade3b48e15a6e46"
+      },
+      {
+        "path": "src/styrened/tui/lifecycle/screen_content.py",
+        "exists": true,
+        "size": 4844,
+        "sha256": "3278f20c83053b898e8052e1405012460cd4d1d1719e97e2eb4615c682a657cb"
+      },
+      {
+        "path": "src/styrened/tui/lifecycle/widget_resources.py",
+        "exists": true,
+        "size": 10716,
+        "sha256": "93072e11ab7f4078d44d598f6050c2ae860cf3821dcc5fa8b2addd5e2c60f748"
+      },
+      {
+        "path": "src/styrened/tui/screens/base.py",
+        "exists": true,
+        "size": 12711,
+        "sha256": "ad5da9458b3ccd888a93ae1cedf567f8a3b6ba15b1ff9dababd46b046fb7e86b"
+      },
+      {
+        "path": "src/styrened/tui/widgets/page_browser.py",
+        "exists": true,
+        "size": 36934,
+        "sha256": "4cb556abe3b5680eac5ba83d21faf82f2ea02020f4f7b8dda2826a666894f2c7"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/ipc/bridge.py",
+      "src/styrened/tui/lifecycle/widget_resources.py",
+      "src/styrened/tui/screens/base.py",
+      "src/styrened/tui/widgets/page_browser.py",
+      "tests/tui/screens/test_screen_base.py",
+      "tests/tui/widgets/test_widget_resources.py",
+      "tests/tui/widgets/test_page_browser.py"
+    ],
+    "constraints": [
+      "Keep the shared app bridge as the control lane; auxiliary lanes remain lazy and workload-specific.",
+      "Lane-specific degradation stays local to the owning surface rather than reading as daemon-wide disconnect.",
+      "Suspend/unmount sequencing cancels dependent workers before auxiliary-lane disconnect, and resume/reactivation recreates lanes lazily."
+    ],
+    "recommendedAction": null
+  }
+}

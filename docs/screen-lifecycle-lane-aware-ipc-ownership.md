@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle-lane-aware-ipc-ownership
 title: Lane-aware IPC ownership for long-running UI work
-status: implementing
+status: implemented
 parent: screen-lifecycle
 related: [tui-pages-browser-ipc-head-of-line-blocking, screen-lifecycle-widget-resource-primitives]
 tags: [tui, lifecycle, ipc, workers, pages]
@@ -62,6 +62,9 @@ Code inspection shows `IPCBridge.spawn_lane()` is intentionally just a transport
 - `src/styrened/tui/lifecycle/screen_content.py` (modified) — Parent-to-pane lifecycle translation that any future lane-aware pane contract must compose with.
 - `src/styrened/tui/widgets/page_browser.py` (modified) — Reference implementation of a lazy execution lane owned by the surface that starts long-running page work.
 - `src/styrened/tui/screens/base.py` (modified) — Potential home for any future screen-level helper or ownership convention that mirrors widget-local lane/resource semantics.
+- `tests/tui/screens/test_screen_base.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `tests/tui/widgets/test_widget_resources.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `tests/tui/widgets/test_page_browser.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
@@ -71,6 +74,9 @@ Code inspection shows `IPCBridge.spawn_lane()` is intentionally just a transport
 - Keep `IPCBridge.spawn_lane()` as a low-level transport primitive; do not turn the bridge into a global lane-ownership registry.
 - `ScreenContentHost` should remain a lifecycle translator only; pane-local lane ownership stays in pane/widget resource helpers or a screen-local resource scope.
 - Suspend/unmount sequencing should stop dependent work before auxiliary-lane disconnect, and resume/reactivation should recreate lanes lazily rather than prewarming them.
+- Keep the shared app bridge as the control lane; auxiliary lanes remain lazy and workload-specific.
+- Lane-specific degradation stays local to the owning surface rather than reading as daemon-wide disconnect.
+- Suspend/unmount sequencing cancels dependent workers before auxiliary-lane disconnect, and resume/reactivation recreates lanes lazily.
 
 ## Acceptance Criteria
 
