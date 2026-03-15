@@ -3,7 +3,7 @@ id: screen-lifecycle-widget-resource-primitives
 title: Composable widget lifecycle resource primitives
 status: implemented
 parent: screen-lifecycle-widget-refresh-tail
-related: [screen-lifecycle-lane-aware-ipc-ownership, screen-lifecycle-screen-content-primitive, screen-lifecycle-aggregate-refresh-surfaces]
+related: [screen-lifecycle-lane-aware-ipc-ownership, screen-lifecycle-screen-content-primitive, screen-lifecycle-aggregate-refresh-surfaces, screen-lifecycle-provision-workflow-ownership]
 open_questions: []
 branches: ["feature/screen-lifecycle-widget-resource-primitives"]
 openspec_change: screen-lifecycle-widget-resource-primitives

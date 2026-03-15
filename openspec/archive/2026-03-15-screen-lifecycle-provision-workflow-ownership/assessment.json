@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "changeName": "screen-lifecycle-provision-workflow-ownership",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T15:31:05.900Z",
+  "summary": "Manual spec verification passed. ProvisionScreen now owns bootstrap, disk-detect, forge, and post-flash watch teardown through screen-local workflow helpers without adopting generic StyreneScreen resume-refresh semantics. Callable worker scheduling is covered in tests, targeted teardown behavior is covered for abort/unmount, and ForgeLog remains the owner of widget-local timer cleanup.",
+  "snapshot": {
+    "gitHead": "a3282b09c4f99f745ec5970ed97b4f90de15ffac",
+    "fingerprint": "8bfbf301d244d7424fc847ac2bbb2073e0ad17241ad0e291d4fe0d14e31273d5",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/tui/screens/provision.py",
+      "tests/tui/screens/test_provision.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/screen-lifecycle-provision-workflow-ownership/design.md",
+        "exists": true,
+        "size": 4653,
+        "sha256": "a21461db55fef41a8818d1bd1e0a4b471debb18325df389715b212f3dc31c7a6"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-provision-workflow-ownership/proposal.md",
+        "exists": true,
+        "size": 751,
+        "sha256": "b204d13c6a37e2c479cf7d857ab0833a81f68907753e304ae1164255cbc7d935"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-provision-workflow-ownership/specs/tui/provision-workflow-ownership.md",
+        "exists": true,
+        "size": 1796,
+        "sha256": "41834fa982aba7adfdb8a26abb32fc2259e94db1fa0d1ce9835c2b35ba106ae1"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-provision-workflow-ownership/tasks.md",
+        "exists": true,
+        "size": 2368,
+        "sha256": "1d4a5229940da54ebf90df1576e9c64b175eeee98bf23f69cd4de613f1ba1943"
+      },
+      {
+        "path": "src/styrened/tui/screens/provision.py",
+        "exists": true,
+        "size": 21772,
+        "sha256": "f13c7904c41563c10a610bd8921e528890e9ca24e1901e78b0b8686aac6220fd"
+      },
+      {
+        "path": "tests/tui/screens/test_provision.py",
+        "exists": true,
+        "size": 13009,
+        "sha256": "ba9a7d8c61f9eff5d82037fe31f88c58ead624656e4ad916ae8cd987f1e4857f"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/services/reticulum.py",
+      "src/styrened/tui/services/reticulum.py",
+      "src/styrened/tui/screens/provision.py",
+      "tests/tui/screens/test_provision.py",
+      "openspec/changes/screen-lifecycle-provision-workflow-ownership/tasks.md"
+    ],
+    "constraints": [
+      "Provision may stop discovery only when it can prove the post-flash watch started that discovery boundary itself; shared/global discovery ownership must not be torn down blindly."
+    ],
+    "recommendedAction": null
+  }
+}
