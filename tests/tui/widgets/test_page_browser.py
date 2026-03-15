@@ -4,7 +4,6 @@ Covers widget initialization, page loading, navigation, and error handling.
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
@@ -212,6 +211,22 @@ class TestPageBrowserTrafficIsolation:
         shared_bridge.disconnect.assert_not_called()
         assert widget._page_bridge is None
 
+    def test_on_unmount_schedules_callable_cleanup_for_dedicated_lane(self):
+        widget = PageBrowserWidget(destination_hash="abc")
+        shared_bridge = MagicMock()
+        page_bridge = MagicMock()
+        widget._page_bridge = page_bridge
+
+        with (
+            patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)),
+            patch.object(widget, "run_worker") as mock_run_worker,
+        ):
+            widget.on_unmount()
+
+        scheduled = mock_run_worker.call_args.args[0]
+        assert callable(scheduled)
+        assert widget._page_bridge is None
+
 
 class TestPageBrowserLinkClick:
     """Tests for micron link click handling."""
@@ -339,8 +354,6 @@ class TestFocusUrl:
     def test_focus_url_i2p_sets_external_mode(self):
         """Entering a .i2p URL switches to external mode and loads."""
         widget = PageBrowserWidget(destination_hash="abc")
-
-        captured: list[str] = []
 
         def fake_push_screen(screen, callback):
             callback("stats.i2p")

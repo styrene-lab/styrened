@@ -9,11 +9,15 @@ Shows:
 """
 
 from __future__ import annotations
+
 import time
 from typing import Any
 
 from textual.app import ComposeResult
+from textual.timer import Timer
 from textual.widgets import Static
+
+from styrened.tui.lifecycle import WidgetResourceScope
 
 _POLL_INTERVAL = 10.0
 
@@ -52,6 +56,8 @@ class CommsSummaryWidget(Static):
         self._contact_count: int = 0
         self._active_links: int = 0
         self._auto_reply: bool = False
+        self._poll_timer: Timer | None = None
+        self._resources = WidgetResourceScope(self)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -59,10 +65,17 @@ class CommsSummaryWidget(Static):
 
     def on_mount(self) -> None:
         self._refresh()
-        self.set_interval(_POLL_INTERVAL, self._refresh)
+        self._poll_timer = self._resources.set_interval(
+            "_poll_timer",
+            _POLL_INTERVAL,
+            self._refresh,
+        )
+
+    def on_unmount(self) -> None:
+        self._resources.release()
 
     def _refresh(self) -> None:
-        self.run_worker(self._fetch_and_render(), exclusive=True)
+        self._resources.run_worker(self._fetch_and_render, exclusive=True)
 
     # ------------------------------------------------------------------
     # Data

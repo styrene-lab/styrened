@@ -1,7 +1,7 @@
 ---
 id: screen-lifecycle-widget-resource-primitives
 title: Composable widget lifecycle resource primitives
-status: implementing
+status: implemented
 parent: screen-lifecycle-widget-refresh-tail
 related: [screen-lifecycle-lane-aware-ipc-ownership, screen-lifecycle-screen-content-primitive]
 open_questions: []
@@ -30,6 +30,10 @@ The four target widgets share a resource-ownership problem, not a common widget 
 
 The common denominator is not UI behavior; it is owned runtime resources that must be registered and released. The reusable layer should therefore center on a widget-attached resource scope that can track and dispose of timers, event-subscription removers, async teardown callbacks, worker-launch callables, and spawned auxiliary IPC lanes. That keeps local degradation visible at the widget boundary — for example, a failed execution lane still belongs to `PageBrowserWidget` — while removing repeated stop/unsubscribe/disconnect bookkeeping from every widget.
 
+### Implementation landed as a composed widget resource scope with direct widget migrations
+
+Implemented `WidgetResourceScope` under `src/styrened/tui/lifecycle/` and migrated `ChatWidget`, `PageBrowserWidget`, `CommsSummaryWidget`, and `ForgeLog` to use it for owned timers, subscription cleanup, auxiliary lane teardown, and callable-based worker scheduling. `PageBrowserWidget` keeps the shared control bridge as the parent-owned lane while the helper only tears down the lazy execution lane; `ChatWidget` now registers message-subscription teardown through the scope while preserving local degradation and existing UI behavior.
+
 ## Decisions
 
 ### Decision: Define widget lifecycle helpers as a composed resource scope with focused ownership primitives
@@ -56,6 +60,11 @@ The common denominator is not UI behavior; it is owned runtime resources that mu
 - `src/styrened/tui/widgets/comms_summary.py` (modified) — Migration target for owned polling timer and refresh-worker helper usage.
 - `src/styrened/tui/widgets/forge_log.py` (modified) — Migration target for owned mesh-watch timer helper usage.
 - `tests/tui/widgets/` (modified) — Regression coverage for helper-backed cleanup, including timer stop, unsubscribe, and auxiliary-lane disconnect behavior.
+- `src/styrened/tui/lifecycle/__init__.py` (new) — Exports the composable widget resource scope package entrypoint.
+- `tests/tui/widgets/test_widget_resources.py` (new) — Direct regression coverage for timer cleanup, subscription teardown, auxiliary lane disconnect, and callable worker scheduling.
+- `tests/tui/widgets/test_comms_summary.py` (new) — Regression coverage for CommsSummaryWidget poll-timer teardown and callable worker scheduling.
+- `tests/tui/widgets/test_page_browser.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `tests/tui/widgets/test_forge_log.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
@@ -63,6 +72,8 @@ The common denominator is not UI behavior; it is owned runtime resources that mu
 - Keep widget-local degradation visible; helper usage must not turn lane or subscription failure into daemon-wide disconnect state.
 - Worker helper APIs must preserve the async-callable/partial scheduling convention so mock-heavy tests do not leak unawaited coroutine warnings.
 - The helper layer must compose with parent-screen ownership of the shared control bridge rather than replacing it.
+- Async teardown during widget unmount must not rely solely on Textual worker execution; `WidgetResourceScope.release()` falls back to the running asyncio loop so unsubscribe/disconnect cleanup still runs during unmount.
+- Widgets continue to own their degraded states locally; the shared control bridge remains screen/app-owned and only widget-spawned auxiliary lanes are eligible for helper-managed disconnect.
 
 ## Acceptance Criteria
 

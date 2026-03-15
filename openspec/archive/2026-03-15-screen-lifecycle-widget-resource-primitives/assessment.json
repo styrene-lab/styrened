@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "changeName": "screen-lifecycle-widget-resource-primitives",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T05:57:50.272Z",
+  "summary": "Manual verification passed. WidgetResourceScope landed as a composition-first helper for timers, cleanup callbacks, callable worker scheduling, and auxiliary IPC lanes; ChatWidget, PageBrowserWidget, CommsSummaryWidget, and ForgeLog were migrated without introducing a shared widget base. Verified with ruff on changed files and a targeted regression batch covering widget helpers plus related TUI screens/integration (180 passed).",
+  "snapshot": {
+    "gitHead": "796068c3705bfaf8e9e22d3df7a90ae009b8767d",
+    "fingerprint": "4a2fb7de434fdef3b93a6e1434a7b6d06850cd1ae82a9f9f60dc6149f83f9016",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/tui/lifecycle/widget_resources.py",
+      "src/styrened/tui/widgets/chat_widget.py",
+      "src/styrened/tui/widgets/comms_summary.py",
+      "src/styrened/tui/widgets/forge_log.py",
+      "src/styrened/tui/widgets/page_browser.py",
+      "tests/tui/widgets/"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/screen-lifecycle-widget-resource-primitives/design.md",
+        "exists": true,
+        "size": 3877,
+        "sha256": "bff627812131df3bcaf296e6fe72ceaaefe2d40ae3db8b75a8b267c818b13d7b"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-widget-resource-primitives/proposal.md",
+        "exists": true,
+        "size": 679,
+        "sha256": "d5a8cfa9449c52051eb5bf5e1ace06426a9195350f469946c1bad413dc0b09bf"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-widget-resource-primitives/tasks.md",
+        "exists": true,
+        "size": 2133,
+        "sha256": "72ac705312a58626028cae385e0bb55c51e9a4b264f81e88944573ec4b7aa0a4"
+      },
+      {
+        "path": "src/styrened/tui/lifecycle/widget_resources.py",
+        "exists": true,
+        "size": 9104,
+        "sha256": "7449633a57cba42b4e7d176ac50ee3a75d253611e811c33498b4b9f59762b974"
+      },
+      {
+        "path": "src/styrened/tui/widgets/chat_widget.py",
+        "exists": true,
+        "size": 63480,
+        "sha256": "5841bbfe133f927d7973c70a51e4b5955896b24a3c49cbca4d8db1a75d6206a0"
+      },
+      {
+        "path": "src/styrened/tui/widgets/comms_summary.py",
+        "exists": true,
+        "size": 7551,
+        "sha256": "9f4a0c13cae6516d316c5543369a9c2cfb45c83b19beea7e048a5ff37ef06b82"
+      },
+      {
+        "path": "src/styrened/tui/widgets/forge_log.py",
+        "exists": true,
+        "size": 9481,
+        "sha256": "5dde6156ba43b787dc3de80882ae6d18f880157afa983ad41f1087addf0acc5f"
+      },
+      {
+        "path": "src/styrened/tui/widgets/page_browser.py",
+        "exists": true,
+        "size": 37011,
+        "sha256": "594225c10f882815c8e31e0b2c9cd9f93eabc95de30ac06fcb993e389d40e6f7"
+      },
+      {
+        "path": "tests/tui/widgets/",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/tui/lifecycle/__init__.py",
+      "src/styrened/tui/lifecycle/widget_resources.py",
+      "src/styrened/tui/widgets/chat_widget.py",
+      "src/styrened/tui/widgets/page_browser.py",
+      "src/styrened/tui/widgets/comms_summary.py",
+      "src/styrened/tui/widgets/forge_log.py",
+      "tests/tui/widgets/test_widget_resources.py",
+      "tests/tui/widgets/test_comms_summary.py",
+      "tests/tui/widgets/test_page_browser.py",
+      "tests/tui/widgets/test_forge_log.py"
+    ],
+    "constraints": [
+      "Async teardown during widget unmount must not rely solely on Textual worker execution; WidgetResourceScope.release() falls back to the running asyncio loop so unsubscribe/disconnect cleanup still runs during unmount.",
+      "Only widget-spawned auxiliary IPC lanes are eligible for helper-managed disconnect; the shared control bridge remains screen/app-owned."
+    ],
+    "recommendedAction": null
+  }
+}

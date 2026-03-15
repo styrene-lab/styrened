@@ -5,13 +5,14 @@ from __future__ import annotations
 import time
 
 from textual.app import ComposeResult
-from textual.timer import Timer
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
+from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Button, Static
 
 from styrened.tui.forge.models import STAGE_NAMES, STAGE_ORDER, MediaEvent, StageKey
+from styrened.tui.lifecycle import WidgetResourceScope
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 
@@ -94,6 +95,7 @@ class ForgeLog(Widget):
         self._hostname: str = ""
         self._mesh_watch_start: float | None = None
         self._mesh_watch_timer: Timer | None = None
+        self._resources = WidgetResourceScope(self)
 
     def compose(self) -> ComposeResult:
         yield Horizontal(id="forge-stage-bar")
@@ -159,7 +161,11 @@ class ForgeLog(Widget):
             watch_panel = self.query_one("#forge-mesh-watch", Vertical)
             watch_panel.remove_class("hidden")
             self._update_mesh_watch_display()
-            self._mesh_watch_timer = self.set_interval(1.0, self._update_mesh_watch_display)
+            self._mesh_watch_timer = self._resources.set_interval(
+                "_mesh_watch_timer",
+                1.0,
+                self._update_mesh_watch_display,
+            )
         except Exception:
             pass
 
@@ -191,7 +197,7 @@ class ForgeLog(Widget):
 
     def on_unmount(self) -> None:
         """Stop mesh-watch timer when the widget is removed."""
-        self._stop_mesh_watch_timer()
+        self._resources.release()
 
     def reset(self) -> None:
         """Reset the widget for a new forge run."""
@@ -215,9 +221,7 @@ class ForgeLog(Widget):
 
     def _stop_mesh_watch_timer(self) -> None:
         """Stop the mesh-watch timer if one is active."""
-        if self._mesh_watch_timer is not None:
-            self._mesh_watch_timer.stop()
-            self._mesh_watch_timer = None
+        self._resources.stop_timer("_mesh_watch_timer")
 
     def _render_stage_bar(self) -> None:
         """Render the horizontal stage indicator bar."""
@@ -235,9 +239,7 @@ class ForgeLog(Widget):
 
         try:
             self.query_one("#forge-stage-bar", Horizontal).remove_children()
-            self.query_one("#forge-stage-bar", Horizontal).mount(
-                Static(" > ".join(parts))
-            )
+            self.query_one("#forge-stage-bar", Horizontal).mount(Static(" > ".join(parts)))
         except Exception:
             pass
 

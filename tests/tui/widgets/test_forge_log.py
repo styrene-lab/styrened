@@ -1,7 +1,6 @@
 """Tests for ForgeLog widget."""
 from __future__ import annotations
 
-
 from unittest.mock import Mock
 
 from styrened.tui.forge.models import MediaEvent, StageKey
@@ -142,9 +141,21 @@ def test_forge_log_mesh_node_found_stops_mesh_watch_timer():
     """mesh_node_found() should stop the elapsed watch timer."""
     widget = ForgeLog()
     timer = Mock()
-    widget._mesh_watch_timer = timer
+    widget._resources.adopt_timer("_mesh_watch_timer", timer)
 
     widget.mesh_node_found("rpi4-01")
+
+    timer.stop.assert_called_once_with()
+    assert widget._mesh_watch_timer is None
+
+
+def test_forge_log_on_unmount_stops_mesh_watch_timer():
+    """on_unmount() should stop any owned mesh-watch timer."""
+    widget = ForgeLog()
+    timer = Mock()
+    widget._resources.adopt_timer("_mesh_watch_timer", timer)
+
+    widget.on_unmount()
 
     timer.stop.assert_called_once_with()
     assert widget._mesh_watch_timer is None

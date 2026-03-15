@@ -13,7 +13,6 @@ Features:
 """
 from __future__ import annotations
 
-
 import asyncio
 import atexit
 import datetime
@@ -35,6 +34,7 @@ from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
 from styrened.ipc import IPCMessageType
+from styrened.tui.lifecycle import WidgetResourceScope
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.tui.widgets.message_bubble import (
     ATTACHMENT_ICONS,
@@ -277,6 +277,8 @@ class ChatWidget(Widget, can_focus=True):
         # Tracks the last displayed date for date separator continuity
         self._last_displayed_date: str | None = None
 
+        self._resources = WidgetResourceScope(self, owner_logger=logger)
+
     @property
     def _ipc_bridge(self) -> Any:
         """Get IPCBridge from app lifecycle."""
@@ -284,6 +286,19 @@ class ChatWidget(Widget, can_focus=True):
             return self.app.services.bridge
         except Exception:
             return None
+
+    def _run_async_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Any:
+        """Schedule async work through the shared widget resource scope."""
+        return self._resources.run_worker(fn, *args, **worker_kwargs)
+
+    def _remove_message_event_handler(self, bridge: Any, event_callback: Any) -> None:
+        """Remove the registered message-event callback if still active."""
+        try:
+            bridge.remove_event_handler(IPCMessageType.EVENT_MESSAGE, event_callback)
+        except Exception:
+            logger.debug("Failed to remove message event handler", exc_info=True)
+        if self._event_callback is event_callback:
+            self._event_callback = None
 
     def compose(self) -> ComposeResult:
         """Compose chat widget layout."""
@@ -315,7 +330,7 @@ class ChatWidget(Widget, can_focus=True):
     def on_mount(self) -> None:
         """Load message history on mount, subscribe to events, and mark as read."""
         if self._ipc_bridge is not None:
-            self.run_worker(self._initialize(), group="chat-init")
+            self._run_async_worker(self._initialize, group="chat-init")
 
     async def _initialize(self) -> None:
         """Load messages, mark as read, and subscribe to events."""
@@ -333,44 +348,30 @@ class ChatWidget(Widget, can_focus=True):
         # Phase 1: Subscribe to message events
         try:
             await bridge.subscribe_messages(peer_hashes=[self.peer_hash])
-            self._event_callback = self._on_message_event
-            bridge.on_event(IPCMessageType.EVENT_MESSAGE, self._event_callback)
+            event_callback = self._on_message_event
+            self._event_callback = event_callback
+            bridge.on_event(IPCMessageType.EVENT_MESSAGE, event_callback)
+            self._resources.own_subscription(
+                remove=lambda bridge=bridge, event_callback=event_callback: self._remove_message_event_handler(
+                    bridge,
+                    event_callback,
+                ),
+                unsubscribe=lambda bridge=bridge: bridge.unsubscribe("messages"),
+            )
             self._last_event_time = time.monotonic()
         except Exception as e:
             logger.warning(f"Failed to subscribe to message events: {e}")
 
         # Phase 1: Set up polling fallback
-        self._poll_timer = self.set_interval(_POLL_INTERVAL, self._poll_fallback)
+        self._poll_timer = self._resources.set_interval(
+            "_poll_timer",
+            _POLL_INTERVAL,
+            self._poll_fallback,
+        )
 
     def on_unmount(self) -> None:
-        """Clean up event subscriptions on unmount."""
-        bridge = self._ipc_bridge
-        if bridge is not None:
-            try:
-                if self._event_callback is not None:
-                    bridge.remove_event_handler(IPCMessageType.EVENT_MESSAGE, self._event_callback)
-                    self._event_callback = None
-            except Exception:
-                pass
-
-            try:
-                import asyncio
-
-                task = asyncio.create_task(bridge.unsubscribe("messages"))
-
-                def _consume_unsub_result(t: asyncio.Task[object]) -> None:
-                    try:
-                        _ = t.exception()
-                    except Exception:
-                        pass
-
-                task.add_done_callback(_consume_unsub_result)
-            except Exception:
-                pass
-
-        if self._poll_timer is not None:
-            self._poll_timer.stop()
-            self._poll_timer = None
+        """Clean up event subscriptions and timers on unmount."""
+        self._resources.release(group="chat-unmount-cleanup")
 
     def _on_message_event(self, event_data: dict[str, Any]) -> None:
         """Handle incoming message event from IPC subscription."""
@@ -398,7 +399,7 @@ class ChatWidget(Widget, can_focus=True):
 
     def _append_event_message(self, event_data: dict[str, Any]) -> None:
         """Append a new message from an event to the display."""
-        self.run_worker(self._refresh_messages(), group="chat-refresh")
+        self._run_async_worker(self._refresh_messages, group="chat-refresh")
 
     def _update_bubble_status(self, message_id: int, new_status: str) -> None:
         """Update a specific message bubble's status icon."""
@@ -432,7 +433,7 @@ class ChatWidget(Widget, can_focus=True):
         """Polling fallback when no events received recently."""
         elapsed = time.monotonic() - self._last_event_time
         if elapsed >= _POLL_INTERVAL and self.is_mounted:
-            self.run_worker(self._refresh_messages(), group="chat-poll")
+            self._run_async_worker(self._refresh_messages, group="chat-poll")
 
     def _set_status(self, text: str) -> None:
         """Update the status line below messages.
@@ -725,8 +726,9 @@ class ChatWidget(Widget, can_focus=True):
             and self._pending_attachment.get("awaiting_path")
         ):
             event.input.value = ""
-            self.run_worker(
-                self._stage_attachment_from_path(message),
+            self._run_async_worker(
+                self._stage_attachment_from_path,
+                message,
                 group="chat-attach",
             )
             # Restore placeholder
@@ -767,9 +769,11 @@ class ChatWidget(Widget, can_focus=True):
         self._pending_messages.append(display)
         self._show_optimistic_message(display)
 
-        self.run_worker(
-            self._send_message(message, **kwargs),
+        self._run_async_worker(
+            self._send_message,
+            message,
             group="chat-send",
+            **kwargs,
         )
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -777,17 +781,16 @@ class ChatWidget(Widget, can_focus=True):
         if event.input.id != "search-input":
             return
 
-        if self._search_timer is not None:
-            self._search_timer.stop()
-            self._search_timer = None
+        self._resources.stop_timer("_search_timer")
 
         query = event.value.strip()
         if len(query) < 2:
             return
 
-        self._search_timer = self.set_timer(
+        self._search_timer = self._resources.set_timer(
+            "_search_timer",
             _SEARCH_DEBOUNCE,
-            lambda: self.run_worker(self._execute_search(query), group="chat-search"),
+            lambda: self._run_async_worker(self._execute_search, query, group="chat-search"),
         )
 
     def _show_optimistic_message(self, content: str) -> None:
@@ -1039,10 +1042,15 @@ class ChatWidget(Widget, can_focus=True):
 
         if bubble.message_id == 0:
             # Optimistic bubble — refresh from DB first to get real ID
-            self.run_worker(self._retry_after_refresh(bubble.raw_content), group="chat-retry")
+            self._run_async_worker(
+                self._retry_after_refresh,
+                bubble.raw_content,
+                group="chat-retry",
+            )
         else:
-            self.run_worker(
-                self._retry_single(bubble.message_id),
+            self._run_async_worker(
+                self._retry_single,
+                bubble.message_id,
                 group=f"chat-retry-{bubble.message_id}",
             )
 
@@ -1088,8 +1096,9 @@ class ChatWidget(Widget, can_focus=True):
 
         self._set_status(f"[{get_color_cascade().dim}]Retrying {len(failed)} failed message(s)...[/]")
         for bubble in failed:
-            self.run_worker(
-                self._retry_single(bubble.message_id),
+            self._run_async_worker(
+                self._retry_single,
+                bubble.message_id,
                 group=f"chat-retry-{bubble.message_id}",
             )
 
@@ -1105,20 +1114,20 @@ class ChatWidget(Widget, can_focus=True):
 
         if self._delete_pending == bubble.message_id:
             self._cancel_delete_timer()
-            self.run_worker(self._execute_delete(bubble.message_id), group="chat-delete")
+            self._run_async_worker(self._execute_delete, bubble.message_id, group="chat-delete")
         else:
             self._delete_pending = bubble.message_id
             self._set_status(f"[{get_color_cascade().color_warning}]Press d again to delete[/]")
             self._cancel_delete_timer()
-            self._delete_timer = self.set_timer(
-                _DELETE_CONFIRM_TIMEOUT, self._cancel_delete_pending
+            self._delete_timer = self._resources.set_timer(
+                "_delete_timer",
+                _DELETE_CONFIRM_TIMEOUT,
+                self._cancel_delete_pending,
             )
 
     def _cancel_delete_timer(self) -> None:
         """Cancel any active delete confirmation timer."""
-        if self._delete_timer is not None:
-            self._delete_timer.stop()
-            self._delete_timer = None
+        self._resources.stop_timer("_delete_timer")
 
     def _cancel_delete_pending(self) -> None:
         """Cancel delete pending state (timeout or other action)."""
@@ -1187,7 +1196,7 @@ class ChatWidget(Widget, can_focus=True):
         except Exception:
             pass
 
-        self.run_worker(self._refresh_messages(), group="chat-refresh")
+        self._run_async_worker(self._refresh_messages, group="chat-refresh")
 
     async def _execute_search(self, query: str) -> None:
         """Execute search via IPC and display results."""
@@ -1351,8 +1360,9 @@ class ChatWidget(Widget, can_focus=True):
             self._set_status(f"[{get_color_cascade().dim}]No attachment on selected message[/]")
             return
 
-        self.run_worker(
-            self._open_attachment(bubble.message_id),
+        self._run_async_worker(
+            self._open_attachment,
+            bubble.message_id,
             group="chat-attachment",
         )
 
@@ -1485,7 +1495,7 @@ class ChatWidget(Widget, can_focus=True):
         import mimetypes
         from pathlib import Path
 
-        DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+        default_max_file_size = 10 * 1024 * 1024  # 10 MB
 
         path = Path(path_str.strip()).expanduser()
         if not path.is_file():
@@ -1501,10 +1511,10 @@ class ChatWidget(Widget, can_focus=True):
             self._pending_attachment = None
             return False
 
-        if file_size > DEFAULT_MAX_FILE_SIZE:
+        if file_size > default_max_file_size:
             self._set_status(
                 f"[{get_color_cascade().color_danger}]File too large: {_human_size(file_size)} "
-                f"(max {_human_size(DEFAULT_MAX_FILE_SIZE)})[/]"
+                f"(max {_human_size(default_max_file_size)})[/]"
             )
             self._pending_attachment = None
             return False
@@ -1581,8 +1591,9 @@ class ChatWidget(Widget, can_focus=True):
                 ".mp3", ".wav", ".ogg", ".mp4", ".mov",
             ) and path.is_file():
                 event.prevent_default()
-                self.run_worker(
-                    self._stage_attachment_from_path(str(path)),
+                self._run_async_worker(
+                    self._stage_attachment_from_path,
+                    str(path),
                     group="chat-paste",
                 )
 
@@ -1637,7 +1648,7 @@ class ChatWidget(Widget, can_focus=True):
         except Exception:
             self._set_status(f"[{get_color_cascade().color_danger}]Cannot access input[/]")
 
-    def _stage_clipboard_attachment(self, attachment: "ClipboardAttachment") -> None:
+    def _stage_clipboard_attachment(self, attachment: ClipboardAttachment) -> None:
         """Stage a clipboard attachment for sending."""
         self._pending_attachment = {
             "data_b64": attachment.data_b64,

@@ -17,12 +17,10 @@ Features:
 """
 from __future__ import annotations
 
-
 import logging
 import os
 import urllib.parse
 from enum import Enum, auto
-from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
@@ -36,10 +34,11 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
+from styrened.tui.lifecycle import WidgetResourceScope
+from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.tui.widgets.html_renderer import ContentKind, detect_content_type, render_html_to_rich
 from styrened.tui.widgets.micron_parser import parse_micron, render_to_rich
 from styrened.tui.widgets.page_renderers import render_structured_page
-from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +178,7 @@ class PageBrowserWidget(Widget):
         self._active_transport: Transport | None = None
         self._last_content_kind: ContentKind = ContentKind.MICRON
         self._page_bridge: Any | None = None
+        self._resources = WidgetResourceScope(self, owner_logger=logger)
 
     @property
     def _ipc_bridge(self) -> Any | None:
@@ -209,19 +209,21 @@ class PageBrowserWidget(Widget):
                 if not ok:
                     return None
 
-        self._page_bridge = page_bridge
-        return page_bridge
+        self._page_bridge = self._resources.adopt_auxiliary_lane(
+            "_page_bridge",
+            page_bridge,
+            shared_lane=shared_bridge,
+        )
+        return self._page_bridge
 
     async def _disconnect_page_bridge(self) -> None:
         """Disconnect the dedicated page lane when this widget unmounts."""
-        page_bridge = self._page_bridge
-        self._page_bridge = None
-        if page_bridge is None or page_bridge is self._ipc_bridge:
-            return
-        try:
-            await page_bridge.disconnect()
-        except Exception:
-            logger.debug("Failed to disconnect page bridge", exc_info=True)
+        self._resources.adopt_auxiliary_lane(
+            "_page_bridge",
+            self._page_bridge,
+            shared_lane=self._ipc_bridge,
+        )
+        await self._resources.aclose()
 
     def _run_async_worker(
         self,
@@ -229,16 +231,8 @@ class PageBrowserWidget(Widget):
         *args: Any,
         **worker_kwargs: Any,
     ) -> None:
-        """Schedule async work without creating bare coroutine objects eagerly.
-
-        Passing a coroutine object directly to ``run_worker`` is valid at runtime,
-        but it leaks unawaited-coroutine warnings in tests that patch
-        ``run_worker`` with a plain mock. Passing the async callable (or a
-        ``functools.partial`` of it) preserves runtime behavior while avoiding
-        those warnings in mock-heavy unit tests.
-        """
-        work = partial(fn, *args) if args else fn
-        self.run_worker(work, **worker_kwargs)
+        """Schedule async work via the shared widget resource scope."""
+        self._resources.run_worker(fn, *args, **worker_kwargs)
 
     @property
     def _is_external_mode(self) -> bool:
@@ -314,11 +308,12 @@ class PageBrowserWidget(Widget):
         """Tear down any dedicated page-browsing IPC lane."""
         if self._page_bridge is None:
             return
-        self._run_async_worker(
-            self._disconnect_page_bridge,
-            exclusive=False,
-            group="page-bridge-disconnect",
+        self._resources.adopt_auxiliary_lane(
+            "_page_bridge",
+            self._page_bridge,
+            shared_lane=self._ipc_bridge,
         )
+        self._resources.release(exclusive=False, group="page-bridge-disconnect")
 
     async def _load_page(self, path: str) -> None:
         """Fetch and render a page.
