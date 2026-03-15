@@ -1,7 +1,7 @@
 ---
 id: tui-device-cache-regression-fixes
 title: TUI Device Cache Regression Fixes
-status: exploring
+status: implemented
 parent: tui-device-cache
 tags: [tui, bug, ipc, device-cache, navigation, tests]
 open_questions: []
@@ -27,11 +27,15 @@ Runtime consumers now distinguish cache availability from cache readiness. Dashb
 
 ### Lifecycle closure state
 
-OpenSpec change `tui-device-cache-regression-fixes` has been archived after a passing spec assessment. Baseline spec was emitted under `openspec/baseline/tui/device-cache.md`, and the change moved to `openspec/archive/2026-03-14-tui-device-cache-regression-fixes/`. The design-tree node still requires the external design-assessment gate before `set_status(decided)` will be accepted by the tool, so lifecycle closure is complete in OpenSpec but status reconciliation remains tool-gated.
+OpenSpec change `tui-device-cache-regression-fixes` has been archived after a passing spec assessment. Baseline spec was emitted under `openspec/baseline/tui/device-cache.md`, and the change moved to `openspec/archive/2026-03-14-tui-device-cache-regression-fixes/`. After follow-up reconciliation, the parent design-tree node and its archived OpenSpec state now agree: this bugfix is marked `implemented` and its follow-on child `tui-startup-ipc-backpressure` is also `implemented`.
 
 ### Live dev-daemon startup bottleneck on large meshes
 
 Live TUI testing against the isolated dev daemon (`STYRENE_HOME=~/.styrene-dev`) exposed a separate startup bottleneck after the cache-readiness regressions were fixed. The TUI connected successfully to the dev daemon, but Home stayed empty and the IPC indicator degraded because startup work fan-out (`get_status`, `get_hub_status`, `get_core_config`, `get_conversations`, plus app-level `DeviceCache.get_devices`) all shared a single IPC bridge/client while the daemon was serving a very large fleet snapshot (roughly 3.7k discovered devices and ~9.4k merged device records including persisted nodes). Per-client IPC handling is serialized, so bulk requests introduced head-of-line blocking; latency-sensitive status checks timed out behind full-fleet hydration and the UI misreported the daemon as unavailable even though the socket and daemon were healthy.
+
+### Lifecycle state reconciled after archive
+
+The archived `tui-device-cache-regression-fixes` OpenSpec baseline and its implemented child `tui-startup-ipc-backpressure` now match the design-tree state. The parent bug node has been reconciled to `implemented`, replacing the earlier transient mismatch where the archive had landed but the design-tree node still showed `exploring`.
 
 ## Decisions
 

@@ -1,7 +1,7 @@
 ---
 id: tui-exploration-row-key-collision
 title: Exploration row-key collisions on duplicate identities
-status: exploring
+status: implemented
 parent: tui-startup-ipc-backpressure
 tags: [tui, nodes, bug, regression]
 open_questions: []
@@ -20,6 +20,10 @@ ExplorationScreen can crash on startup when Reticulum discovery returns multiple
 ### Root cause from live dev-tui crash
 
 The startup crash occurs in ReticumAnnounceTable._rebuild_table() when Textual add_row() receives a duplicate row key. ExplorationScreen._load_all_devices() deduplicates raw discovery only by destination_hash, but ReticumAnnounceTable and StyreneFleetTable currently key rows by identity_hash. On large meshes it is valid to encounter multiple announces/endpoints that share an identity hash while differing by destination or service aspect, so the table can attempt to render distinct rows with the same identity-based key and crash during on_mount.
+
+### Regression coverage confirmed the destination-key fix
+
+After switching Exploration row keys to destination hashes and resolving selections back to MeshDevice identities, targeted verification passed for the crash path and downstream detail/chat flows. Regression tests now cover duplicate-identity rows in Other and Pages tabs plus selection routing when row keys are destination based.
 
 ## Decisions
 
