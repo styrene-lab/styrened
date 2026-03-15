@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from textual.app import ComposeResult
@@ -14,7 +14,6 @@ from styrened.tui.screens.base import (
     StyreneLoadingIndicator,
     StyreneScreen,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -186,7 +185,7 @@ async def test_screen_calls_load_data_on_mount():
     screen = _TrackingScreen()
     app = _make_app()
 
-    async with app.run_test(size=(80, 24)) as pilot:
+    async with app.run_test(size=(80, 24)):
         await app.push_screen(screen)
         await asyncio.wait_for(load_called.wait(), timeout=5.0)
 
@@ -258,7 +257,7 @@ async def test_load_data_error_retries():
     app = _make_app()
 
     with patch("styrened.tui.screens.base.asyncio.sleep", new=AsyncMock()):
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(80, 24)):
             await app.push_screen(screen)
             await asyncio.wait_for(exhausted.wait(), timeout=5.0)
 
@@ -281,7 +280,7 @@ async def test_error_hook_called_after_exhaustion():
     app = _make_app()
 
     with patch("styrened.tui.screens.base.asyncio.sleep", new=AsyncMock()):
-        async with app.run_test(size=(80, 24)) as pilot:
+        async with app.run_test(size=(80, 24)):
             await app.push_screen(screen)
             await asyncio.wait_for(exhausted.wait(), timeout=5.0)
 
@@ -330,7 +329,7 @@ async def test_screen_cleanup_on_unmount():
     screen = _TrackingScreen()
     app = _make_app()
 
-    async with app.run_test(size=(80, 24)) as pilot:
+    async with app.run_test(size=(80, 24)):
         await app.push_screen(screen)
         await asyncio.wait_for(done.wait(), timeout=5.0)
 
@@ -359,7 +358,7 @@ async def test_screen_refreshes_on_resume():
     screen = _TrackingScreen()
     app = _make_app()
 
-    async with app.run_test(size=(80, 24)) as pilot:
+    async with app.run_test(size=(80, 24)):
         await app.push_screen(screen)
         await asyncio.wait_for(first_done.wait(), timeout=5.0)
         # Post the event through Textual's dispatcher to avoid un-awaited coroutines.
@@ -534,7 +533,7 @@ async def test_auxiliary_lane_disconnected_on_unmount():
     screen = _LaneScreen()
     app = _make_app()
 
-    async with app.run_test(size=(80, 24)) as pilot:
+    async with app.run_test(size=(80, 24)):
         await app.push_screen(screen)
         await asyncio.sleep(0.2)
 
