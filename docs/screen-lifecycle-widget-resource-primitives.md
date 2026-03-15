@@ -1,10 +1,12 @@
 ---
 id: screen-lifecycle-widget-resource-primitives
 title: Composable widget lifecycle resource primitives
-status: decided
+status: implementing
 parent: screen-lifecycle-widget-refresh-tail
 related: [screen-lifecycle-lane-aware-ipc-ownership, screen-lifecycle-screen-content-primitive]
 open_questions: []
+branches: ["feature/screen-lifecycle-widget-resource-primitives"]
+openspec_change: screen-lifecycle-widget-resource-primitives
 issue_type: task
 priority: 1
 ---
@@ -44,41 +46,6 @@ The common denominator is not UI behavior; it is owned runtime resources that mu
 
 *No open questions.*
 
-## Acceptance Criteria
-
-### Scenarios
-
-#### Scenario 1: Widgets compose reusable resource primitives instead of inheriting a heavyweight base
-
-Given the first-pass widget lifecycle targets own different kinds of persistent resources  
-When the reusable lifecycle layer is defined  
-Then it must be expressed as composable resource helpers rather than a universal widget superclass that every live widget must inherit
-
-#### Scenario 2: The first helper set covers the current repeated ownership problems
-
-Given `ChatWidget`, `PageBrowserWidget`, `CommsSummaryWidget`, and `ForgeLog` are the current migration targets  
-When the initial helper set is chosen  
-Then it must explicitly cover owned timers, owned subscriptions, owned worker launch, and owned auxiliary IPC lanes
-
-#### Scenario 3: Local degradation remains visible at the widget boundary
-
-Given some widget-owned resources may fail independently of daemon liveness  
-When the helpers are used to manage cleanup and teardown  
-Then lane, timer, or subscription failures must remain local to the owning widget instead of being flattened into daemon-wide disconnect semantics
-
-### Falsifiability
-
-- This design is wrong if the helper layer requires a heavyweight shared widget base to become useful.
-- This design is wrong if the initial helper set does not clearly cover the current repeated resource-ownership patterns in ChatWidget, PageBrowserWidget, CommsSummaryWidget, and ForgeLog.
-- This design is wrong if helper-driven cleanup obscures widget ownership so thoroughly that local failures appear as daemon-wide failures.
-
-### Constraints
-
-- Do not introduce a heavyweight universal widget base class just to share cleanup code.
-- Keep widget-local degradation visible; helper usage must not turn lane or subscription failure into daemon-wide disconnect state.
-- Worker helper APIs must preserve the async-callable/partial scheduling convention so mock-heavy tests do not leak unawaited coroutine warnings.
-- The helper layer must compose with parent-screen ownership of the shared control bridge rather than replacing it.
-
 ## Implementation Notes
 
 ### File Scope
@@ -96,3 +63,11 @@ Then lane, timer, or subscription failures must remain local to the owning widge
 - Keep widget-local degradation visible; helper usage must not turn lane or subscription failure into daemon-wide disconnect state.
 - Worker helper APIs must preserve the async-callable/partial scheduling convention so mock-heavy tests do not leak unawaited coroutine warnings.
 - The helper layer must compose with parent-screen ownership of the shared control bridge rather than replacing it.
+
+## Acceptance Criteria
+
+### Falsifiability
+
+- This decision is wrong if: This design is wrong if the helper layer requires a heavyweight shared widget base to become useful.
+- This decision is wrong if: This design is wrong if the initial helper set does not clearly cover the current repeated resource-ownership patterns in ChatWidget, PageBrowserWidget, CommsSummaryWidget, and ForgeLog.
+- This decision is wrong if: This design is wrong if helper-driven cleanup obscures widget ownership so thoroughly that local failures appear as daemon-wide failures.
