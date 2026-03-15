@@ -717,7 +717,7 @@ class ControlClient:
         data = await self._request(
             CmdDeleteConversationRequest(peer_hash=peer_hash)
         )
-        return cast(int, data.get("deleted_count", 0))
+        return cast(int, data.get("deleted", data.get("deleted_count", 0)))
 
     async def delete_message(self, message_id: int) -> bool:
         """Delete a specific message.

@@ -156,10 +156,24 @@ class ConversationScreen(Screen[None]):
         except Exception:
             return
 
+        cascade = get_color_cascade()
+
         if not info.get("found"):
             try:
                 path_widget = self.query_one("#conv-path-info", Static)
-                path_widget.update(f"[{get_color_cascade().dim}]No path info available[/]")
+                path_widget.update(
+                    f"[{cascade.color_danger}]✗ No path to peer[/] "
+                    f"[{cascade.dim}]— messages queued for propagated delivery[/]"
+                )
+            except Exception:
+                pass
+            # Also push warning into the embedded ChatWidget status bar.
+            try:
+                chat = self.query_one(ChatWidget)
+                chat._set_status(
+                    f"[{cascade.color_danger}]No path to peer[/] "
+                    f"[{cascade.dim}]— reply will queue for propagated delivery[/]"
+                )
             except Exception:
                 pass
             return
@@ -180,7 +194,7 @@ class ConversationScreen(Screen[None]):
 
         try:
             path_widget = self.query_one("#conv-path-info", Static)
-            path_widget.update(f"[{get_color_cascade().dim}]{' | '.join(parts)}[/]")
+            path_widget.update(f"[{cascade.dim}]{' | '.join(parts)}[/]")
         except Exception:
             pass
 

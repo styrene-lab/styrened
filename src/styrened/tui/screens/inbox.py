@@ -546,19 +546,29 @@ class InboxScreen(StyreneScreen[None]):
     # -------------------------------------------------------------------------
 
     def action_delete_conversation(self) -> None:
-        """Delete selected conversation with double-tap confirmation."""
+        """Delete selected conversation with double-tap confirmation.
+
+        First press: highlights the row and updates the footer status — no
+        intrusive toast.  Second press within the timeout window executes.
+        """
         peer_hash = self._get_selected_peer_hash()
         if peer_hash is None:
             return
 
         if self._delete_pending == peer_hash:
-            # Second press — execute
+            # Second press on the same row — execute.
             self._cancel_delete_timer()
-            self._run_async_worker(self._execute_delete_conversation, peer_hash, group="inbox-delete")
+            self._delete_pending = None
+            self._set_footer_status("")
+            # exclusive=True prevents concurrent deletes from racing.
+            self._run_async_worker(
+                self._execute_delete_conversation, peer_hash,
+                group="inbox-delete", exclusive=True,
+            )
         else:
-            # First press — set pending
+            # First press — arm confirmation without a toast.
             self._delete_pending = peer_hash
-            self.notify("Press d again to delete conversation", severity="warning")
+            self._set_footer_status("⚠ Press D again to confirm delete")
             self._cancel_delete_timer()
             self._delete_timer = self._resources.set_timer(
                 "_delete_timer",
@@ -566,26 +576,41 @@ class InboxScreen(StyreneScreen[None]):
                 self._cancel_delete_pending,
             )
 
+    def _set_footer_status(self, text: str) -> None:
+        """Push a transient message into the screen's status area."""
+        try:
+            from styrened.tui.widgets.highlighted_panel import get_color_cascade
+            cascade = get_color_cascade()
+            # Attempt to use a dedicated status label if one exists.
+            status = self.query_one("#inbox-status", Static)
+            status.update(f"[{cascade.dim}]{text}[/]" if text else "")
+        except Exception:
+            # Fallback: sub_title on the screen itself.
+            try:
+                self.sub_title = text
+            except Exception:
+                pass
+
     def _cancel_delete_timer(self) -> None:
         """Cancel delete confirmation timer."""
         self._resources.stop_timer("_delete_timer")
 
     def _cancel_delete_pending(self) -> None:
-        """Cancel delete pending state."""
+        """Cancel delete pending state and clear footer hint."""
         self._delete_pending = None
+        self._set_footer_status("")
         self._cancel_delete_timer()
 
     async def _execute_delete_conversation(self, peer_hash: str) -> None:
-        """Execute conversation deletion and remove row."""
-        self._delete_pending = None
+        """Execute conversation deletion and refresh the list."""
         bridge = self._ipc_bridge
         if bridge is None:
             return
 
         try:
             count = await bridge.delete_conversation(peer_hash)
-            self.notify(f"Deleted {count} messages", severity="information")
-            # Refresh conversation list
+            msg = f"Conversation deleted ({count} message{'s' if count != 1 else ''})" if count else "Conversation deleted"
+            self.notify(msg, severity="information", timeout=3)
             await self._load_conversations()
         except Exception as e:
             logger.error(f"Failed to delete conversation: {e}")
