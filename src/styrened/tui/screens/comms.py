@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar
 
-from textual.binding import Binding, BindingType
 from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
 from textual.widgets import Footer, Header, Input, Label, Static, TabbedContent, TabPane
 

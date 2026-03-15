@@ -1,11 +1,10 @@
 """Tests for CommsScreen workspace structure, navigation, and capability gating."""
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from textual.widgets import Input, Static, TabPane, TabbedContent
+from textual.widgets import Input, Static, TabbedContent, TabPane
 
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.base import BridgeUnavailableError
