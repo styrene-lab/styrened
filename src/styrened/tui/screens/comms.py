@@ -1,4 +1,3 @@
-
 """Comms workspace screen.
 
 Aggregate shell for synchronous/direct/live communication. Capability-gated
@@ -8,36 +7,27 @@ shown when those subsystems are enabled in core config.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, ClassVar
 
-from textual import events
-from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
+from textual.app import ComposeResult
 from textual.containers import Container, Vertical
-from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Label, Static, TabbedContent, TabPane
 
+from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
 from styrened.ui_state import CommsMode, CommsWorkspaceInputs, build_comms_workspace_state
 
 
-class CommsScreen(Screen[None]):
+class CommsScreen(StyreneScreen[None]):
     """Aggregate workspace for synchronous and live communication."""
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "go_home", "Home"),
+        Binding("escape", "app.pop_screen", "Back"),
     ]
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._caps_loaded = False
-
-    @property
-    def _ipc_bridge(self) -> Any:
-        """Get IPCBridge via typed services protocol."""
-        try:
-            return self.app.services.bridge  # type: ignore[union-attr]
-        except Exception:
-            return None
+    def _loading_message(self) -> str:
+        return "Loading comms…"
 
     def compose(self) -> ComposeResult:
         state = build_comms_workspace_state(CommsWorkspaceInputs())
@@ -97,29 +87,14 @@ class CommsScreen(Screen[None]):
                     )
         yield Footer()
 
-    def action_go_home(self) -> None:
-        """Return to the dashboard."""
-        self.app.switch_screen("dashboard")
-
-    def on_mount(self) -> None:
-        """Fetch daemon capabilities and update capability-gated sections."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_capabilities(), group="comms-caps", exclusive=True)
-
-    def on_screen_resume(self, event: events.ScreenResume) -> None:
-        """Refresh capability state when returning to Comms workspace."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_capabilities(), group="comms-caps", exclusive=True)
-
-    async def _load_capabilities(self) -> None:
+    async def _load_data(self) -> None:
         """Fetch core config + daemon status and apply capability visibility."""
-        bridge = self._ipc_bridge
-        if bridge is None:
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
             return
 
-        import asyncio
-
-        tasks = {
+        tasks: dict[str, asyncio.Task[Any]] = {
             "config": asyncio.create_task(bridge.get_core_config()),
             "status": asyncio.create_task(bridge.get_status()),
         }
@@ -211,8 +186,6 @@ class CommsScreen(Screen[None]):
                 i2p_section.add_class("hidden")
         except Exception:
             pass
-
-        self._caps_loaded = True
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle I2P URL submission — open page browser with I2P transport."""
