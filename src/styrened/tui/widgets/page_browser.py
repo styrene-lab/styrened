@@ -216,23 +216,18 @@ class PageBrowserWidget(Widget):
         )
         return self._page_bridge
 
-    async def _disconnect_page_bridge(self) -> None:
-        """Disconnect the dedicated page lane when this widget unmounts."""
-        self._resources.adopt_auxiliary_lane(
-            "_page_bridge",
-            self._page_bridge,
-            shared_lane=self._ipc_bridge,
-        )
-        await self._resources.aclose()
-
     def _run_async_worker(
         self,
         fn: Any,
         *args: Any,
         **worker_kwargs: Any,
     ) -> None:
-        """Schedule async work via the shared widget resource scope."""
-        self._resources.run_worker(fn, *args, **worker_kwargs)
+        """Schedule async work via the shared widget resource scope.
+
+        Workers are tracked so they are cancelled before the auxiliary IPC
+        lane is disconnected on teardown.
+        """
+        self._resources.own_worker(self._resources.run_worker(fn, *args, **worker_kwargs))
 
     @property
     def _is_external_mode(self) -> bool:
@@ -305,15 +300,15 @@ class PageBrowserWidget(Widget):
         self._run_async_worker(self._load_page, target, exclusive=True)
 
     def on_unmount(self) -> None:
-        """Tear down any dedicated page-browsing IPC lane."""
-        if self._page_bridge is None:
-            return
-        self._resources.adopt_auxiliary_lane(
-            "_page_bridge",
-            self._page_bridge,
-            shared_lane=self._ipc_bridge,
-        )
-        self._resources.release(exclusive=False, group="page-bridge-disconnect")
+        """Cancel in-flight workers and tear down the dedicated page-browsing IPC lane.
+
+        Worker cancellation happens before lane disconnect via
+        ``WidgetResourceScope.release()``, which drains tracked workers first.
+        If the lane was never created (``_page_bridge is None``) the call is a
+        no-op — both the workers list and the auxiliary-lane registry will be
+        empty.
+        """
+        self._resources.release()
 
     async def _load_page(self, path: str) -> None:
         """Fetch and render a page.
