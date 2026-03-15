@@ -148,14 +148,121 @@ dev-daemon profile="standard" ephemeral="false":
 # Alias for dev-daemon — use when you just want a clean slate.
 dev-reset profile="standard": (dev-daemon profile)
 
-# Launch the TUI from the venv against the dev daemon's home.
-# Assumes dev daemon is already running via dev-daemon.
-dev-tui:
-    STYRENE_HOME="{{ _dev_home }}" .venv/bin/styrene
+# Launch the TUI — starts the dev daemon in the background automatically,
+# waits for it to be ready, runs the TUI, then kills the daemon on exit.
+# You own the TUI. The justfile owns the daemon. profile= selects a profile.
+dev-tui profile="standard":
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Launch the compact dashboard from the venv against the dev daemon's home.
-dev-dashboard:
-    STYRENE_HOME="{{ _dev_home }}" .venv/bin/styrene --dashboard
+    DEV_HOME="{{ _dev_home }}"
+    PROFILE="{{ profile }}"
+    CONFIG_OUT="$DEV_HOME/config/config.yaml"
+    SOCK="$DEV_HOME/run/control.sock"
+    LOG="$DEV_HOME/logs/daemon-dev.log"
+
+    # Stop system service so it doesn't collide
+    if [[ "$(uname)" == "Darwin" ]]; then
+        launchctl unload ~/Library/LaunchAgents/com.styrene.styrened.plist 2>/dev/null || true
+    else
+        systemctl --user stop styrened.service 2>/dev/null || true
+    fi
+
+    # Merge profile config
+    mkdir -p "$DEV_HOME/config" "$DEV_HOME/logs"
+    .venv/bin/python dev/merge_profile.py "$PROFILE" "$CONFIG_OUT"
+
+    # Kill any leftover daemon from a previous session
+    if [[ -S "$SOCK" ]]; then
+        OLD_PID=$(lsof -t "$SOCK" 2>/dev/null || true)
+        if [[ -n "$OLD_PID" ]]; then
+            echo "→ Killing stale dev daemon (pid $OLD_PID)..."
+            kill "$OLD_PID" 2>/dev/null || true
+            sleep 0.5
+        fi
+        rm -f "$SOCK"
+    fi
+
+    # Start daemon in background, log to file
+    echo "→ Starting dev daemon (profile=$PROFILE) → $LOG"
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon >> "$LOG" 2>&1 &
+    DAEMON_PID=$!
+    echo "   daemon pid=$DAEMON_PID"
+
+    # Ensure daemon is killed when the TUI exits (normal or signal)
+    trap "echo '→ Stopping dev daemon (pid $DAEMON_PID)...'; kill $DAEMON_PID 2>/dev/null || true; wait $DAEMON_PID 2>/dev/null || true" EXIT
+
+    # Wait for socket to appear (up to 15s)
+    echo -n "→ Waiting for daemon socket"
+    for i in $(seq 1 30); do
+        if [[ -S "$SOCK" ]]; then
+            echo " ready (${i}×0.5s)"
+            break
+        fi
+        echo -n "."
+        sleep 0.5
+        if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+            echo ""
+            echo "✗ Dev daemon exited unexpectedly. Check $LOG"
+            exit 1
+        fi
+    done
+
+    if [[ ! -S "$SOCK" ]]; then
+        echo ""
+        echo "✗ Daemon socket never appeared after 15s. Check $LOG"
+        kill "$DAEMON_PID" 2>/dev/null || true
+        exit 1
+    fi
+
+    # Run the TUI — blocks until user exits
+    echo "→ Launching TUI..."
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrene
+
+# Launch the compact dashboard — same lifecycle management as dev-tui.
+dev-dashboard profile="standard":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    DEV_HOME="{{ _dev_home }}"
+    PROFILE="{{ profile }}"
+    CONFIG_OUT="$DEV_HOME/config/config.yaml"
+    SOCK="$DEV_HOME/run/control.sock"
+    LOG="$DEV_HOME/logs/daemon-dev.log"
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        launchctl unload ~/Library/LaunchAgents/com.styrene.styrened.plist 2>/dev/null || true
+    else
+        systemctl --user stop styrened.service 2>/dev/null || true
+    fi
+
+    mkdir -p "$DEV_HOME/config" "$DEV_HOME/logs"
+    .venv/bin/python dev/merge_profile.py "$PROFILE" "$CONFIG_OUT"
+
+    if [[ -S "$SOCK" ]]; then
+        OLD_PID=$(lsof -t "$SOCK" 2>/dev/null || true)
+        if [[ -n "$OLD_PID" ]]; then
+            kill "$OLD_PID" 2>/dev/null || true
+            sleep 0.5
+        fi
+        rm -f "$SOCK"
+    fi
+
+    echo "→ Starting dev daemon (profile=$PROFILE) → $LOG"
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon >> "$LOG" 2>&1 &
+    DAEMON_PID=$!
+    trap "kill $DAEMON_PID 2>/dev/null || true; wait $DAEMON_PID 2>/dev/null || true" EXIT
+
+    echo -n "→ Waiting for daemon socket"
+    for i in $(seq 1 30); do
+        if [[ -S "$SOCK" ]]; then echo " ready"; break; fi
+        echo -n "."; sleep 0.5
+        if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+            echo ""; echo "✗ Daemon exited. Check $LOG"; exit 1
+        fi
+    done
+
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrene --dashboard
 
 # Restore the system service after dev work.
 dev-restore:
