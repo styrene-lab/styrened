@@ -183,9 +183,11 @@ dev-tui profile="standard":
         rm -f "$SOCK"
     fi
 
-    # Start daemon in background, log to file
+    # Start daemon in background, fully detached from terminal.
+    # < /dev/null: daemon has no stdin — prevents it from stealing terminal input
+    # and interfering with Textual's raw mode.
     echo "→ Starting dev daemon (profile=$PROFILE) → $LOG"
-    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon >> "$LOG" 2>&1 &
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon < /dev/null >> "$LOG" 2>&1 &
     DAEMON_PID=$!
     echo "   daemon pid=$DAEMON_PID"
 
@@ -249,7 +251,7 @@ dev-dashboard profile="standard":
     fi
 
     echo "→ Starting dev daemon (profile=$PROFILE) → $LOG"
-    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon >> "$LOG" 2>&1 &
+    STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon < /dev/null >> "$LOG" 2>&1 &
     DAEMON_PID=$!
     trap "kill $DAEMON_PID 2>/dev/null || true; wait $DAEMON_PID 2>/dev/null || true" EXIT
 
