@@ -1,7 +1,7 @@
 ---
 id: hub-status-semantics
 title: Hub Status Semantics — DISABLED vs WAITING for Default Hub
-status: decided
+status: implemented
 parent: tui-home-cop
 tags: [hub, cop, ux, onboarding, hub-connection, first-run]
 open_questions: []

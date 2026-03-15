@@ -190,6 +190,19 @@ All transports are declared by the same RNS identity. The content MAY differ (mi
 
 This is NOT "verified same content" — it's "same operator, declared endpoints." That's honest and useful.
 
+### I2P vs NomadNet discovery model — fundamental difference
+
+NomadNet is announce-based: nodes broadcast their destination hash + capabilities over the Reticulum mesh. The Pages tab is essentially a filtered announce log — you see nodes because they reached you.
+
+I2P has no equivalent passive discovery. Eepsites are standard HTTP servers tunneled through I2P garlic routing. To browse an eepsite you need the .b32.i2p address from somewhere. Historical I2P has manually-curated directories (stats.i2p, notbob.i2p) and jump services, but nothing like a mesh announce.
+
+Implications for Styrene Pages discovery:
+- NomadNet nodes → appear in Pages tab automatically when they announce
+- Styrene node I2P eepsite → discoverable only because the Styrene node announced on the mesh; /meta gives b32_address; T key lets you switch to I2P transport for that node
+- Generic I2P eepsites (non-Styrene) → invisible to the Pages tab; user must know the address and type it in the U (URL) bar
+
+The Pages tab is therefore NomadNet-native. I2P is a transport option for already-known Styrene nodes, not a parallel discovery mechanism. A future I2P address book or hub-maintained eepsite directory would be needed to make I2P browsable without prior knowledge of addresses — but that's a separate design problem.
+
 ## Decisions
 
 ### Decision: Three-tier graceful degradation: A (browser) → C (html2text) → B (micron-native)

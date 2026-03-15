@@ -2,6 +2,7 @@
 id: overlay-network-integration
 title: "Overlay Network Integration: Yggdrasil + I2P"
 status: exploring
+related: [styrene-contacts-page]
 tags: [yggdrasil, i2p, transport, mesh, overlay]
 open_questions:
   - Should the public hub publish a well-known Yggdrasil address for peers to connect via?
