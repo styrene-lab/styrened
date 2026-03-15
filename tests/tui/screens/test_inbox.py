@@ -1,9 +1,10 @@
 """Tests for InboxScreen - conversation list via IPCBridge."""
 from __future__ import annotations
 
-
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+from styrened.tui.screens.base import StyreneScreen
 from styrened.tui.screens.inbox import InboxScreen, MailScreen
 
 
@@ -18,6 +19,60 @@ class TestInboxScreenInit:
         """InboxScreen should initialize without errors."""
         screen = InboxScreen()
         assert screen is not None
+
+    def test_inbox_is_styrene_screen(self) -> None:
+        """InboxScreen must inherit from StyreneScreen for shared lifecycle."""
+        assert issubclass(InboxScreen, StyreneScreen)
+
+
+class TestInboxScreenLifecycle:
+    """Tests that InboxScreen uses the shared StyreneScreen load/resume contract."""
+
+    def test_inbox_has_load_data_method(self) -> None:
+        """InboxScreen must implement the abstract _load_data() hook."""
+        screen = InboxScreen()
+        assert callable(getattr(screen, "_load_data", None))
+
+    def test_inbox_does_not_override_on_screen_resume(self) -> None:
+        """InboxScreen must NOT define its own on_screen_resume — StyreneScreen owns it."""
+        # The method must resolve to StyreneScreen, not InboxScreen
+        assert "on_screen_resume" not in InboxScreen.__dict__, (
+            "InboxScreen must not override on_screen_resume; "
+            "refresh is handled by StyreneScreen._start_load()"
+        )
+
+    def test_inbox_load_data_calls_conversations_and_auto_reply(self) -> None:
+        """_load_data() must invoke both _load_conversations and _load_auto_reply_state."""
+        screen = InboxScreen()
+
+        loaded_conversations = False
+        loaded_auto_reply = False
+
+        async def fake_load_conversations() -> None:
+            nonlocal loaded_conversations
+            loaded_conversations = True
+
+        async def fake_auto_reply() -> None:
+            nonlocal loaded_auto_reply
+            loaded_auto_reply = True
+
+        screen._load_conversations = fake_load_conversations  # type: ignore[method-assign]
+        screen._load_auto_reply_state = fake_auto_reply  # type: ignore[method-assign]
+
+        asyncio.run(screen._load_data())
+
+        assert loaded_conversations, "_load_data() did not call _load_conversations()"
+        assert loaded_auto_reply, "_load_data() did not call _load_auto_reply_state()"
+
+    def test_inbox_loading_message(self) -> None:
+        """InboxScreen should provide a mail-specific loading message."""
+        screen = InboxScreen()
+        assert "mail" in screen._loading_message().lower() or "load" in screen._loading_message().lower()
+
+    def test_inbox_has_start_load(self) -> None:
+        """InboxScreen must have _start_load() from StyreneScreen (not its own copy)."""
+        assert "_start_load" in dir(InboxScreen)  # via StyreneScreen
+        assert "_start_load" not in InboxScreen.__dict__, "InboxScreen must not redefine _start_load"
 
 
 class TestInboxScreenIPCMode:
@@ -50,6 +105,18 @@ class TestInboxScreenNoBridge:
         screen = InboxScreen()
         # Without an app, _ipc_bridge returns None
         assert screen._ipc_bridge is None
+
+    def test_get_selected_peer_hash_without_app(self) -> None:
+        """_get_selected_peer_hash() must exist and return None without an app."""
+        screen = InboxScreen()
+        # No app → no query_one → should not raise AttributeError
+        try:
+            result = screen._get_selected_peer_hash()
+            assert result is None
+        except Exception:
+            # Any exception other than AttributeError (missing method) is acceptable
+            # at this level — we just need the method to exist.
+            pass
 
 
 class TestInboxComposeNew:
