@@ -14,9 +14,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Input, Static, Switch
+
+from styrened.tui.screens.base import StyreneScreen
 
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import (
@@ -58,7 +59,7 @@ def _format_timestamp(ts: float | int | None) -> str:
         return dt.strftime("%Y-%m-%d")
 
 
-class InboxScreen(Screen[None]):
+class InboxScreen(StyreneScreen[None]):
     """Mail workspace compatibility screen showing conversation list.
 
     Displays all chat conversations with:
@@ -191,30 +192,28 @@ class InboxScreen(Screen[None]):
 
     @property
     def _ipc_bridge(self) -> Any:
-        """Get IPCBridge from app lifecycle."""
+        """Get IPCBridge from app lifecycle (returns None when unavailable)."""
         try:
-            return self.app.services.bridge
+            return self.bridge
         except Exception:
             return None
 
+    def _loading_message(self) -> str:
+        return "Loading mail…"
+
     def on_mount(self) -> None:
-        """Load conversations on mount."""
+        """Set up the DataTable widget structure, then start the shared load cycle."""
         table = self.query_one("#conversation-table", DataTable)
         table.cursor_type = "row"
         table.add_columns("DESTINATION", "LAST MESSAGE", "UNREAD", "ATTACH", "TIMESTAMP")
-
-        if self._ipc_bridge is None:
-            table.add_row("-", f"[{get_color_cascade().dim}]Chat requires daemon mode[/]", "-", "-", "-")
-            return
-
-        self.run_worker(self._load_conversations())
-        self.run_worker(self._load_auto_reply_state())
         table.focus()
+        # StyreneScreen.on_mount() triggers _start_load() which calls _load_data().
+        super().on_mount()
 
-    def on_screen_resume(self) -> None:
-        """Refresh conversations when returning from another screen."""
-        if self._ipc_bridge is not None:
-            self.run_worker(self._load_conversations())
+    async def _load_data(self) -> None:
+        """Fetch conversations and auto-reply state via the shared StyreneScreen lifecycle."""
+        await self._load_conversations()
+        await self._load_auto_reply_state()
 
     async def _load_conversations(self) -> None:
         """Load conversations via IPCBridge."""
@@ -403,6 +402,13 @@ class InboxScreen(Screen[None]):
         if thread_id is None:
             return None
         return self._mail_index.by_thread_id.get(thread_id)
+
+    def _get_selected_peer_hash(self) -> str | None:
+        """Return the peer hash for the currently selected conversation row.
+
+        For DIRECT-scope threads the thread_id doubles as the peer hash.
+        """
+        return self._get_selected_thread_id()
 
     def action_go_back(self) -> None:
         """Layered escape: close compose -> close search -> pop screen."""
