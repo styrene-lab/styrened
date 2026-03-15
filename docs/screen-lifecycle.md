@@ -1,9 +1,9 @@
 ---
 id: screen-lifecycle
 title: Screen Lifecycle Contract
-status: implementing
+status: implemented
 parent: tui-specification
-related: [tui-data-state-model]
+related: [tui-data-state-model, tui-pages-browser-ipc-head-of-line-blocking]
 tags: [tui, architecture, textual, lifecycle]
 open_questions: []
 ---
@@ -297,6 +297,14 @@ The non-k8s TUI screen-heavy tail was successfully decomposed into four parallel
 
 All pre-screen-overhaul scaffolding is now in place (commit 8ca0070, branch feature/tui-workspace-architecture):\n\n**StyreneScreen base class** (`src/styrened/tui/screens/base.py`):\n- Abstract `_load_data()` — subclasses implement, base handles when/how\n- Optional hooks: `_cleanup()`, `_on_error(error, attempt)`, `_loading_message() -> str`\n- `self.bridge` property — returns `IPCBridge`, raises `BridgeUnavailableError` if None\n- 3-attempt exponential-backoff retry (0.5s / 1s / 2s)\n- `StyreneLoadingIndicator` shown before first load, hidden after\n- Stale data preserved on error (no blank screen)\n- Worker ownership: suspend cancels `_load_worker`, unmount cancels + cleanup\n- `on_mount` and `on_screen_resume` both call `_start_load()` (always refresh on re-entry)\n- All lifecycle events logged at DEBUG with screen class name + attempt count\n- 11 tests in `tests/tui/screens/test_screen_base.py`, all green\n\n**WorkspaceId** (`src/styrened/ui_state/workspace.py`): HOME/NODES/MAIL/COMMS/CONTACTS/ADMIN\n\n**app.py hardening**: `action_open_admin()` added, `grave_accent`→`open_admin` binding, `action_open_mail` uses `self.services.bridge` not `self._lifecycle.ipc_bridge`, `action_push_screen_settings` kept as backward-compat alias\n\n**Test mocks**: 6 test files updated from `get_node_store` daemon patches to `bridge.get_nodes()` bridge patches\n\n**Next step**: Begin screen-by-screen migration to `StyreneScreen`. Recommended order:\n1. `ExplorationScreen` (Nodes workspace) — clear `_load_data()` split already exists\n2. `InboxScreen` / `MailScreen` — has `on_screen_resume` already, straightforward\n3. `ContactsScreen` — small, low risk\n4. `MeshDeviceDetailScreen` (peer workspace) — most complex, do last\n5. `DashboardScreen` (Home) — large but well-understood after NodeInfoPanel work\n6. `SettingsScreen` — largest (1264 LOC), split into sub-screens as part of migration"
 
+### Pages IPC isolation extends the lifecycle contract to lane-aware ownership
+
+Recent Pages head-of-line blocking work showed that lifecycle ownership is not just about timers and workers on one shared bridge. Long-running interactive flows may need a lazily spawned auxiliary IPC lane so they do not monopolize the shared control bridge. `IPCBridge.spawn_lane('execution')` and `PageBrowserWidget` establish the new pattern: keep the app bridge as the control lane, create the auxiliary lane only when work begins, keep page degradation local to the browser surface, and disconnect the dedicated lane during teardown rather than letting extra transport state linger past unmount.
+
+### Remaining lifecycle work is now narrow enough to split from the umbrella contract
+
+The parent node already contains the core contract decisions, the StyreneScreen base scaffolding, and several completed ownership cleanups across Dashboard, Exploration, MeshDeviceDetail, and NodeInfoPanel. What remains is no longer one monolithic implementation stream: (1) codifying lane-aware ownership for auxiliary IPC bridges and long-running work, and (2) finishing the migration tail for screens that still rely on ad hoc lifecycle behavior instead of the shared contract.
+
 ## Decisions
 
 ### Decision: StyreneScreen base class with enforced lifecycle contract
@@ -334,6 +342,27 @@ All pre-screen-overhaul scaffolding is now in place (commit 8ca0070, branch feat
 **Status:** decided
 **Rationale:** Option B is the correct boundary. NodeInfoPanel currently mixes synchronous local reads with bridge-backed refreshes, which keeps widget lifecycle and data authority tangled. The widget should instead render parent-provided canonical state snapshots, with DashboardScreen or a thin adapter owning refresh timing, IPC access, and normalization through ui_state builders. The new `_apply_identity_snapshot()` and `_apply_mesh_catalog_count()` seams support an incremental migration by letting parent-owned state flow into the widget before all direct fetch logic is removed.
 
+### Decision: Auxiliary IPC lanes are lifecycle-owned resources, not ambient global channels
+
+**Status:** decided
+**Rationale:** The Pages execution-lane fix makes the lifecycle contract more specific. Screens and widgets may isolate long-running operator-driven work onto lazily spawned sibling IPC bridges, but those lanes must remain subordinate to the shared control lane, must not increase baseline startup demand, and must be explicitly disconnected during suspend/unmount so lane-specific degradation does not masquerade as daemon-wide failure.
+
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `src/styrened/tui/screens/base.py` (modified) — Core StyreneScreen lifecycle hooks and worker ownership semantics; likely home for codifying auxiliary-lane cleanup expectations.
+- `src/styrened/ipc/bridge.py` (modified) — Lane-cloning support (`spawn_lane`) and traffic-class metadata that screen/widget lifecycle code must treat as owned resources.
+- `src/styrened/tui/widgets/page_browser.py` (modified) — Reference implementation of lazy execution-lane creation, local degradation, and explicit auxiliary-lane teardown.
+
+### Constraints
+
+- Keep the shared app bridge as the control lane; auxiliary lanes must be lazy and workload-specific.
+- Long-running interactive work may remain slow, but it must not monopolize normal control/status traffic.
+- Lane-specific degradation must remain local to the owning surface instead of being reported as daemon-wide disconnect.
+- Lifecycle cleanup must own both workers and any dedicated IPC lanes they created.
+- Prefer async callables/partials over bare coroutine objects when scheduling workers in mock-heavy code paths.

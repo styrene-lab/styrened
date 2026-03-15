@@ -3,6 +3,7 @@ id: tui-pages-browser-ipc-head-of-line-blocking
 title: Pages browser IPC head-of-line blocking
 status: decided
 parent: tui-startup-ipc-backpressure
+related: [screen-lifecycle, screen-lifecycle-lane-aware-ipc-ownership]
 tags: [tui, pages, ipc, bug]
 open_questions: []
 openspec_change: tui-pages-browser-ipc-isolation
