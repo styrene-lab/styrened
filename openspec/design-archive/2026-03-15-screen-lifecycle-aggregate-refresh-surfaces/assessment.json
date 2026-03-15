@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "nodeId": "screen-lifecycle-aggregate-refresh-surfaces",
+  "assessmentKind": "design",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T13:24:37.215305Z",
+  "summary": "Manual design assessment passed. The node now narrows the remaining standalone screen tail to Inbox, Contacts, and Comms, chooses direct migration onto `StyreneScreen` plus screen-local `WidgetResourceScope` ownership, and explicitly leaves Provision workflow ownership as a separate follow-up.",
+  "checks": [
+    "Research explains why Inbox, Contacts, and Comms still duplicate the old mount/resume refresh contract and why Provision is a distinct workflow-owned follow-up.",
+    "Decisions choose direct migration onto `StyreneScreen` instead of another standalone-screen helper and keep UI bootstrap explicit while moving daemon refresh into `_load_data()`.",
+    "Acceptance criteria require shared load-cycle ownership, truthful local placeholder behavior, and callable worker scheduling for user-triggered async actions.",
+    "Implementation notes identify the three target screens, their regression tests, and the base-class touch point only if concrete migration evidence requires it."
+  ]
+}

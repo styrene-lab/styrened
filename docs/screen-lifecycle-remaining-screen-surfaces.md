@@ -35,6 +35,10 @@ On reassessment, the cost/benefit tilts toward introducing a small reusable scre
 
 `ScreenContentHost` has now landed in Exchange, so the highest-value remaining screen-side lifecycle work is no longer the parent-plus-live-pane shape. The next screen-side follow-up set is the standalone aggregate/workflow surfaces that still own ad hoc mount/resume logic directly, especially `InboxScreen`, `ContactsScreen`, `CommsScreen`, and `ProvisionScreen`.
 
+### Repo scan splits the remaining standalone screen tail into aggregate refresh surfaces and provisioning-specific workflow ownership
+
+A fresh code scan after the Exchange proving ground shows two narrower follow-up clusters inside this epic. `InboxScreen`, `ContactsScreen`, and `CommsScreen` still manually own mount/resume refresh kickoff, direct bridge access, and callable-vs-coroutine worker scheduling concerns that now have shared solutions in `StyreneScreen` and `WidgetResourceScope`. `ProvisionScreen` is distinct: its main debt is async mount bootstrap, disk-detect worker ownership, and flash-worker cleanup semantics rather than repeated aggregate refresh fan-out.
+
 ## Decisions
 
 ### Decision: Prioritize aggregate mail/comms surfaces before local-form or wizard screens
