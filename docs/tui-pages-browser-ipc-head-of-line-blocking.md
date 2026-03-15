@@ -1,7 +1,7 @@
 ---
 id: tui-pages-browser-ipc-head-of-line-blocking
 title: Pages browser IPC head-of-line blocking
-status: exploring
+status: decided
 parent: tui-startup-ipc-backpressure
 tags: [tui, pages, ipc, bug]
 open_questions: []
@@ -37,6 +37,10 @@ The remaining pytest warning was not another IPC regression. `PageBrowserWidget`
 ### Implementation slice archived to OpenSpec baseline
 
 The implementation change `tui-pages-browser-ipc-isolation` has been archived and merged into `openspec/baseline/tui/pages-browser-ipc.md`. No active OpenSpec changes remain. The design-tree node itself is still gated from `set_status(decided)` by the explicit `/assess design` requirement enforced by the design-tree workflow.
+
+### Page failures remain localized to the browser surface
+
+The isolated execution lane keeps slow or failed page work attached to PageBrowserWidget instead of the shared control plane. During live probing, stale-node page fetches continued on the execution lane while control-lane status requests remained immediate, which preserves truthful daemon liveness and prevents page-browser degradation from masquerading as a wider TUI disconnect.
 
 ## Decisions
 
@@ -82,8 +86,37 @@ The implementation change `tui-pages-browser-ipc-isolation` has been archived an
 
 ## Acceptance Criteria
 
+### Scenarios
+
+#### Scenario 1: Slow page loads do not monopolize control-plane IPC
+
+Given a `PageBrowserWidget` page load is in flight for a slow or timing-out node  
+When the TUI issues an unrelated control-plane request such as daemon status or shared-screen refresh work  
+Then that request must not be queued behind the page fetch on the same IPC lane
+
+#### Scenario 2: Page browsing uses an isolated long-running lane
+
+Given the TUI maintains separate latency classes for quick control/command work, bulk data refreshes, and long-running interactive execution  
+When Pages browsing is isolated onto its own lane  
+Then page traffic must stop monopolizing the normal control lane without increasing baseline startup demand
+
+#### Scenario 3: Page failures stay local to the browser surface
+
+Given a page fetch fails, times out, or falls back to cached content  
+When the operator remains elsewhere in the TUI  
+Then daemon liveness and overall UI responsiveness must remain truthful and distinct from page-browser degradation
+
 ### Falsifiability
 
 - This decision is wrong if: If a slow `fetch_page()` still delays unrelated status/control requests issued through the normal shared bridge, this design has failed.
 - This decision is wrong if: If the fix requires broad server-wide request-scheduling changes to recover responsiveness for Pages browsing, the smaller-blast-radius client-side isolation decision was wrong or incomplete.
 - This decision is wrong if: If the solution adds startup IPC demand or reintroduces screen-owned caches just to hide page latency, it violates the design intent.
+
+### Constraints
+
+- Do not reintroduce screen-owned fleet caches just to mask page latency.
+- Keep daemon liveness and page-fetch backpressure distinct in operator-facing status.
+- Prefer isolating long-lived page requests without increasing baseline startup demand on constrained hardware.
+- Preserve separated IPC traffic classes so quick control/command work, bulk hydration, and long-running interactive flows do not collapse back onto one shared lane.
+- Keep the shared app bridge as the control lane; page isolation must remain lazy so startup demand does not grow.
+- A slow page fetch should be allowed to remain slow, but it must no longer monopolize the normal control/status lane.

@@ -1,0 +1,85 @@
+{
+  "nodeId": "tui-pages-browser-ipc-head-of-line-blocking",
+  "pass": true,
+  "structuralPass": true,
+  "findings": [
+    {
+      "type": "structural",
+      "index": 1,
+      "pass": true,
+      "finding": "The node records decided design decisions, no open questions, and non-empty acceptance-criteria scenarios, falsifiability conditions, and constraints."
+    },
+    {
+      "type": "scenario",
+      "index": 1,
+      "pass": true,
+      "finding": "Live probing and the implementation notes show slow page fetches are isolated from shared control-plane requests: control-lane get_status() stayed immediate while the execution-lane page fetch remained in flight."
+    },
+    {
+      "type": "scenario",
+      "index": 2,
+      "pass": true,
+      "finding": "The design is implemented with IPCBridge.spawn_lane('execution') and lazy PageBrowserWidget bridge creation, preserving lane isolation without increasing baseline startup demand."
+    },
+    {
+      "type": "scenario",
+      "index": 3,
+      "pass": true,
+      "finding": "The document now explicitly records that page failures remain localized to the browser surface, and live probing confirmed daemon liveness stays truthful while stale page fetches continue on the isolated lane."
+    },
+    {
+      "type": "falsifiability",
+      "index": 1,
+      "pass": true,
+      "finding": "The design directly addresses the head-of-line blocking failure mode by moving page traffic off the shared control lane and validating that unrelated control requests no longer queue behind page fetches."
+    },
+    {
+      "type": "falsifiability",
+      "index": 2,
+      "pass": true,
+      "finding": "Responsiveness was recovered with a smaller-blast-radius client-side lane split rather than server-wide IPC scheduling changes."
+    },
+    {
+      "type": "falsifiability",
+      "index": 3,
+      "pass": true,
+      "finding": "The fix keeps page isolation lazy and does not reintroduce screen-owned caches, so startup IPC demand and cache ownership constraints remain intact."
+    },
+    {
+      "type": "constraint",
+      "index": 1,
+      "pass": true,
+      "finding": "The design does not reintroduce screen-owned fleet caches; it isolates only page-browser transport work."
+    },
+    {
+      "type": "constraint",
+      "index": 2,
+      "pass": true,
+      "finding": "Daemon liveness remains distinct from page-browser degradation because control-lane status calls remain responsive during slow execution-lane page work."
+    },
+    {
+      "type": "constraint",
+      "index": 3,
+      "pass": true,
+      "finding": "The chosen fix isolates long-running requests without increasing baseline startup demand because the extra bridge is created lazily by PageBrowserWidget."
+    },
+    {
+      "type": "constraint",
+      "index": 4,
+      "pass": true,
+      "finding": "The design preserves separated traffic classes for control work, bulk hydration, and long-running execution flows by assigning Pages browsing to the execution lane."
+    },
+    {
+      "type": "constraint",
+      "index": 5,
+      "pass": true,
+      "finding": "The shared app bridge remains the normal control lane; page isolation is additive and lazy rather than replacing the main bridge."
+    },
+    {
+      "type": "constraint",
+      "index": 6,
+      "pass": true,
+      "finding": "Slow page fetches may still take time, but they no longer monopolize the normal control/status lane."
+    }
+  ]
+}

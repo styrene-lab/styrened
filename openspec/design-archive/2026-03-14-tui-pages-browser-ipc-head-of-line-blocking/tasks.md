@@ -2,4 +2,4 @@
 
 ## 1. Design exploration
 
-- [ ] 1.1 Explore and decide: Pages browser IPC head-of-line blocking
+- [x] 1.1 Explore and decide: Pages browser IPC head-of-line blocking
