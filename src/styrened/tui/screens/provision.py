@@ -7,16 +7,19 @@ forge pipeline execution and post-flash mesh detection.
 
 from __future__ import annotations
 
+import logging
+from functools import partial
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Static
-from textual.worker import Worker
+from textual.worker import Worker, WorkerState
 
+from styrened.models.mesh_device import MeshDevice
 from styrened.tui.forge.models import (
     DeviceProfile,
     DiskInfo,
@@ -26,9 +29,12 @@ from styrened.tui.forge.models import (
     load_device_catalog,
     load_forge_config,
 )
+from styrened.tui.lifecycle import WidgetResourceScope
 from styrened.tui.widgets.config_form import ConfigForm
 from styrened.tui.widgets.forge_log import ForgeLog
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Device catalog table
@@ -193,7 +199,13 @@ class ProvisionScreen(Screen[None]):
         self._forge_config: ForgeConfig = ForgeConfig()
         self._edge_dir: Path | None = None
         self._config: dict[str, str] = {}
+        self._resources = WidgetResourceScope(self, owner_logger=logger)
+        self._bootstrap_worker: Worker[None] | None = None
+        self._disk_detect_worker: Worker[None] | None = None
         self._flash_worker: Worker[None] | None = None
+        self._mesh_watch_hostname: str | None = None
+        self._mesh_watch_active = False
+        self._owns_mesh_watch_discovery = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -227,8 +239,43 @@ class ProvisionScreen(Screen[None]):
 
         yield Footer()
 
-    async def on_mount(self) -> None:
-        """Load device catalog and forge config on mount."""
+    def _run_async_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Worker[None]:
+        """Schedule async work with callable-based worker semantics."""
+        work = partial(fn, *args) if args else fn
+        return self.run_worker(work, **worker_kwargs)
+
+    def _cancel_worker(self, worker: Worker[Any] | None) -> None:
+        """Cancel an in-flight worker if it is still pending or running."""
+        if worker is not None and worker.state in (WorkerState.PENDING, WorkerState.RUNNING):
+            worker.cancel()
+
+    def _track_worker(self, attr_name: str, worker: Worker[None]) -> Worker[None]:
+        """Store and register a workflow-owned worker for teardown."""
+        self._cancel_worker(getattr(self, attr_name, None))
+        setattr(self, attr_name, worker)
+        self._resources.own_worker(worker)
+        return worker
+
+    def on_mount(self) -> None:
+        """Start workflow bootstrap without relying on raw async mount semantics."""
+        self._start_bootstrap()
+
+    def on_unmount(self) -> None:
+        """Release workflow-owned workers and stop any active mesh watch."""
+        self._stop_mesh_watch()
+        self._resources.release(group="provision-cleanup")
+
+    def _start_bootstrap(self) -> None:
+        """Start or replace the initial catalog/config bootstrap worker."""
+        worker = self._run_async_worker(
+            self._bootstrap,
+            group="provision-bootstrap",
+            exclusive=True,
+        )
+        self._track_worker("_bootstrap_worker", worker)
+
+    async def _bootstrap(self) -> None:
+        """Load device catalog and forge config during the provision workflow bootstrap."""
         # Resolve edge_dir from app config
         try:
             app = self.app
@@ -238,10 +285,8 @@ class ProvisionScreen(Screen[None]):
         except Exception:
             pass
 
-        # Load device catalog
         await self._load_catalog()
 
-        # Load forge config
         if self._edge_dir:
             forge_yaml = self._edge_dir / "forge.yaml"
             self._forge_config = load_forge_config(forge_yaml)
@@ -301,7 +346,7 @@ class ProvisionScreen(Screen[None]):
         self._rebuild_config_form()
 
         # Trigger disk detection
-        self.run_worker(self._detect_disks(), group="disk-detect")
+        self._start_disk_detection()
 
         self._update_flash_button()
 
@@ -321,6 +366,15 @@ class ProvisionScreen(Screen[None]):
     # ------------------------------------------------------------------
     # Disk detection
     # ------------------------------------------------------------------
+
+    def _start_disk_detection(self) -> None:
+        """Start or replace disk detection for the current workflow step."""
+        worker = self._run_async_worker(
+            self._detect_disks,
+            group="disk-detect",
+            exclusive=True,
+        )
+        self._track_worker("_disk_detect_worker", worker)
 
     async def _detect_disks(self) -> None:
         """Detect external disks."""
@@ -348,7 +402,7 @@ class ProvisionScreen(Screen[None]):
 
     def action_refresh_disks(self) -> None:
         """Refresh disk detection."""
-        self.run_worker(self._detect_disks(), group="disk-detect")
+        self._start_disk_detection()
 
     # ------------------------------------------------------------------
     # Config form handling
@@ -380,7 +434,7 @@ class ProvisionScreen(Screen[None]):
         if event.button.id == "btn-flash":
             await self._initiate_flash()
         elif event.button.id == "btn-refresh-disks":
-            self.run_worker(self._detect_disks(), group="disk-detect")
+            self._start_disk_detection()
 
     async def _initiate_flash(self) -> None:
         """Validate, confirm, and start the flash process."""
@@ -436,9 +490,7 @@ class ProvisionScreen(Screen[None]):
         forge_log.set_hostname(target.hostname)
 
         # Start forge pipeline
-        self._flash_worker = self.run_worker(
-            self._run_forge(target), exclusive=True, group="forge"
-        )
+        self._start_forge(target)
 
     def _show_forge_panel(self) -> None:
         """Hide selection panels, show forge panel."""
@@ -463,6 +515,16 @@ class ProvisionScreen(Screen[None]):
         except Exception:
             pass
 
+    def _start_forge(self, target: FlashTarget) -> None:
+        """Start or replace the long-running forge pipeline worker."""
+        worker = self._run_async_worker(
+            self._run_forge,
+            target,
+            exclusive=True,
+            group="forge",
+        )
+        self._track_worker("_flash_worker", worker)
+
     async def _run_forge(self, target: FlashTarget) -> None:
         """Execute the forge media writer pipeline."""
         from styrened.tui.forge.media_writer import run_media_writer
@@ -484,14 +546,14 @@ class ProvisionScreen(Screen[None]):
     def on_forge_log_aborted(self, message: ForgeLog.Aborted) -> None:
         """Handle abort/done from forge log."""
         forge_log = self.query_one("#forge-log", ForgeLog)
+        self._stop_mesh_watch()
 
         if forge_log.is_complete or forge_log.is_error:
             # Done — return to selection
             self._show_selection_panels()
         else:
             # Active — cancel worker
-            if self._flash_worker:
-                self._flash_worker.cancel()
+            self._cancel_worker(self._flash_worker)
             self._show_selection_panels()
 
     def on_forge_log_flash_complete(self, message: ForgeLog.FlashComplete) -> None:
@@ -505,18 +567,45 @@ class ProvisionScreen(Screen[None]):
 
     def _start_mesh_watch(self, hostname: str) -> None:
         """Begin watching for the newly provisioned node on the mesh."""
+        self._stop_mesh_watch()
+        self._mesh_watch_hostname = hostname
+        self._mesh_watch_active = True
+
         forge_log = self.query_one("#forge-log", ForgeLog)
         forge_log.start_mesh_watch()
 
         try:
-            from styrened.tui.services.reticulum import start_discovery
+            from styrened.tui.services.reticulum import is_discovery_running, start_discovery
 
-            start_discovery(callback=lambda device: self._on_mesh_device(device, hostname))
+            discovery_was_running = is_discovery_running()
+            start_discovery(callback=self._on_mesh_device)
+            self._owns_mesh_watch_discovery = not discovery_was_running and is_discovery_running()
         except Exception:
-            pass
+            self._owns_mesh_watch_discovery = False
 
-    def _on_mesh_device(self, device, hostname: str) -> None:  # noqa: ANN001
+    def _stop_mesh_watch(self) -> None:
+        """End any screen-owned post-flash watch state."""
+        self._mesh_watch_active = False
+        self._mesh_watch_hostname = None
+
+        if not self._owns_mesh_watch_discovery:
+            return
+
+        try:
+            from styrened.tui.services.reticulum import stop_discovery
+
+            stop_discovery()
+        except Exception:
+            logger.debug("Failed to stop provision-owned discovery watch", exc_info=True)
+        finally:
+            self._owns_mesh_watch_discovery = False
+
+    def _on_mesh_device(self, device: MeshDevice) -> None:
         """Callback for mesh device discovery during post-flash watch."""
+        hostname = self._mesh_watch_hostname
+        if not self._mesh_watch_active or not hostname:
+            return
+
         try:
             if device.name and hostname.lower() in device.name.lower():
                 self.app.call_from_thread(self._mesh_node_found, hostname)
@@ -525,6 +614,7 @@ class ProvisionScreen(Screen[None]):
 
     def _mesh_node_found(self, hostname: str) -> None:
         """Handle mesh node detection (main thread)."""
+        self._stop_mesh_watch()
         try:
             forge_log = self.query_one("#forge-log", ForgeLog)
             forge_log.mesh_node_found(hostname)

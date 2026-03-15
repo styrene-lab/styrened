@@ -1,8 +1,10 @@
 """Tests for the rewritten ProvisionScreen."""
 from __future__ import annotations
 
+import inspect
+from unittest.mock import Mock
 
-
+from textual.worker import WorkerState
 
 from styrened.tui.forge.models import (
     DeviceProfile,
@@ -243,3 +245,114 @@ class TestForgeConfigResolution:
         assert config.wifi_password == "secret"
         assert "rpi4" in config.hostnames
         assert config.hostnames["rpi4"] == "my-rpi4"
+
+
+# ---------------------------------------------------------------------------
+# Workflow ownership regressions
+# ---------------------------------------------------------------------------
+
+
+def _make_worker(state: WorkerState = WorkerState.PENDING) -> Mock:
+    worker = Mock()
+    worker.state = state
+    worker.cancel = Mock()
+    return worker
+
+
+class TestProvisionWorkflowOwnership:
+    """Test workflow-owned workers and mesh-watch teardown."""
+
+    def test_on_mount_schedules_bootstrap_with_callable_worker(self):
+        """Mount bootstrap uses callable worker scheduling instead of eager coroutines."""
+        screen = ProvisionScreen()
+        worker = _make_worker()
+        screen.run_worker = Mock(return_value=worker)
+        screen._resources.own_worker = Mock()
+
+        screen.on_mount()
+
+        scheduled = screen.run_worker.call_args.args[0]
+        assert callable(scheduled)
+        assert not inspect.iscoroutine(scheduled)
+        assert screen.run_worker.call_args.kwargs == {
+            "group": "provision-bootstrap",
+            "exclusive": True,
+        }
+        screen._resources.own_worker.assert_called_once_with(worker)
+        assert screen._bootstrap_worker is worker
+
+    def test_refresh_disks_schedules_callable_worker(self):
+        """Disk refresh keeps callable worker scheduling for test-safe execution."""
+        screen = ProvisionScreen()
+        worker = _make_worker()
+        screen.run_worker = Mock(return_value=worker)
+        screen._resources.own_worker = Mock()
+
+        screen.action_refresh_disks()
+
+        scheduled = screen.run_worker.call_args.args[0]
+        assert callable(scheduled)
+        assert not inspect.iscoroutine(scheduled)
+        assert screen.run_worker.call_args.kwargs == {
+            "group": "disk-detect",
+            "exclusive": True,
+        }
+        assert screen._disk_detect_worker is worker
+
+    def test_start_forge_schedules_callable_worker(self):
+        """Forge execution keeps callable worker scheduling for the long-running workflow."""
+        screen = ProvisionScreen()
+        worker = _make_worker()
+        screen.run_worker = Mock(return_value=worker)
+        screen._resources.own_worker = Mock()
+        target = FlashTarget(device=_make_device())
+
+        screen._start_forge(target)
+
+        scheduled = screen.run_worker.call_args.args[0]
+        assert callable(scheduled)
+        assert not inspect.iscoroutine(scheduled)
+        assert screen.run_worker.call_args.kwargs == {
+            "group": "forge",
+            "exclusive": True,
+        }
+        assert screen._flash_worker is worker
+
+    def test_abort_cancels_flash_worker_and_stops_mesh_watch(self):
+        """Aborting active forge work cancels the worker and tears down watch state."""
+        screen = ProvisionScreen()
+        flash_worker = _make_worker(state=WorkerState.RUNNING)
+        forge_log = Mock(is_complete=False, is_error=False)
+        screen._flash_worker = flash_worker
+        screen._mesh_watch_active = True
+        screen._mesh_watch_hostname = "node-01"
+        screen._show_selection_panels = Mock()
+        screen.query_one = Mock(return_value=forge_log)
+
+        screen.on_forge_log_aborted(Mock())
+
+        flash_worker.cancel.assert_called_once()
+        assert screen._mesh_watch_active is False
+        assert screen._mesh_watch_hostname is None
+        screen._show_selection_panels.assert_called_once_with()
+
+    def test_on_unmount_stops_owned_mesh_watch_and_releases_resources(self, monkeypatch):
+        """Unmount stops screen-owned discovery watch before releasing other resources."""
+        screen = ProvisionScreen()
+        stop_discovery = Mock()
+        monkeypatch.setattr(
+            "styrened.tui.services.reticulum.stop_discovery",
+            stop_discovery,
+        )
+        screen._resources.release = Mock()
+        screen._mesh_watch_active = True
+        screen._mesh_watch_hostname = "node-01"
+        screen._owns_mesh_watch_discovery = True
+
+        screen.on_unmount()
+
+        stop_discovery.assert_called_once_with()
+        screen._resources.release.assert_called_once_with(group="provision-cleanup")
+        assert screen._mesh_watch_active is False
+        assert screen._mesh_watch_hostname is None
+        assert screen._owns_mesh_watch_discovery is False
