@@ -2,10 +2,30 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
+from textual.coordinate import Coordinate
+from textual.widgets import DataTable
+
+from styrened.tui.app import StyreneApp
 from styrened.tui.screens.base import StyreneScreen
 from styrened.tui.screens.inbox import InboxScreen, MailScreen
+
+
+@pytest.fixture(autouse=True)
+def mock_reticulum(tmp_path):
+    """Mock Reticulum initialization for inbox TUI tests."""
+    fake_config = tmp_path / "config"
+    fake_config.mkdir()
+    (fake_config / "config").write_text("")
+
+    with (
+        patch("styrened.tui.services.reticulum.find_reticulum_config", return_value=fake_config),
+        patch("styrened.tui.services.app_lifecycle.StyreneLifecycle"),
+        patch("styrened.tui.app.StyreneApp._check_daemon", return_value=True),
+    ):
+        yield
 
 
 class TestInboxScreenInit:
@@ -59,7 +79,8 @@ class TestInboxScreenLifecycle:
         screen._load_conversations = fake_load_conversations  # type: ignore[method-assign]
         screen._load_auto_reply_state = fake_auto_reply  # type: ignore[method-assign]
 
-        asyncio.run(screen._load_data())
+        with patch.object(InboxScreen, "_ipc_bridge", new_callable=PropertyMock, return_value=MagicMock()):
+            asyncio.run(screen._load_data())
 
         assert loaded_conversations, "_load_data() did not call _load_conversations()"
         assert loaded_auto_reply, "_load_data() did not call _load_auto_reply_state()"
@@ -118,6 +139,22 @@ class TestInboxScreenNoBridge:
             # at this level — we just need the method to exist.
             pass
 
+    @pytest.mark.asyncio
+    async def test_no_bridge_renders_workspace_local_placeholder(self) -> None:
+        """Inbox should render a local daemon-required placeholder when no bridge exists."""
+        app = StyreneApp()
+
+        async with app.run_test() as pilot:
+            await app.push_screen(InboxScreen())
+            await pilot.pause()
+
+            screen = app.screen
+            assert isinstance(screen, InboxScreen)
+            table = screen.query_one("#conversation-table", DataTable)
+            assert table.row_count >= 1
+            message = str(table.get_cell_at(Coordinate(0, 1)))
+            assert "Chat requires daemon mode" in message
+
 
 class TestInboxComposeNew:
     """Tests for compose new conversation feature."""
@@ -141,6 +178,54 @@ class TestInboxComposeNew:
         InboxScreen()
         # Without an app, this should not raise
         # (notify will fail silently without an app)
+
+
+class TestInboxWorkerScheduling:
+    """Tests for callable worker scheduling on async Inbox actions."""
+
+    def test_toggle_auto_reply_schedules_callable(self) -> None:
+        """Switch changes should pass a callable to run_worker, not a coroutine object."""
+        screen = InboxScreen()
+        event = MagicMock()
+        event.switch.id = "ooo-switch"
+        event.value = True
+
+        captured: list = []
+
+        def fake_run_worker(fn, **kwargs):
+            captured.append(fn)
+            return MagicMock()
+
+        with patch.object(screen, "run_worker", side_effect=fake_run_worker):
+            screen.on_switch_changed(event)
+
+        assert len(captured) == 1
+        fn = captured[0]
+        import inspect
+        assert callable(fn)
+        assert not inspect.iscoroutine(fn)
+
+    def test_delete_conversation_schedules_callable(self) -> None:
+        """Delete confirmation should schedule a callable worker on the second press."""
+        screen = InboxScreen()
+        screen._delete_pending = "abc123"
+        captured: list = []
+
+        def fake_run_worker(fn, **kwargs):
+            captured.append(fn)
+            return MagicMock()
+
+        with (
+            patch.object(screen, "_get_selected_peer_hash", return_value="abc123"),
+            patch.object(screen, "run_worker", side_effect=fake_run_worker),
+        ):
+            screen.action_delete_conversation()
+
+        assert len(captured) == 1
+        fn = captured[0]
+        import inspect
+        assert callable(fn)
+        assert not inspect.iscoroutine(fn)
 
 
 class TestInboxSync:

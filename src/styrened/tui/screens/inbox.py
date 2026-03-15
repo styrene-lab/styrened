@@ -1,13 +1,14 @@
-from __future__ import annotations
-
 """InboxScreen - Conversation list for chat messages.
 
 This screen displays a list of conversations with unread counts and message previews.
 Uses IPCBridge for daemon communication and theme variables for styling.
 """
 
+from __future__ import annotations
+
 import datetime
 import logging
+from functools import partial
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -18,7 +19,6 @@ from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Input, Static, Switch
 
 from styrened.tui.screens.base import StyreneScreen
-
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.ui_state import (
     ConversationScopeKind,
@@ -201,6 +201,11 @@ class InboxScreen(StyreneScreen[None]):
     def _loading_message(self) -> str:
         return "Loading mail…"
 
+    def _run_async_worker(self, fn: Any, *args: Any, **worker_kwargs: Any) -> Any:
+        """Schedule async work with callable-based worker semantics."""
+        work = partial(fn, *args) if args else fn
+        return self.run_worker(work, **worker_kwargs)
+
     def on_mount(self) -> None:
         """Set up the DataTable widget structure, then start the shared load cycle."""
         table = self.query_one("#conversation-table", DataTable)
@@ -212,6 +217,14 @@ class InboxScreen(StyreneScreen[None]):
 
     async def _load_data(self) -> None:
         """Fetch conversations and auto-reply state via the shared StyreneScreen lifecycle."""
+        if self._ipc_bridge is None:
+            self._conversations = []
+            self._mail_index = MailIndexState(threads=(), by_thread_id={})
+            table = self.query_one("#conversation-table", DataTable)
+            table.clear()
+            table.add_row("-", f"[{get_color_cascade().dim}]Chat requires daemon mode[/]", "-", "-", "-")
+            return
+
         await self._load_conversations()
         await self._load_auto_reply_state()
 
@@ -325,7 +338,7 @@ class InboxScreen(StyreneScreen[None]):
             threads.sort(
                 key=lambda thread: (
                     thread.unread_count == 0,
-                    -((thread.latest_message.timestamp if thread.latest_message and thread.latest_message.timestamp is not None else 0)),
+                    -(thread.latest_message.timestamp if thread.latest_message and thread.latest_message.timestamp is not None else 0),
                 )
             )
         elif self._sort_mode == "name":
@@ -361,7 +374,7 @@ class InboxScreen(StyreneScreen[None]):
     def on_switch_changed(self, event: Switch.Changed) -> None:
         """Handle OOO switch toggle."""
         if str(event.switch.id) == "ooo-switch":
-            self.run_worker(self._toggle_auto_reply(event.value))
+            self._run_async_worker(self._toggle_auto_reply, event.value)
 
     async def _toggle_auto_reply(self, enabled: bool) -> None:
         """Toggle auto-reply via IPCBridge."""
@@ -541,21 +554,21 @@ class InboxScreen(StyreneScreen[None]):
         if self._delete_pending == peer_hash:
             # Second press — execute
             self._cancel_delete_timer()
-            self.run_worker(self._execute_delete_conversation(peer_hash), group="inbox-delete")
+            self._run_async_worker(self._execute_delete_conversation, peer_hash, group="inbox-delete")
         else:
             # First press — set pending
             self._delete_pending = peer_hash
             self.notify("Press d again to delete conversation", severity="warning")
             self._cancel_delete_timer()
-            self._delete_timer = self.set_timer(
-                _DELETE_CONFIRM_TIMEOUT, self._cancel_delete_pending
+            self._delete_timer = self._resources.set_timer(
+                "_delete_timer",
+                _DELETE_CONFIRM_TIMEOUT,
+                self._cancel_delete_pending,
             )
 
     def _cancel_delete_timer(self) -> None:
         """Cancel delete confirmation timer."""
-        if self._delete_timer is not None:
-            self._delete_timer.stop()
-            self._delete_timer = None
+        self._resources.stop_timer("_delete_timer")
 
     def _cancel_delete_pending(self) -> None:
         """Cancel delete pending state."""
@@ -614,7 +627,7 @@ class InboxScreen(StyreneScreen[None]):
             pass
 
         # Restore conversation list
-        self.run_worker(self._load_conversations())
+        self._run_async_worker(self._load_conversations)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle compose or search input submission."""
@@ -622,7 +635,7 @@ class InboxScreen(StyreneScreen[None]):
             value = event.value.strip()
             if not value:
                 return
-            self.run_worker(self._resolve_and_open(value), group="inbox-compose")
+            self._run_async_worker(self._resolve_and_open, value, group="inbox-compose")
             return
 
         if event.input.id != "inbox-search-input":
@@ -632,7 +645,7 @@ class InboxScreen(StyreneScreen[None]):
         if len(query) < 2:
             return
 
-        self.run_worker(self._execute_search(query), group="inbox-search")
+        self._run_async_worker(self._execute_search, query, group="inbox-search")
 
     async def _resolve_and_open(self, value: str) -> None:
         """Resolve input to a peer hash and open conversation.
@@ -740,7 +753,7 @@ class InboxScreen(StyreneScreen[None]):
             return
 
         self.notify("Syncing with propagation node...", severity="information")
-        self.run_worker(self._execute_sync(), group="inbox-sync")
+        self._run_async_worker(self._execute_sync, group="inbox-sync")
 
     async def _execute_sync(self) -> None:
         """Execute propagation node sync via IPCBridge."""

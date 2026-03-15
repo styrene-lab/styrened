@@ -1,7 +1,6 @@
 """Tests for ContactsScreen."""
 from __future__ import annotations
 
-import functools
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -9,11 +8,11 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Input, Static
 
 from styrened.tui.app import StyreneApp
-from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
+from styrened.tui.screens.base import StyreneScreen
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.conversation import ConversationScreen
-from styrened.ui_state import WorkspaceId
 from styrened.tui.services.app_lifecycle import LifecycleMode
+from styrened.ui_state import WorkspaceId
 
 
 def _make_mock_lifecycle(contacts=None):

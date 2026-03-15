@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ContactsScreen - Manage contact aliases for mesh peers.
 
 Provides a DataTable of contacts with add, edit, delete, and resolve actions.
@@ -11,6 +9,8 @@ _load_data() call; no-daemon placeholder is rendered screen-locally without
 depending on bridge availability; async follow-up actions (delete, save,
 resolve) use callable worker scheduling instead of eagerly created coroutines.
 """
+
+from __future__ import annotations
 
 import datetime
 import functools
@@ -25,8 +25,7 @@ from textual.coordinate import Coordinate
 from textual.widgets import Button, DataTable, Footer, Header, Input, Static
 
 from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel
-from styrened.tui.widgets.highlighted_panel import get_color_cascade
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +320,7 @@ class ContactsScreen(StyreneScreen[None]):
             peer_hash = str(event.row_key.value)
 
             try:
-                self.bridge  # raises if unavailable
+                _ = self.bridge
             except BridgeUnavailableError:
                 self.notify("Chat requires daemon mode", severity="warning")
                 return
@@ -365,7 +364,7 @@ class ContactsScreen(StyreneScreen[None]):
             return
 
         try:
-            self.bridge
+            _ = self.bridge
         except BridgeUnavailableError:
             self.notify("Chat requires daemon mode", severity="warning")
             return
