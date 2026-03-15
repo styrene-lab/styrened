@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "changeName": "screen-lifecycle-screen-content-primitive",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T07:36:41.853Z",
+  "summary": "Manual verification passed for the screen-content host implementation. Verified the new ScreenContentHost and Exchange integration with ruff plus focused regression coverage for lazy active-pane-only startup, tab-switch-triggered pane activation, and suspend/unmount cleanup fan-out. Focused pytest batch passed: tests/tui/screens/test_exchange_lifecycle.py tests/tui/screens/test_contacts.py tests/tui/screens/test_inbox.py (31 passed).",
+  "snapshot": {
+    "gitHead": "7c7fcaf3073241ac82c2dc78a36feb0de6b06559",
+    "fingerprint": "29e6a44c5c267b13fd8bd8da4451cc9551d0c1b7a8cc903a6a2cb0d0b896b594",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/tui/lifecycle/screen_content.py",
+      "src/styrened/tui/screens/exchange.py",
+      "src/styrened/tui/screens/exchange_tabs.py",
+      "tests/tui/screens/test_exchange_lifecycle.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/screen-lifecycle-screen-content-primitive/design.md",
+        "exists": true,
+        "size": 3856,
+        "sha256": "8d334cabb42b4f17c45703ca6c710a5ed87720999d62a9e50cb024446ca46b55"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-screen-content-primitive/proposal.md",
+        "exists": true,
+        "size": 797,
+        "sha256": "7fda53d08a9698a2e7bc8dccfec0b0e4c87931486d683feda8e1452c2dd733f4"
+      },
+      {
+        "path": "openspec/changes/screen-lifecycle-screen-content-primitive/tasks.md",
+        "exists": true,
+        "size": 1455,
+        "sha256": "f73012dc59265642513e98fb6754b761dd86b5bd5e244ee60d0839fca65f523a"
+      },
+      {
+        "path": "src/styrened/tui/lifecycle/screen_content.py",
+        "exists": true,
+        "size": 4844,
+        "sha256": "3278f20c83053b898e8052e1405012460cd4d1d1719e97e2eb4615c682a657cb"
+      },
+      {
+        "path": "src/styrened/tui/screens/exchange.py",
+        "exists": true,
+        "size": 38959,
+        "sha256": "2fa06eb2dce860208f2c3fc3fa33d7380f3ec2e68ccd43c3dddbee425cafd744"
+      },
+      {
+        "path": "src/styrened/tui/screens/exchange_tabs.py",
+        "exists": true,
+        "size": 27028,
+        "sha256": "3669a7e4291f33b1f81cfe83ccb2ce946062c1e2425b8122aef071347f0b3bd1"
+      },
+      {
+        "path": "tests/tui/screens/test_exchange_lifecycle.py",
+        "exists": true,
+        "size": 5452,
+        "sha256": "326df0ad3d62e4fe9954aa5f6a84ddf43dcbf036fd3daa06caa588c4ee22ef7a"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/tui/lifecycle/__init__.py",
+      "src/styrened/tui/lifecycle/screen_content.py",
+      "src/styrened/tui/screens/exchange.py",
+      "src/styrened/tui/screens/exchange_tabs.py",
+      "tests/tui/screens/test_exchange_lifecycle.py",
+      "docs/screen-lifecycle-screen-content-primitive.md"
+    ],
+    "constraints": [
+      "Parent screen remains explicit owner of tab navigation and the shared control bridge.",
+      "Hidden panes do not eagerly fetch on parent mount; only the active slot is activated.",
+      "Pane-local worker ownership uses WidgetResourceScope/callable worker scheduling rather than host-owned ad hoc cleanup."
+    ],
+    "recommendedAction": null
+  }
+}

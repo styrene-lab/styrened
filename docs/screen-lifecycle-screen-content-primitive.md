@@ -1,10 +1,12 @@
 ---
 id: screen-lifecycle-screen-content-primitive
 title: Reusable screen-content lifecycle primitive
-status: decided
+status: implemented
 parent: screen-lifecycle-remaining-screen-surfaces
 related: [screen-lifecycle-widget-resource-primitives]
 open_questions: []
+branches: ["feature/screen-lifecycle-screen-content-primitive"]
+openspec_change: screen-lifecycle-screen-content-primitive
 issue_type: task
 priority: 1
 ---
@@ -27,6 +29,10 @@ Define a narrow parent-owned lifecycle host for embedded live panes inside aggre
 ### A parent-owned content host keeps ownership explicit while enabling reusable pane hooks
 
 The clearest reusable shape is a small parent-owned lifecycle host or controller that registers named content slots and forwards `activate`, `deactivate`, `resume`, `suspend`, and final `cleanup` transitions to the currently relevant pane. This keeps tab selection, workspace navigation, and shared control-bridge ownership at the parent screen, while each pane keeps its own rendering and resource ownership. The host can standardize lazy first activation, cancellation/deactivation ordering when tabs switch, and screen-suspend cleanup without forcing embedded panes to masquerade as full `Screen` subclasses.
+
+### Implementation validation: Exchange now lazily activates embedded panes
+
+`ScreenContentHost` now owns Exchange pane lifecycle fan-out, `ExchangeDirectTab`/`ExchangeContactsTab` refresh only through explicit `activate_content`/`resume_content` hooks, and targeted regression coverage verifies active-pane-only startup, tab-switch-triggered lazy loads, and suspend/unmount cleanup delegation (`tests/tui/screens/test_exchange_lifecycle.py`).
 
 ## Decisions
 
@@ -52,6 +58,8 @@ The clearest reusable shape is a small parent-owned lifecycle host or controller
 - `src/styrened/tui/screens/exchange.py` (modified) — First proving ground: register tab panes with the screen-content host and forward tab/screen lifecycle transitions through it.
 - `src/styrened/tui/screens/exchange_tabs.py` (modified) — Adapt Direct/Contacts embedded panes to explicit activate/deactivate/resume/suspend hooks rather than ad hoc mount/resume fetches.
 - `tests/tui/screens/test_exchange_lifecycle.py` (new) — Regression coverage for lazy first activation, tab-switch deactivation ordering, and suspend/unmount cleanup fan-out.
+- `src/styrened/tui/lifecycle/__init__.py` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `docs/screen-lifecycle-screen-content-primitive.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
@@ -59,35 +67,14 @@ The clearest reusable shape is a small parent-owned lifecycle host or controller
 - Hidden panes must not eagerly fetch on parent mount unless they are the active content slot.
 - Pane-local timers, workers, and auxiliary lanes should compose with `WidgetResourceScope` or equivalent local helpers instead of reintroducing ad hoc cleanup logic inside the host.
 - The primitive must work with embedded widgets/panes; it must not require every live pane to become a full `Screen` subclass.
+- Parent screen remains explicit owner of tab navigation and the shared control bridge.
+- Hidden panes do not eagerly fetch on parent mount; only the active slot is activated.
+- Pane-local worker ownership uses WidgetResourceScope/callable worker scheduling rather than host-owned ad hoc cleanup.
 
 ## Acceptance Criteria
 
-### Scenarios
-
-#### Scenario 1: Initial mount activates only the visible pane
-
-Given a parent workspace registers multiple embedded live content slots
-When the screen mounts with one tab already active
-Then the lifecycle host activates only that visible pane
-And hidden panes do not start their first refresh just because they were mounted in the DOM
-
-#### Scenario 2: Tab switches deactivate the previous pane before activating the next one
-
-Given one embedded pane is active and another pane becomes active through parent navigation
-When the parent forwards the tab change to the lifecycle host
-Then the previous pane receives a deactivation/suspend transition before the new pane begins its refresh
-And the newly active pane receives an activation/refresh transition without requiring full-screen remount
-
-#### Scenario 3: Screen suspend and unmount fan out cleanup without stealing parent ownership
-
-Given an embedded pane owns timers, workers, or auxiliary lanes
-When the parent screen is suspended or unmounted
-Then the lifecycle host forwards suspend/cleanup to the relevant pane content
-And pane-owned resources are released locally
-And the shared control bridge remains parent-owned rather than being disconnected by the helper
-
 ### Falsifiability
 
-- This design is wrong if the helper only works by turning embedded panes into subclasses of a heavyweight universal screen base.
-- This design is wrong if hidden panes still eagerly fetch on initial parent mount, reintroducing the startup pressure this helper is meant to avoid.
-- This design is wrong if the helper obscures ownership so completely that parent navigation, shared-bridge access, and pane-local cleanup responsibilities are no longer obvious.
+- This decision is wrong if: This design is wrong if the helper only works by turning embedded panes into subclasses of a heavyweight universal screen base.
+- This decision is wrong if: This design is wrong if hidden panes still eagerly fetch on initial parent mount, reintroducing the startup pressure this helper is meant to avoid.
+- This decision is wrong if: This design is wrong if the helper obscures ownership so completely that parent navigation, shared-bridge access, and pane-local cleanup responsibilities are no longer obvious.
