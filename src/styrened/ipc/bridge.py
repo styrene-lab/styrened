@@ -67,17 +67,38 @@ class IPCBridge:
         socket_path: Path | None = None,
         timeout: float = 30.0,
         auto_reconnect: bool = True,
+        traffic_class: str = "control",
     ) -> None:
         self._socket_path = socket_path or get_default_socket_path()
         self._timeout = timeout
         self._auto_reconnect = auto_reconnect
+        self._traffic_class = traffic_class
         self._client: ControlClient | None = None
         self._connected = False
         self._reconnect_task: asyncio.Task | None = None
 
+    def spawn_lane(self, traffic_class: str) -> "IPCBridge":
+        """Create a sibling bridge with the same transport settings.
+
+        The new bridge is disconnected initially, so callers can lazily spin up
+        a separate IPC lane for slower or differently-prioritized workloads
+        without increasing baseline startup demand.
+        """
+        return IPCBridge(
+            socket_path=self._socket_path,
+            timeout=self._timeout,
+            auto_reconnect=self._auto_reconnect,
+            traffic_class=traffic_class,
+        )
+
     @property
     def connected(self) -> bool:
         return self._connected and self._client is not None and self._client.connected
+
+    @property
+    def traffic_class(self) -> str:
+        """Logical IPC lane purpose for observability and traffic shaping."""
+        return self._traffic_class
 
     async def connect(self) -> bool:
         """Connect to the daemon.
@@ -96,7 +117,11 @@ class IPCBridge:
             await self._client.connect()
             if await self._client.ping(timeout=3.0):
                 self._connected = True
-                logger.info(f"IPCBridge connected to {self._socket_path}")
+                logger.info(
+                    "IPCBridge(%s) connected to %s",
+                    self._traffic_class,
+                    self._socket_path,
+                )
                 return True
             else:
                 await self._client.disconnect()
@@ -126,7 +151,7 @@ class IPCBridge:
                 pass
             self._client = None
 
-        logger.debug("IPCBridge disconnected")
+        logger.debug("IPCBridge(%s) disconnected", self._traffic_class)
 
     async def _ensure_connected(self) -> ControlClient:
         """Ensure we have a live connection, attempting reconnect if needed.

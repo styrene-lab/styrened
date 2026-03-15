@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tui-pages-browser-ipc-isolation",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T00:23:48.906Z",
+  "summary": "Manual spec verification passed. Page browsing now uses a lazy dedicated execution IPC lane via IPCBridge.spawn_lane() so slow page fetches no longer monopolize the shared control bridge. Targeted and broader regressions passed (241 total in the broader batch), live probing against the dev daemon confirmed control-lane get_status() stayed immediate while a stale-node page fetch continued on the execution lane, and the remaining unawaited-coroutine test warning was eliminated by passing async callables into run_worker instead of eagerly creating coroutine objects.",
+  "snapshot": {
+    "gitHead": "2c70bb0449077e91686e75fbe4ae2f9cdd90c819",
+    "fingerprint": "677efd42bf3dca98d6abcca44b77f0c1528b16293ce47cbef87d81e8b892efef",
+    "dirty": true,
+    "scopedPaths": [
+      "src/styrened/ipc/bridge.py",
+      "src/styrened/tui/widgets/page_browser.py",
+      "tests/tui/services/test_ipc_bridge.py",
+      "tests/tui/widgets/test_page_browser.py"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/tui-pages-browser-ipc-isolation/design.md",
+        "exists": true,
+        "size": 1895,
+        "sha256": "9c515a7317108ece1e4f64051aae945620aebfccef37c51390f244f46dea3252"
+      },
+      {
+        "path": "openspec/changes/tui-pages-browser-ipc-isolation/proposal.md",
+        "exists": true,
+        "size": 633,
+        "sha256": "55b02fb942ebcd43a26d95daa4918d47970b3f8fe3bfb6b21b90b390e9f8cc4f"
+      },
+      {
+        "path": "openspec/changes/tui-pages-browser-ipc-isolation/specs/tui/pages-browser-ipc.md",
+        "exists": true,
+        "size": 1986,
+        "sha256": "02ba1872c4dd6d22200b3c06f5378c71caeff0cbc1c7c36f40fd6e4396525e95"
+      },
+      {
+        "path": "openspec/changes/tui-pages-browser-ipc-isolation/tasks.md",
+        "exists": true,
+        "size": 1023,
+        "sha256": "9749556252adeed1c979e55ab3954b94399238735cb901d0358bde2882227188"
+      },
+      {
+        "path": "src/styrened/ipc/bridge.py",
+        "exists": true,
+        "size": 28996,
+        "sha256": "df5eb913e34511711ac52b8f96aa0b8049f5c93ab26fa7f35d821f60a7a460cd"
+      },
+      {
+        "path": "src/styrened/tui/widgets/page_browser.py",
+        "exists": true,
+        "size": 37231,
+        "sha256": "8e2db2bdb9fc96e2ef884a4984d75f18a7130801a7602cca1b314e1fa1a48689"
+      },
+      {
+        "path": "tests/tui/services/test_ipc_bridge.py",
+        "exists": true,
+        "size": 23549,
+        "sha256": "7728ecc08e517aceb1aa90d98a457b6f5326e2c569f2e67d9fc9c1314c363805"
+      },
+      {
+        "path": "tests/tui/widgets/test_page_browser.py",
+        "exists": true,
+        "size": 15241,
+        "sha256": "ba4245f3b76aff3e933c5201346c1bc7720fe2b15e82d1fb986fab9bf13aed89"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "src/styrened/ipc/bridge.py",
+      "src/styrened/tui/widgets/page_browser.py",
+      "tests/tui/services/test_ipc_bridge.py",
+      "tests/tui/widgets/test_page_browser.py"
+    ],
+    "constraints": [
+      "Keep the shared app bridge as the control lane; page isolation remains lazy so startup demand does not grow.",
+      "A slow page fetch may remain slow, but it must not monopolize the normal control/status lane.",
+      "Use callable/partial inputs to run_worker in mock-heavy widgets to avoid unawaited-coroutine warnings from patched run_worker."
+    ],
+    "recommendedAction": null
+  }
+}

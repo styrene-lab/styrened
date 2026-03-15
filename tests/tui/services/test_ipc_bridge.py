@@ -102,6 +102,17 @@ class TestIPCBridgeInit:
         bridge = IPCBridge()
         assert bridge.connected is False
 
+    def test_spawn_lane_clones_transport_settings(self):
+        bridge = IPCBridge(timeout=60.0, auto_reconnect=False, traffic_class="control")
+
+        lane = bridge.spawn_lane("execution")
+
+        assert lane is not bridge
+        assert lane._socket_path == bridge._socket_path
+        assert lane._timeout == 60.0
+        assert lane._auto_reconnect is False
+        assert lane.traffic_class == "execution"
+
 
 # ===================================================================
 # Connect

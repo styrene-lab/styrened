@@ -5,7 +5,7 @@ Covers widget initialization, page loading, navigation, and error handling.
 from __future__ import annotations
 
 
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -151,6 +151,66 @@ class TestPageBrowserLoadPage:
             await widget._load_page("/page/index.mu")
 
         assert widget.loading is False
+
+
+class TestPageBrowserTrafficIsolation:
+    """Tests for dedicated page-browsing IPC lane behavior."""
+
+    @pytest.mark.asyncio
+    async def test_get_page_bridge_spawns_execution_lane_once(self):
+        widget = PageBrowserWidget(destination_hash="abc")
+
+        shared_bridge = MagicMock()
+        page_bridge = MagicMock()
+        page_bridge.connected = False
+        page_bridge.connect = AsyncMock(return_value=True)
+        shared_bridge.spawn_lane = Mock(return_value=page_bridge)
+
+        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
+            first = await widget._get_page_bridge()
+            second = await widget._get_page_bridge()
+
+        assert first is page_bridge
+        assert second is page_bridge
+        shared_bridge.spawn_lane.assert_called_once_with("execution")
+        page_bridge.connect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_load_page_prefers_dedicated_page_lane(self):
+        widget = PageBrowserWidget(destination_hash="abc")
+
+        shared_bridge = MagicMock()
+        shared_bridge.fetch_page = AsyncMock(side_effect=AssertionError("shared bridge should not fetch pages"))
+
+        page_bridge = MagicMock()
+        page_bridge.connected = True
+        page_bridge.fetch_page = AsyncMock(return_value={
+            "status": "ok",
+            "content": ">Welcome\nHello world",
+            "transfer_time": 0.5,
+            "content_length": 25,
+        })
+        page_bridge.page_get_cached = AsyncMock(return_value=None)
+        shared_bridge.spawn_lane = Mock(return_value=page_bridge)
+
+        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
+            widget.query_one = MagicMock(side_effect=Exception("No DOM"))
+            await widget._load_page("/page/index.mu")
+
+        shared_bridge.fetch_page.assert_not_called()
+        page_bridge.fetch_page.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_page_bridge_skips_shared_bridge(self):
+        widget = PageBrowserWidget(destination_hash="abc")
+        shared_bridge = MagicMock()
+        widget._page_bridge = shared_bridge
+
+        with patch.object(type(widget), "_ipc_bridge", property(lambda s: shared_bridge)):
+            await widget._disconnect_page_bridge()
+
+        shared_bridge.disconnect.assert_not_called()
+        assert widget._page_bridge is None
 
 
 class TestPageBrowserLinkClick:

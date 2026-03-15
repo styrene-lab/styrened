@@ -106,11 +106,12 @@ class TestDashboardUnreadDisplay:
         bridge = MagicMock()
         bridge.get_status = AsyncMock(return_value={"rns_initialized": True, "interfaces": [], "uptime": 10, "active_links": 0})
         bridge.get_hub_status = AsyncMock(return_value={"status": "connected"})
-        bridge.get_core_config = AsyncMock(return_value={})
-        bridge.get_conversations = AsyncMock(return_value=[
-            {"identity_hash": sample_devices[0].identity_hash, "unread_count": 3},
-            {"identity_hash": sample_devices[1].identity_hash, "unread_count": 1},
-        ])
+        bridge.get_unread_counts = AsyncMock(return_value={
+            "counts": {
+                sample_devices[0].identity_hash: 3,
+                sample_devices[1].identity_hash: 1,
+            }
+        })
 
         def query_one_side_effect(widget_type):
             from styrened.tui.widgets.cop_activity_summary import CopActivitySummary

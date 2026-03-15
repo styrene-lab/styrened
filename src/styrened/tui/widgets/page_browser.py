@@ -22,6 +22,7 @@ import logging
 import os
 import urllib.parse
 from enum import Enum, auto
+from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
@@ -177,14 +178,67 @@ class PageBrowserWidget(Widget):
         self._mesh_device: Any | None = None  # MeshDevice for transport selector
         self._active_transport: Transport | None = None
         self._last_content_kind: ContentKind = ContentKind.MICRON
+        self._page_bridge: Any | None = None
 
     @property
     def _ipc_bridge(self) -> Any | None:
-        """Get IPCBridge from app lifecycle."""
+        """Get the app's shared control-plane IPC bridge."""
         try:
             return self.app.services.bridge
         except Exception:
             return None
+
+    async def _get_page_bridge(self) -> Any | None:
+        """Get or lazily create the long-running page-browsing IPC lane."""
+        if self._page_bridge is not None:
+            return self._page_bridge
+
+        shared_bridge = self._ipc_bridge
+        if shared_bridge is None:
+            return None
+
+        page_bridge = shared_bridge
+        spawn_lane = getattr(shared_bridge, "spawn_lane", None)
+        if callable(spawn_lane):
+            page_bridge = spawn_lane("execution")
+
+        if page_bridge is not shared_bridge:
+            connected = getattr(page_bridge, "connected", False)
+            if not connected:
+                ok = await page_bridge.connect()
+                if not ok:
+                    return None
+
+        self._page_bridge = page_bridge
+        return page_bridge
+
+    async def _disconnect_page_bridge(self) -> None:
+        """Disconnect the dedicated page lane when this widget unmounts."""
+        page_bridge = self._page_bridge
+        self._page_bridge = None
+        if page_bridge is None or page_bridge is self._ipc_bridge:
+            return
+        try:
+            await page_bridge.disconnect()
+        except Exception:
+            logger.debug("Failed to disconnect page bridge", exc_info=True)
+
+    def _run_async_worker(
+        self,
+        fn: Any,
+        *args: Any,
+        **worker_kwargs: Any,
+    ) -> None:
+        """Schedule async work without creating bare coroutine objects eagerly.
+
+        Passing a coroutine object directly to ``run_worker`` is valid at runtime,
+        but it leaks unawaited-coroutine warnings in tests that patch
+        ``run_worker`` with a plain mock. Passing the async callable (or a
+        ``functools.partial`` of it) preserves runtime behavior while avoiding
+        those warnings in mock-heavy unit tests.
+        """
+        work = partial(fn, *args) if args else fn
+        self.run_worker(work, **worker_kwargs)
 
     @property
     def _is_external_mode(self) -> bool:
@@ -254,7 +308,17 @@ class PageBrowserWidget(Widget):
         if not self.destination_hash and not self._external_url:
             return  # deferred — waiting for set_destination() / set_external_url()
         target = self._external_url or self._initial_path
-        self.run_worker(self._load_page(target), exclusive=True)
+        self._run_async_worker(self._load_page, target, exclusive=True)
+
+    def on_unmount(self) -> None:
+        """Tear down any dedicated page-browsing IPC lane."""
+        if self._page_bridge is None:
+            return
+        self._run_async_worker(
+            self._disconnect_page_bridge,
+            exclusive=False,
+            group="page-bridge-disconnect",
+        )
 
     async def _load_page(self, path: str) -> None:
         """Fetch and render a page.
@@ -262,7 +326,7 @@ class PageBrowserWidget(Widget):
         Args:
             path: Page path to fetch.
         """
-        bridge = self._ipc_bridge
+        bridge = await self._get_page_bridge()
         if bridge is None:
             self._set_error("Page browsing requires daemon mode")
             return
@@ -476,11 +540,11 @@ class PageBrowserWidget(Widget):
             return
 
         previous_path = self._history.pop()
-        self.run_worker(self._load_page(previous_path), exclusive=True)
+        self._run_async_worker(self._load_page, previous_path, exclusive=True)
 
     def action_reload(self) -> None:
         """Reload the current page."""
-        self.run_worker(self._load_page(self.current_path), exclusive=True)
+        self._run_async_worker(self._load_page, self.current_path, exclusive=True)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Hide the open_in_browser action in headless environments."""
@@ -558,7 +622,7 @@ class PageBrowserWidget(Widget):
             self._external_url = ""
             self.destination_hash = nomadnet_dest
             self.notify(f"Switched to {label} transport")
-            self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
+            self._run_async_worker(self._load_page, "/page/index.mu", exclusive=True)
 
         elif self._active_transport == Transport.I2P:
             # Switch to I2P mode — set fields directly, one worker
@@ -567,7 +631,7 @@ class PageBrowserWidget(Widget):
             self._external_url = url
             self.destination_hash = ""
             self.notify(f"Switched to {label} transport")
-            self.run_worker(self._load_page(url), exclusive=True)
+            self._run_async_worker(self._load_page, url, exclusive=True)
 
         elif self._active_transport == Transport.HTTPS:
             # Switch to HTTPS mode — set fields directly, one worker
@@ -575,7 +639,7 @@ class PageBrowserWidget(Widget):
             self._external_url = web_url
             self.destination_hash = ""
             self.notify(f"Switched to {label} transport")
-            self.run_worker(self._load_page(web_url), exclusive=True)
+            self._run_async_worker(self._load_page, web_url, exclusive=True)
 
     def action_focus_url(self) -> None:
         """Open a URL entry modal for manual navigation.
@@ -640,12 +704,12 @@ class PageBrowserWidget(Widget):
             if result.endswith(".i2p") or result.startswith("http://") or result.startswith("https://"):
                 # External URL — switch to external mode and navigate
                 self.set_external_url(result)
-                self.run_worker(self._load_page(result), exclusive=True, group="page-load")
+                self._run_async_worker(self._load_page, result, exclusive=True, group="page-load")
             else:
                 # Treat as NomadNet destination hash or path
                 if self._is_external_mode:
                     self.set_external_url("")  # exit external mode
-                self.run_worker(self._load_page(result), exclusive=True, group="page-load")
+                self._run_async_worker(self._load_page, result, exclusive=True, group="page-load")
 
         self.app.push_screen(_UrlInputScreen(), _handle_url)
 
@@ -654,11 +718,11 @@ class PageBrowserWidget(Widget):
         if self._is_external_mode:
             self.notify("Save Site is only available for NomadNet nodes", severity="warning")
             return
-        self.run_worker(self._do_save_site(), exclusive=True, group="page-save")
+        self._run_async_worker(self._do_save_site, exclusive=True, group="page-save")
 
     async def _do_save_site(self) -> None:
         """Save site via IPC."""
-        bridge = self._ipc_bridge
+        bridge = await self._get_page_bridge()
         if bridge is None:
             self.notify("Requires daemon mode", severity="error")
             return
@@ -678,11 +742,11 @@ class PageBrowserWidget(Widget):
         if self._is_external_mode:
             self.notify("Crawl is only available for NomadNet nodes", severity="warning")
             return
-        self.run_worker(self._do_crawl_site(), exclusive=True, group="page-crawl")
+        self._run_async_worker(self._do_crawl_site, exclusive=True, group="page-crawl")
 
     async def _do_crawl_site(self) -> None:
         """Crawl site via IPC."""
-        bridge = self._ipc_bridge
+        bridge = await self._get_page_bridge()
         if bridge is None:
             self.notify("Requires daemon mode", severity="error")
             return
@@ -808,7 +872,7 @@ class PageBrowserWidget(Widget):
         if form_data:
             if self.current_path:
                 self._history.append(self.current_path)
-            self.run_worker(self._load_page_with_form(path, form_data), exclusive=True)
+            self._run_async_worker(self._load_page_with_form, path, form_data, exclusive=True)
         else:
             self.navigate(path)
 
@@ -818,7 +882,7 @@ class PageBrowserWidget(Widget):
             self._set_error("Form submission is only supported for NomadNet pages")
             return
 
-        bridge = self._ipc_bridge
+        bridge = await self._get_page_bridge()
         if bridge is None:
             self._set_error("Page browsing requires daemon mode")
             return
@@ -879,7 +943,7 @@ class PageBrowserWidget(Widget):
         self._external_url = ""
         self._history.clear()
         self.current_path = "/page/index.mu"
-        self.run_worker(self._load_page("/page/index.mu"), exclusive=True)
+        self._run_async_worker(self._load_page, "/page/index.mu", exclusive=True)
 
     def set_external_url(self, url: str) -> None:
         """Change target to an explicit external URL and reload it."""
@@ -887,7 +951,7 @@ class PageBrowserWidget(Widget):
         self._external_url = url
         self._history.clear()
         self.current_path = url
-        self.run_worker(self._load_page(url), exclusive=True)
+        self._run_async_worker(self._load_page, url, exclusive=True)
 
     def navigate(self, path: str) -> None:
         """Navigate to a new page path.
@@ -899,4 +963,4 @@ class PageBrowserWidget(Widget):
         """
         if self.current_path:
             self._history.append(self.current_path)
-        self.run_worker(self._load_page(path), exclusive=True)
+        self._run_async_worker(self._load_page, path, exclusive=True)
