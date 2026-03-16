@@ -23,6 +23,7 @@ from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, S
 from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.exchange import ExchangeScreen
+from styrened.tui.screens.global_cop import GlobalCopScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
 from styrened.tui.screens.splash import SplashScreen
 from styrened.tui.screens.dashboard import DashboardScreen
@@ -132,6 +133,7 @@ class StyreneApp(App[None]):
         "dashboard": DashboardScreen,
         "exchange": ExchangeScreen,
         "exploration": ExplorationScreen,
+        "global_cop": GlobalCopScreen,
         "provision": ProvisionScreen,
     }
 
@@ -183,8 +185,8 @@ class StyreneApp(App[None]):
         self.action_open_admin()
 
     def action_open_global_cop(self) -> None:
-        """Open the Global COP workspace (placeholder until screen is implemented)."""
-        self.notify("Global COP — coming soon", severity="information", timeout=2)
+        """Toggle the Global COP workspace."""
+        self._toggle_screen("global_cop")
 
     def action_open_nodes(self) -> None:
         """Toggle the Mesh/Nodes workspace."""

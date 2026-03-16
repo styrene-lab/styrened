@@ -1,7 +1,7 @@
 ---
 id: tui-global-cop-surface
 title: TUI Global COP Surface
-status: resolved
+status: implemented
 parent: tui-startup-ipc-backpressure
 open_questions: []
 issue_type: feature
