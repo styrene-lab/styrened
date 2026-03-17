@@ -1323,7 +1323,11 @@ class ExecResultInfo:
 
 @dataclass
 class RemoteStatusInfo:
-    """Remote device status information."""
+    """Remote device status information.
+
+    Mirrors rpc.messages.StatusResponse fields so the IPC layer passes
+    system info through to TUI widgets without truncation.
+    """
 
     uptime: float
     ip: str
@@ -1331,9 +1335,15 @@ class RemoteStatusInfo:
     disk_used: int
     disk_total: int
     available_commands: list[str] = field(default_factory=list)
+    hostname: str | None = None
+    arch: str | None = None
+    os_id: str | None = None
+    os_version: str | None = None
+    nixos_generation: str | None = None
+    styrened_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "uptime": self.uptime,
             "ip": self.ip,
             "services": self.services,
@@ -1341,6 +1351,19 @@ class RemoteStatusInfo:
             "disk_total": self.disk_total,
             "available_commands": self.available_commands,
         }
+        if self.hostname:
+            d["hostname"] = self.hostname
+        if self.arch:
+            d["arch"] = self.arch
+        if self.os_id:
+            d["os_id"] = self.os_id
+        if self.os_version:
+            d["os_version"] = self.os_version
+        if self.nixos_generation:
+            d["nixos_generation"] = self.nixos_generation
+        if self.styrened_version:
+            d["styrened_version"] = self.styrened_version
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RemoteStatusInfo:
@@ -1351,7 +1374,31 @@ class RemoteStatusInfo:
             disk_used=data.get("disk_used", 0),
             disk_total=data.get("disk_total", 0),
             available_commands=data.get("available_commands", []),
+            hostname=data.get("hostname"),
+            arch=data.get("arch"),
+            os_id=data.get("os_id"),
+            os_version=data.get("os_version"),
+            nixos_generation=data.get("nixos_generation"),
+            styrened_version=data.get("styrened_version"),
         )
+
+    def format_uptime(self) -> str:
+        """Format uptime as human-readable string."""
+        uptime = int(self.uptime)
+        days, remainder = divmod(uptime, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts: list[str] = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        if seconds > 0 or not parts:
+            parts.append(f"{seconds}s")
+        return " ".join(parts)
 
 
 @dataclass
