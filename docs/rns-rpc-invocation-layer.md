@@ -4,9 +4,7 @@ title: Protobuf-over-RNS — Structured RPC Invocation Layer
 status: exploring
 parent: wire-protocol-idl
 tags: [architecture, rpc, protobuf, rns, wire-protocol, grpc-inspired]
-open_questions:
-  - Should Styrene migrate Link-based RPC from StyreneEnvelope-over-LXMF to native RNS Channel MessageBase types, keeping LXMF only for async store-and-forward?
-  - "Is the protobuf dependency acceptable on target hardware (Pi Zero 2W, RP2040, ESP32), or should the IDL generate msgpack-based pack/unpack instead?"
+open_questions: []
 ---
 
 # Protobuf-over-RNS — Structured RPC Invocation Layer
@@ -85,7 +83,23 @@ Mapping gRPC concepts to RNS primitives:
 
 **Practical concern**: protobuf adds ~2MB Python dependency and C extension compilation on ARM. An alternative is to keep msgpack but generate the pack/unpack methods from a schema — getting the IDL benefit without changing serialization.
 
+## Decisions
+
+### Decision: Migrate Link-based RPC to native RNS Channel MessageBase types; LXMF stays on StyreneEnvelope
+
+**Status:** decided
+**Rationale:** Link-based communication (status, exec, terminal, file transfer, VPN handshake) moves to RNS Channel with IDL-generated MessageBase subclasses. LXMF store-and-forward (chat, offline RPC, announce-based discovery) stays on the existing msgpack StyreneEnvelope — it's the right tool for async delivery where no connection exists.
+
+### Decision: Use msgpack for payload encoding with a schema IDL for codegen — no protobuf dependency
+
+**Status:** decided
+**Rationale:** msgpack is already a dependency of RNS/LXMF, works on all target hardware (ARM SBCs, ESP32, RP2040), and keeps the ecosystem consistent. The IDL generates pack()/unpack() methods that serialize to msgpack, not protobuf wire format. This gets the schema-driven codegen benefit without adding a heavy binary dependency or mixing serialization formats.
+
+### Decision: Proceed with TOML schema IDL + msgpack codegen for both Python and Rust
+
+**Status:** decided
+**Rationale:** Operator decided: define the schema, generate code, keep msgpack. The IDL simplifies the Rust port by providing a single source of truth for all 50+ message types. Codegen produces RNS Channel MessageBase subclasses (Python) and serde-derived structs (Rust) from the same schema file.
+
 ## Open Questions
 
-- Should Styrene migrate Link-based RPC from StyreneEnvelope-over-LXMF to native RNS Channel MessageBase types, keeping LXMF only for async store-and-forward?
-- Is the protobuf dependency acceptable on target hardware (Pi Zero 2W, RP2040, ESP32), or should the IDL generate msgpack-based pack/unpack instead?
+*No open questions.*
