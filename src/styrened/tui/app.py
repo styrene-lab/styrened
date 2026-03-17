@@ -493,6 +493,28 @@ class StyreneApp(App[None]):
         if theme_name != self.theme:
             self.theme = theme_name
 
+    async def prepare_for_dashboard(self) -> bool:
+        """Initialize services and prime the device cache.
+
+        Called by SplashScreen before dismissing so the dashboard has
+        data on first paint.  Safe to call multiple times — idempotent.
+
+        Returns True if at least some mesh nodes were discovered.
+        """
+        if not getattr(self, "_services_initialized", False):
+            await self._initialize_services()
+            self._services_initialized = True
+
+        # Prime cache synchronously so nodes are available immediately
+        cache = self.device_cache
+        if cache._bridge is not None:
+            try:
+                await cache._do_refresh()
+            except Exception:
+                pass
+
+        return bool(cache.get())
+
     async def _initialize_services(self) -> None:
         """Initialize all services asynchronously via IPC.
 

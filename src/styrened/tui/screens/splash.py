@@ -324,48 +324,37 @@ class SplashScreen(Screen[bool]):
         that to land and propagate back via IPC.  The 5s cap prevents the
         splash from hanging if the mesh is truly empty.
         """
-        # Initialise services and prime the device cache so the dashboard
-        # has nodes on first paint.  We do NOT push screens here — the
-        # splash callback handles navigation after dismiss.
-        try:
-            app = self.app
-            init = getattr(app, "_initialize_services", None)
-            if init:
-                await init()
-                app._services_initialized = True
-            # Wire bridge into cache and trigger immediate prime
-            bridge = getattr(getattr(app, "_lifecycle", None), "_ipc_bridge", None)
-            if bridge is None:
-                bridge = getattr(app, "bridge", None)
-            cache = getattr(app, "device_cache", None)
-            if cache:
-                if bridge:
-                    cache.update_bridge(bridge)
-                # Prime the cache directly — don't wait for timers
-                try:
-                    await cache._do_refresh()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
         checklist.set_item(1, _ACTIVE)  # mesh discovery
-        status.update("discovering mesh nodes…")
+        status.update("initialising services…")
 
-        for tick in range(20):  # 20 × 0.25s = 5s max
-            await asyncio.sleep(0.25)
+        # Use the app's public API — no reaching into private attributes
+        app = self.app
+        prepare = getattr(app, "prepare_for_dashboard", None)
+        has_nodes = False
+
+        if prepare:
             try:
-                cache = getattr(self.app, "device_cache", None)
-                if cache and cache.get():
-                    break
-                # Re-prime if first attempt returned empty
-                if cache and tick in (4, 8, 12):
-                    try:
-                        await cache._do_refresh()
-                    except Exception:
-                        pass
+                has_nodes = await prepare()
             except Exception:
                 pass
+
+        if has_nodes:
+            checklist.finish_all()
+            status.update(_STATUS_DONE)
+            await asyncio.sleep(0.3)
+            return
+
+        # No nodes yet — poll for up to 5s as announces trickle in
+        status.update("discovering mesh nodes…")
+        for tick in range(20):  # 20 × 0.25s = 5s max
+            await asyncio.sleep(0.25)
+            if prepare:
+                try:
+                    has_nodes = await prepare()
+                    if has_nodes:
+                        break
+                except Exception:
+                    pass
             # Update checklist progression while waiting
             if tick == 4:  # 1s
                 checklist.set_item(1, _DONE)
