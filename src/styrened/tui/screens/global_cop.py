@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
+from textual.timer import Timer
 from textual.widgets import Footer, Header
 
 from styrened.ipc.protocol import IPCMessageType
@@ -35,6 +36,12 @@ _STYRENE_TYPES = {DeviceType.STYRENE_NODE}
 
 # Debounce device-change events to avoid bursty re-fetches
 _EVENT_DEBOUNCE: float = 5.0
+
+# Status bar refresh: uptime, links, hub state — cheap IPC, keep current
+_STATUS_REFRESH_INTERVAL: float = 10.0
+
+# Full fleet safety-net refresh — catches anything events missed
+_FLEET_REFRESH_INTERVAL: float = 60.0
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
@@ -92,6 +99,8 @@ class GlobalCopScreen(StyreneScreen[None]):
         super().__init__(*args, **kwargs)
         self._activity_worker = None
         self._last_event_refresh: float = 0.0
+        self._status_timer: Timer | None = None
+        self._fleet_timer: Timer | None = None
 
     # ------------------------------------------------------------------
     # StyreneScreen hooks
@@ -101,7 +110,7 @@ class GlobalCopScreen(StyreneScreen[None]):
         return "Loading COP data…"
 
     async def _acquire_lanes(self) -> None:
-        """Start activity subscription at mount/resume (not lazily)."""
+        """Start activity subscription and periodic timers at mount/resume."""
         if self._activity_worker is not None:
             # Already running — don't double-subscribe
             return
@@ -110,12 +119,30 @@ class GlobalCopScreen(StyreneScreen[None]):
             group="cop-activity",
             exclusive=False,
         )
+        # Status bar auto-refresh (uptime, links, hub — cheap, keep current)
+        if self._status_timer is None:
+            self._status_timer = self.set_interval(
+                _STATUS_REFRESH_INTERVAL, self._auto_refresh_status
+            )
+        else:
+            self._status_timer.resume()
+        # Fleet safety-net refresh (catches anything events missed)
+        if self._fleet_timer is None:
+            self._fleet_timer = self.set_interval(
+                _FLEET_REFRESH_INTERVAL, self._auto_refresh_fleet
+            )
+        else:
+            self._fleet_timer.resume()
 
     def _cleanup(self) -> None:
-        """Cancel activity subscription on suspend/unmount."""
+        """Cancel activity subscription and pause timers on suspend/unmount."""
         if self._activity_worker is not None:
             self._activity_worker.cancel()
             self._activity_worker = None
+        if self._status_timer is not None:
+            self._status_timer.pause()
+        if self._fleet_timer is not None:
+            self._fleet_timer.pause()
         super()._cleanup()
 
     async def _load_data(self) -> None:
@@ -271,6 +298,49 @@ class GlobalCopScreen(StyreneScreen[None]):
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Periodic auto-refresh
+    # ------------------------------------------------------------------
+
+    def _auto_refresh_status(self) -> None:
+        """Refresh status bar only — cheap IPC, runs every 10s."""
+        self.run_worker(self._refresh_status_bar(), group="cop-status", exclusive=True)
+
+    async def _refresh_status_bar(self) -> None:
+        """Fetch daemon status + hub status and update the health bar."""
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
+            return
+        try:
+            from styrened.services.hub_connection import HubStatus
+
+            status = await bridge.get_status()
+            hub_data = await bridge.get_hub_status()
+
+            bar = self.query_one("#cop-status-bar", HomeStatusBar)
+            bar.daemon_connected = True
+            ifaces = _get(status, "interfaces", [])
+            bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
+            bar.rns_online = bool(_get(status, "rns_initialized", True))
+            bar.daemon_uptime = float(_get(status, "uptime", 0))
+            bar.transport_enabled = bool(_get(status, "transport_enabled", False))
+            bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
+            bar.active_links = int(_get(status, "active_links", 0))
+
+            if isinstance(hub_data, dict):
+                hub_str = hub_data.get("status", "unknown")
+                try:
+                    bar.hub_status = HubStatus(hub_str)
+                except (ValueError, KeyError):
+                    bar.hub_status = HubStatus.UNKNOWN
+        except Exception as e:
+            log.debug("GlobalCOP: status bar auto-refresh failed: %s", e)
+
+    def _auto_refresh_fleet(self) -> None:
+        """Safety-net full refresh — runs every 60s to catch missed events."""
+        self.run_worker(self._load_data(), group="cop-refresh", exclusive=True)
 
     def action_refresh_cop(self) -> None:
         """Manual full refresh."""

@@ -1,0 +1,14 @@
+{
+  "providers": {
+    "anthropic": {
+      "until": "2026-03-15T19:01:22.719Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZ5Nm2MbYkm34Ab245ujB\"}"
+    }
+  },
+  "candidates": {
+    "anthropic/claude-sonnet-4-6": {
+      "until": "2026-03-15T19:01:22.719Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZ5Nm2MbYkm34Ab245ujB\"}"
+    }
+  }
+}

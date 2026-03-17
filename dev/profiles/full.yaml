@@ -1,6 +1,7 @@
-# Full profile — maximum surface area.
-# All interfaces up, all well-known hubs enabled, API on, boundary sink on.
-# Use for: full-exposure failure testing, validating new features end-to-end.
+# Full profile — everything Styrene-managed.
+# All RNS peers, LXMF propagation, API, overlays in managed mode.
+# Styrened owns i2p/yggdrasil process lifecycle — no system daemons needed.
+# Use for: complete end-to-end testing, COP with all surfaces populated.
 
 reticulum:
   mode: standalone
@@ -25,14 +26,6 @@ reticulum:
         port: 4242
         name: "BetweenTheBorders"
         enabled: true
-      - host: istanbul.reserve.network
-        port: 9034
-        name: "Istanbul Reserve"
-        enabled: true
-      - host: sydney.reticulum.au
-        port: 4242
-        name: "RNS Sydney"
-        enabled: true
 
 lxmf:
   autopeer: true
@@ -42,15 +35,15 @@ lxmf:
 
 api:
   enabled: true
-  host: "127.0.0.1"  # local only in dev
+  host: "127.0.0.1"
   port: 8000
   public_mode: false
 
 i2p:
-  mode: disabled      # enable manually when testing i2p path
+  mode: managed
 
 yggdrasil:
-  mode: disabled      # enable manually when testing yggdrasil path
+  mode: managed
 
 mesh_vpn:
-  enable: false       # enable manually when testing vpn path
+  enable: false

@@ -101,20 +101,20 @@ _dev_home := env_var_or_default("STYRENE_HOME", env_var("HOME") + "/.styrene-dev
 # Use ephemeral=true to run with a temp identity discarded on exit.
 #
 # Profiles:
-#   standard (default) — AutoInterface + Styrene hub, no extras
+#   full (default)     — all features, styrened-managed overlays, API, multi-hub
+#   standard           — AutoInterface + Styrene hub, no overlays
 #   hub                — standard + LXMF propagation enabled (tests hub status)
-#   overlay            — hub + yggdrasil/i2p in adopt mode (tests COP adapter row)
-#   full               — all well-known hubs + hub propagation + API
+#   overlay            — hub + yggdrasil/i2p in adopt mode (requires running daemons)
 #   minimal            — RNS + LXMF only, low-noise baseline
 #
 # Examples:
-#   just dev-daemon                    # standard profile, persistent QA identity
+#   just dev-daemon                    # full profile — everything managed
+#   just dev-daemon profile=standard   # RNS + hub only
 #   just dev-daemon profile=hub        # with LXMF propagation → hub status visible
-#   just dev-daemon profile=overlay    # hub + ygg + i2p adapt (requires local daemons)
-#   just dev-daemon profile=full       # all hubs up, API on
+#   just dev-daemon profile=overlay    # hub + ygg + i2p adopt (just overlay-start first)
 #   just dev-daemon profile=minimal    # RNS + LXMF only
-#   just dev-daemon ephemeral=true     # throwaway identity, standard profile
-dev-daemon profile="standard" ephemeral="false":
+#   just dev-daemon ephemeral=true     # throwaway identity, full profile
+dev-daemon profile="full" ephemeral="false":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -146,12 +146,71 @@ dev-daemon profile="standard" ephemeral="false":
     STYRENE_HOME="$DEV_HOME" .venv/bin/styrened daemon
 
 # Alias for dev-daemon — use when you just want a clean slate.
-dev-reset profile="standard": (dev-daemon profile)
+dev-reset profile="full": (dev-daemon profile)
+
+# ---------------------------------------------------------------------------
+# Overlay daemon helpers (i2pd + yggdrasil)
+# ---------------------------------------------------------------------------
+
+# Check if overlay daemons are running.
+overlay-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Overlay Daemon Status ==="
+    if [[ "$(uname)" == "Darwin" ]]; then
+        for svc in yggdrasil i2pd; do
+            if brew services list 2>/dev/null | grep -q "$svc.*started"; then
+                echo "  ✓ $svc — running (brew)"
+            elif pgrep -x "$svc" >/dev/null 2>&1; then
+                echo "  ✓ $svc — running (pid $(pgrep -x $svc | head -1))"
+            else
+                echo "  ✗ $svc — not running"
+            fi
+        done
+    else
+        for svc in yggdrasil i2pd; do
+            if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                echo "  ✓ $svc — running (systemd)"
+            elif pgrep -x "$svc" >/dev/null 2>&1; then
+                echo "  ✓ $svc — running (pid $(pgrep -x $svc | head -1))"
+            else
+                echo "  ✗ $svc — not running"
+            fi
+        done
+    fi
+
+# Start overlay daemons (for adopt-mode profiles).
+overlay-start:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ Starting overlay daemons..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        brew services start yggdrasil 2>/dev/null && echo "  ✓ yggdrasil started" || echo "  ! yggdrasil: brew start failed (try: brew install yggdrasil)"
+        brew services start i2pd 2>/dev/null && echo "  ✓ i2pd started" || echo "  ! i2pd: brew start failed (try: brew install i2pd)"
+    else
+        sudo systemctl start yggdrasil 2>/dev/null && echo "  ✓ yggdrasil started" || echo "  ! yggdrasil: systemctl start failed"
+        sudo systemctl start i2pd 2>/dev/null && echo "  ✓ i2pd started" || echo "  ! i2pd: systemctl start failed"
+    fi
+    echo ""
+    just overlay-status
+
+# Stop overlay daemons.
+overlay-stop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ Stopping overlay daemons..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        brew services stop yggdrasil 2>/dev/null && echo "  ✓ yggdrasil stopped" || true
+        brew services stop i2pd 2>/dev/null && echo "  ✓ i2pd stopped" || true
+    else
+        sudo systemctl stop yggdrasil 2>/dev/null && echo "  ✓ yggdrasil stopped" || true
+        sudo systemctl stop i2pd 2>/dev/null && echo "  ✓ i2pd stopped" || true
+    fi
 
 # Launch the TUI — starts the dev daemon in the background automatically,
 # waits for it to be ready, runs the TUI, then kills the daemon on exit.
 # You own the TUI. The justfile owns the daemon. profile= selects a profile.
-dev-tui profile="standard":
+dev-tui profile="full":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -222,7 +281,7 @@ dev-tui profile="standard":
     STYRENE_HOME="$DEV_HOME" .venv/bin/styrene
 
 # Launch the compact dashboard — same lifecycle management as dev-tui.
-dev-dashboard profile="standard":
+dev-dashboard profile="full":
     #!/usr/bin/env bash
     set -euo pipefail
 

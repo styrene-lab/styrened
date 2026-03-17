@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "changeName": "global-cop-screen",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-17T01:12:18.910Z",
+  "summary": "All 5 spec requirements verified: dedicated screen with g keybinding, 4-zone layout (health bar, fleet table, alert list, activity feed), Styrene-primary fleet with toggle, ephemeral alerts, mount-time activity subscription with backfill. 18 unit tests passing.",
+  "snapshot": {
+    "gitHead": "8f1fbaf5454a852ac79d6872cb1b7161f35e4562",
+    "fingerprint": "8388a48103ac120b2e93b5d4c9e558be790ec1cc0cbe8299172d7e14238f3776",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/global-cop-screen/design.md",
+        "exists": true,
+        "size": 527,
+        "sha256": "253da41a1b72c0ecf9c61d1c6fb18513d38a01b4ac9b8cbeae9162a22853fbd9"
+      },
+      {
+        "path": "openspec/changes/global-cop-screen/proposal.md",
+        "exists": true,
+        "size": 461,
+        "sha256": "06943544417c27c491fa5d83d46761367b6256b5dea95005b4e850a850155f0a"
+      },
+      {
+        "path": "openspec/changes/global-cop-screen/specs/tui.md",
+        "exists": true,
+        "size": 2062,
+        "sha256": "0cd57e79b443e05f56be59e7db5af9686b9cb2a1c9054d2cdf25f447d87db16a"
+      },
+      {
+        "path": "openspec/changes/global-cop-screen/tasks.md",
+        "exists": true,
+        "size": 810,
+        "sha256": "a56a14a7fd8ceda08044b1007b203e7377c73f88221b77e21f5d3aa4db5dabc0"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
