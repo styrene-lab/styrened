@@ -3,8 +3,7 @@ id: wire-protocol-idl
 title: Wire Protocol IDL — gRPC Proto vs. Status Quo
 status: resolved
 tags: [architecture, wire-protocol, grpc, protobuf, msgpack, rns, cross-language]
-open_questions:
-  - "Should the shared schema approach (option 3) be pursued now, or is the manual duplication between styrene_wire.py and styrene-mesh/wire.rs acceptable until the Rust port is further along?"
+open_questions: []
 ---
 
 # Wire Protocol IDL — gRPC Proto vs. Status Quo
@@ -86,4 +85,4 @@ Protobuf the serialization format has marginal wire size benefits (~10-30% small
 
 ## Open Questions
 
-- Should the shared schema approach (option 3) be pursued now, or is the manual duplication between styrene_wire.py and styrene-mesh/wire.rs acceptable until the Rust port is further along?
+*No open questions.*
