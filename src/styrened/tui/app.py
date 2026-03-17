@@ -12,11 +12,13 @@ from sqlalchemy.engine import Engine
 from textual import work
 from textual.app import App, ComposeResult
 
+import styrened.tui.widgets.safe_header  # noqa: F401 — monkey-patches Header for Textual 8.x
+
 if TYPE_CHECKING:
     from styrened.protocols.chat import ChatProtocol
 from textual.binding import Binding, BindingType
 from textual.screen import Screen
-from textual.widgets import Footer
+from textual.widgets import Footer, Header
 
 from styrened.ipc.bridge import IPCBridge
 from styrened.tui.models.config import (
@@ -55,7 +57,6 @@ from styrened.tui.themes.styrene_brand import (
     create_styrene_theme,
 )
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
-from styrened.tui.widgets.safe_header import Header
 
 try:
     import textual_image.renderable  # noqa: F401

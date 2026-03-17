@@ -16,7 +16,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Static
+from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.worker import Worker, WorkerState
 
 from styrened.models.mesh_device import MeshDevice
@@ -33,7 +33,6 @@ from styrened.tui.lifecycle import WidgetResourceScope
 from styrened.tui.widgets.config_form import ConfigForm
 from styrened.tui.widgets.forge_log import ForgeLog
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
-from styrened.tui.widgets.safe_header import Header
 
 logger = logging.getLogger(__name__)
 

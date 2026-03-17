@@ -19,7 +19,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.timer import Timer
-from textual.widgets import Footer
+from textual.widgets import Footer, Header
 from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
@@ -31,7 +31,6 @@ from styrened.tui.widgets.alert_list import AlertListWidget
 from styrened.tui.widgets.global_cop_fleet_table import GlobalCopFleetTable
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.home_status_bar import HomeStatusBar
-from styrened.tui.widgets.safe_header import Header
 
 log = logging.getLogger(__name__)
 

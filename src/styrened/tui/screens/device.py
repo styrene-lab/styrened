@@ -7,11 +7,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Button, Footer, Header, Static
 
 from styrened.tui.models.fleet import Device
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
-from styrened.tui.widgets.safe_header import Header
 
 logger = logging.getLogger(__name__)
 

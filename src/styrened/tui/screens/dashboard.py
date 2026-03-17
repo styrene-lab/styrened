@@ -13,7 +13,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Footer
+from textual.widgets import Footer, Header
 from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
@@ -21,7 +21,6 @@ from styrened.services.hub_connection import HubStatus
 from styrened.tui.models.adapter_status import AdapterStatusTracker
 from styrened.tui.models.cop_situation import CopSituationTracker
 from styrened.tui.models.events import DaemonEvent
-from styrened.tui.widgets.safe_header import Header
 
 # Map legacy IPC activity event type strings to coarse bus event types
 _IPC_TO_BUS_TYPE: dict[str, str] = {

@@ -8,9 +8,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Header, Static
 
-from styrened.tui.widgets.safe_header import Header
 from styrened.ui_state import (
     DeliveryPathClass,
     GroupThreadFeatureTier,

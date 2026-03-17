@@ -21,7 +21,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import DataTable, Footer, Input, Static, Switch, TabbedContent, TabPane
+from textual.widgets import DataTable, Footer, Header, Input, Static, Switch, TabbedContent, TabPane
 from textual.worker import Worker, WorkerState
 
 from styrened.models.mesh_device import DeviceType
@@ -29,7 +29,6 @@ from styrened.tui.lifecycle import ScreenContentHooks, ScreenContentHost
 from styrened.tui.screens.exchange_tabs import ExchangeContactsTab, ExchangeDirectTab
 from styrened.tui.screens.exploration import ReticumAnnounceTable
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
-from styrened.tui.widgets.safe_header import Header
 from styrened.ui_state import (
     ConversationScopeKind,
     MailIndexInputs,

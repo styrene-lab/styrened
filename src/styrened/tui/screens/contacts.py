@@ -22,11 +22,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.widgets import Button, DataTable, Footer, Input, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, Static
 
 from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
-from styrened.tui.widgets.safe_header import Header
 
 logger = logging.getLogger(__name__)
 

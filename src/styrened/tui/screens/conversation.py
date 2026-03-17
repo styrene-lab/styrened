@@ -15,11 +15,10 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Header, Static
 
 from styrened.tui.widgets.chat_widget import ChatWidget
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
-from styrened.tui.widgets.safe_header import Header
 from styrened.ui_state import (
     PeerWorkspaceContext,
     PeerWorkspaceFocus,

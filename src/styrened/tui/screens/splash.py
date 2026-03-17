@@ -332,7 +332,7 @@ class SplashScreen(Screen[bool]):
             init = getattr(app, "_initialize_services", None)
             if init:
                 await init()
-                setattr(app, "_services_initialized", True)
+                app._services_initialized = True
             # Wire bridge into cache and trigger immediate prime
             bridge = getattr(getattr(app, "_lifecycle", None), "_ipc_bridge", None)
             if bridge is None:

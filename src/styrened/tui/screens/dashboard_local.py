@@ -11,11 +11,10 @@ from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Footer
+from textual.widgets import Footer, Header
 
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel
 from styrened.tui.widgets.node_info_panel import NodeInfoPanel
-from styrened.tui.widgets.safe_header import Header
 from styrened.tui.widgets.uptime_panel import UptimePanel
 
 
