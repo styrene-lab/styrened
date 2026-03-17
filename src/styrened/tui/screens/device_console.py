@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import Footer, Input, RichLog, Static
 
 from styrened.rpc.errors import RPCTimeoutError
 from styrened.rpc.messages import (
@@ -17,6 +17,7 @@ from styrened.rpc.messages import (
     StatusResponse,
     UpdateConfigResult,
 )
+from styrened.tui.widgets.safe_header import Header
 
 logger = logging.getLogger(__name__)
 

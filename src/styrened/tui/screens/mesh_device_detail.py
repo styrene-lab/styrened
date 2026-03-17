@@ -13,7 +13,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import Button, Footer, Static, TabbedContent, TabPane
 from textual.worker import Worker
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
@@ -23,6 +23,7 @@ from styrened.tui.widgets.command_widget import CommandWidget
 from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
 from styrened.tui.widgets.page_browser import PageBrowserWidget
+from styrened.tui.widgets.safe_header import Header
 from styrened.tui.widgets.terminal_widget import TerminalWidget
 from styrened.ui_state import (
     PeerWorkspaceContext,

@@ -23,7 +23,6 @@ from textual.timer import Timer
 from textual.widgets import (
     DataTable,
     Footer,
-    Header,
     Input,
     Static,
     TabbedContent,
@@ -38,6 +37,7 @@ from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.tui.widgets.page_browser import PageBrowserWidget
+from styrened.tui.widgets.safe_header import Header
 from styrened.ui_state import WorkspaceId
 
 # Device types shown on the exploration screen (non-Styrene announces)

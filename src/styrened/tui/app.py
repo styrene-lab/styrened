@@ -14,13 +14,19 @@ from textual.app import App, ComposeResult
 
 if TYPE_CHECKING:
     from styrened.protocols.chat import ChatProtocol
-    from styrened.tui.models.config import DeploymentMode, PeerConfig
+    from styrened.tui.widgets.safe_header import Header
 from textual.binding import Binding, BindingType
 from textual.screen import Screen
-from textual.widgets import Footer, Header
+from textual.widgets import Footer
 
 from styrened.ipc.bridge import IPCBridge
-from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
+from styrened.tui.models.config import (
+    ConfigLoadError,
+    ConfigValidationError,
+    DeploymentMode,
+    PeerConfig,
+    StyreneConfig,
+)
 from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen

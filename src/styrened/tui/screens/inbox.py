@@ -16,10 +16,11 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.timer import Timer
-from textual.widgets import DataTable, Footer, Header, Input, Static, Switch
+from textual.widgets import DataTable, Footer, Input, Static, Switch
 
 from styrened.tui.screens.base import StyreneScreen
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
+from styrened.tui.widgets.safe_header import Header
 from styrened.ui_state import (
     ConversationScopeKind,
     MailIndexInputs,

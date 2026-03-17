@@ -13,9 +13,10 @@ from typing import Any, ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
-from textual.widgets import Footer, Header, Input, Label, Static, TabbedContent, TabPane
+from textual.widgets import Footer, Input, Label, Static, TabbedContent, TabPane
 
 from styrened.tui.screens.base import BridgeUnavailableError, StyreneScreen
+from styrened.tui.widgets.safe_header import Header
 from styrened.ui_state import CommsMode, CommsWorkspaceInputs, build_comms_workspace_state
 
 
