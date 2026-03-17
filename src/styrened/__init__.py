@@ -21,7 +21,7 @@ from styrened import StyreneDaemon, main
 """
 from __future__ import annotations
 
-__version__ = "0.16.1"
+__version__ = "0.17.0"
 
 # Path resolution
 from styrened import paths  # noqa: F401
