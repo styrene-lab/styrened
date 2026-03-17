@@ -519,15 +519,12 @@ class StyreneApp(App[None]):
         """Mount handler - check daemon, initialize services, handle first-run.
 
         Flow:
-            1. Check for updates (background, non-blocking)
-            2. Check if daemon is reachable via IPC ping
-            3. If no daemon → DaemonSetupScreen (install/start/skip)
-            4. If daemon OK → initialize services → FirstRunWizard or Dashboard
+            1. Show splash screen (blocks until daemon reachable or timeout)
+            2. On splash complete → init services → dashboard
+            3. Check for updates AFTER dashboard is visible (deferred)
         """
-        self._check_for_updates()
-        # Show intro animation while daemon connection is established.
-        # SplashScreen runs _check_daemon() internally and dismisses with
-        # True (daemon ok) or False (timed out → setup needed).
+        # Update check is deferred until after splash completes so the
+        # UpgradeScreen doesn't race with SplashScreen for the stack.
         self.push_screen(SplashScreen(), callback=self._on_splash_complete)
 
     async def _on_splash_complete(self, daemon_ok: bool) -> None:
@@ -689,11 +686,13 @@ class StyreneApp(App[None]):
         else:
             self.push_screen("dashboard")
 
-        self.call_after_refresh(self._start_device_cache)
+        self.call_after_refresh(self._post_dashboard_init)
 
-    def _start_device_cache(self) -> None:
-        """Start shared device cache priming after initial UI paint."""
+    def _post_dashboard_init(self) -> None:
+        """Run after dashboard paints: prime device cache, then check updates."""
         self.device_cache.start(self)
+        # Update check deferred from on_mount to avoid racing SplashScreen
+        self._check_for_updates()
 
     def _on_wizard_complete(self, result: bool | None) -> None:
         """Handle wizard completion.

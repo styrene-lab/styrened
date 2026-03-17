@@ -154,10 +154,26 @@ class DeviceCache:
         app.run_worker(self._initial_load(), exclusive=False, group="device-cache")
 
     async def _initial_load(self) -> None:
-        """Initial fetch; schedule the periodic timer afterwards."""
+        """Initial fetch; schedule follow-up and periodic timer afterwards.
+
+        RNS announces trickle in during startup — the first prime at 0.25s
+        catches whatever's there, but many nodes haven't announced yet.
+        A quick follow-up at 3s catches the early announce wave so the
+        operator doesn't stare at an empty mesh table for 15s.
+        """
         await self._do_refresh()
-        if self._app is not None and self._timer is None:
-            self._timer = self._app.set_interval(self._interval, self._on_timer)
+        if self._app is not None:
+            # Quick follow-up to catch the announce wave during RNS init
+            self._app.set_timer(3.0, self._run_followup_refresh)
+            if self._timer is None:
+                self._timer = self._app.set_interval(self._interval, self._on_timer)
+
+    def _run_followup_refresh(self) -> None:
+        """One-shot follow-up refresh after initial prime."""
+        if self._app is not None:
+            self._app.run_worker(
+                self._do_refresh(), exclusive=False, group="device-cache"
+            )
 
     def _on_timer(self) -> None:
         """Periodic timer callback — kicks off a background refresh worker."""
