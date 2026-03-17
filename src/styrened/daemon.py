@@ -221,7 +221,14 @@ class StyreneDaemon:
 
         # Initialize Styrene services
         if not self.lifecycle.initialize():
-            logger.error("Failed to initialize services")
+            error_state = self.lifecycle.rns_error_state
+            if error_state and error_state.message:
+                logger.error("Failed to initialize services: %s", error_state.message)
+                # Print to stderr so it's visible even without log config
+                print(f"\n✗ Daemon startup failed: {error_state.message}\n", file=sys.stderr)
+            else:
+                logger.error("Failed to initialize services")
+                print("\n✗ Daemon startup failed — check logs for details\n", file=sys.stderr)
             sys.exit(1)
 
         # Create and cache the operator destination once

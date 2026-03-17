@@ -279,7 +279,11 @@ dev-tui profile="full":
         sleep 0.5
         if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
             echo ""
-            echo "✗ Dev daemon exited unexpectedly. Check $LOG"
+            echo "✗ Dev daemon exited unexpectedly."
+            echo ""
+            echo "── Last 15 lines of $LOG ──"
+            tail -15 "$LOG" 2>/dev/null || echo "(log not found)"
+            echo "────────────────────────────"
             exit 1
         fi
     done

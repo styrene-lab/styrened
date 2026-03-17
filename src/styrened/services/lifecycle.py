@@ -28,10 +28,11 @@ from __future__ import annotations
 import atexit
 import logging
 import shutil
+import socket
 from pathlib import Path
 
 from styrened.models.config import CoreConfig
-from styrened.models.rns_error import RNSErrorState
+from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
 from styrened.services.reticulum import (
     ensure_operator_identity,
     get_operator_identity_object,
@@ -205,6 +206,17 @@ class CoreLifecycle:
             logger.info(f"Initializing RNS in {self.config.reticulum.mode.value} mode")
             logger.debug(f"RNS config dir: {config_dir}")
 
+            # Pre-flight: check configured ports are available before handing
+            # off to RNS.Reticulum() which will hang on bind conflicts.
+            conflict = self._check_port_conflicts()
+            if conflict:
+                logger.error(f"Port conflict: {conflict}")
+                self._rns_error_state = RNSErrorState(
+                    category=RNSErrorCategory.PORT_CONFLICT,
+                    message=conflict,
+                )
+                return False
+
             # Initialize RNS with temporary config
             rns_service = get_rns_service()
             if not rns_service.initialize(config_override=config_dir):
@@ -233,6 +245,54 @@ class CoreLifecycle:
             logger.error(f"Reticulum initialization error: {e}")
             self._rns_error_state = RNSErrorState.from_exception(e)
             return False
+
+    def _check_port_conflicts(self) -> str | None:
+        """Pre-flight check that configured TCP server ports are available.
+
+        RNS.Reticulum() hangs indefinitely on bind conflicts instead of
+        raising a clean exception. This detects the conflict early so the
+        daemon can report a useful error and exit gracefully.
+
+        Returns:
+            Error message string if a conflict is found, None if all clear.
+        """
+        server = self.config.reticulum.interfaces.server
+        if not server.enabled:
+            return None
+
+        host = server.listen_ip or "0.0.0.0"
+        port = server.port
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.settimeout(1)
+                s.bind((host, port))
+        except OSError:
+            # Find what's holding the port
+            holder = ""
+            try:
+                import subprocess
+
+                result = subprocess.run(
+                    ["lsof", "-i", f":{port}", "-sTCP:LISTEN", "-t"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                pids = result.stdout.strip().split("\n")
+                if pids and pids[0]:
+                    holder = f" (held by pid {pids[0]})"
+            except Exception:
+                pass
+
+            return (
+                f"TCP port {port} on {host} is already in use{holder} — "
+                f"another styrened or RNS transport may be running. "
+                f"Stop it first or change reticulum.interfaces.server.port in config."
+            )
+
+        return None
 
     def _initialize_lxmf(self) -> bool:
         """Initialize LXMF messaging for RPC.
