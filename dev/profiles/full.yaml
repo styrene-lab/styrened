@@ -11,7 +11,7 @@ reticulum:
     auto: true
     server:
       enabled: true
-      listen_ip: "0.0.0.0"
+      listen_ip: "127.0.0.1"  # local only in dev — change to 0.0.0.0 for LAN testing
       port: 4242
     peers:
       - host: rns.styrene.io

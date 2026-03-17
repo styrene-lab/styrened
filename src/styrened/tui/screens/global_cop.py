@@ -12,6 +12,7 @@ Keybinding: g (app-level).
 from __future__ import annotations
 
 import logging
+import time as _time
 from typing import Any, ClassVar
 
 from textual.app import ComposeResult
@@ -19,6 +20,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.timer import Timer
 from textual.widgets import Footer
+from textual.worker import Worker
 
 from styrened.ipc.protocol import IPCMessageType
 from styrened.models.mesh_device import DeviceType, MeshDevice
@@ -98,7 +100,7 @@ class GlobalCopScreen(StyreneScreen[None]):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._activity_worker = None
+        self._activity_worker: Worker[None] | None = None
         self._last_event_refresh: float = 0.0
         self._status_timer: Timer | None = None
         self._fleet_timer: Timer | None = None
@@ -151,32 +153,7 @@ class GlobalCopScreen(StyreneScreen[None]):
         bridge = self.bridge  # raises BridgeUnavailableError if not connected
 
         # --- Zone 1: aggregate health bar ---
-        try:
-            from styrened.services.hub_connection import HubStatus
-
-            status = await bridge.get_status()
-            hub_data = await bridge.get_hub_status()
-
-            bar = self.query_one("#cop-status-bar", HomeStatusBar)
-            bar.daemon_connected = True
-            ifaces = _get(status, "interfaces", [])
-            bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
-            bar.rns_online = bool(_get(status, "rns_initialized", True))
-            bar.daemon_uptime = float(_get(status, "uptime", 0))
-            bar.transport_enabled = bool(_get(status, "transport_enabled", False))
-            bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
-            bar.active_links = int(_get(status, "active_links", 0))
-
-            if isinstance(hub_data, dict):
-                hub_str = hub_data.get("status", "unknown")
-                try:
-                    bar.hub_status = HubStatus(hub_str)
-                except (ValueError, KeyError):
-                    bar.hub_status = HubStatus.UNKNOWN
-        except BridgeUnavailableError:
-            raise
-        except Exception as e:
-            log.debug("GlobalCOP: status fetch failed: %s", e)
+        await self._update_status_bar(bridge)
 
         # --- Zone 2 + 3: fleet table and alert list ---
         devices = self._get_devices()
@@ -253,8 +230,6 @@ class GlobalCopScreen(StyreneScreen[None]):
         ):
             return
 
-        import time as _time
-
         now = _time.monotonic()
         if (now - self._last_event_refresh) < _EVENT_DEBOUNCE:
             return
@@ -300,49 +275,6 @@ class GlobalCopScreen(StyreneScreen[None]):
     # Actions
     # ------------------------------------------------------------------
 
-    # ------------------------------------------------------------------
-    # Periodic auto-refresh
-    # ------------------------------------------------------------------
-
-    def _auto_refresh_status(self) -> None:
-        """Refresh status bar only — cheap IPC, runs every 10s."""
-        self.run_worker(self._refresh_status_bar(), group="cop-status", exclusive=True)
-
-    async def _refresh_status_bar(self) -> None:
-        """Fetch daemon status + hub status and update the health bar."""
-        try:
-            bridge = self.bridge
-        except BridgeUnavailableError:
-            return
-        try:
-            from styrened.services.hub_connection import HubStatus
-
-            status = await bridge.get_status()
-            hub_data = await bridge.get_hub_status()
-
-            bar = self.query_one("#cop-status-bar", HomeStatusBar)
-            bar.daemon_connected = True
-            ifaces = _get(status, "interfaces", [])
-            bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
-            bar.rns_online = bool(_get(status, "rns_initialized", True))
-            bar.daemon_uptime = float(_get(status, "uptime", 0))
-            bar.transport_enabled = bool(_get(status, "transport_enabled", False))
-            bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
-            bar.active_links = int(_get(status, "active_links", 0))
-
-            if isinstance(hub_data, dict):
-                hub_str = hub_data.get("status", "unknown")
-                try:
-                    bar.hub_status = HubStatus(hub_str)
-                except (ValueError, KeyError):
-                    bar.hub_status = HubStatus.UNKNOWN
-        except Exception as e:
-            log.debug("GlobalCOP: status bar auto-refresh failed: %s", e)
-
-    def _auto_refresh_fleet(self) -> None:
-        """Safety-net full refresh — runs every 60s to catch missed events."""
-        self.run_worker(self._load_data(), group="cop-refresh", exclusive=True)
-
     def action_refresh_cop(self) -> None:
         """Manual full refresh."""
         self._start_load()
@@ -364,8 +296,57 @@ class GlobalCopScreen(StyreneScreen[None]):
             pass
 
     # ------------------------------------------------------------------
+    # Periodic auto-refresh
+    # ------------------------------------------------------------------
+
+    def _auto_refresh_status(self) -> None:
+        """Refresh status bar only — cheap IPC, runs every 10s."""
+        self.run_worker(self._refresh_status_bar(), group="cop-status", exclusive=True)
+
+    async def _refresh_status_bar(self) -> None:
+        """Periodic status bar refresh — runs via timer."""
+        try:
+            bridge = self.bridge
+        except BridgeUnavailableError:
+            return
+        await self._update_status_bar(bridge)
+
+    def _auto_refresh_fleet(self) -> None:
+        """Safety-net full refresh — runs every 60s to catch missed events."""
+        self.run_worker(self._load_data(), group="cop-refresh", exclusive=True)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _update_status_bar(self, bridge: Any) -> None:
+        """Fetch daemon + hub status and apply to the health bar widget."""
+        from styrened.services.hub_connection import HubStatus
+
+        try:
+            status = await bridge.get_status()
+            hub_data = await bridge.get_hub_status()
+
+            bar = self.query_one("#cop-status-bar", HomeStatusBar)
+            bar.daemon_connected = True
+            ifaces = _get(status, "interfaces", [])
+            bar.interface_count = len(ifaces) if isinstance(ifaces, list) else 0
+            bar.rns_online = bool(_get(status, "rns_initialized", True))
+            bar.daemon_uptime = float(_get(status, "uptime", 0))
+            bar.transport_enabled = bool(_get(status, "transport_enabled", False))
+            bar.propagation_enabled = bool(_get(status, "propagation_enabled", False))
+            bar.active_links = int(_get(status, "active_links", 0))
+
+            if isinstance(hub_data, dict):
+                hub_str = hub_data.get("status", "unknown")
+                try:
+                    bar.hub_status = HubStatus(hub_str)
+                except (ValueError, KeyError):
+                    bar.hub_status = HubStatus.UNKNOWN
+        except BridgeUnavailableError:
+            raise
+        except Exception as e:
+            log.debug("GlobalCOP: status bar update failed: %s", e)
 
     def _get_devices(self) -> list[MeshDevice]:
         """Return device list from the shared app device cache."""

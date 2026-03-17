@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 from textual.css.query import NoMatches
+from textual.dom import NoScreen
 from textual.events import Mount
 from textual.widgets import Header as _TextualHeader
 from textual.widgets._header import HeaderTitle
@@ -29,7 +30,7 @@ class Header(_TextualHeader):
         async def set_title() -> None:
             try:
                 self.query_one(HeaderTitle).update(self.format_title())
-            except (NoMatches, Exception):
+            except (NoMatches, NoScreen):
                 pass
 
         self.watch(self.app, "title", set_title)
@@ -37,5 +38,5 @@ class Header(_TextualHeader):
         try:
             self.watch(self.screen, "title", set_title)
             self.watch(self.screen, "sub_title", set_title)
-        except Exception:
+        except NoScreen:
             pass

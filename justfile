@@ -188,8 +188,16 @@ overlay-start:
         brew services start yggdrasil 2>/dev/null && echo "  ✓ yggdrasil started" || echo "  ! yggdrasil: brew start failed (try: brew install yggdrasil)"
         brew services start i2pd 2>/dev/null && echo "  ✓ i2pd started" || echo "  ! i2pd: brew start failed (try: brew install i2pd)"
     else
-        sudo systemctl start yggdrasil 2>/dev/null && echo "  ✓ yggdrasil started" || echo "  ! yggdrasil: systemctl start failed"
-        sudo systemctl start i2pd 2>/dev/null && echo "  ✓ i2pd started" || echo "  ! i2pd: systemctl start failed"
+        # Try user units first, fall back to system units (requires sudo)
+        for svc in yggdrasil i2pd; do
+            if systemctl --user start "$svc" 2>/dev/null; then
+                echo "  ✓ $svc started (user unit)"
+            elif sudo systemctl start "$svc" 2>/dev/null; then
+                echo "  ✓ $svc started (system unit, via sudo)"
+            else
+                echo "  ! $svc: start failed (try: sudo apt install $svc)"
+            fi
+        done
     fi
     echo ""
     just overlay-status
@@ -203,8 +211,15 @@ overlay-stop:
         brew services stop yggdrasil 2>/dev/null && echo "  ✓ yggdrasil stopped" || true
         brew services stop i2pd 2>/dev/null && echo "  ✓ i2pd stopped" || true
     else
-        sudo systemctl stop yggdrasil 2>/dev/null && echo "  ✓ yggdrasil stopped" || true
-        sudo systemctl stop i2pd 2>/dev/null && echo "  ✓ i2pd stopped" || true
+        for svc in yggdrasil i2pd; do
+            if systemctl --user stop "$svc" 2>/dev/null; then
+                echo "  ✓ $svc stopped (user unit)"
+            elif sudo systemctl stop "$svc" 2>/dev/null; then
+                echo "  ✓ $svc stopped (system unit)"
+            else
+                true
+            fi
+        done
     fi
 
 # Launch the TUI — starts the dev daemon in the background automatically,
