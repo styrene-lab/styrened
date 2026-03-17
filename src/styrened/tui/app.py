@@ -674,38 +674,22 @@ class StyreneApp(App[None]):
             self.push_screen("dashboard")
 
     async def _proceed_after_daemon(self) -> None:
-        """Initialize services and continue to wizard or dashboard.
+        """Initialize services and push the dashboard (or wizard).
 
-        Idempotent — safe to call from both the splash screen (early, for cache
-        priming) and the splash complete callback (for screen navigation).
+        The splash screen handles service init and cache priming before
+        dismissing.  This method handles screen navigation after dismiss.
         """
-        if getattr(self, "_services_initialized", False):
-            # Already initialized by splash — just push the screen
-            if not getattr(self, "_dashboard_pushed", False):
-                self._dashboard_pushed = True
-                if find_reticulum_config() is None:
-                    self.log.info("Reticulum not configured - launching first-run wizard")
-                    self.push_screen(
-                        FirstRunWizardScreen(),
-                        callback=self._on_wizard_complete,
-                    )
-                else:
-                    self.push_screen("dashboard")
-                self.call_after_refresh(self._post_dashboard_init)
-            return
-
-        await self._initialize_services()
-        self._services_initialized = True
+        if not getattr(self, "_services_initialized", False):
+            await self._initialize_services()
+            self._services_initialized = True
 
         if find_reticulum_config() is None:
             self.log.info("Reticulum not configured - launching first-run wizard")
-            self._dashboard_pushed = True
             self.push_screen(
                 FirstRunWizardScreen(),
                 callback=self._on_wizard_complete,
             )
         else:
-            self._dashboard_pushed = True
             self.push_screen("dashboard")
 
         self.call_after_refresh(self._post_dashboard_init)

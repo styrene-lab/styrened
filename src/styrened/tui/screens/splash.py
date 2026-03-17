@@ -324,11 +324,28 @@ class SplashScreen(Screen[bool]):
         that to land and propagate back via IPC.  The 5s cap prevents the
         splash from hanging if the mesh is truly empty.
         """
-        # Trigger services init + cache priming early so it runs in parallel
+        # Initialise services and prime the device cache so the dashboard
+        # has nodes on first paint.  We do NOT push screens here — the
+        # splash callback handles navigation after dismiss.
         try:
             app = self.app
-            if hasattr(app, "_proceed_after_daemon"):
-                await app._proceed_after_daemon()
+            init = getattr(app, "_initialize_services", None)
+            if init:
+                await init()
+                setattr(app, "_services_initialized", True)
+            # Wire bridge into cache and trigger immediate prime
+            bridge = getattr(getattr(app, "_lifecycle", None), "_ipc_bridge", None)
+            if bridge is None:
+                bridge = getattr(app, "bridge", None)
+            cache = getattr(app, "device_cache", None)
+            if cache:
+                if bridge:
+                    cache.update_bridge(bridge)
+                # Prime the cache directly — don't wait for timers
+                try:
+                    await cache._do_refresh()
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -341,6 +358,12 @@ class SplashScreen(Screen[bool]):
                 cache = getattr(self.app, "device_cache", None)
                 if cache and cache.get():
                     break
+                # Re-prime if first attempt returned empty
+                if cache and tick in (4, 8, 12):
+                    try:
+                        await cache._do_refresh()
+                    except Exception:
+                        pass
             except Exception:
                 pass
             # Update checklist progression while waiting
@@ -369,6 +392,9 @@ class SplashScreen(Screen[bool]):
     def _maybe_dismiss(self) -> None:
         """Dismiss only when both animation and daemon poll are done."""
         if self._anim_done and self._daemon_done:
+            if getattr(self, "_dismissed", False):
+                return
+            self._dismissed = True
             self.dismiss(bool(self._daemon_ok))
 
     # ------------------------------------------------------------------
