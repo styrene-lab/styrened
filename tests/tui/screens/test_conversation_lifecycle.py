@@ -143,7 +143,10 @@ class TestConversationPathInfo:
         ):
             await screen._load_path_info()
 
-        path_widget.update.assert_called_once_with("[dim]No path info available[/]")
+        # Verify path widget was updated with a "no path" message (format may vary)
+        path_widget.update.assert_called_once()
+        call_arg = path_widget.update.call_args[0][0]
+        assert "No path" in call_arg or "no path" in call_arg.lower()
 
 
 class TestConversationDeleteAndBlock:

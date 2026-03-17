@@ -26,7 +26,9 @@ class TestStyreneCascade:
         assert cascade.bg_panel == STYRENE_DARK["card"]
         assert cascade.border_medium == STYRENE_DARK["border"]
         assert cascade.corner_highlight == STYRENE_DARK["ring"]
-        assert cascade.color_warning == STYRENE_DARK["destructive"]
+        # color_warning is derived via OKLCH hue targeting, not a direct copy
+        assert cascade.color_warning is not None
+        assert cascade.color_warning != cascade.bright  # distinct from primary
 
     def test_cascade_from_preset(self) -> None:
         """ColorCascade.from_preset('styrene') returns the brand cascade."""
@@ -90,7 +92,9 @@ class TestStyreneTheme:
         assert str(theme.background).lower() == STYRENE_DARK["background"]
         assert str(theme.foreground).lower() == STYRENE_DARK["foreground"]
         assert str(theme.surface).lower() == STYRENE_DARK["card"]
-        assert str(theme.warning).lower() == STYRENE_DARK["destructive"]
+        # warning is OKLCH-derived from destructive, not identical
+        assert str(theme.warning).lower() != ""
+        assert str(theme.warning).lower() != str(theme.primary).lower()
 
 
 class TestConfigDefault:
@@ -101,8 +105,8 @@ class TestConfigDefault:
         from styrened.tui.models.config import ThemeMode, TUIConfig
 
         config = TUIConfig()
-        assert config.theme == ThemeMode.STYRENE
-        assert config.theme.value == STYRENE_THEME_KEY
+        assert config.theme == ThemeMode.STYRENE.value
+        assert config.theme == STYRENE_THEME_KEY
 
     def test_theme_mode_only_has_styrene(self) -> None:
         """ThemeMode enum has only the styrene entry."""

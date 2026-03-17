@@ -444,6 +444,10 @@ class TestRunDoctor:
     """Test the run_doctor orchestrator."""
 
     @pytest.mark.asyncio
+    @patch("styrened.services.doctor.check_adapter_binaries", return_value=[])
+    @patch("styrened.services.doctor.check_boundary_log", return_value=[])
+    @patch("styrened.services.doctor.check_i2p", return_value=[])
+    @patch("styrened.services.doctor.check_yggdrasil", return_value=[])
     @patch("styrened.services.doctor.check_daemon")
     @patch("styrened.services.doctor.check_paths")
     @patch("styrened.services.doctor.check_reticulum")
@@ -462,6 +466,10 @@ class TestRunDoctor:
         mock_retic,
         mock_paths_check,
         mock_daemon,
+        mock_ygg,
+        mock_i2p,
+        mock_boundary,
+        mock_binaries,
     ):
         """run_doctor should aggregate findings from all check functions."""
         mock_version.return_value = [

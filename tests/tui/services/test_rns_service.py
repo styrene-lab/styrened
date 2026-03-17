@@ -43,10 +43,11 @@ class TestRNSServiceInitialization:
         assert service.reticulum is None
 
     @pytest.mark.rns_singleton
+    @pytest.mark.integration
     def test_initialize_creates_reticulum_instance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test initialize creates RNS.Reticulum instance."""
+        """Test initialize creates RNS.Reticulum instance (requires network)."""
         import RNS
 
         # Create a minimal Reticulum config for testing

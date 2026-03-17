@@ -437,7 +437,7 @@ class TestBackwardCompatibility:
         }
         config = _parse_config_dict(data)
         # Config should load successfully — use_ipc is silently ignored
-        assert config.tui.theme.value == "styrene"
+        assert config.tui.theme == "styrene"
         assert not hasattr(config.tui, "use_ipc") or True  # field removed
 
     def test_old_config_with_use_ipc_true_loads(self):

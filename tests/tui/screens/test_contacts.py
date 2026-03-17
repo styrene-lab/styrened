@@ -60,7 +60,7 @@ class TestContactsScreenInit:
         screen = ContactsScreen()
         binding_keys = [b.key for b in screen.BINDINGS]
         assert "escape" in binding_keys
-        assert "a" in binding_keys
+        assert "c" in binding_keys
         assert "e" in binding_keys
         assert "delete" in binding_keys
         assert "r" in binding_keys

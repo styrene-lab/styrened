@@ -44,6 +44,7 @@ class TestInitDb:
             "nomadnet_destination_hash",
             "ygg_address",
             "b32_address",
+            "web_url",
             "created_at",
             "updated_at",
         }

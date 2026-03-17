@@ -19,7 +19,7 @@ from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.models.messages import Message, init_db
 from styrened.tui.app import StyreneApp
 from styrened.tui.screens.conversation import ConversationScreen
-from styrened.tui.screens.dashboard import DashboardScreen, MeshDeviceTree
+from styrened.tui.screens.dashboard import DashboardScreen
 from styrened.tui.services.app_lifecycle import LifecycleMode
 
 
@@ -111,6 +111,7 @@ def mock_reticulum_for_tests(tmp_path):
 class TestBoundaryConditions:
     """Tests for edge cases and boundary conditions."""
 
+    @pytest.mark.skip(reason="MeshDeviceTree removed — dashboard uses ExplorationScreen")
     @pytest.mark.asyncio
     async def test_device_with_excessive_unread_count_displays_correctly(
         self, message_db, mock_local_identity
@@ -274,6 +275,7 @@ class TestMessageDeliveryStates:
 class TestStaleDeviceHandling:
     """Tests for handling stale/offline devices."""
 
+    @pytest.mark.skip(reason="Dashboard no longer uses discover_devices — navigation via ExplorationScreen")
     @pytest.mark.asyncio
     async def test_detail_screen_works_for_stale_device(self):
         """Device detail screen should work for stale devices."""
@@ -315,6 +317,7 @@ class TestStaleDeviceHandling:
 class TestNavigationRobustness:
     """Tests for rapid/complex navigation patterns."""
 
+    @pytest.mark.skip(reason="MeshDeviceTree removed — dashboard uses ExplorationScreen")
     @pytest.mark.asyncio
     async def test_rapid_detail_transitions_dont_corrupt_state(
         self, message_db, mock_local_identity
@@ -377,6 +380,7 @@ class TestNavigationRobustness:
 class TestMultiDeviceScenarios:
     """Tests for interactions with multiple devices."""
 
+    @pytest.mark.skip(reason="Dashboard no longer uses discover_devices — navigation via ExplorationScreen")
     @pytest.mark.asyncio
     async def test_detail_screen_for_correct_device(
         self, message_db, mock_local_identity

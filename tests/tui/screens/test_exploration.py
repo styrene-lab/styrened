@@ -84,9 +84,9 @@ def app_with_cache(sample_devices):
 class TestExplorationWorkspaceSemantics:
     def test_home_binding_exists_for_returning_home(self):
         screen = ExplorationScreen()
-        bindings = [b for b in screen.BINDINGS if b.key == "n"]
+        bindings = [b for b in screen.BINDINGS if getattr(b, "action", None) == "go_home"]
         assert len(bindings) == 1
-        assert bindings[0].action == "go_home"
+        assert bindings[0].key == "escape"
         assert bindings[0].description == "Home"
 
 

@@ -460,6 +460,9 @@ class TestContentKindUnconditional:
 
         bridge = mock.AsyncMock()
         bridge.fetch_page = mock.AsyncMock(return_value=fake_result)
+        # spawn_lane is called synchronously — must return a bridge, not a coroutine
+        bridge.spawn_lane = mock.MagicMock(return_value=bridge)
+        bridge.connected = True
 
         with mock.patch("styrened.tui.widgets.page_browser.detect_content_type", _tracking_detect):
             with mock.patch("styrened.tui.widgets.page_browser.render_structured_page", return_value="rendered"):

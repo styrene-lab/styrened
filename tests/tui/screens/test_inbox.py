@@ -160,9 +160,9 @@ class TestInboxComposeNew:
     """Tests for compose new conversation feature."""
 
     def test_compose_binding_exists(self) -> None:
-        """InboxScreen should have 'n' binding for new conversation."""
+        """InboxScreen should have 'ctrl+n' binding for new conversation."""
         binding_keys = [b.key for b in InboxScreen.BINDINGS]
-        assert "n" in binding_keys
+        assert "ctrl+n" in binding_keys
 
     def test_compose_bar_in_css(self) -> None:
         """InboxScreen CSS should include compose-bar styling."""

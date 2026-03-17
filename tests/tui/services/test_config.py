@@ -39,7 +39,7 @@ class TestGetDefaultConfig:
         """Test generating default configuration."""
         config = get_default_config()
         assert isinstance(config, StyreneConfig)
-        assert config.tui.theme == ThemeMode.STYRENE
+        assert config.tui.theme == ThemeMode.STYRENE.value
         assert config.tui.log_level == LogLevel.INFO
         assert config.mesh.mesh_id == "styrene"
         assert config.mesh.channel == 6
@@ -220,7 +220,7 @@ class TestConfigLoadSave:
         config = load_config()
         assert isinstance(config, StyreneConfig)
         # Should be defaults
-        assert config.tui.theme == ThemeMode.STYRENE
+        assert config.tui.theme == ThemeMode.STYRENE.value
 
     def test_load_invalid_yaml(self, temp_config_dir, monkeypatch):
         """Test loading invalid YAML raises error."""
@@ -266,7 +266,7 @@ mesh:
         assert config.mesh.mesh_id == "custom-mesh"
 
         # Unspecified values should have defaults
-        assert config.tui.theme == ThemeMode.STYRENE
+        assert config.tui.theme == ThemeMode.STYRENE.value
         assert config.mesh.channel == 6
 
     def test_config_file_has_comment_header(self, temp_config_dir, monkeypatch):

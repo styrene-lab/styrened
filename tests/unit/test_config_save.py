@@ -282,11 +282,15 @@ class TestSaveCoreConfigRoundTrip:
         assert loaded.reticulum.interfaces.peers[0].name == "Hub Alpha"
         assert loaded.reticulum.interfaces.peers[1].host == "10.0.0.2"
         assert loaded.reticulum.interfaces.peers[1].port == 4243
-        # Well-known hubs appended (disabled)
+        # Well-known hubs appended — Community Hub enabled, others disabled
         from styrened.models.config import WELL_KNOWN_HUBS
         assert len(loaded.reticulum.interfaces.peers) == 2 + len(WELL_KNOWN_HUBS)
-        for merged_peer in loaded.reticulum.interfaces.peers[2:]:
-            assert merged_peer.enabled is False
+        merged_peers = loaded.reticulum.interfaces.peers[2:]
+        for merged_peer in merged_peers:
+            hub_def = next(h for h in WELL_KNOWN_HUBS if h.host == merged_peer.host)
+            assert merged_peer.enabled is hub_def.enabled, (
+                f"{merged_peer.host}: expected enabled={hub_def.enabled}"
+            )
 
     def test_yubikey_config_round_trip(self, tmp_path: Path) -> None:
         """YubiKey identity config survives round-trip."""
