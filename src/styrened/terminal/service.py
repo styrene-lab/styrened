@@ -23,7 +23,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import fcntl
 import logging
@@ -36,9 +35,9 @@ import struct
 import termios
 import time
 from dataclasses import dataclass, field
-
 from typing import TYPE_CHECKING, Any
 
+from styrened.models.rbac import Capability
 from styrened.models.styrene_wire import (
     StyreneEnvelope,
     StyreneMessageType,
@@ -57,8 +56,6 @@ from styrened.terminal.messages import (
     register_message_types,
     serialize_message,
 )
-
-from styrened.models.rbac import Capability
 
 if TYPE_CHECKING:
     import RNS
@@ -157,8 +154,8 @@ class TerminalSession:
     source_identity: str
     master_fd: int
     child_pid: int
-    link: "RNS.Link | None" = None
-    channel: "RNS.Channel.Channel | None" = field(default=None, repr=False)
+    link: RNS.Link | None = None
+    channel: RNS.Channel.Channel | None = field(default=None, repr=False)
     protocol_version: str = "1.0"
     term_type: str = "xterm-256color"
     rows: int = 24
@@ -246,8 +243,8 @@ class TerminalService:
 
     def __init__(
         self,
-        rns_service: "RNSService",
-        styrene_protocol: "StyreneProtocol",
+        rns_service: RNSService,
+        styrene_protocol: StyreneProtocol,
         default_shell: str = DEFAULT_SHELL,
         allowed_signals: frozenset[int] | None = None,
         max_sessions_per_identity: int = DEFAULT_MAX_SESSIONS_PER_IDENTITY,
@@ -257,7 +254,7 @@ class TerminalService:
         allowed_shells: set[str] | None = None,
         allowed_commands: set[str] | None = None,
         disable_command_validation: bool = False,
-        rbac_policy: "RBACPolicy | None" = None,  # None → default RBACPolicy()
+        rbac_policy: RBACPolicy | None = None,  # None → default RBACPolicy()
     ):
         """Initialize terminal service.
 
@@ -353,7 +350,7 @@ class TerminalService:
             f"command_validation={'disabled' if disable_command_validation else 'enabled'}"
         )
 
-    def _send_link_packet(self, link: "RNS.Link", data: bytes) -> bool:
+    def _send_link_packet(self, link: RNS.Link, data: bytes) -> bool:
         """Send data packet over an RNS Link.
 
         Args:
@@ -376,7 +373,7 @@ class TerminalService:
             logger.error(f"Failed to send link packet: {e}")
             return False
 
-    def set_rbac_policy(self, policy: "RBACPolicy") -> None:
+    def set_rbac_policy(self, policy: RBACPolicy) -> None:
         """Set or replace the RBAC policy for authorization checks."""
         self._rbac_policy = policy
 
@@ -865,7 +862,7 @@ class TerminalService:
 
     async def _handle_terminal_request(
         self,
-        message: "LXMFMessage",
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_REQUEST from client.
@@ -1260,7 +1257,7 @@ class TerminalService:
                 f"[METRICS] child_monitor_cancelled session={session_hex} poll_count={poll_count}"
             )
 
-    def _on_link_established(self, link: "RNS.Link") -> None:
+    def _on_link_established(self, link: RNS.Link) -> None:
         """Handle new RNS Link connection.
 
         Client must send session_id as first packet to associate Link.
@@ -1280,7 +1277,7 @@ class TerminalService:
         # Access reason via link.teardown_reason
         link.set_link_closed_callback(lambda lnk: self._on_link_closed(lnk, lnk.teardown_reason))
 
-    def _on_link_packet(self, link: "RNS.Link", data: bytes, packet: "RNS.Packet") -> None:
+    def _on_link_packet(self, link: RNS.Link, data: bytes, packet: RNS.Packet) -> None:
         """Handle packet received on terminal Link.
 
         Args:
@@ -1412,7 +1409,7 @@ class TerminalService:
                 f"data_len={len(data)} error={e}"
             )
 
-    def _on_channel_message(self, session: TerminalSession, message: "RNS.Channel.MessageBase") -> bool:
+    def _on_channel_message(self, session: TerminalSession, message: RNS.Channel.MessageBase) -> bool:
         """Handle a message received via RNS Channel (v2.0 data plane).
 
         Dispatches typed Channel messages to appropriate handlers.
@@ -1471,7 +1468,7 @@ class TerminalService:
 
     async def _async_verify_and_associate(
         self,
-        link: "RNS.Link",
+        link: RNS.Link,
         session_id: bytes,
         session: TerminalSession,
     ) -> None:
@@ -1632,7 +1629,7 @@ class TerminalService:
             link._association_in_progress = False
             link.teardown()
 
-    def _on_link_closed(self, link: "RNS.Link", reason: int) -> None:
+    def _on_link_closed(self, link: RNS.Link, reason: int) -> None:
         """Handle Link closure.
 
         Args:
@@ -1893,7 +1890,7 @@ class TerminalService:
 
     async def _handle_terminal_resize(
         self,
-        message: "LXMFMessage",
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_RESIZE from client (via LXMF control plane)."""
@@ -1939,7 +1936,7 @@ class TerminalService:
 
     async def _handle_terminal_signal(
         self,
-        message: "LXMFMessage",
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle TERMINAL_SIGNAL from client.
@@ -2012,7 +2009,7 @@ class TerminalService:
 
     async def _handle_terminal_close(
         self,
-        message: "LXMFMessage",
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> StyreneEnvelope | None:
         """Handle TERMINAL_CLOSE from client.

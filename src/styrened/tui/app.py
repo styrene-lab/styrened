@@ -19,21 +19,20 @@ from textual.binding import Binding, BindingType
 from textual.screen import Screen
 from textual.widgets import Footer, Header
 
+from styrened.ipc.bridge import IPCBridge
 from styrened.tui.models.config import ConfigLoadError, ConfigValidationError, StyreneConfig
 from styrened.tui.screens.comms import CommsScreen
 from styrened.tui.screens.contacts import ContactsScreen
-from styrened.tui.screens.exchange import ExchangeScreen
-from styrened.tui.screens.global_cop import GlobalCopScreen
 from styrened.tui.screens.daemon_setup import DaemonSetupScreen
-from styrened.tui.screens.splash import SplashScreen
 from styrened.tui.screens.dashboard import DashboardScreen
+from styrened.tui.screens.exchange import ExchangeScreen
 from styrened.tui.screens.exploration import ExplorationScreen
 from styrened.tui.screens.first_run_wizard import FirstRunWizardScreen
+from styrened.tui.screens.global_cop import GlobalCopScreen
 from styrened.tui.screens.provision import ProvisionScreen
 from styrened.tui.screens.settings import SettingsScreen
+from styrened.tui.screens.splash import SplashScreen
 from styrened.tui.services.app_lifecycle import StyreneLifecycle
-from styrened.tui.services.device_cache import DeviceCache
-from styrened.ipc.bridge import IPCBridge
 from styrened.tui.services.config import (
     ensure_directories,
     get_default_config,
@@ -42,6 +41,7 @@ from styrened.tui.services.config import (
     save_rns_config,
     update_styrene_config_from_cli,
 )
+from styrened.tui.services.device_cache import DeviceCache
 from styrened.tui.services.reticulum import find_reticulum_config
 from styrened.tui.themes.color_cascade import FORGE_WORLD_PRESETS, ColorCascade
 from styrened.tui.themes.styrene_brand import (
@@ -198,7 +198,7 @@ class StyreneApp(App[None]):
 
     def action_open_mail(self) -> None:
         """Open Exchange on Mail tab, or return to dashboard if already on Exchange."""
-        from styrened.tui.screens.exchange import ExchangeScreen, TAB_MAIL
+        from styrened.tui.screens.exchange import TAB_MAIL, ExchangeScreen
 
         if self._current_screen_name() == "exchange":
             self.switch_screen("dashboard")
@@ -214,7 +214,7 @@ class StyreneApp(App[None]):
 
     def action_open_comms(self) -> None:
         """Open Exchange on Direct tab, or return to dashboard if already on Exchange."""
-        from styrened.tui.screens.exchange import ExchangeScreen, TAB_DIRECT
+        from styrened.tui.screens.exchange import TAB_DIRECT, ExchangeScreen
 
         if self._current_screen_name() == "exchange":
             self.switch_screen("dashboard")
@@ -226,7 +226,7 @@ class StyreneApp(App[None]):
 
     def action_open_contacts(self) -> None:
         """Open Exchange on Contacts tab, or return to dashboard if already on Exchange."""
-        from styrened.tui.screens.exchange import ExchangeScreen, TAB_CONTACTS
+        from styrened.tui.screens.exchange import TAB_CONTACTS, ExchangeScreen
 
         if self._current_screen_name() == "exchange":
             self.switch_screen("dashboard")
@@ -275,7 +275,7 @@ class StyreneApp(App[None]):
     db_engine: Engine | None
 
     # Chat protocol for LXMF messaging
-    chat_protocol: "ChatProtocol | None"
+    chat_protocol: ChatProtocol | None
 
     # Local identity hash for message attribution
     local_identity_hash: str
@@ -285,7 +285,7 @@ class StyreneApp(App[None]):
     # See styrened.tui.services.protocol.TUIServices for the contract.
 
     @property
-    def services(self) -> "StyreneApp":
+    def services(self) -> StyreneApp:
         """Typed service accessor for screens/widgets.
 
         Returns self (StyreneApp implements TUIServices protocol).
@@ -306,10 +306,10 @@ class StyreneApp(App[None]):
 
     def __init__(
         self,
-        mode: "DeploymentMode | None" = None,
+        mode: DeploymentMode | None = None,
         headless: bool = False,
         server_port: int | None = None,
-        peers: list["PeerConfig"] | None = None,
+        peers: list[PeerConfig] | None = None,
         api_port: int | None = None,
         config_path: str | None = None,
         remote_url: str | None = None,
@@ -812,7 +812,7 @@ class StyreneApp(App[None]):
         for panel in self.query(NodeInfoPanel):
             panel.refresh_data()
 
-    def on_device_cache_devices_updated(self, message: "DeviceCache.DevicesUpdated") -> None:
+    def on_device_cache_devices_updated(self, message: DeviceCache.DevicesUpdated) -> None:
         """Fan-out DevicesUpdated to all mounted screens.
 
         DeviceCache.post_message delivers to the App widget only — Textual

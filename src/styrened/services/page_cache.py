@@ -11,7 +11,6 @@ Architecture:
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import re
@@ -87,14 +86,14 @@ class PageCacheService:
     URLs use direct cache entries keyed by URL.
     """
 
-    def __init__(self, engine: "Engine", i2p_cache_ttl: int = 3600) -> None:
+    def __init__(self, engine: Engine, i2p_cache_ttl: int = 3600) -> None:
         self._engine = engine
         self._i2p_cache_ttl = i2p_cache_ttl
         self._crawl_task: asyncio.Task | None = None
         self._started = False
         self._page_browser: PageBrowserService | None = None
 
-    def set_page_browser(self, browser: "PageBrowserService") -> None:
+    def set_page_browser(self, browser: PageBrowserService) -> None:
         """Set reference to PageBrowserService for crawling."""
         self._page_browser = browser
 

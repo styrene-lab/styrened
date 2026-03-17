@@ -8,7 +8,6 @@ phosphor color reflecting their industrial character.
 """
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -346,7 +345,7 @@ class ColorCascade:
         self.color_info = self.medium  # Medium for informational
 
     @classmethod
-    def from_textual_theme(cls, theme: "Theme") -> "ColorCascade":
+    def from_textual_theme(cls, theme: Theme) -> ColorCascade:
         """Create a ColorCascade from an active Textual Theme.
 
         Uses the theme's accent color as the phosphex root, then overrides
@@ -370,7 +369,7 @@ class ColorCascade:
         return cascade
 
     @classmethod
-    def from_preset(cls, preset_key: str) -> "ColorCascade":
+    def from_preset(cls, preset_key: str) -> ColorCascade:
         """Create a ColorCascade from a preset name.
 
         The "styrene" key returns the hand-tuned brand cascade;
@@ -453,7 +452,7 @@ class ColorCascade:
             "color_info": self.color_info,
         }
 
-    def to_textual_theme(self, name: str | None = None) -> "Theme":
+    def to_textual_theme(self, name: str | None = None) -> Theme:
         """Generate a Textual Theme from this cascade.
 
         Args:
@@ -503,13 +502,12 @@ class ColorCascade:
         )
 
 
-def generate_all_themes() -> dict[str, "Theme"]:
+def generate_all_themes() -> dict[str, Theme]:
     """Generate Textual themes for all presets including the styrene brand theme.
 
     Returns:
         Dictionary mapping preset keys to Theme objects.
     """
-    from textual.theme import Theme
 
     from styrened.tui.themes.styrene_brand import STYRENE_THEME_KEY, create_styrene_theme
 

@@ -10,7 +10,6 @@ for hardened msgpack deserialization (max lengths, strict keys).
 """
 from __future__ import annotations
 
-
 import base64
 import json
 import logging

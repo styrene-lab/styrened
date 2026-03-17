@@ -32,8 +32,6 @@ continues to work without changes.
 """
 from __future__ import annotations
 
-
-
 from textual.widget import Widget
 
 from styrened.tui.themes.color_cascade import ColorCascade

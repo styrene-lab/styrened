@@ -33,7 +33,6 @@ Usage (CLI side):
 """
 from __future__ import annotations
 
-
 from styrened.ipc.bridge import IPCBridge
 from styrened.ipc.client import (
     ControlClient,

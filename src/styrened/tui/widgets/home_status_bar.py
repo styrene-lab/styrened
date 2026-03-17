@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """Home Status Bar — compact SCADA-style horizontal status indicator.
 
 Renders a single-line pipe-delimited bar showing daemon/mesh status.

@@ -23,7 +23,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import os
@@ -89,12 +88,12 @@ class TerminalClientSession:
 
     session_id: bytes
     link_destination: str
-    styrene_protocol: "StyreneProtocol"
+    styrene_protocol: StyreneProtocol
     destination: str  # Remote destination hash
     identity_hash: str | None = None  # Identity hash for RNS.Identity.recall()
 
-    link: "RNS.Link | None" = None
-    channel: "RNS.Channel.Channel | None" = None
+    link: RNS.Link | None = None
+    channel: RNS.Channel.Channel | None = None
     remote_version: VersionInfo | None = None
     exit_code: int | None = None
 
@@ -224,7 +223,7 @@ class TerminalClientSession:
             logger.error(f"Failed to send packet: {e}")
             return False
 
-    def _on_link_established(self, link: "RNS.Link") -> None:
+    def _on_link_established(self, link: RNS.Link) -> None:
         """Handle Link establishment.
 
         Identifies client to server and sends session_id to associate Link with terminal session.
@@ -278,7 +277,7 @@ class TerminalClientSession:
         # This ensures the version handshake completes before we consider the connection ready
         logger.info("Link established, waiting for server version exchange...")
 
-    def _on_link_closed(self, link: "RNS.Link") -> None:
+    def _on_link_closed(self, link: RNS.Link) -> None:
         """Handle Link closure.
 
         Note: This callback runs in RNS's thread, not the asyncio event loop.
@@ -294,7 +293,7 @@ class TerminalClientSession:
         if self.on_exit and self.exit_code is not None:
             self.on_exit(self.exit_code)
 
-    def _on_link_packet(self, data: bytes, packet: "RNS.Packet") -> None:
+    def _on_link_packet(self, data: bytes, packet: RNS.Packet) -> None:
         """Handle data received from server.
 
         Note: This callback runs in RNS's thread, not the asyncio event loop.
@@ -355,7 +354,7 @@ class TerminalClientSession:
         except Exception as e:
             logger.error(f"Failed to handle terminal packet: {e}")
 
-    def _on_channel_message(self, message: "RNS.Channel.MessageBase") -> bool:
+    def _on_channel_message(self, message: RNS.Channel.MessageBase) -> bool:
         """Handle a message received via RNS Channel (v2.0 data plane).
 
         Note: This callback runs in RNS's thread, not the asyncio event loop.
@@ -583,7 +582,7 @@ class TerminalClient:
         exit_code = await session.run_interactive()
     """
 
-    def __init__(self, styrene_protocol: "StyreneProtocol"):
+    def __init__(self, styrene_protocol: StyreneProtocol):
         """Initialize terminal client.
 
         Args:

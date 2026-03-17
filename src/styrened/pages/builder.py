@@ -13,7 +13,6 @@ the embedded structured data via :func:`~styrened.pages.parser.parse_page_direct
 """
 from __future__ import annotations
 
-
 import base64
 import json
 import logging

@@ -7,7 +7,6 @@ Privacy: logs content_length, never content.
 """
 from __future__ import annotations
 
-
 import json
 import time
 

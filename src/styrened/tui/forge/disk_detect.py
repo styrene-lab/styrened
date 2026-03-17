@@ -5,7 +5,6 @@ Extracted from styrene-edge. Detects external removable disks
 """
 from __future__ import annotations
 
-
 import json
 import re
 import subprocess

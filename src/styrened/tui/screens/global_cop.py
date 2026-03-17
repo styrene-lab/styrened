@@ -260,7 +260,7 @@ class GlobalCopScreen(StyreneScreen[None]):
         self._last_event_refresh = now
 
         try:
-            self.bridge  # guard: do nothing if bridge is gone
+            _ = self.bridge  # guard: do nothing if bridge is gone
         except BridgeUnavailableError:
             return
 

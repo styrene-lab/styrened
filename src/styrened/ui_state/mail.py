@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from styrened.ui_state.base import LoadState, RefreshMeta
 
 
-class ConversationScopeKind(str, Enum):
+class ConversationScopeKind(StrEnum):
     """Canonical async discussion scopes."""
 
     DIRECT = "direct"
@@ -27,7 +27,7 @@ class MailTransportMeta:
     fallback_used: bool = False
 
 
-class DeliveryPathClass(str, Enum):
+class DeliveryPathClass(StrEnum):
     """Relative quality/cost classification for a route."""
 
     HIGH = "high"
@@ -36,7 +36,7 @@ class DeliveryPathClass(str, Enum):
     UNKNOWN = "unknown"
 
 
-class MediaFrictionLevel(str, Enum):
+class MediaFrictionLevel(StrEnum):
     """How cautious the UI should be with expensive media actions."""
 
     NONE = "none"
@@ -44,7 +44,7 @@ class MediaFrictionLevel(str, Enum):
     AVOID = "avoid"
 
 
-class GroupThreadFeatureTier(str, Enum):
+class GroupThreadFeatureTier(StrEnum):
     """Local feature/storage tier for group-thread behavior."""
 
     MINIMAL = "minimal"

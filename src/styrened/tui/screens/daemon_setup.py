@@ -218,6 +218,7 @@ class DaemonSetupScreen(Screen[bool]):
             True if daemon responded successfully.
         """
         import asyncio
+
         from styrened.ipc.server import get_default_socket_path
 
         socket_path = get_default_socket_path()

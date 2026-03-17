@@ -12,7 +12,6 @@ during the migration period.
 """
 from __future__ import annotations
 
-
 import warnings
 
 from styrened.ipc.bridge import IPCBridge

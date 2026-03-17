@@ -24,6 +24,7 @@ third-party colour libraries.
 """
 
 from __future__ import annotations
+
 import json
 import math
 import re
@@ -265,7 +266,7 @@ class TweakcnProfile:
         *,
         name: str | None = None,
         source_url: str = "",
-    ) -> "TweakcnProfile":
+    ) -> TweakcnProfile:
         """Build a profile from a parsed tweakcn registry JSON dict."""
         css_vars = data.get("cssVars", {})
         return cls(
@@ -283,7 +284,7 @@ class TweakcnProfile:
         *,
         name: str = "custom",
         source_url: str = "",
-    ) -> "TweakcnProfile":
+    ) -> TweakcnProfile:
         """Build a profile from a flat dict of hex color values.
 
         Used by the TUI color editor to reconstruct a profile from
@@ -297,7 +298,7 @@ class TweakcnProfile:
         )
 
     @classmethod
-    def from_url(cls, url: str, *, timeout: int = 10) -> "TweakcnProfile":
+    def from_url(cls, url: str, *, timeout: int = 10) -> TweakcnProfile:
         """Fetch a tweakcn theme by URL and parse it.
 
         Accepts either the human-readable URL
@@ -329,7 +330,7 @@ class TweakcnProfile:
 
     def to_textual_theme(
         self, mode: Literal["dark", "light"] = "dark"
-    ) -> "Theme":
+    ) -> Theme:
         """Convert this profile to a Textual ``Theme``.
 
         Parameters

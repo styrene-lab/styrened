@@ -16,7 +16,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import os
@@ -153,7 +152,7 @@ class ControlServer:
 
     def __init__(
         self,
-        daemon: "StyreneDaemon",
+        daemon: StyreneDaemon,
         socket_path: Path | None = None,
         socket_mode: int = 0o660,
     ) -> None:

@@ -28,7 +28,6 @@ the complexity of connection pooling for this use case.
 """
 from __future__ import annotations
 
-
 import logging
 import re
 import sqlite3

@@ -12,7 +12,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import base64
 import logging
@@ -144,7 +143,7 @@ class ControlClient:
         self._event_callbacks: dict[IPCMessageType, list[Callable]] = {}
         self._event_queue: asyncio.Queue[tuple[IPCMessageType, dict]] = asyncio.Queue()
 
-    async def __aenter__(self) -> "ControlClient":
+    async def __aenter__(self) -> ControlClient:
         """Async context manager entry."""
         await self.connect()
         return self

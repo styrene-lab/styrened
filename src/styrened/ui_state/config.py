@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from styrened.ui_state.base import LoadState, RefreshMeta
 
 
-class ConfigSaveState(str, Enum):
+class ConfigSaveState(StrEnum):
     """Save lifecycle for an editable config draft."""
 
     IDLE = "idle"

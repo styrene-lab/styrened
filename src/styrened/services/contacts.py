@@ -1,7 +1,6 @@
 """Contact service for managing mesh peer aliases and name resolution."""
 from __future__ import annotations
 
-
 import logging
 import time
 from dataclasses import dataclass
@@ -40,7 +39,7 @@ class ContactInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ContactInfo":
+    def from_dict(cls, data: dict[str, Any]) -> ContactInfo:
         return cls(
             identity_hash=data.get("identity_hash", ""),
             alias=data.get("alias", ""),
@@ -50,7 +49,7 @@ class ContactInfo:
         )
 
     @classmethod
-    def from_model(cls, contact: Contact) -> "ContactInfo":
+    def from_model(cls, contact: Contact) -> ContactInfo:
         return cls(
             identity_hash=contact.identity_hash,
             alias=contact.alias,

@@ -10,7 +10,6 @@ no default path since this code is no longer inside styrene-edge.
 """
 from __future__ import annotations
 
-
 import shutil
 import stat
 from collections.abc import AsyncIterator

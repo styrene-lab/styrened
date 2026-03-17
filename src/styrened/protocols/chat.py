@@ -13,7 +13,6 @@ Note: This protocol depends on node_store service which will be migrated in a la
 """
 from __future__ import annotations
 
-
 import logging
 import time
 from typing import Any

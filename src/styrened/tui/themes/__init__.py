@@ -5,7 +5,6 @@ the Styrene brand theme, and semantic visual differentiation utilities.
 """
 from __future__ import annotations
 
-
 from .color_cascade import (
     ColorCascade,
 )

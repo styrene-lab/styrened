@@ -15,8 +15,8 @@ from typing import ClassVar
 
 from rich.text import Text
 from textual.app import RenderResult
-from textual.reactive import reactive
 from textual.message import Message
+from textual.reactive import reactive
 from textual.widget import Widget
 
 # ---------------------------------------------------------------------------
@@ -261,10 +261,10 @@ class GlitchLogoWidget(Widget):
         text = Text(no_wrap=True, overflow="fold")
 
         for y, (line, row_frames) in enumerate(
-            zip(self._lines, self._unlock_map)
+            zip(self._lines, self._unlock_map, strict=False)
         ):
             for x, (ch, (appear, unlock)) in enumerate(
-                zip(line, row_frames)
+                zip(line, row_frames, strict=False)
             ):
                 if ch in (" ", _BRAILLE_BLANK):
                     text.append(ch)

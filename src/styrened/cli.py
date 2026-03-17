@@ -29,7 +29,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import argparse
 import asyncio
 import logging
@@ -2931,7 +2930,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         if binary:
             config.i2p.mode = DaemonMode.MANAGED
             save_core_config(config, config_path)
-            print(f"✓ i2p mode set to MANAGED and config saved.")
+            print("✓ i2p mode set to MANAGED and config saved.")
         else:
             print("i2pd binary not found — config not modified.")
             return 1

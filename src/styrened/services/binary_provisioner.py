@@ -18,12 +18,12 @@ import logging
 import os
 import platform
 import shutil
-import struct
 import sys
 import tarfile
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from styrened.services.binary_errors import BinaryIntegrityError, UnsupportedPlatformError
 

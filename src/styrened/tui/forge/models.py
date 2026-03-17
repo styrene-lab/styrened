@@ -5,7 +5,6 @@ for portability outside the edge repo.
 """
 from __future__ import annotations
 
-
 import importlib.resources
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -128,7 +127,7 @@ class Bundle:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     @classmethod
-    def load(cls, bundle_path: Path) -> "Bundle":
+    def load(cls, bundle_path: Path) -> Bundle:
         """Load a bundle from its manifest."""
         manifest = bundle_path / "bundle.yaml"
         with open(manifest) as f:
@@ -152,9 +151,9 @@ class Bundle:
     def create(
         cls,
         bundles_dir: Path,
-        target: "FlashTarget",
+        target: FlashTarget,
         wheels_dir: Path | None = None,
-    ) -> "Bundle":
+    ) -> Bundle:
         """Create a new empty bundle directory for a target.
 
         Args:

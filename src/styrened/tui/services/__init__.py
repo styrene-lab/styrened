@@ -5,7 +5,6 @@ data loading, and external interactions.
 """
 from __future__ import annotations
 
-
 from styrened.tui.services.config import (
     config_exists,
     create_default_config,

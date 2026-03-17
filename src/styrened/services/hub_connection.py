@@ -21,7 +21,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import logging
 import time
 from enum import Enum
@@ -53,7 +52,7 @@ class HubStatus(Enum):
 
 
 # Singleton instance
-_hub_connection: "HubConnection | None" = None
+_hub_connection: HubConnection | None = None
 
 
 class HubConnection:

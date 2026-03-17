@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from styrened.ui_state.base import CapabilityState, LoadState, RefreshMeta
 
 
-class PageTransport(str, Enum):
+class PageTransport(StrEnum):
     """Canonical transport selected for a page session."""
 
     NOMADNET = "nomadnet"

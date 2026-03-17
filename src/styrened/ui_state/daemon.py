@@ -8,7 +8,6 @@ from typing import Any
 
 from styrened.models.hardware import NetworkInterface, SystemInfo
 from styrened.services.hub_connection import HubStatus
-
 from styrened.ui_state.base import CapabilityState, LoadState, RefreshMeta
 from styrened.ui_state.mail import GroupThreadFeatureTier
 

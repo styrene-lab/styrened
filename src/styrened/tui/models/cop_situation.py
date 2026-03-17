@@ -161,7 +161,7 @@ class CopSituationTracker:
 
     # ---- Event-driven intake -----------------------------------------------
 
-    def ingest(self, event: "DaemonEvent") -> None:
+    def ingest(self, event: DaemonEvent) -> None:
         """Route a DaemonEvent into ephemeral situations.
 
         Only file and PQC events produce ephemeral situations.  Node,

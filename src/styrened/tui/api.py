@@ -12,7 +12,6 @@ Endpoints:
 """
 from __future__ import annotations
 
-
 from typing import Any
 
 from styrened.tui.models.config import StyreneConfig

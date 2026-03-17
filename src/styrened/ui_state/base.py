@@ -8,10 +8,10 @@ helpers; it does not own persistence, polling, or runtime service access.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class LoadState(str, Enum):
+class LoadState(StrEnum):
     """Lifecycle state for a constructed UI snapshot."""
 
     IDLE = "idle"
@@ -21,7 +21,7 @@ class LoadState(str, Enum):
     ERROR = "error"
 
 
-class CapabilityState(str, Enum):
+class CapabilityState(StrEnum):
     """Availability of an optional daemon capability."""
 
     UNSUPPORTED = "unsupported"
@@ -29,7 +29,7 @@ class CapabilityState(str, Enum):
     AVAILABLE = "available"
 
 
-class KnowledgeState(str, Enum):
+class KnowledgeState(StrEnum):
     """Whether a specific field value is known."""
 
     KNOWN = "known"

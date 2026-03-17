@@ -12,7 +12,6 @@ no default path since this code is no longer inside styrene-edge.
 """
 from __future__ import annotations
 
-
 import asyncio
 import platform
 import re

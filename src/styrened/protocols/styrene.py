@@ -24,7 +24,6 @@ Message Flow:
 """
 from __future__ import annotations
 
-
 import logging
 import time
 from typing import Any
@@ -519,10 +518,10 @@ class StyreneProtocol(Protocol):
         )
 
         # Register delivery callbacks for debugging
-        def on_delivery(message: "LXMF.LXMessage") -> None:
+        def on_delivery(message: LXMF.LXMessage) -> None:
             logger.info(f"[LXMF] Message delivered to {destination[:16]}...")
 
-        def on_failed(message: "LXMF.LXMessage") -> None:
+        def on_failed(message: LXMF.LXMessage) -> None:
             logger.warning(f"[LXMF] Message delivery FAILED to {destination[:16]}...")
 
         lxmf_msg.register_delivery_callback(on_delivery)

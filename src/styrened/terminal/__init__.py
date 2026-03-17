@@ -35,7 +35,6 @@ Usage (client/TUI):
 """
 from __future__ import annotations
 
-
 # Legacy alias — TerminalMessage was the old base class, now MessageBase
 from RNS.Channel import MessageBase as TerminalMessage
 

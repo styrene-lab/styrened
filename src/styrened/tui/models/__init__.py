@@ -5,7 +5,6 @@ structures used throughout the application.
 """
 from __future__ import annotations
 
-
 # Re-export from styrene-core (duplicates migrated)
 from styrened.models.messages import Base, Message, get_session, init_db
 from styrened.models.reticulum import (
@@ -35,8 +34,6 @@ from styrened.tui.models.config import (
     TUIConfig,
 )
 from styrened.tui.models.device_hardware import Hardware
-from styrened.tui.models.profiles import Profile
-from styrened.tui.models.roles import Role
 from styrened.tui.models.fleet import Device, DeviceStatus
 from styrened.tui.models.hardware import (
     DiskInfo,
@@ -46,6 +43,8 @@ from styrened.tui.models.hardware import (
     NetworkInterfaceType,
     SystemInfo,
 )
+from styrened.tui.models.profiles import Profile
+from styrened.tui.models.roles import Role
 
 __all__ = [
     "AdvancedConfig",

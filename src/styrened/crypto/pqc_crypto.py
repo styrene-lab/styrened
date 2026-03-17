@@ -8,7 +8,6 @@ All other operations use the cryptography library (already a dependency via RNS)
 """
 from __future__ import annotations
 
-
 import os
 
 from cryptography.hazmat.primitives import hashes

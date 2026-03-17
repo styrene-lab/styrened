@@ -42,7 +42,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import logging
 import threading
 import time
@@ -57,7 +56,7 @@ from styrened.models.rns_error import RNSErrorState
 logger = logging.getLogger(__name__)
 
 # Singleton instance
-_rns_service: "RNSService | None" = None
+_rns_service: RNSService | None = None
 
 
 # Outbound packet error filtering explanation:

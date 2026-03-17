@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from styrened.ui_state.base import LoadState, RefreshMeta
 
 
-class SessionKind(str, Enum):
+class SessionKind(StrEnum):
     """Known live session kinds."""
 
     DIRECT_LINK = "direct_link"
@@ -19,7 +19,7 @@ class SessionKind(str, Enum):
     VPN_HANDSHAKE = "vpn_handshake"
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     """Normalized runtime state for a live session."""
 
     INACTIVE = "inactive"

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-
 from typing import TYPE_CHECKING, Any
 
 from styrened.tui.models.config import StyreneConfig
@@ -94,7 +93,7 @@ class StyreneLifecycle:
         return self._initialized
 
     @property
-    def ipc_bridge(self) -> "IPCBridge | None":
+    def ipc_bridge(self) -> IPCBridge | None:
         """Access the IPC bridge (available after initialization)."""
         return self._ipc_bridge
 
@@ -139,8 +138,8 @@ class StyreneLifecycle:
     async def _initialize_ipc(self) -> bool:
         """Initialize via IPC — spawn daemon, connect bridge."""
         try:
-            from styrened.tui.services.daemon_manager import DaemonManager, DaemonMode
             from styrened.ipc.bridge import IPCBridge
+            from styrened.tui.services.daemon_manager import DaemonManager, DaemonMode
 
             self._daemon_manager = DaemonManager(mode=DaemonMode.MANAGED)
             if not await self._daemon_manager.ensure_running():

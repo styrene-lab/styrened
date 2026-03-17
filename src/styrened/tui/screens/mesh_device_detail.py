@@ -19,21 +19,20 @@ from textual.worker import Worker
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.services.reticulum import discover_devices
 from styrened.tui.widgets.chat_widget import ChatWidget
+from styrened.tui.widgets.command_widget import CommandWidget
+from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
+from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
+from styrened.tui.widgets.page_browser import PageBrowserWidget
+from styrened.tui.widgets.terminal_widget import TerminalWidget
 from styrened.ui_state import (
     PeerWorkspaceContext,
     PeerWorkspaceFocus,
     WorkspaceId,
     build_peer_workspace_context,
 )
-from styrened.tui.widgets.command_widget import CommandWidget
-from styrened.tui.widgets.device_status_widget import DeviceStatusWidget
-from styrened.tui.widgets.highlighted_panel import HighlightedPanel, get_color_cascade
-from styrened.tui.widgets.page_browser import PageBrowserWidget
-from styrened.tui.widgets.terminal_widget import TerminalWidget
 
 if TYPE_CHECKING:
     from styrened.rpc.messages import StatusResponse
-    from styrened.tui.app import StyreneApp
 
 # ── Status cache ──────────────────────────────────────────────────
 # LRU TTL cache: {identity_hash: (StatusResponse, timestamp)}
@@ -188,7 +187,7 @@ class MeshDeviceDetailScreen(Screen[None]):
     def __init__(
         self,
         device_identity: str,
-        initial_status: "StatusResponse | None" = None,
+        initial_status: StatusResponse | None = None,
         initial_tab: str | None = None,
         device: MeshDevice | None = None,
         origin_workspace: WorkspaceId | str | None = None,

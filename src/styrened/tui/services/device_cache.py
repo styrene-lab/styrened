@@ -88,7 +88,7 @@ class DeviceCache:
     # Lifecycle
     # -------------------------------------------------------------------------
 
-    def start(self, app: "App") -> None:
+    def start(self, app: App) -> None:
         """Attach to *app* and schedule delayed priming after first paint.
 
         Idempotent — safe to call again on IPC reconnect; cancels any existing

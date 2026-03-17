@@ -6,7 +6,6 @@ and IPC event broadcasting for connected clients.
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import time

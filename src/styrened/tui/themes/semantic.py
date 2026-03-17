@@ -10,7 +10,6 @@ The visual differentiation uses three layers:
 """
 from __future__ import annotations
 
-
 from enum import Enum
 from typing import NamedTuple
 

@@ -14,7 +14,6 @@ Requires: pip install 'styrened[yubikey]'  (python-fido2>=1.0)
 """
 from __future__ import annotations
 
-
 import base64
 import logging
 from hashlib import sha256
@@ -66,7 +65,7 @@ def require_fido2() -> None:
         )
 
 
-def _get_fido2_client(rp_id: str) -> "Fido2Client":
+def _get_fido2_client(rp_id: str) -> Fido2Client:
     """Find a connected YubiKey and return a Fido2Client.
 
     Args:

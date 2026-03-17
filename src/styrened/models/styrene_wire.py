@@ -39,7 +39,6 @@ Design Decisions:
 """
 from __future__ import annotations
 
-
 import os
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -291,7 +290,7 @@ class StyreneEnvelope:
             return header + self.payload
 
     @classmethod
-    def decode(cls, data: bytes) -> "StyreneEnvelope":
+    def decode(cls, data: bytes) -> StyreneEnvelope:
         """Decode wire format to envelope.
 
         Args:

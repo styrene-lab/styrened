@@ -7,10 +7,10 @@ workspace routing without depending on any frontend framework.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class WorkspaceId(str, Enum):
+class WorkspaceId(StrEnum):
     """Stable aggregate workspace identifiers."""
 
     HOME = "home"
@@ -21,7 +21,7 @@ class WorkspaceId(str, Enum):
     ADMIN = "admin"
 
 
-class PeerWorkspaceFocus(str, Enum):
+class PeerWorkspaceFocus(StrEnum):
     """Requested focus within the peer workspace."""
 
     STATUS = "status"

@@ -20,8 +20,6 @@ import logging
 import os
 import shutil
 import signal
-import socket
-import struct
 from pathlib import Path
 
 from styrened.models.config import CoreConfig, I2PConfig
@@ -114,7 +112,7 @@ class I2PAdapter(DaemonAdapter, AdapterProtocol):
         self,
         config: I2PConfig,
         *,
-        core_config: "CoreConfig | None" = None,
+        core_config: CoreConfig | None = None,
     ) -> None:
         super().__init__(config.mode)
         self._config = config
@@ -202,7 +200,7 @@ class I2PAdapter(DaemonAdapter, AdapterProtocol):
             return
         try:
             await asyncio.wait_for(self._process.wait(), timeout=10.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("i2pd did not stop after SIGTERM; sending SIGKILL")
             try:
                 self._process.send_signal(signal.SIGKILL)
@@ -248,7 +246,7 @@ class I2PAdapter(DaemonAdapter, AdapterProtocol):
                 asyncio.open_connection(self._config.http_proxy_host, port),
                 timeout=3.0,
             )
-        except (OSError, asyncio.TimeoutError):
+        except (TimeoutError, OSError):
             return None
 
         try:

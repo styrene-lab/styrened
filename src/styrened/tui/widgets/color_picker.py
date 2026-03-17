@@ -11,9 +11,12 @@ Returns the selected hex color string or None on cancel.
 """
 
 from __future__ import annotations
+
 import colorsys
 from dataclasses import dataclass
 
+from rich.segment import Segment
+from rich.style import Style
 from textual import on
 from textual.app import ComposeResult
 from textual.color import Color
@@ -25,9 +28,6 @@ from textual.screen import ModalScreen
 from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Static
-
-from rich.segment import Segment
-from rich.style import Style
 
 # CRT-appropriate palette presets
 PRESET_COLORS: list[str] = [

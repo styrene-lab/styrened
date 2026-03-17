@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from styrened.tui.models.cop_situation import SituationLine, SituationPriority
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 # Enums / state
 # ---------------------------------------------------------------------------
 
-class AdapterDisplayState(str, Enum):
+class AdapterDisplayState(StrEnum):
     """Canonical adapter states visible to the TUI."""
 
     DISABLED = "disabled"
@@ -41,7 +41,7 @@ class AdapterDisplayState(str, Enum):
     DEGRADED = "degraded"
 
     @classmethod
-    def _missing_(cls, value: object) -> "AdapterDisplayState":
+    def _missing_(cls, value: object) -> AdapterDisplayState:
         """Map unknown values to PROBING rather than raising."""
         return cls.PROBING
 
@@ -110,7 +110,7 @@ class AdapterStatusTracker:
 
     # ---- Event-driven intake ------------------------------------------------
 
-    def ingest(self, event: "DaemonEvent") -> None:
+    def ingest(self, event: DaemonEvent) -> None:
         """Process a DaemonEvent.  Only ``adapter_changed`` events are handled.
 
         The event payload is expected to contain:

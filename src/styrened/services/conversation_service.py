@@ -12,7 +12,6 @@ Design decisions:
 """
 from __future__ import annotations
 
-
 import logging
 import math
 import threading
@@ -60,7 +59,7 @@ class ConversationInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ConversationInfo":
+    def from_dict(cls, data: dict[str, Any]) -> ConversationInfo:
         """Deserialize from dictionary."""
         return cls(
             peer_hash=data.get("peer_hash", ""),
@@ -135,7 +134,7 @@ class MessageInfo:
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MessageInfo":
+    def from_dict(cls, data: dict[str, Any]) -> MessageInfo:
         """Deserialize from dictionary."""
         return cls(
             id=data.get("id", 0),
@@ -163,7 +162,7 @@ class MessageInfo:
         )
 
     @classmethod
-    def from_message(cls, msg: Message, local_identity_hash: str) -> "MessageInfo":
+    def from_message(cls, msg: Message, local_identity_hash: str) -> MessageInfo:
         """Create MessageInfo from a Message model instance.
 
         Args:

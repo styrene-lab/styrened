@@ -25,7 +25,10 @@ import yaml
 
 from styrened import paths
 from styrened.models.config import ConfigFieldError, GroupThreadFeatureTierConfig
-from styrened.services.group_threads import HardwareFootprintInputs, choose_group_thread_feature_tier
+from styrened.services.group_threads import (
+    HardwareFootprintInputs,
+    choose_group_thread_feature_tier,
+)
 from styrened.tui.models.config import (
     ConfigLoadError,
     ConfigValidationError,
@@ -34,7 +37,6 @@ from styrened.tui.models.config import (
     LogLevel,
     PeerConfig,
     StyreneConfig,
-    ThemeMode,
 )
 
 # Application identifiers for platformdirs

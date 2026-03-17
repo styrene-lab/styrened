@@ -6,13 +6,13 @@ ImagePreview for inline image attachments.
 """
 from __future__ import annotations
 
-
 import logging
 from typing import Any
 
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
+
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)

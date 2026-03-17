@@ -17,7 +17,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import logging
 import os
 import stat
@@ -30,7 +29,6 @@ from styrened import __version__, paths
 from styrened.models.daemon_mode import DaemonMode
 from styrened.services.config import load_core_config
 from styrened.services.i2p import I2PAdapter
-from styrened.services.yggdrasil import YggdrasilAdapter
 from styrened.services.reticulum import (
     _resolve_identity_path,
     detect_existing_lxmf_identity,
@@ -40,6 +38,7 @@ from styrened.services.reticulum import (
     get_reticulum_config_state,
     is_reticulum_configured,
 )
+from styrened.services.yggdrasil import YggdrasilAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -628,7 +627,7 @@ def check_paths() -> list[Finding]:
 # -----------------------------------------------------------------------------
 
 
-async def check_yggdrasil(config: "Any | None" = None) -> list[Finding]:
+async def check_yggdrasil(config: Any | None = None) -> list[Finding]:
     """Check Yggdrasil integration status.
 
     Args:
@@ -714,7 +713,7 @@ async def check_yggdrasil(config: "Any | None" = None) -> list[Finding]:
     return findings
 
 
-async def check_i2p(config: "Any | None" = None) -> list[Finding]:
+async def check_i2p(config: Any | None = None) -> list[Finding]:
     """Check I2P (i2pd) integration status.
 
     Args:
@@ -1070,7 +1069,7 @@ async def fix_adapter_binaries(config: Any) -> list[Finding]:
                     category=category,
                     severity=Severity.ERROR,
                     message=f"✗ {adapter_name} provisioner not available",
-                    fix_hint=f"Install binary manually or upgrade styrened",
+                    fix_hint="Install binary manually or upgrade styrened",
                 )
             )
             continue
@@ -1140,7 +1139,9 @@ async def check_boundary_log() -> list[Finding]:
     # ipc-command sibling task).  If it is absent the build is incomplete;
     # surface a WARN rather than sending garbage via a silent fallback shim.
     try:
-        from styrened.ipc.messages import CmdBoundarySnapshotRequest as _BoundaryReq  # type: ignore[attr-defined]
+        from styrened.ipc.messages import (
+            CmdBoundarySnapshotRequest as _BoundaryReq,  # type: ignore[attr-defined]
+        )
     except ImportError as exc:
         findings.append(
             Finding(

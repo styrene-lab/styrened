@@ -13,14 +13,13 @@ compatibility and for use by ``create_styrene_cascade()``.
 """
 from __future__ import annotations
 
-
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from textual.theme import Theme
 
     from styrened.tui.themes.color_cascade import ColorCascade
+    from styrened.tui.themes.tweakcn import TweakcnProfile
 
 STYRENE_THEME_KEY = "styrene"
 STYRENE_TWEAKCN_URL = "https://tweakcn.com/themes/cmly8fsie000204l8fqt54s1p"
@@ -107,7 +106,7 @@ _STYRENE_REGISTRY: dict = {
 }
 
 
-def get_styrene_profile() -> "TweakcnProfile":
+def get_styrene_profile() -> TweakcnProfile:
     """Return the built-in Styrene brand TweakcnProfile (no network call)."""
     from styrened.tui.themes.tweakcn import TweakcnProfile
 
@@ -247,7 +246,12 @@ def create_styrene_cascade() -> ColorCascade:
     # Semantic colors
     # Semantic colors derived via OKLCH hue targeting from destructive/primary.
     # See tweakcn.py _derive_semantic_color() for the derivation logic.
-    from styrened.tui.themes.tweakcn import _derive_semantic_color, _HUE_ERROR, _HUE_WARNING, _HUE_SUCCESS
+    from styrened.tui.themes.tweakcn import (
+        _HUE_ERROR,
+        _HUE_SUCCESS,
+        _HUE_WARNING,
+        _derive_semantic_color,
+    )
     _destr_raw = "oklch(0.7036 0.1665 59.0920)"  # destructive
     _prim_raw = "oklch(0.8556 0.1555 179.7932)"   # primary
     cascade.color_success = _derive_semantic_color(_prim_raw, _HUE_SUCCESS, chroma_scale=0.7)
@@ -258,7 +262,7 @@ def create_styrene_cascade() -> ColorCascade:
     return cascade
 
 
-def create_styrene_theme() -> "Theme":
+def create_styrene_theme() -> Theme:
     """Create the Styrene Textual Theme from the embedded registry snapshot.
 
     Delegates to :class:`~styrened.tui.themes.tweakcn.TweakcnProfile`

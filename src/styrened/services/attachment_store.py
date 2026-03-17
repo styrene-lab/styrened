@@ -7,7 +7,6 @@ Layout: data_dir() / "attachments" / <peer_hash[:16]> / <msg_id>_<filename>
 """
 from __future__ import annotations
 
-
 import logging
 import os
 import re

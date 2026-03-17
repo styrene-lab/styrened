@@ -22,7 +22,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -666,7 +665,7 @@ class CmdBlockPeerRequest(IPCRequest):
         }
 
     @classmethod
-    def from_payload(cls, data: dict) -> "CmdBlockPeerRequest":
+    def from_payload(cls, data: dict) -> CmdBlockPeerRequest:
         return cls(
             identity_hash=data.get("identity_hash", ""),
             lxmf_dest_hash=data.get("lxmf_dest_hash", ""),
@@ -685,7 +684,7 @@ class CmdUnblockPeerRequest(IPCRequest):
         return {"identity_hash": self.identity_hash}
 
     @classmethod
-    def from_payload(cls, data: dict) -> "CmdUnblockPeerRequest":
+    def from_payload(cls, data: dict) -> CmdUnblockPeerRequest:
         return cls(identity_hash=data.get("identity_hash", ""))
 
 
@@ -699,7 +698,7 @@ class QueryBlockedPeersRequest(IPCRequest):
         return {}
 
     @classmethod
-    def from_payload(cls, data: dict) -> "QueryBlockedPeersRequest":
+    def from_payload(cls, data: dict) -> QueryBlockedPeersRequest:
         return cls()
 
 
@@ -1042,7 +1041,7 @@ class PongResponse(IPCResponse):
         }
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "PongResponse":
+    def from_payload(cls, payload: dict[str, Any]) -> PongResponse:
         return cls(
             success=payload.get("success", True),
             daemon_version=payload.get("daemon_version", ""),
@@ -1063,7 +1062,7 @@ class ResultResponse(IPCResponse):
         }
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "ResultResponse":
+    def from_payload(cls, payload: dict[str, Any]) -> ResultResponse:
         return cls(
             success=payload.get("success", True),
             data=payload.get("data", {}),
@@ -1091,7 +1090,7 @@ class ErrorResponse(IPCResponse):
         return payload
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "ErrorResponse":
+    def from_payload(cls, payload: dict[str, Any]) -> ErrorResponse:
         return cls(
             code=payload.get("code", IPCErrorCode.UNKNOWN),
             message=payload.get("message", "Unknown error"),
@@ -1099,22 +1098,22 @@ class ErrorResponse(IPCResponse):
         )
 
     @classmethod
-    def not_found(cls, message: str) -> "ErrorResponse":
+    def not_found(cls, message: str) -> ErrorResponse:
         """Create a NOT_FOUND error response."""
         return cls(code=IPCErrorCode.NOT_FOUND, message=message)
 
     @classmethod
-    def timeout(cls, message: str) -> "ErrorResponse":
+    def timeout(cls, message: str) -> ErrorResponse:
         """Create a TIMEOUT error response."""
         return cls(code=IPCErrorCode.TIMEOUT, message=message)
 
     @classmethod
-    def invalid_request(cls, message: str) -> "ErrorResponse":
+    def invalid_request(cls, message: str) -> ErrorResponse:
         """Create an INVALID_REQUEST error response."""
         return cls(code=IPCErrorCode.INVALID_REQUEST, message=message)
 
     @classmethod
-    def internal_error(cls, message: str) -> "ErrorResponse":
+    def internal_error(cls, message: str) -> ErrorResponse:
         """Create an INTERNAL_ERROR error response."""
         return cls(code=IPCErrorCode.INTERNAL_ERROR, message=message)
 
@@ -1160,7 +1159,7 @@ class DeviceInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DeviceInfo":
+    def from_dict(cls, data: dict[str, Any]) -> DeviceInfo:
         return cls(
             destination_hash=data.get("destination_hash", ""),
             identity_hash=data.get("identity_hash", ""),
@@ -1178,7 +1177,7 @@ class DeviceInfo:
         )
 
     @classmethod
-    def from_mesh_device(cls, device) -> "DeviceInfo":
+    def from_mesh_device(cls, device) -> DeviceInfo:
         """Create DeviceInfo from a MeshDevice instance.
 
         Args:
@@ -1226,7 +1225,7 @@ class IdentityInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "IdentityInfo":
+    def from_dict(cls, data: dict[str, Any]) -> IdentityInfo:
         return cls(
             identity_hash=data.get("identity_hash", ""),
             destination_hash=data.get("destination_hash", ""),
@@ -1275,7 +1274,7 @@ class DaemonStatus:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DaemonStatus":
+    def from_dict(cls, data: dict[str, Any]) -> DaemonStatus:
         return cls(
             uptime=data.get("uptime", 0.0),
             daemon_version=data.get("daemon_version", ""),
@@ -1314,7 +1313,7 @@ class ExecResultInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExecResultInfo":
+    def from_dict(cls, data: dict[str, Any]) -> ExecResultInfo:
         return cls(
             exit_code=data.get("exit_code", -1),
             stdout=data.get("stdout", ""),
@@ -1344,7 +1343,7 @@ class RemoteStatusInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RemoteStatusInfo":
+    def from_dict(cls, data: dict[str, Any]) -> RemoteStatusInfo:
         return cls(
             uptime=data.get("uptime", 0.0),
             ip=data.get("ip", ""),
@@ -1371,7 +1370,7 @@ class RebootResultInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RebootResultInfo":
+    def from_dict(cls, data: dict[str, Any]) -> RebootResultInfo:
         return cls(
             success=data.get("success", False),
             message=data.get("message", ""),
@@ -1397,7 +1396,7 @@ class SelfUpdateResultInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SelfUpdateResultInfo":
+    def from_dict(cls, data: dict[str, Any]) -> SelfUpdateResultInfo:
         return cls(
             success=data.get("success", False),
             message=data.get("message", ""),
@@ -1436,7 +1435,7 @@ class MessageEventPayload:
         }
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "MessageEventPayload":
+    def from_payload(cls, payload: dict[str, Any]) -> MessageEventPayload:
         return cls(
             event_type=payload.get("event_type", ""),
             message_id=payload.get("message_id", 0),

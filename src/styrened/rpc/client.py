@@ -26,7 +26,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import time
@@ -106,7 +105,7 @@ class RPCClient(Protocol):
         default_timeout: Default timeout in seconds for RPC calls.
     """
 
-    def __init__(self, styrene_protocol: "StyreneProtocol") -> None:
+    def __init__(self, styrene_protocol: StyreneProtocol) -> None:
         """Initialize RPC client.
 
         Args:
@@ -145,7 +144,7 @@ class RPCClient(Protocol):
 
         logger.debug(f"Registered handlers for {len(response_types)} response types")
 
-    async def _handle_response(self, message: "LXMFMessage", envelope: "StyreneEnvelope") -> None:
+    async def _handle_response(self, message: LXMFMessage, envelope: StyreneEnvelope) -> None:
         """Handle incoming RPC response from StyreneProtocol.
 
         This is called by StyreneProtocol when a response message is received.

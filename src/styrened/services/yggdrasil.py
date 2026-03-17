@@ -16,7 +16,6 @@ import os
 import shutil
 import signal
 import socket
-import time
 from pathlib import Path
 from typing import Any
 
@@ -126,7 +125,7 @@ class YggdrasilAdapter(DaemonAdapter, AdapterProtocol):
         self,
         config: YggdrasilConfig,
         *,
-        core_config: "CoreConfig | None" = None,
+        core_config: CoreConfig | None = None,
     ) -> None:
         super().__init__(config.mode)
         self._config = config
@@ -273,7 +272,7 @@ class YggdrasilAdapter(DaemonAdapter, AdapterProtocol):
 
         try:
             await asyncio.wait_for(self._process.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("yggdrasil did not exit after SIGTERM; sending SIGKILL")
             try:
                 self._process.kill()
@@ -281,7 +280,7 @@ class YggdrasilAdapter(DaemonAdapter, AdapterProtocol):
                 pass
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.error("yggdrasil process did not respond to SIGKILL")
         finally:
             self._process = None

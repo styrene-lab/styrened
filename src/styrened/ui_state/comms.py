@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from styrened.ui_state.base import CapabilityState, LoadState, RefreshMeta
 
 
-class CommsMode(str, Enum):
+class CommsMode(StrEnum):
     """Transport/session-aware submodes in the Comms workspace."""
 
     DIRECT = "direct"

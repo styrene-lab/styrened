@@ -15,7 +15,6 @@ acts as a signaling server; WireGuard data flows directly peer-to-peer.
 """
 from __future__ import annotations
 
-
 import base64
 import hashlib
 import ipaddress
@@ -458,7 +457,7 @@ class MeshVPNService:
 
         return None
 
-    def _select_peer_endpoint(self, peer: "PeerInfo") -> str | None:
+    def _select_peer_endpoint(self, peer: PeerInfo) -> str | None:
         """Choose the best WireGuard endpoint for a peer.
 
         If our local Yggdrasil is running (adapter present and running) and

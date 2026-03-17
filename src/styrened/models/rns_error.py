@@ -5,7 +5,6 @@ initialization failures to enable informative UX for degraded states.
 """
 from __future__ import annotations
 
-
 from dataclasses import dataclass
 from enum import Enum
 
@@ -122,12 +121,12 @@ class RNSErrorState:
         return self.category != RNSErrorCategory.NONE
 
     @classmethod
-    def none(cls) -> "RNSErrorState":
+    def none(cls) -> RNSErrorState:
         """Create a non-error state (healthy)."""
         return cls(category=RNSErrorCategory.NONE)
 
     @classmethod
-    def from_exception(cls, exc: Exception) -> "RNSErrorState":
+    def from_exception(cls, exc: Exception) -> RNSErrorState:
         """Categorize an exception into an error state.
 
         Examines the exception type and message to determine the most

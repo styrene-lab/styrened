@@ -13,7 +13,6 @@ Features:
 """
 from __future__ import annotations
 
-
 import logging
 import time
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Button, Static
+
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 logger = logging.getLogger(__name__)

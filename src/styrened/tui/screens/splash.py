@@ -104,7 +104,7 @@ class StartupChecklist(Widget):
 
     def render(self) -> Text:
         text = Text(no_wrap=True)
-        for i, (label, state) in enumerate(zip(_CHECKLIST_ITEMS, self._states)):
+        for i, (label, state) in enumerate(zip(_CHECKLIST_ITEMS, self._states, strict=False)):
             if state == _HIDDEN:
                 continue
             flash_f = self._flash[i]

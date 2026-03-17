@@ -11,11 +11,10 @@ Categorized tabbed interface for current network discovery:
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, ClassVar
 
-from textual.app import ComposeResult
 from textual import events
+from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
 from textual.coordinate import Coordinate
@@ -34,8 +33,8 @@ from textual.widgets import (
 from styrened.ipc.protocol import IPCMessageType
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.models.events import DaemonEvent
-from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.screens.exploration_projection import build_styrene_fleet_projection
+from styrened.tui.services.reticulum import discover_devices, start_discovery
 from styrened.tui.widgets.activity_feed import ActivityFeedWidget
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 from styrened.tui.widgets.page_browser import PageBrowserWidget
@@ -808,10 +807,10 @@ class ExplorationScreen(Screen[None]):
             self._stored_nodes_worker.cancel()
             self._stored_nodes_worker = None
 
-    def on_device_cache_devices_updated(self, message: "Any") -> None:
+    def on_device_cache_devices_updated(self, message: Any) -> None:
         """React to the app-level DeviceCache refresh — re-populate tables."""
         self._refresh_announce_tables()
-    
+
     def _refresh_via_bridge(self) -> None:
         """Periodic refresh using IPC bridge data."""
         self._start_node_refresh()

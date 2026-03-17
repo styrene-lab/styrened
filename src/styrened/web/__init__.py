@@ -5,7 +5,6 @@ single-page frontend for visualizing the Reticulum mesh graph.
 """
 from __future__ import annotations
 
-
 from styrened.web.app import create_app
 
 __all__ = ["create_app"]

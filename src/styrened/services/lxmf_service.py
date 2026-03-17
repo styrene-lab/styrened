@@ -37,7 +37,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import json
 import logging
 import time
@@ -49,9 +48,8 @@ if TYPE_CHECKING:
     from styrened.models.config import LXMFConfig
     from styrened.models.rbac import RBACPolicy
 
-from styrened.models.rbac import Role
-
 from styrened import paths
+from styrened.models.rbac import Role
 
 try:
     import LXMF
@@ -84,7 +82,7 @@ class SendMessageResult(TypedDict):
 logger = logging.getLogger(__name__)
 
 # Singleton instance
-_lxmf_service: "LXMFService | None" = None
+_lxmf_service: LXMFService | None = None
 
 
 class LXMFService:
@@ -108,9 +106,9 @@ class LXMFService:
 
         # RBAC policy reference (injected by daemon after init, always present)
         from styrened.models.rbac import RBACPolicy as _RBACPolicy
-        self._rbac_policy: "RBACPolicy" = _RBACPolicy()
+        self._rbac_policy: RBACPolicy = _RBACPolicy()
 
-    def set_rbac_policy(self, policy: "RBACPolicy") -> None:
+    def set_rbac_policy(self, policy: RBACPolicy) -> None:
         """Inject RBAC policy for unified authorization checks.
 
         Args:
@@ -129,7 +127,7 @@ class LXMFService:
         return self._initialized and self._router is not None
 
     @property
-    def router(self) -> "LXMF.LXMRouter | None":
+    def router(self) -> LXMF.LXMRouter | None:
         """Get the LXMF router instance.
 
         Returns:
@@ -138,7 +136,7 @@ class LXMFService:
         return self._router
 
     @property
-    def delivery_destination(self) -> "RNS.Destination | None":
+    def delivery_destination(self) -> RNS.Destination | None:
         """Get the LXMF delivery destination.
 
         Returns:
@@ -148,14 +146,14 @@ class LXMFService:
 
     # Alias for backward compatibility
     @property
-    def _destination(self) -> "RNS.Destination | None":
+    def _destination(self) -> RNS.Destination | None:
         """Alias for delivery_destination (backward compatibility)."""
         return self._delivery_destination
 
     def initialize(
         self,
-        identity: "RNS.Identity",
-        lxmf_config: "LXMFConfig | None" = None,
+        identity: RNS.Identity,
+        lxmf_config: LXMFConfig | None = None,
         display_name: str | None = None,
     ) -> bool:
         """Initialize LXMF router instance.
@@ -262,7 +260,7 @@ class LXMFService:
                 self._router.get_outbound_propagation_cost
             )
 
-            def _patched_get_outbound_propagation_cost() -> "int | None":
+            def _patched_get_outbound_propagation_cost() -> int | None:
                 if self._router.get_outbound_propagation_node() is None:
                     logger.debug(
                         "[LXMF] get_outbound_propagation_cost() called with no "
@@ -355,12 +353,12 @@ class LXMFService:
     def send_message(
         self,
         destination_hash: str,
-        payload: "str | dict[str, object]",
-        on_delivery: "Callable[[LXMF.LXMessage], None] | None" = None,
-        on_failed: "Callable[[LXMF.LXMessage], None] | None" = None,
+        payload: str | dict[str, object],
+        on_delivery: Callable[[LXMF.LXMessage], None] | None = None,
+        on_failed: Callable[[LXMF.LXMessage], None] | None = None,
         delivery_method: str = DeliveryMethod.AUTO,
         lxmf_fields: dict[int, Any] | None = None,
-    ) -> "SendMessageResult | None":
+    ) -> SendMessageResult | None:
         """Send LXMF message to destination.
 
         This method handles the complexity of looking up the correct identity
@@ -549,7 +547,7 @@ class LXMFService:
             logger.error(f"Failed to send message: {e}")
             return None
 
-    def _resolve_identity(self, destination_hash: str, *, network_resolve: bool = True) -> "RNS.Identity | None":
+    def _resolve_identity(self, destination_hash: str, *, network_resolve: bool = True) -> RNS.Identity | None:
         """Resolve a destination hash to an RNS Identity.
 
         This method implements a multi-strategy lookup to find the identity:
@@ -712,7 +710,7 @@ class LXMFService:
         )
         return None
 
-    def _load_identity_from_storage(self, identity_hash: str) -> "RNS.Identity | None":
+    def _load_identity_from_storage(self, identity_hash: str) -> RNS.Identity | None:
         """Attempt to load an identity from RNS persistent storage.
 
         RNS stores known identities in ~/.reticulum/storage/identities/.
@@ -914,7 +912,7 @@ class LXMFService:
         # The next announce or message send will need to re-register the destination
         logger.info("[RECONNECT] LXMF reconnection handling complete")
 
-    def _normalize_message_payload(self, message: "LXMF.LXMessage") -> dict[str, Any] | None:
+    def _normalize_message_payload(self, message: LXMF.LXMessage) -> dict[str, Any] | None:
         """Normalize LXMF message content into a payload dict.
 
         Handles both JSON payloads (from styrened/internal protocols) and plain
@@ -1213,7 +1211,7 @@ class LXMFService:
             logger.error(f"Failed to get blocked peers: {e}")
             return []
 
-    def _handle_lxmf_message(self, message: "LXMF.LXMessage") -> None:
+    def _handle_lxmf_message(self, message: LXMF.LXMessage) -> None:
         """Handle incoming LXMF message.
 
         This is called by the LXMF router when a message is received.
@@ -1273,7 +1271,7 @@ class LXMFService:
             except Exception as e:
                 logger.error(f"Error in message callback: {e}")
 
-    def request_messages_from_propagation_node(self, identity: "RNS.Identity | None" = None) -> bool:
+    def request_messages_from_propagation_node(self, identity: RNS.Identity | None = None) -> bool:
         """Request pending messages from the configured propagation node.
 
         Triggers the LXMF router to sync with the outbound propagation node,
@@ -1370,7 +1368,7 @@ class MockLXMFService:
     def send_message(
         self,
         destination: str,
-        payload: "str | dict[str, Any]",
+        payload: str | dict[str, Any],
         on_delivery: Callable[[Any], None] | None = None,
         on_failed: Callable[[Any], None] | None = None,
         delivery_method: str = DeliveryMethod.AUTO,

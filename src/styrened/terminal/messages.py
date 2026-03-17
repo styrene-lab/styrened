@@ -28,7 +28,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, cast
 
@@ -300,7 +299,7 @@ MESSAGE_TYPES: dict[TerminalMessageType, type[MessageBase]] = {
 }
 
 
-def register_message_types(channel: "RNS.Channel.Channel") -> None:
+def register_message_types(channel: RNS.Channel.Channel) -> None:
     """Register terminal message types with an RNS Channel.
 
     This must be called before sending/receiving terminal messages

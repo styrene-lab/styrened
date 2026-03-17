@@ -35,7 +35,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import os
@@ -46,7 +45,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-
 from typing import TYPE_CHECKING, Any
 
 from styrened import __version__ as _styrened_version
@@ -183,7 +181,7 @@ class RPCServer:
 
     def __init__(
         self,
-        styrene_protocol: "StyreneProtocol",
+        styrene_protocol: StyreneProtocol,
         allowed_commands: set[str] | None = None,
         rate_limit: int = DEFAULT_RPC_RATE_LIMIT,
         rbac_policy: RBACPolicy | None = None,  # None → default RBACPolicy()
@@ -1627,7 +1625,7 @@ class RPCServer:
 _rpc_server: RPCServer | None = None
 
 
-def get_rpc_server(styrene_protocol: "StyreneProtocol | None" = None) -> RPCServer:
+def get_rpc_server(styrene_protocol: StyreneProtocol | None = None) -> RPCServer:
     """Get the singleton RPCServer instance.
 
     Args:

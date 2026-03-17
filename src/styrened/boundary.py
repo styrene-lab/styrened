@@ -6,18 +6,18 @@ the IPC snapshot command and surfaced by `styrened doctor`.
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import logging.handlers
-import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
-from enum import Enum
+from dataclasses import asdict, dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 
-class InterfaceBoundary(str, Enum):
+class InterfaceBoundary(StrEnum):
     """Logical boundary tags identifying which third-party stack an error crossed."""
 
     RNS = "rns"

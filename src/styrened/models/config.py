@@ -6,15 +6,14 @@ styrene-tui/src/styrene/models/config.py.
 """
 from __future__ import annotations
 
-
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from styrened.models.rbac import RBACPolicy
 from styrened.models.daemon_mode import DaemonMode
+from styrened.models.rbac import RBACPolicy
 
 if TYPE_CHECKING:
     from styrened.models.relay import RelayConfig
@@ -710,7 +709,7 @@ class MeshVPNConfig:
     peer_discovery: str = "lazy"  # "eager" | "lazy" — when to fetch /meta for Ygg address
 
 
-class PeerDiscovery(str, Enum):
+class PeerDiscovery(StrEnum):
     """Controls when /meta is fetched for Yggdrasil peer bootstrapping.
 
     - EAGER: fetch /meta and call add_peer() immediately on each announce
@@ -776,7 +775,7 @@ class I2PConfig:
     fetch_timeout: float = 45.0
 
 
-class GroupThreadFeatureTierConfig(str, Enum):
+class GroupThreadFeatureTierConfig(StrEnum):
     """Local feature/storage tier for group-thread support."""
 
     MINIMAL = "minimal"

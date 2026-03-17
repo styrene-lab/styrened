@@ -1,7 +1,6 @@
 """Settings screen for configuration management."""
 from __future__ import annotations
 
-
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, ClassVar
@@ -1837,7 +1836,6 @@ class SettingsScreen(Screen[None]):
     @on(Button.Pressed, "#apply-theme-btn")
     def on_apply_theme(self) -> None:
         """Commit the previewed theme to config (persists across sessions)."""
-        from styrened.tui.themes.tweakcn import parse_color
 
         # Read current editor state as the committed colors
         colors: dict[str, str] = {}

@@ -7,8 +7,6 @@ Uses cascade colors for theme-aware rendering.
 """
 from __future__ import annotations
 
-
-
 import RNS  # type: ignore
 from rich.table import Table
 from rich.text import Text
@@ -16,7 +14,6 @@ from textual.reactive import reactive
 from textual.widgets import Static
 from textual.worker import Worker
 
-from styrened.models.mesh_device import DeviceType
 from styrened.models.rns_error import RNSErrorState
 from styrened.services.hub_connection import HubStatus  # Pure data enum, no service state
 from styrened.tui.models.hardware import NetworkInterface, SystemInfo
@@ -552,7 +549,7 @@ class NodeInfoPanel(Static):
         except Exception:
             # No fallback - rely on IPC bridge only
             pass
-    
+
     def _apply_mesh_catalog_count(self, device_infos: tuple[object, ...]) -> int:
         """Apply mesh count from canonical node catalog normalization.
 

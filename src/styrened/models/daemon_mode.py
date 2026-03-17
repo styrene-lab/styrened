@@ -8,11 +8,10 @@ which re-exports this enum.
 """
 from __future__ import annotations
 
+from enum import StrEnum
 
-from enum import Enum
 
-
-class DaemonMode(str, Enum):
+class DaemonMode(StrEnum):
     """Operating mode for an optional daemon integration."""
 
     DISABLED = "disabled"

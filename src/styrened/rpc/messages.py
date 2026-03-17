@@ -25,7 +25,6 @@ Note:
 """
 from __future__ import annotations
 
-
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -45,7 +44,7 @@ class StatusRequest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StatusRequest":
+    def from_dict(cls, data: dict[str, Any]) -> StatusRequest:
         """Deserialize from dict."""
         return cls()
 
@@ -68,7 +67,7 @@ class ExecCommand:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExecCommand":
+    def from_dict(cls, data: dict[str, Any]) -> ExecCommand:
         """Deserialize from dict."""
         return cls(
             command=data["command"],
@@ -92,7 +91,7 @@ class RebootCommand:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RebootCommand":
+    def from_dict(cls, data: dict[str, Any]) -> RebootCommand:
         """Deserialize from dict."""
         return cls(delay=data.get("delay", 0))
 
@@ -113,7 +112,7 @@ class UpdateConfigCommand:
         return {"type": self.type, "config": self.config_updates}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UpdateConfigCommand":
+    def from_dict(cls, data: dict[str, Any]) -> UpdateConfigCommand:
         """Deserialize from dict."""
         return cls(config_updates=data.get("config", {}))
 
@@ -181,7 +180,7 @@ class StatusResponse:
         return f"{used_gb:.1f}GB / {total_gb:.1f}GB ({percent:.0f}%)"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StatusResponse":
+    def from_dict(cls, data: dict[str, Any]) -> StatusResponse:
         """Deserialize from dict."""
         return cls(
             uptime=data["uptime"],
@@ -224,7 +223,7 @@ class ExecResult:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExecResult":
+    def from_dict(cls, data: dict[str, Any]) -> ExecResult:
         """Deserialize from dict."""
         return cls(
             exit_code=data["exit_code"],
@@ -253,7 +252,7 @@ class RebootResult:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RebootResult":
+    def from_dict(cls, data: dict[str, Any]) -> RebootResult:
         """Deserialize from dict."""
         return cls(
             success=data["success"],
@@ -282,7 +281,7 @@ class UpdateConfigResult:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UpdateConfigResult":
+    def from_dict(cls, data: dict[str, Any]) -> UpdateConfigResult:
         """Deserialize from dict."""
         return cls(
             success=data["success"],
@@ -313,7 +312,7 @@ class SelfUpdateResult:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SelfUpdateResult":
+    def from_dict(cls, data: dict[str, Any]) -> SelfUpdateResult:
         """Deserialize from dict."""
         return cls(
             success=data["success"],
@@ -342,7 +341,7 @@ class InboxResponse:
         return {"conversations": self.conversations, "type": self.type}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "InboxResponse":
+    def from_dict(cls, data: dict[str, Any]) -> InboxResponse:
         """Deserialize from dict."""
         return cls(conversations=data.get("conversations", []))
 
@@ -366,7 +365,7 @@ class MessagesResponse:
         return {"messages": self.messages, "type": self.type}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MessagesResponse":
+    def from_dict(cls, data: dict[str, Any]) -> MessagesResponse:
         """Deserialize from dict."""
         return cls(messages=data.get("messages", []))
 
@@ -388,7 +387,7 @@ class ProvisionRequest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProvisionRequest":
+    def from_dict(cls, data: dict[str, Any]) -> ProvisionRequest:
         """Deserialize from dict."""
         return cls(adapter=data.get("adapter", ""))
 
@@ -414,7 +413,7 @@ class ProvisionResponse:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProvisionResponse":
+    def from_dict(cls, data: dict[str, Any]) -> ProvisionResponse:
         """Deserialize from dict."""
         return cls(
             success=data.get("success", False),

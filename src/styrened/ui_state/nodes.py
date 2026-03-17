@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from enum import StrEnum
 
 from styrened.ui_state.base import (
     CapabilityState,
@@ -19,7 +18,7 @@ _LOST_CUTOFF_SECONDS = 15 * 60
 _STALE_CUTOFF_SECONDS = 5 * 60
 
 
-class PresenceState(str, Enum):
+class PresenceState(StrEnum):
     """Normalized presence state for a peer identity."""
 
     LIVE = "live"
@@ -29,7 +28,7 @@ class PresenceState(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RouteKind(str, Enum):
+class RouteKind(StrEnum):
     """Known route/aspect kinds for a peer."""
 
     STYRENE = "styrene"

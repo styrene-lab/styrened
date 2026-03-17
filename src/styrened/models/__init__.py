@@ -1,7 +1,6 @@
 """Styrene Core Models."""
 from __future__ import annotations
 
-
 from styrened.models.config import (
     APIConfig,
     ChatConfig,

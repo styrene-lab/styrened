@@ -118,9 +118,9 @@ def create_router(daemon: StyreneDaemon, broadcaster: SSEBroadcaster) -> APIRout
         """Update configuration (partial merge). Protected fields are rejected."""
         from styrened.models.config import ConfigValidationError
         from styrened.services.config import (
-            serialize_config,
             load_core_config,
             save_core_config,
+            serialize_config,
             validate_core_config,
         )
 

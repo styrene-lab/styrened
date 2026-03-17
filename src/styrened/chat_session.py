@@ -12,7 +12,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -54,7 +53,7 @@ class ChatEvent:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "ChatEvent":
+    def from_payload(cls, payload: dict[str, Any]) -> ChatEvent:
         """Create ChatEvent from IPC event payload."""
         return cls(
             event_type=payload.get("event_type", ""),
@@ -106,7 +105,7 @@ class ChatSession:
         assert self._client is not None, "ChatSession not entered"
         return self._client
 
-    async def __aenter__(self) -> "ChatSession":
+    async def __aenter__(self) -> ChatSession:
         """Connect and subscribe to messages."""
         if self._owns_client:
             self._client = ControlClient()

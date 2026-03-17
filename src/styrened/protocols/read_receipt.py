@@ -15,7 +15,6 @@ Design decisions:
 """
 from __future__ import annotations
 
-
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -49,8 +48,8 @@ class ReadReceiptProtocol(Protocol):
 
     def __init__(
         self,
-        conversation_service: "ConversationService",
-        lxmf_service: "LXMFService",
+        conversation_service: ConversationService,
+        lxmf_service: LXMFService,
     ) -> None:
         """Initialize ReadReceiptProtocol.
 

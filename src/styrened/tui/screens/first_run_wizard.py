@@ -10,6 +10,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Label, RadioButton, RadioSet, Static
+
 from styrened.tui.widgets.highlighted_panel import get_color_cascade
 
 

@@ -14,7 +14,6 @@ cooldown cache size to prevent unbounded growth from mesh scanning.
 """
 from __future__ import annotations
 
-
 import asyncio
 import json
 import logging
@@ -130,15 +129,15 @@ class AutoReplyHandler:
 
     def __init__(
         self,
-        config: "ChatConfig | None" = None,
+        config: ChatConfig | None = None,
         identity: Any = None,  # RNS.Identity
         router: Any = None,  # LXMF.LXMRouter
         start_time: float | None = None,
         skip_reply_on_no_path: bool = True,
         *,
-        config_accessor: "Callable[[], ChatConfig] | None" = None,
+        config_accessor: Callable[[], ChatConfig] | None = None,
         conversation_service: Any = None,
-        broadcast_callback: "Callable[..., None] | None" = None,
+        broadcast_callback: Callable[..., None] | None = None,
         event_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         """Initialize the auto-reply handler.
@@ -179,11 +178,11 @@ class AutoReplyHandler:
         self._last_reply: OrderedDict[bytes, float] = OrderedDict()
 
     @property
-    def config(self) -> "ChatConfig":
+    def config(self) -> ChatConfig:
         """Return current chat config via accessor for hot-reload support."""
         return self._config_accessor()
 
-    def handle_message(self, message: "LXMF.LXMessage") -> None:
+    def handle_message(self, message: LXMF.LXMessage) -> None:
         """Handle an incoming LXMF message.
 
         This is registered as a callback with the LXMF router. It checks

@@ -10,7 +10,6 @@ Contact.blocked/blocked_at are retained for UI display.
 """
 from __future__ import annotations
 
-
 import time
 
 from sqlalchemy import String, Text

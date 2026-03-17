@@ -341,7 +341,6 @@ def create_auth_router(
 
     @router.post("/challenge")
     async def challenge(body: ChallengeRequest) -> JSONResponse:
-        auth_config = daemon.config.api.auth
 
         # RBAC: check web.read capability
         from styrened.models.rbac import Capability

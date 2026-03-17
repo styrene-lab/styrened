@@ -20,7 +20,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import time
@@ -70,7 +69,7 @@ class PageResponse:
     cache_ttl: int | None = None
     error_message: str | None = None
     structured_data: dict[str, Any] | None = None
-    page_metadata: "PageMetadata | None" = None
+    page_metadata: PageMetadata | None = None
     content_type: str | None = None
 
 
@@ -78,7 +77,7 @@ class PageResponse:
 class _LinkEntry:
     """Internal tracking for a cached RNS.Link."""
 
-    link: "RNS.Link"
+    link: RNS.Link
     destination_hash: str
     last_used: float = field(default_factory=time.time)
     established: bool = False
@@ -255,7 +254,7 @@ class PageBrowserService:
         # Step 4: Send page request
         response_future: asyncio.Future[tuple[bytes | None, bool]] = asyncio.Future()
 
-        def response_callback(request_receipt: "RNS.RequestReceipt") -> None:
+        def response_callback(request_receipt: RNS.RequestReceipt) -> None:
             """RNS callback when response is received."""
             if self._event_loop is None:
                 return
@@ -268,7 +267,7 @@ class PageBrowserService:
             except Exception as e:
                 logger.warning(f"Error in response callback: {e}")
 
-        def failed_callback(request_receipt: "RNS.RequestReceipt") -> None:
+        def failed_callback(request_receipt: RNS.RequestReceipt) -> None:
             """RNS callback when request fails."""
             if self._event_loop is None:
                 return
@@ -508,8 +507,8 @@ class PageBrowserService:
     async def _get_or_create_link(
         self,
         destination_hash: str,
-        identity: "RNS.Identity",
-    ) -> "RNS.Link | None":
+        identity: RNS.Identity,
+    ) -> RNS.Link | None:
         """Get a cached link or create a new one.
 
         Args:
@@ -550,7 +549,7 @@ class PageBrowserService:
         link = RNS.Link(destination)
         logger.info(f"RNS.Link created, status={link.status}, waiting for establishment...")
 
-        def link_established(lnk: "RNS.Link") -> None:
+        def link_established(lnk: RNS.Link) -> None:
             logger.info(f"Link ESTABLISHED callback fired for {destination_hash[:16]}...")
             if self._event_loop is None:
                 logger.warning("No event loop in link_established callback!")
@@ -560,7 +559,7 @@ class PageBrowserService:
                 self._event_loop,
             )
 
-        def link_closed(lnk: "RNS.Link") -> None:
+        def link_closed(lnk: RNS.Link) -> None:
             dest_hash = destination_hash
             logger.info(f"Link CLOSED callback fired for {dest_hash[:16]}... (teardown_reason={getattr(lnk, 'teardown_reason', 'unknown')})")
             self._links.pop(dest_hash, None)

@@ -14,7 +14,6 @@ identity verification, and thread-safe asyncio interaction.
 """
 from __future__ import annotations
 
-
 import asyncio
 import hashlib
 import logging
@@ -95,10 +94,10 @@ class FileTransferService:
 
     def __init__(
         self,
-        identity: "RNS.Identity",
-        styrene_protocol: "StyreneProtocol",
-        attachment_store: "AttachmentStore",
-        conversation_service: "ConversationService",
+        identity: RNS.Identity,
+        styrene_protocol: StyreneProtocol,
+        attachment_store: AttachmentStore,
+        conversation_service: ConversationService,
         max_size: int = DEFAULT_MAX_TRANSFER_SIZE,
     ) -> None:
         self._identity = identity
@@ -308,7 +307,7 @@ class FileTransferService:
 
     async def _handle_file_offer(
         self,
-        message: "LXMFMessage",
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle incoming FILE_OFFER from a peer.
@@ -403,7 +402,7 @@ class FileTransferService:
 
     async def _handle_file_accept(
         self,
-        message: "LXMFMessage",
+        message: LXMFMessage,
         envelope: StyreneEnvelope,
     ) -> None:
         """Handle incoming FILE_ACCEPT — initiate outbound RNS.Resource transfer."""
@@ -465,7 +464,7 @@ class FileTransferService:
             prefixed_data = accept_request_id[:_REQUEST_ID_PREFIX_LEN] + outbound.data
 
             # Wait for link to be established, then push resource
-            def _on_link_ready(link: "RNS.Link") -> None:
+            def _on_link_ready(link: RNS.Link) -> None:
                 try:
                     RNS.Resource(
                         prefixed_data,
@@ -484,7 +483,7 @@ class FileTransferService:
         except Exception as e:
             logger.error(f"Failed to initiate outbound transfer: {e}")
 
-    def _on_outbound_resource_concluded(self, resource: "RNS.Resource") -> None:
+    def _on_outbound_resource_concluded(self, resource: RNS.Resource) -> None:
         """Handle completed outbound resource transfer."""
         import RNS
 
@@ -493,7 +492,7 @@ class FileTransferService:
         else:
             logger.warning(f"Outbound file transfer resource failed: {resource.status}")
 
-    def _on_link_established(self, link: "RNS.Link") -> None:
+    def _on_link_established(self, link: RNS.Link) -> None:
         """Handle incoming RNS link for file transfer data plane."""
         import RNS
 
@@ -504,7 +503,7 @@ class FileTransferService:
 
         logger.debug(f"File transfer link established from {link}")
 
-    def _resource_filter(self, resource: "RNS.Resource") -> bool:
+    def _resource_filter(self, resource: RNS.Resource) -> bool:
         """Filter incoming resources: only accept if a matching pending transfer exists.
 
         Called from RNS thread when ACCEPT_APP strategy is set.
@@ -529,11 +528,11 @@ class FileTransferService:
         logger.warning("Rejecting resource: no pending inbound transfers")
         return False
 
-    def _on_resource_started(self, resource: "RNS.Resource") -> None:
+    def _on_resource_started(self, resource: RNS.Resource) -> None:
         """Handle incoming resource transfer start."""
         logger.debug(f"File transfer resource started: {resource}")
 
-    def _on_resource_concluded(self, resource: "RNS.Resource") -> None:
+    def _on_resource_concluded(self, resource: RNS.Resource) -> None:
         """Handle completed inbound resource transfer.
 
         Called from RNS thread — schedules async work on the event loop.
@@ -546,7 +545,7 @@ class FileTransferService:
         else:
             logger.warning("No event loop for inbound resource processing")
 
-    async def _process_inbound_resource(self, resource: "RNS.Resource") -> None:
+    async def _process_inbound_resource(self, resource: RNS.Resource) -> None:
         """Process a completed inbound resource transfer (async, thread-safe)."""
         import RNS
 

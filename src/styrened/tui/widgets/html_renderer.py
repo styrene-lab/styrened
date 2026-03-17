@@ -190,7 +190,7 @@ def _postprocess_links(markdown: str) -> str:
     return "".join(parts)
 
 
-def render_html_to_rich(html_content: str) -> "RenderableType":
+def render_html_to_rich(html_content: str) -> RenderableType:
     """Convert HTML to a Rich renderable for display in TUI.
 
     Pipeline: html2text → escape Rich markup → link post-processing → Rich Text

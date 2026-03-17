@@ -21,7 +21,6 @@ from styrened.services.hub_connection import HubStatus
 from styrened.tui.models.adapter_status import AdapterStatusTracker
 from styrened.tui.models.cop_situation import CopSituationTracker
 from styrened.tui.models.events import DaemonEvent
-from styrened.tui.services.config import load_config
 
 # Map legacy IPC activity event type strings to coarse bus event types
 _IPC_TO_BUS_TYPE: dict[str, str] = {

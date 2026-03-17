@@ -11,7 +11,6 @@ Reference: NomadNet MicronParser.py
 """
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
@@ -80,7 +79,7 @@ class MicronElement:
     # Divider fill character
     divider_char: str = "\u2500"
     # Compound children for inline-formatted headings
-    children: list["MicronElement"] | None = None
+    children: list[MicronElement] | None = None
 
 
 def _expand_color(code: str) -> str | None:
