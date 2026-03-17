@@ -14,7 +14,6 @@ from textual.app import App, ComposeResult
 
 if TYPE_CHECKING:
     from styrened.protocols.chat import ChatProtocol
-    from styrened.tui.widgets.safe_header import Header
 from textual.binding import Binding, BindingType
 from textual.screen import Screen
 from textual.widgets import Footer
@@ -56,6 +55,7 @@ from styrened.tui.themes.styrene_brand import (
     create_styrene_theme,
 )
 from styrened.tui.widgets.highlighted_panel import HighlightedPanel, set_color_cascade
+from styrened.tui.widgets.safe_header import Header
 
 try:
     import textual_image.renderable  # noqa: F401
