@@ -265,12 +265,13 @@ class SplashScreen(Screen[bool]):
         # Fast path — already running? (generous timeout, only called once)
         if await self._ping_daemon(timeout=3.0):
             self._daemon_ok = True
-            # Give each item a minimum visible dwell even on fast path
-            for i in range(len(_CHECKLIST_ITEMS)):
-                checklist.set_item(i, _ACTIVE)
-                await asyncio.sleep(0.35)
-                checklist.set_item(i, _DONE)
+            checklist.set_item(0, _DONE)
+            checklist.set_item(1, _ACTIVE)
             status.update(_STATUS_LOADING)
+
+            # Wait for device cache to prime so the dashboard has nodes on
+            # first paint.  Polls the app-level cache for up to 5s.
+            await self._wait_for_mesh_discovery(checklist, status)
             self._finish_daemon()
             return
 
@@ -289,10 +290,10 @@ class SplashScreen(Screen[bool]):
             # Short timeout — we're polling rapidly, no need to wait long
             if await self._ping_daemon(timeout=0.8):
                 self._daemon_ok = True
-                checklist.finish_all()
+                checklist.set_item(2, _DONE)
+                checklist.set_item(3, _ACTIVE)
                 status.update(_STATUS_LOADING)
-                await asyncio.sleep(0.4)
-                status.update(_STATUS_DONE)
+                await self._wait_for_mesh_discovery(checklist, status)
                 self._finish_daemon()
                 return
             # Advance checklist as polling drags on
@@ -309,6 +310,53 @@ class SplashScreen(Screen[bool]):
         status.update(_STATUS_FAILED)
         await asyncio.sleep(0.8)
         self._finish_daemon()
+
+    async def _wait_for_mesh_discovery(
+        self,
+        checklist: StartupChecklist,
+        status: Label,
+    ) -> None:
+        """Hold splash until the device cache has at least one node (or 5s timeout).
+
+        This ensures the dashboard has nodes on first paint rather than showing
+        an empty "No mesh nodes discovered" table.  The app-level DeviceCache
+        primes at 0.25s after the dashboard mounts — we just need to wait for
+        that to land and propagate back via IPC.  The 5s cap prevents the
+        splash from hanging if the mesh is truly empty.
+        """
+        # Trigger services init + cache priming early so it runs in parallel
+        try:
+            app = self.app
+            if hasattr(app, "_proceed_after_daemon"):
+                await app._proceed_after_daemon()
+        except Exception:
+            pass
+
+        checklist.set_item(1, _ACTIVE)  # mesh discovery
+        status.update("discovering mesh nodes…")
+
+        for tick in range(20):  # 20 × 0.25s = 5s max
+            await asyncio.sleep(0.25)
+            try:
+                cache = getattr(self.app, "device_cache", None)
+                if cache and cache.get():
+                    break
+            except Exception:
+                pass
+            # Update checklist progression while waiting
+            if tick == 4:  # 1s
+                checklist.set_item(1, _DONE)
+                checklist.set_item(2, _ACTIVE)
+                status.update("establishing routes…")
+            if tick == 12:  # 3s
+                checklist.set_item(2, _DONE)
+                checklist.set_item(3, _ACTIVE)
+                status.update("connecting to hub…")
+
+        # Mark remaining items done regardless
+        checklist.finish_all()
+        status.update(_STATUS_DONE)
+        await asyncio.sleep(0.3)
 
     def _finish_daemon(self) -> None:
         self._daemon_done = True

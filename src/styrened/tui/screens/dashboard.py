@@ -105,13 +105,13 @@ class DashboardScreen(Screen[None]):
         """Initialise Home: start discovery, then fetch daemon state."""
         start_discovery()
         self._hub_retry_timer = self.set_interval(30.0, self._retry_hub_connection)
-        # Slow reconciliation timer — belt-and-suspenders behind event-driven updates
+        # Slow reconciliation timer — belt-and-suspenders behind event-driven updates.
+        # The splash screen waits for mesh discovery before dismissing, so the
+        # first paint should already have nodes. This catches long-tail updates.
         self._reconcile_timer = self.set_interval(60.0, self._reconcile)
-        # Quick initial refresh burst — catches the announce wave during RNS startup.
-        # DevicesUpdated message routing from app→screen is unreliable in Textual 8.x,
-        # so we poll the cache directly at 3s and 8s after mount.
-        self.set_timer(3.0, self._reconcile)
-        self.set_timer(8.0, self._reconcile)
+        # One early catch at 5s for any announces that arrive between splash
+        # dismiss and the first reconcile cycle.
+        self.set_timer(5.0, self._reconcile)
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")
