@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +19,6 @@ import pytest
 
 from styrened.models.config import CoreConfig, SecurityConfig
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode, VerificationResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -172,7 +170,7 @@ class TestNonStrictVerification:
     @pytest.mark.asyncio
     async def test_mismatch_logs_warning_and_starts(self, tmp_path: Path, caplog):
         """Tampered binary in non-strict mode → WARNING logged, process starts."""
-        manifest_path = _write_manifest(
+        _write_manifest(
             tmp_path, _make_manifest(binary_sha256=WRONG_SHA256)
         )
         binary_path = _write_binary(tmp_path)
@@ -192,8 +190,8 @@ class TestNonStrictVerification:
             # The actual wiring test: verify that _start_managed proceeds
             # despite mismatch when strict=False. We test this through
             # the adapter's start() path.
-            from styrened.services.yggdrasil import YggdrasilAdapter
             from styrened.models.config import YggdrasilConfig
+            from styrened.services.yggdrasil import YggdrasilAdapter
 
             ygg_config = YggdrasilConfig(mode=DaemonMode.MANAGED)
             adapter = YggdrasilAdapter(
@@ -230,8 +228,8 @@ class TestNonStrictVerification:
             DaemonAdapter, "verify_binary_integrity",
             return_value=VerificationResult(True, "abc123", "abc123"),
         ):
-            from styrened.services.yggdrasil import YggdrasilAdapter
             from styrened.models.config import YggdrasilConfig
+            from styrened.services.yggdrasil import YggdrasilAdapter
 
             ygg_config = YggdrasilConfig(mode=DaemonMode.MANAGED)
             adapter = YggdrasilAdapter(
@@ -262,9 +260,9 @@ class TestStrictVerification:
     @pytest.mark.asyncio
     async def test_strict_mismatch_raises(self, tmp_path: Path):
         """Tampered binary in strict mode → BinaryIntegrityError raised."""
+        from styrened.models.config import YggdrasilConfig
         from styrened.services.binary_errors import BinaryIntegrityError
         from styrened.services.yggdrasil import YggdrasilAdapter
-        from styrened.models.config import YggdrasilConfig
 
         config = CoreConfig(
             security=SecurityConfig(strict_binary_verification=True)
@@ -289,9 +287,9 @@ class TestStrictVerification:
     @pytest.mark.asyncio
     async def test_strict_mismatch_does_not_start_process(self, tmp_path: Path):
         """Strict mode mismatch → subprocess never launched."""
+        from styrened.models.config import YggdrasilConfig
         from styrened.services.binary_errors import BinaryIntegrityError
         from styrened.services.yggdrasil import YggdrasilAdapter
-        from styrened.models.config import YggdrasilConfig
 
         config = CoreConfig(
             security=SecurityConfig(strict_binary_verification=True)
@@ -326,9 +324,9 @@ class TestI2PAdapterVerification:
 
     @pytest.mark.asyncio
     async def test_i2p_strict_mismatch_raises(self, tmp_path: Path):
+        from styrened.models.config import I2PConfig
         from styrened.services.binary_errors import BinaryIntegrityError
         from styrened.services.i2p import I2PAdapter
-        from styrened.models.config import I2PConfig
 
         config = CoreConfig(
             security=SecurityConfig(strict_binary_verification=True)
@@ -352,8 +350,8 @@ class TestI2PAdapterVerification:
 
     @pytest.mark.asyncio
     async def test_i2p_non_strict_starts_on_mismatch(self, tmp_path: Path):
-        from styrened.services.i2p import I2PAdapter
         from styrened.models.config import I2PConfig
+        from styrened.services.i2p import I2PAdapter
 
         config = CoreConfig(
             security=SecurityConfig(strict_binary_verification=False)
@@ -383,8 +381,8 @@ class TestI2PAdapterVerification:
     @pytest.mark.asyncio
     async def test_i2p_skip_when_not_in_manifest(self, tmp_path: Path):
         """Missing manifest entry → verification skipped, process starts."""
-        from styrened.services.i2p import I2PAdapter
         from styrened.models.config import I2PConfig
+        from styrened.services.i2p import I2PAdapter
 
         config = CoreConfig()
 
@@ -432,8 +430,8 @@ class TestVerificationEdgeCases:
     @pytest.mark.asyncio
     async def test_verification_skip_logs_debug(self, tmp_path: Path, caplog):
         """When verification returns None (skip), DEBUG is logged."""
-        from styrened.services.yggdrasil import YggdrasilAdapter
         from styrened.models.config import YggdrasilConfig
+        from styrened.services.yggdrasil import YggdrasilAdapter
 
         config = CoreConfig()
 
@@ -482,9 +480,9 @@ class TestRealVerificationThroughStartManaged:
     @pytest.mark.asyncio
     async def test_yggdrasil_real_mismatch_strict_raises(self, tmp_path: Path):
         """Real tampered binary + strict mode → BinaryIntegrityError via real code path."""
+        from styrened.models.config import YggdrasilConfig
         from styrened.services.binary_errors import BinaryIntegrityError
         from styrened.services.yggdrasil import YggdrasilAdapter
-        from styrened.models.config import YggdrasilConfig
 
         manifest_path = _write_manifest(
             tmp_path, _make_manifest(binary_sha256=WRONG_SHA256)
@@ -515,8 +513,8 @@ class TestRealVerificationThroughStartManaged:
     @pytest.mark.asyncio
     async def test_yggdrasil_real_mismatch_nonstrict_starts(self, tmp_path: Path, caplog):
         """Real tampered binary + non-strict → WARNING logged, process starts."""
-        from styrened.services.yggdrasil import YggdrasilAdapter
         from styrened.models.config import YggdrasilConfig
+        from styrened.services.yggdrasil import YggdrasilAdapter
 
         manifest_path = _write_manifest(
             tmp_path, _make_manifest(binary_sha256=WRONG_SHA256)
@@ -557,8 +555,8 @@ class TestRealVerificationThroughStartManaged:
     @pytest.mark.asyncio
     async def test_yggdrasil_real_valid_hash_starts(self, tmp_path: Path):
         """Real matching binary hash → starts without error."""
-        from styrened.services.yggdrasil import YggdrasilAdapter
         from styrened.models.config import YggdrasilConfig
+        from styrened.services.yggdrasil import YggdrasilAdapter
 
         manifest_path = _write_manifest(
             tmp_path, _make_manifest(binary_sha256=FAKE_SHA256)
@@ -593,9 +591,9 @@ class TestRealVerificationThroughStartManaged:
     @pytest.mark.asyncio
     async def test_i2p_real_mismatch_strict_raises(self, tmp_path: Path):
         """Real tampered i2pd binary + strict mode → BinaryIntegrityError."""
+        from styrened.models.config import I2PConfig
         from styrened.services.binary_errors import BinaryIntegrityError
         from styrened.services.i2p import I2PAdapter
-        from styrened.models.config import I2PConfig
 
         manifest_path = _write_manifest(
             tmp_path, _make_manifest(adapter="i2pd", binary_sha256=WRONG_SHA256)

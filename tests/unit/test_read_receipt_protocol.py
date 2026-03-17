@@ -5,7 +5,6 @@ message read acknowledgments.
 """
 from __future__ import annotations
 
-
 import tempfile
 from unittest.mock import MagicMock
 

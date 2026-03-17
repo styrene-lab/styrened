@@ -7,7 +7,6 @@ Tests focus on throughput, scaling, and concurrency:
 """
 from __future__ import annotations
 
-
 import asyncio
 import re
 

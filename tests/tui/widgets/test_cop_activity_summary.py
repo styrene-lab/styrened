@@ -1,7 +1,6 @@
 """Tests for COP situation tracker and presentation widget."""
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
@@ -15,7 +14,6 @@ from styrened.tui.models.cop_situation import (
 )
 from styrened.tui.models.events import DaemonEvent
 from styrened.tui.widgets.cop_activity_summary import CopActivitySummary
-
 
 # ---------------------------------------------------------------------------
 # Fake node for testing
@@ -381,9 +379,8 @@ class TestDashboardDaemonEventRouting:
     @pytest.mark.asyncio
     async def test_on_daemon_event_pushes_snapshot(self):
         """on_daemon_event must call tracker.ingest + apply_snapshot on widget."""
-        from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+        from unittest.mock import patch
 
-        from styrened.ipc.protocol import IPCMessageType
         from styrened.tui.screens.dashboard import DashboardScreen
 
         screen = DashboardScreen()
@@ -404,7 +401,7 @@ class TestDashboardDaemonEventRouting:
     @pytest.mark.asyncio
     async def test_activity_subscription_posts_daemon_event(self):
         """Activity subscription posts DaemonEvent; no longer calls add_ephemeral."""
-        from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+        from unittest.mock import AsyncMock, PropertyMock, patch
 
         from styrened.ipc.protocol import IPCMessageType
         from styrened.tui.screens.dashboard import DashboardScreen

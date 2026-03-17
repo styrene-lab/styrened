@@ -1,7 +1,6 @@
 """Tests for RNS error state model."""
 from __future__ import annotations
 
-
 from styrened.models.rns_error import (
     RNS_ERROR_INFO,
     RNSErrorCategory,

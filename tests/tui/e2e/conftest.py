@@ -5,7 +5,6 @@ Configuration is loaded from tests/e2e_config.yaml (gitignored).
 """
 from __future__ import annotations
 
-
 import logging
 from pathlib import Path
 from typing import Any

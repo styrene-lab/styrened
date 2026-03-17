@@ -1,7 +1,6 @@
 """Test fixtures package for styrene-tui tests."""
 from __future__ import annotations
 
-
 from tests.fixtures.chat_fixtures import (
     add_conversation,
     add_messages_to_db,

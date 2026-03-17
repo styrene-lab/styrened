@@ -8,13 +8,12 @@ import time
 import pytest
 
 from styrened.services.event_bus import (
+    _MAX_CONSECUTIVE_FAILURES,
+    _SLOW_SUBSCRIBER_MS,
     TRACE,
     Event,
     EventBus,
-    _MAX_CONSECUTIVE_FAILURES,
-    _SLOW_SUBSCRIBER_MS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Event dataclass

@@ -9,17 +9,14 @@ import os
 from dataclasses import dataclass
 from unittest import mock
 
-import pytest
-
-from styrened.tui.widgets.page_browser import (
-    Transport,
-    PageBrowserWidget,
-    _is_headless,
-    _TRANSPORT_LABELS,
-    _CONTENT_INDICATORS,
-)
 from styrened.tui.widgets.html_renderer import ContentKind
-
+from styrened.tui.widgets.page_browser import (
+    _CONTENT_INDICATORS,
+    _TRANSPORT_LABELS,
+    PageBrowserWidget,
+    Transport,
+    _is_headless,
+)
 
 # ---------------------------------------------------------------------------
 # Minimal MeshDevice stub for transport selector tests
@@ -437,8 +434,9 @@ class TestContentKindUnconditional:
 
     def test_detect_content_type_called_before_structured_render(self):
         """The content-type detection runs unconditionally, not only on fallback path."""
-        from styrened.tui.widgets.page_browser import detect_content_type
         import asyncio
+
+        from styrened.tui.widgets.page_browser import detect_content_type
 
         w = PageBrowserWidget(destination_hash="a" * 32)
         # Simulate a result with both structured_data AND content_type

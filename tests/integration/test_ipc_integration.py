@@ -5,7 +5,6 @@ validating the full request/response lifecycle.
 """
 from __future__ import annotations
 
-
 import asyncio
 import tempfile
 from pathlib import Path
@@ -15,11 +14,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from styrened.ipc.client import ControlClient, IPCConnectionError
-from styrened.models.config import CoreConfig
 from styrened.ipc.messages import (
     DaemonStatus,
 )
 from styrened.ipc.server import ControlServer
+from styrened.models.config import CoreConfig
 
 
 @pytest.fixture

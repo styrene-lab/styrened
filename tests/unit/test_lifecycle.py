@@ -7,7 +7,6 @@ Tests the config path discovery and precedence logic to ensure:
 """
 from __future__ import annotations
 
-
 from pathlib import Path
 from unittest.mock import patch
 

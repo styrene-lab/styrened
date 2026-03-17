@@ -1,7 +1,6 @@
 """Unit tests for shared frontend-agnostic ui_state builders."""
 from __future__ import annotations
 
-
 from dataclasses import dataclass
 
 from styrened.ipc.messages import DaemonStatus, DeviceInfo, IdentityInfo
@@ -9,10 +8,9 @@ from styrened.ui_state import (
     CapabilityState,
     CommsMode,
     CommsWorkspaceInputs,
-    ConversationScopeKind,
-    CommsWorkspaceState,
     ConfigDraftInputs,
     ConfigSaveState,
+    ConversationScopeKind,
     DeliveryPathClass,
     GroupThreadFeatureTier,
     KnowledgeState,

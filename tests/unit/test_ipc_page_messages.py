@@ -1,7 +1,6 @@
 """Unit tests for IPC page browser message dataclasses."""
 from __future__ import annotations
 
-
 from styrened.ipc.messages import (
     CmdPageDisconnectRequest,
     QueryPageRequest,

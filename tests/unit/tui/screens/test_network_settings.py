@@ -8,7 +8,6 @@ Tests the redesigned Network tab that manages:
 """
 from __future__ import annotations
 
-
 from styrened.models.config import (
     CoreConfig,
     DeploymentMode,

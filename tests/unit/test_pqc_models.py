@@ -1,7 +1,6 @@
 """Unit tests for PQC models and wire format extensions."""
 from __future__ import annotations
 
-
 import time
 
 from styrened.models.pqc import PQCSession, PQCSessionState, SecurityTier

@@ -5,7 +5,6 @@ ensuring proper error responses when daemon or dependencies are unavailable.
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

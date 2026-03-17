@@ -1,8 +1,7 @@
 """Tests for relay data models and error hierarchy. TDD: written before implementation."""
 from __future__ import annotations
 
-
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -16,7 +15,6 @@ class TestRelayErrors:
             RelayBridgeDenied,
             RelayByteLimitExceeded,
             RelayDisabled,
-            RelayError,
             RelayEvicted,
             RelayIdleTimeout,
             RelayMaxPerIdentity,
@@ -178,9 +176,9 @@ class TestRelaySession:
         from styrened.models.relay import RelaySession
 
         s = RelaySession(requester_hash="aaa", target_hash="bbb")
-        before = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        before = datetime(2000, 1, 1, tzinfo=UTC)
         s.last_activity = before
-        fixed_now = datetime(2000, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+        fixed_now = datetime(2000, 1, 1, 0, 0, 1, tzinfo=UTC)
         with patch("styrened.models.relay.datetime") as mock_dt:
             mock_dt.now.return_value = fixed_now
             s.record_bytes(1024)

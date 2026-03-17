@@ -6,7 +6,6 @@ is_event_type behavior for terminal events.
 """
 from __future__ import annotations
 
-
 from styrened.ipc.messages import (
     CmdTerminalCloseRequest,
     CmdTerminalInputRequest,

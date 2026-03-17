@@ -5,7 +5,6 @@ without code changes — this is a locking test.
 """
 from __future__ import annotations
 
-
 from styrened.models.mesh_device import parse_announce_data
 
 

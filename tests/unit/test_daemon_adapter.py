@@ -18,13 +18,11 @@ import asyncio
 import inspect
 import stat
 import time
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from styrened.services.daemon_adapter import DaemonAdapter, DaemonMode, DaemonStatus
-
 
 # ---------------------------------------------------------------------------
 # Concrete stub for testing the base class
@@ -333,7 +331,6 @@ async def test_supervision_loop_exponential_backoff():
     # Make _start_managed raise so backoff doesn't reset
     adapter._start_managed_calls_inner = 0
 
-    original_start = adapter._start_managed
 
     async def failing_start() -> None:
         adapter._start_managed_calls_inner += 1

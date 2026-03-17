@@ -1,7 +1,6 @@
 """Unit tests for terminal data plane messages."""
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock
 
 import pytest

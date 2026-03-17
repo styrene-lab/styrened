@@ -5,7 +5,6 @@ and config round-trip for the short_name field.
 """
 from __future__ import annotations
 
-
 import tempfile
 from unittest.mock import MagicMock
 

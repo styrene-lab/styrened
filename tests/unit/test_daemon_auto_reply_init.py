@@ -5,7 +5,6 @@ enabling runtime toggle without daemon restart.
 """
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock, patch
 
 from styrened.models.config import AutoReplyMode, CoreConfig

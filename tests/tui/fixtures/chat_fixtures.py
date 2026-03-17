@@ -5,7 +5,6 @@ consistent mock setups for LXMF, ChatProtocol, and message database operations.
 """
 from __future__ import annotations
 
-
 from datetime import datetime
 from unittest.mock import Mock, patch
 

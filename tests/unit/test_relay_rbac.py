@@ -4,11 +4,9 @@ TDD: written before implementation per project convention.
 """
 from __future__ import annotations
 
-
 import pytest
 
-from styrened.models.rbac import Capability, Role, ROLE_CAPABILITIES, RBACPolicy, RosterEntry
-
+from styrened.models.rbac import ROLE_CAPABILITIES, Capability, RBACPolicy, Role, RosterEntry
 
 # --- Capability constants exist ---
 

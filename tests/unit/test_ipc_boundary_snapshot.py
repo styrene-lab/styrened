@@ -6,15 +6,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from styrened.ipc.handlers import IPCHandlers
 from styrened.ipc.messages import (
     CmdBoundarySnapshotRequest,
-    create_request,
     ErrorResponse,
     ResultResponse,
+    create_request,
 )
-from styrened.ipc.handlers import IPCHandlers
 from styrened.ipc.protocol import IPCMessageType
-
 
 # ---------------------------------------------------------------------------
 # Protocol registration
@@ -174,6 +173,7 @@ async def test_handle_boundary_snapshot_exception_returns_error():
 # ---------------------------------------------------------------------------
 
 from unittest.mock import AsyncMock, patch
+
 from styrened.ipc.bridge import IPCBridge
 
 

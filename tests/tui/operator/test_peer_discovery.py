@@ -319,9 +319,9 @@ class TestTUIPeerDiscovery:
             assert lxmf_hash, "Alpha fixture has no LXMF destination hash"
 
             sent = False
-            for attempt in range(10):
+            for _attempt in range(10):
                 try:
-                    result = await bridge.send_chat(
+                    await bridge.send_chat(
                         peer_hash=lxmf_hash,
                         content="Hello from operator test",
                     )

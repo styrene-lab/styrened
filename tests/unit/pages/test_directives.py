@@ -5,8 +5,6 @@ regex patterns, and block marker generation.
 """
 from __future__ import annotations
 
-
-
 import pytest
 
 from styrened.pages.directives import (

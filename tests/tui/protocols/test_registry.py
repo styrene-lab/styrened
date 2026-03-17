@@ -1,7 +1,6 @@
 """Tests for ProtocolRegistry."""
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.protocols.base import LXMFMessage, Protocol

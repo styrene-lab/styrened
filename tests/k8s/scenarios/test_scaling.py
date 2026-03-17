@@ -7,7 +7,6 @@ Tests focus on horizontal scaling and resource limits:
 """
 from __future__ import annotations
 
-
 import asyncio
 
 import pytest

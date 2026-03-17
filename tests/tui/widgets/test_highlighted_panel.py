@@ -5,16 +5,15 @@ custom box-drawing characters.  Title is set via border_title.
 """
 from __future__ import annotations
 
-import pytest
 from textual.widgets import Label, Static
 
+from styrened.tui.themes.color_cascade import ColorCascade
 from styrened.tui.widgets.highlighted_panel import (
     HighlightedPanel,
     StyrenePanel,
     get_color_cascade,
     set_color_cascade,
 )
-from styrened.tui.themes.color_cascade import ColorCascade
 
 
 class TestStyrenePanel:

@@ -15,10 +15,9 @@ Covers:
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Rate limiter
@@ -302,7 +301,6 @@ class TestResponseSizeGate:
         oversized = b"x" * (MAX_RESPONSE_BYTES + 1)
         svc.request = MagicMock(return_value=None)
 
-        import asyncio
         async def fake_request(*a, **kw):
             return oversized
 

@@ -1,8 +1,6 @@
 """Tests for ConfirmFlash modal."""
 from __future__ import annotations
 
-
-
 from styrened.tui.screens.confirm_flash import ConfirmFlash
 
 

@@ -7,7 +7,6 @@ Verifies that ygg_address and ygg_port are:
 """
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock
 
 import pytest

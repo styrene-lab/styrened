@@ -1,8 +1,6 @@
 """Tests for mesh device models and announce parsing."""
 from __future__ import annotations
 
-
-
 from styrened.models.mesh_device import (
     DeviceType,
     MeshDevice,

@@ -12,7 +12,6 @@ from styrened.services.adapter_registry import (
     WarmupBehavior,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers — concrete adapter stubs for testing
 # ---------------------------------------------------------------------------

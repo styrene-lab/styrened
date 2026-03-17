@@ -5,7 +5,6 @@ but with simulated responses for testing purposes.
 """
 from __future__ import annotations
 
-
 import asyncio
 
 from styrened.tui.models.rpc import ExecResult, RPCTimeoutError, StatusResponse

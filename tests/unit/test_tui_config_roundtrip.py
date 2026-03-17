@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-
 """Tests for TUI config serialization roundtrip.
 
 O3: Verify _parse_config_dict ↔ _config_to_dict preserve all fields,
@@ -11,10 +10,9 @@ O3: Verify _parse_config_dict ↔ _config_to_dict preserve all fields,
 
 from pathlib import Path
 
-import pytest
 import yaml
 
-from styrened.tui.models.config import LogLevel, StyreneConfig, TUIConfig
+from styrened.tui.models.config import LogLevel, StyreneConfig
 from styrened.tui.services.config import (
     _config_to_dict,
     _parse_config_dict,

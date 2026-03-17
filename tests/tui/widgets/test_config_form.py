@@ -1,7 +1,6 @@
 """Tests for configuration form widget."""
 from __future__ import annotations
 
-
 from styrened.tui.widgets.config_form import ConfigForm, HostnameValidator
 
 

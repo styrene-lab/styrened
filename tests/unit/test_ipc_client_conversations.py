@@ -4,7 +4,6 @@ Tests serialization round-trips and client method response parsing.
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, patch
 
 import pytest

@@ -13,7 +13,6 @@ must be relayed by Node B's RNS transport layer.
 """
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.ipc.client import ControlClient

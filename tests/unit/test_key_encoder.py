@@ -5,7 +5,6 @@ are correctly mapped to their VT100/xterm escape sequences.
 """
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock
 
 from styrened.tui.widgets.terminal_widget import KeyEncoder

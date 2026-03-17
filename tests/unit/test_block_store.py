@@ -12,13 +12,11 @@ Covers:
 """
 from __future__ import annotations
 
-
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, text
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -61,8 +59,8 @@ def db_engine(tmp_path):
 def service(db_engine):
     """LXMFService with RBAC mock and patched DB path."""
     _, db_path = db_engine
-    from styrened.services.lxmf_service import LXMFService
     from styrened.models.rbac import RBACPolicy, Role
+    from styrened.services.lxmf_service import LXMFService
 
     svc = LXMFService()
     policy = MagicMock(spec=RBACPolicy)
@@ -434,8 +432,8 @@ class TestHandleLxmfMessageRbac:
 
     def test_drops_message_when_identity_hash_blocked(self, tmp_path):
         """RBAC check uses resolved identity_hash from NodeStore."""
-        from styrened.services.lxmf_service import LXMFService
         from styrened.models.rbac import Role
+        from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         policy = MagicMock()
@@ -462,8 +460,8 @@ class TestHandleLxmfMessageRbac:
 
     def test_falls_back_to_source_hash_when_nodestore_unavailable(self, tmp_path):
         """When NodeStore raises, falls back to source_hash (hex) for RBAC check."""
-        from styrened.services.lxmf_service import LXMFService
         from styrened.models.rbac import Role
+        from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         policy = MagicMock()
@@ -489,8 +487,8 @@ class TestHandleLxmfMessageRbac:
 
     def test_passes_message_when_not_blocked(self, tmp_path):
         """Non-blocked peers have messages dispatched to callbacks."""
-        from styrened.services.lxmf_service import LXMFService
         from styrened.models.rbac import Role
+        from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         policy = MagicMock()

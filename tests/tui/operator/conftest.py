@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Generator
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine, Generator
+from typing import Any
 
 import pytest
 

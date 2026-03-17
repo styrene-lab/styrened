@@ -1,7 +1,6 @@
 """Tests for group/forum Mail placeholder screens."""
 from __future__ import annotations
 
-
 import pytest
 from textual.widgets import Static
 

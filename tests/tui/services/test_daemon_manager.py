@@ -4,7 +4,6 @@ All subprocess and IPC calls are mocked. No real daemon is spawned.
 """
 from __future__ import annotations
 
-
 import asyncio
 import signal
 from unittest.mock import AsyncMock, Mock, patch

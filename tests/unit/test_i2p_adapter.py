@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import signal
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from styrened.models.config import I2PConfig
 from styrened.models.daemon_mode import DaemonMode
 from styrened.services.i2p import I2PAdapter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,7 +129,7 @@ async def test_stop_managed_sigkill_on_timeout():
             coro.close()
         except Exception:
             pass
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with patch("styrened.services.i2p.asyncio.wait_for", side_effect=patched_wait_for):
         await adapter._stop_managed()

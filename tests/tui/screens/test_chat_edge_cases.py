@@ -9,7 +9,6 @@ These tests cover scenarios that might cause issues:
 """
 from __future__ import annotations
 
-
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 

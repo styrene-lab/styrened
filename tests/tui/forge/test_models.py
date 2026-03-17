@@ -5,8 +5,6 @@ DiskInfo, MediaEvent, ForgeConfig, and catalog loading functions.
 """
 from __future__ import annotations
 
-
-
 import pytest
 import yaml
 

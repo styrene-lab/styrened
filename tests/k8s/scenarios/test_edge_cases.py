@@ -9,7 +9,6 @@ Tests focus on failure modes, recovery, and graceful degradation:
 """
 from __future__ import annotations
 
-
 import asyncio
 
 import pytest

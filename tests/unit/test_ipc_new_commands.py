@@ -5,7 +5,6 @@ Each handler is tested in isolation with mocked daemon services.
 """
 from __future__ import annotations
 
-
 import time
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +22,6 @@ from styrened.ipc.messages import (
     create_request,
 )
 from styrened.ipc.protocol import IPCMessageType
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -523,7 +521,7 @@ class TestDeduplicateByIdentity:
 
     def test_real_mesh_device(self):
         """Test with actual MeshDevice instances, not fakes."""
-        from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
+        from styrened.models.mesh_device import DeviceType, MeshDevice
         from styrened.tui.utils import _deduplicate_by_identity
 
         now = time.time()

@@ -5,12 +5,9 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
-import pytest
-
 from styrened.models.mesh_device import DeviceType, MeshDevice, NodeStatus
 from styrened.tui.widgets.alert_list import AlertListWidget, AlertSeverity
 from styrened.tui.widgets.global_cop_fleet_table import GlobalCopFleetTable
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -218,6 +215,7 @@ class TestGlobalCopScreenRegistration:
     def test_action_open_global_cop_not_stub(self) -> None:
         """action_open_global_cop must not be the old 'coming soon' notify stub."""
         import inspect
+
         from styrened.tui.app import StyreneApp
 
         src = inspect.getsource(StyreneApp.action_open_global_cop)

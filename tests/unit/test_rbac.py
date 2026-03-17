@@ -1,7 +1,6 @@
 """Unit tests for RBAC model and policy resolution."""
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.models.rbac import (

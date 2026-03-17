@@ -14,18 +14,15 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+from styrened.models.rbac import RBACPolicy, Role, RosterEntry
 from styrened.web.auth import (
     ChallengeStore,
     SessionStore,
     create_auth_router,
 )
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-from styrened.models.rbac import RBACPolicy, Role, RosterEntry
 
 
 @dataclass

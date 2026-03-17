@@ -7,16 +7,14 @@ TDD: ADMIN succeeds, OPERATOR rejected, LOCAL bypasses RBAC.
 """
 from __future__ import annotations
 
-
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from styrened.models.rbac import Capability, RBACPolicy, Role, RosterEntry
+from styrened.models.rbac import Capability, RBACPolicy, Role
 from styrened.models.styrene_wire import StyreneMessageType
 from styrened.rpc.messages import ProvisionRequest, ProvisionResponse
-
 
 # ---------------------------------------------------------------------------
 # ProvisionRequest / ProvisionResponse serialization

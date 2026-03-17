@@ -7,7 +7,6 @@ These tests verify:
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest

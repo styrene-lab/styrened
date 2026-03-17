@@ -5,7 +5,6 @@ Bug 3: NodeInfoPanel two-column alignment with wide Unicode
 """
 from __future__ import annotations
 
-
 import re
 from unittest.mock import MagicMock, PropertyMock
 

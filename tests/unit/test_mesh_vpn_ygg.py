@@ -14,15 +14,13 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import json
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from styrened.models.config import MeshVPNConfig
 from styrened.services.mesh_vpn import (
     CAPABILITY_YGGDRASIL,
     PeerDiscovery,
@@ -32,8 +30,6 @@ from styrened.services.mesh_vpn import (
     parse_handshake_request,
     parse_handshake_response,
 )
-from styrened.models.config import MeshVPNConfig
-
 
 # ---------------------------------------------------------------------------
 # Constants and enums
@@ -369,7 +365,7 @@ async def test_initiate_handshake_lazy_fetches_meta_for_ygg_peer():
                 future.set_result(svc._peers["target"])
 
         svc._send_vpn_message = _fake_send  # type: ignore[method-assign]
-        result = await svc.initiate_handshake("target", timeout=2.0)
+        await svc.initiate_handshake("target", timeout=2.0)
 
     # add_peer should have been called with the Ygg address from /meta
     mock_adapter.add_peer.assert_called_once_with("200:cafe::1")

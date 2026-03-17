@@ -5,7 +5,6 @@ and round-trip parse verification for the demo test pages.
 """
 from __future__ import annotations
 
-
 from pathlib import Path
 from unittest.mock import patch
 

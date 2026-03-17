@@ -1,7 +1,6 @@
 """Unit tests for LXMF identity detection and sharing."""
 from __future__ import annotations
 
-
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

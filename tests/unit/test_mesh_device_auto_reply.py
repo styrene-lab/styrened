@@ -1,7 +1,6 @@
 """Unit tests for MeshDevice.has_auto_reply property."""
 from __future__ import annotations
 
-
 from styrened.models.mesh_device import DeviceType, MeshDevice
 
 

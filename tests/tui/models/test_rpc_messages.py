@@ -9,7 +9,6 @@ These tests verify:
 """
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.rpc.messages import (

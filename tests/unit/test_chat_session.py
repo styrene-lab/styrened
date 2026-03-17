@@ -1,7 +1,6 @@
 """Unit tests for ChatSession async context manager."""
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, patch
 
 import pytest

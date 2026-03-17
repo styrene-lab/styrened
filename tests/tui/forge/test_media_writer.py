@@ -5,7 +5,6 @@ root, network, or real disks. Subprocess calls are patched.
 """
 from __future__ import annotations
 
-
 import stat
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch

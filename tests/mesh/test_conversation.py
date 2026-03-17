@@ -5,7 +5,6 @@ Uses real RNS/LXMF stack through TCP mesh transport between containers.
 """
 from __future__ import annotations
 
-
 import asyncio
 
 import pytest

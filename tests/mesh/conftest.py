@@ -11,7 +11,6 @@ asyncio.open_connection instead of open_unix_connection.
 """
 from __future__ import annotations
 
-
 import asyncio
 import logging
 import subprocess
@@ -24,7 +23,6 @@ import pytest_asyncio
 from tests.harness.ipc_client import (
     MeshControlClient,
     poll_for_message,
-    poll_for_status,
 )
 from tests.harness.ipc_client import (
     wait_for_ping as _wait_for_ping,

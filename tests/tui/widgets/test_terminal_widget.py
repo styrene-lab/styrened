@@ -5,7 +5,6 @@ and event handling via mocked IPC bridge.
 """
 from __future__ import annotations
 
-
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 

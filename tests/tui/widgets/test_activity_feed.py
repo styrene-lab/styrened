@@ -1,7 +1,6 @@
 """Tests for ActivityFeedWidget."""
 from __future__ import annotations
 
-
 import time
 
 from styrened.tui.widgets.activity_feed import (

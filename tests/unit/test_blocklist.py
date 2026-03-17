@@ -1,7 +1,6 @@
 """Tests for peer blocking / blocklist functionality."""
 from __future__ import annotations
 
-
 import time
 from unittest.mock import MagicMock, patch
 
@@ -278,8 +277,8 @@ class TestRBACPrefixBlocking:
 
     def test_exact_hash_blocks_via_rbac(self, db_engine):
         """Exact hash match blocks via RBAC."""
-        from styrened.services.lxmf_service import LXMFService
         from styrened.models.rbac import RBACPolicy, Role
+        from styrened.services.lxmf_service import LXMFService
 
         svc = LXMFService()
         source = "ca3e981348d3bb48"

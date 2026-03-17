@@ -1,7 +1,6 @@
 """Tests for CommandWidget, OutputEntry, and command presets."""
 from __future__ import annotations
 
-
 from styrened.tui.widgets.command_widget import (
     FLEET_OP_PRESETS,
     CommandWidget,

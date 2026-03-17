@@ -11,7 +11,6 @@ Covers:
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,9 +18,8 @@ import pytest
 
 from styrened.models.capabilities import CAPABILITY_YGGDRASIL
 from styrened.models.config import PeerDiscovery, YggdrasilConfig
-from styrened.models.mesh_device import DeviceType, MeshDevice, create_mesh_device
+from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.services.reticulum import StyreneAnnounceHandler, _bootstrap_ygg_peer
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -274,7 +272,6 @@ class TestBootstrapYggPeer:
         with patch("styrened.services.direct_link.DirectLinkService") as mock_cls:
             mock_cls.get_instance.return_value = None
             # Pass no direct_link, force import path to return None
-            import styrened.services.reticulum as ret_mod
             import styrened.services.direct_link as dl_mod
 
             original = getattr(dl_mod.DirectLinkService, "get_instance", None)

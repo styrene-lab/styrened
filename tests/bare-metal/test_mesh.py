@@ -10,7 +10,6 @@ import pytest
 
 from tests.harness.ssh import SSHHarness
 
-
 REQUIRED_DEVICES = {"styrene-node", "t100ta"}
 
 

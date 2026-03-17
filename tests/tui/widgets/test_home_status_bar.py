@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """Tests for HomeStatusBar widget.
 
 Validates compact SCADA-style status rendering with dim/bright anomaly logic.
@@ -12,7 +13,6 @@ from rich.text import Text
 from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
 from styrened.services.hub_connection import HubStatus
 from styrened.tui.widgets.home_status_bar import HomeStatusBar
-
 
 _DEFAULTS = {
     "rns_online": True,
@@ -99,7 +99,7 @@ class TestNominalRendering:
 
         text = _render_rich(bar)
         # Check no span uses bold
-        for start, end, style in text._spans:
+        for _start, _end, style in text._spans:
             assert "bold" not in str(style), f"Unexpected bold in nominal: {style}"
 
 

@@ -1,9 +1,6 @@
 """Tests for ConversationScreen - message thread display via ChatWidget."""
 from __future__ import annotations
 
-
-
-
 from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.widgets.chat_widget import STATUS_ICONS
 

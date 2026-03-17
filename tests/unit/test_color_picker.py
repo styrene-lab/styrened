@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-
-
 import colorsys
-
-import pytest
 
 from styrened.tui.widgets.color_picker import (
     PRESET_COLORS,

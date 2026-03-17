@@ -1,7 +1,6 @@
 """Tests for MessageBubble widget."""
 from __future__ import annotations
 
-
 from styrened.tui.widgets.message_bubble import STATUS_ICONS, MessageBubble
 
 

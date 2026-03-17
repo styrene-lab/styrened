@@ -3,26 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
 from styrened.models.rbac import Capability, RBACPolicy, Role, RosterEntry
 from styrened.models.relay import (
-    RelayConfig,
-    RelaySession,
-    RelayDisabled,
-    RelayMaxSessions,
-    RelayMaxPerIdentity,
     RelayByteLimitExceeded,
-    RelayIdleTimeout,
+    RelayConfig,
+    RelayDisabled,
+    RelayMaxPerIdentity,
+    RelayMaxSessions,
+    RelayPermanentConsentDenied,
     RelayPermanentDenied,
+    RelaySession,
     RelayTargetOffline,
     RelayTargetRejected,
-    RelayPermanentConsentDenied,
     RelayUnauthorized,
-    RelayEvicted,
 )
 from styrened.services.relay import RelayService
 
@@ -151,9 +149,9 @@ async def test_lru_eviction_oldest_non_priority():
     cfg = RelayConfig(enabled=True, max_sessions=2)
     svc = _operator_svc(cfg)
     s1 = await svc.create_session("a1", "b1")
-    s1.created_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    s1.created_at = datetime(2020, 1, 1, tzinfo=UTC)
     s2 = await svc.create_session("a2", "b2", priority=True)
-    s2.created_at = datetime(2021, 1, 1, tzinfo=timezone.utc)
+    s2.created_at = datetime(2021, 1, 1, tzinfo=UTC)
 
     # Now at cap. New priority request should evict s1 (oldest non-priority).
     s3 = await svc.create_session("a3", "b3", priority=True)
@@ -166,8 +164,8 @@ async def test_lru_eviction_all_priority():
     """All priority sessions — no evictable, raises RelayMaxSessions."""
     cfg = RelayConfig(enabled=True, max_sessions=2)
     svc = _operator_svc(cfg)
-    s1 = await svc.create_session("a1", "b1", priority=True)
-    s2 = await svc.create_session("a2", "b2", priority=True)
+    await svc.create_session("a1", "b1", priority=True)
+    await svc.create_session("a2", "b2", priority=True)
     with pytest.raises(RelayMaxSessions):
         await svc.create_session("a3", "b3")
 
@@ -216,7 +214,7 @@ async def test_idle_timeout():
     session = await svc.create_session("aaa", "bbb")
     sid = id(session)
     # Simulate stale last_activity
-    session.last_activity = datetime.now(timezone.utc) - timedelta(seconds=10)
+    session.last_activity = datetime.now(UTC) - timedelta(seconds=10)
     await svc.idle_check()
     assert sid not in svc._sessions
 
@@ -228,7 +226,7 @@ async def test_idle_timeout_permanent_exempt():
     svc = _operator_svc(cfg)
     session = await svc.create_session("aaa", "bbb", permanent=True)
     sid = id(session)
-    session.last_activity = datetime.now(timezone.utc) - timedelta(seconds=1800)
+    session.last_activity = datetime.now(UTC) - timedelta(seconds=1800)
     await svc.idle_check()
     assert sid in svc._sessions
 
@@ -249,8 +247,6 @@ def test_relay_config_in_core_config_default():
 
 def test_relay_config_parse_full():
     """Full relay config parsed from YAML dict."""
-    from styrened.services.config import load_core_config
-    from io import StringIO
     import yaml
 
     yaml_str = """
@@ -277,9 +273,10 @@ relay:
 
 def test_relay_config_round_trip():
     """Serialize and load back preserves relay config."""
+    import yaml
+
     from styrened.models.config import CoreConfig
     from styrened.services.config import serialize_config
-    import yaml
 
     config = CoreConfig()
     config.relay = RelayConfig(enabled=True, max_sessions=32)
@@ -335,6 +332,7 @@ def test_link_info_relayed_link_type():
 def test_link_entry_default_link_type():
     """_LinkEntry defaults to LinkType.DIRECT link_type."""
     from unittest.mock import MagicMock
+
     from styrened.models.relay import LinkType
     from styrened.services.direct_link import _LinkEntry
 
@@ -349,6 +347,7 @@ def test_link_entry_default_link_type():
 def test_link_entry_relayed_link_type():
     """_LinkEntry can be set to LinkType.RELAYED."""
     from unittest.mock import MagicMock
+
     from styrened.models.relay import LinkType
     from styrened.services.direct_link import _LinkEntry
 
@@ -383,7 +382,7 @@ def test_relay_service_set_rbac_policy():
 
 def test_daemon_has_relay_service_attr():
     """StyreneDaemon has _relay_service attribute initialized to None."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     with patch("styrened.daemon.load_core_config") as mock_load:
         mock_load.return_value = MagicMock()
@@ -400,7 +399,7 @@ def test_daemon_has_relay_service_attr():
 
 def test_start_relay_service_creates_service():
     """_start_relay_service instantiates RelayService from config."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     daemon = MagicMock()
     daemon.config = MagicMock()
@@ -536,7 +535,6 @@ def test_serve_relay_target_offline():
 def test_serve_relay_success():
     """/relay creates session and returns established status."""
     import json as _json
-    import asyncio
     import threading
     from unittest.mock import MagicMock
 
@@ -584,7 +582,6 @@ def test_serve_relay_success():
 def test_serve_relay_error_propagation():
     """/relay returns relay error codes."""
     import json as _json
-    import asyncio
     import threading
     from unittest.mock import MagicMock
 

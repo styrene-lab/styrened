@@ -5,7 +5,6 @@ and --fix provisioning for adapter binaries (yggdrasil, i2pd).
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,7 +12,6 @@ import pytest
 from styrened.models.daemon_mode import DaemonMode
 from styrened.services.doctor import (
     CheckCategory,
-    Finding,
     Severity,
     check_adapter_binaries,
     fix_adapter_binaries,
@@ -235,7 +233,7 @@ class TestFixMode:
             patch(f"{_DOCTOR}._check_binary_version", return_value="0.5.13"),
             patch(f"{_DOCTOR}._get_provisioner", return_value=mock_provisioner),
         ):
-            findings = await fix_adapter_binaries(config)
+            await fix_adapter_binaries(config)
 
         mock_provisioner.provision.assert_not_called()
 

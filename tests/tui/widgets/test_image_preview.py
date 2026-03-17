@@ -7,9 +7,6 @@ Covers:
 """
 from __future__ import annotations
 
-
-
-
 import pytest
 from textual.widgets import Static
 

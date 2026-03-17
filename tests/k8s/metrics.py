@@ -25,7 +25,6 @@ Example usage:
 """
 from __future__ import annotations
 
-
 from dataclasses import asdict, dataclass
 
 
@@ -62,7 +61,7 @@ class PodMetrics:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "PodMetrics":
+    def from_dict(cls, data: dict) -> PodMetrics:
         """Create PodMetrics from dict.
 
         Args:
@@ -113,7 +112,7 @@ class TestSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TestSnapshot":
+    def from_dict(cls, data: dict) -> TestSnapshot:
         """Create TestSnapshot from dict.
 
         Args:
@@ -160,7 +159,7 @@ class TestRunMetadata:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TestRunMetadata":
+    def from_dict(cls, data: dict) -> TestRunMetadata:
         """Create TestRunMetadata from dict."""
         return cls(**data)
 
@@ -215,7 +214,7 @@ class TestSummary:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TestSummary":
+    def from_dict(cls, data: dict) -> TestSummary:
         """Create TestSummary from dict."""
         metadata = TestRunMetadata.from_dict(data["metadata"])
         return cls(

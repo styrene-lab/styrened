@@ -14,6 +14,7 @@ O6: Regression test ensuring MeshDevice uses identity_hash (not 'identity').
 """
 
 from __future__ import annotations
+
 import re
 import time
 from typing import Any
@@ -22,20 +23,19 @@ import pytest
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _make_device(**overrides) -> MeshDevice:
     """Create a MeshDevice with sensible defaults, overridable by kwargs."""
-    defaults = dict(
-        destination_hash="abcdef1234567890",
-        identity_hash="abc123",
-        name="test-node",
-        device_type=DeviceType.STYRENE_NODE,
-        last_announce=int(time.time()),
-    )
+    defaults = {
+        "destination_hash": "abcdef1234567890",
+        "identity_hash": "abc123",
+        "name": "test-node",
+        "device_type": DeviceType.STYRENE_NODE,
+        "last_announce": int(time.time()),
+    }
     defaults.update(overrides)
     return MeshDevice(**defaults)
 
@@ -121,7 +121,6 @@ class TestInboxUnreadFormatting:
 
     def test_unread_true_produces_bold_bright_markup(self, cascade):
         """Production logic: is_unread=True → [{cascade.bright} bold]{count}[/]"""
-        is_unread = True
         unread = 3
         # This is the exact expression from inbox.py line 282
         unread_text = f"[{cascade.bright} bold]{unread}[/]"
@@ -132,7 +131,6 @@ class TestInboxUnreadFormatting:
 
     def test_unread_false_produces_dim_dash_markup(self, cascade):
         """Production logic: is_unread=False → [{cascade.dim}]-[/]"""
-        is_unread = False
         # inbox.py line 284
         unread_text = f"[{cascade.dim}]-[/]"
 
@@ -212,8 +210,8 @@ class TestHomeStatusBarUptime:
 
     def test_render_uptime_low_uses_warning_style(self):
         """Uptime < 300s uses color_warning style (recently-restarted highlight)."""
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         from styrened.tui.widgets.highlighted_panel import get_color_cascade
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         bar = HomeStatusBar()
         object.__setattr__(bar, "daemon_connected", True)
         object.__setattr__(bar, "daemon_uptime", 120)
@@ -231,8 +229,8 @@ class TestHomeStatusBarUptime:
 
     def test_render_uptime_high_uses_dim_style(self):
         """Uptime >= 300s uses dim style (normal operation)."""
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         from styrened.tui.widgets.highlighted_panel import get_color_cascade
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         bar = HomeStatusBar()
         object.__setattr__(bar, "daemon_connected", True)
         object.__setattr__(bar, "daemon_uptime", 600)
@@ -254,8 +252,8 @@ class TestHomeStatusBarUptime:
 
     def test_render_uptime_boundary_299(self):
         """Uptime=299 (< 300) should trigger warning style."""
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         from styrened.tui.widgets.highlighted_panel import get_color_cascade
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         bar = HomeStatusBar()
         object.__setattr__(bar, "daemon_connected", True)
         object.__setattr__(bar, "daemon_uptime", 299)
@@ -270,8 +268,8 @@ class TestHomeStatusBarUptime:
 
     def test_render_uptime_boundary_300(self):
         """Uptime=300 (>= 300) should NOT trigger warning."""
-        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         from styrened.tui.widgets.highlighted_panel import get_color_cascade
+        from styrened.tui.widgets.home_status_bar import HomeStatusBar
         bar = HomeStatusBar()
         object.__setattr__(bar, "daemon_connected", True)
         object.__setattr__(bar, "daemon_uptime", 300)
@@ -457,13 +455,13 @@ class TestHomeStatusBarRNS:
         assert "RNS ○ offline" in output
 
     def test_rns_offline_with_error(self):
-        from styrened.models.rns_error import RNSErrorState, RNSErrorCategory
+        from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
         err = RNSErrorState(category=RNSErrorCategory.PORT_CONFLICT, message="port in use")
         output = _render_bar(rns_online=False, error_state=err)
         assert "port in use" in output
 
     def test_rns_error_message_truncated(self):
-        from styrened.models.rns_error import RNSErrorState, RNSErrorCategory
+        from styrened.models.rns_error import RNSErrorCategory, RNSErrorState
         long_msg = "a" * 50
         err = RNSErrorState(category=RNSErrorCategory.PORT_CONFLICT, message=long_msg)
         output = _render_bar(rns_online=False, error_state=err)

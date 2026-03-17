@@ -11,11 +11,7 @@ Task 3 (relay-directlink): Tests that:
 from __future__ import annotations
 
 import json
-from dataclasses import fields
 from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # LinkType enum and dataclass field type tests
@@ -70,7 +66,6 @@ class TestLinkTypeEnum:
 class TestDirectLinkServiceRelayMethods:
     def _make_service_with_entry(self, dest_hash="aabbccdd"):
         """Return a DirectLinkService with a mock _LinkEntry pre-inserted."""
-        from styrened.models.relay import LinkType
         from styrened.services.direct_link import DirectLinkService, _LinkEntry
 
         svc = DirectLinkService()
@@ -157,10 +152,9 @@ class TestDaemonRelayEndpoint:
 
     def test_relay_handler_marks_target_link_relayed_on_success(self):
         """When _serve_datalink_relay succeeds, target link gets link_type=RELAYED."""
-        from styrened.models.relay import LinkType, RelaySession
-
         # Build a minimal daemon mock
         from styrened.daemon import StyreneDaemon
+        from styrened.models.relay import LinkType, RelaySession
         daemon = object.__new__(StyreneDaemon)
 
         # Set up minimal required attributes
@@ -317,7 +311,7 @@ class TestDaemonRelayServiceWiring:
 
         mock_relay_svc = MagicMock()
 
-        with patch("styrened.services.relay.RelayService", return_value=mock_relay_svc) as MockRS:
+        with patch("styrened.services.relay.RelayService", return_value=mock_relay_svc):
             daemon._start_relay_service()
 
         assert daemon._relay_service is mock_relay_svc
@@ -376,7 +370,7 @@ class TestRelayPermanentCapabilityCheck:
 
     def _make_daemon(self, has_permanent_cap: bool):
         from styrened.daemon import StyreneDaemon
-        from styrened.models.rbac import Capability, RBACPolicy, Role
+        from styrened.models.rbac import Capability, Role
 
         daemon = object.__new__(StyreneDaemon)
         daemon._datalink_rl = MagicMock()
@@ -452,8 +446,9 @@ class TestRelayServiceTeardownOnStop:
 
     def test_teardown_calls_teardown_session_for_all_active_sessions(self):
         import asyncio
-        from styrened.services.relay import RelayService
+
         from styrened.models.relay import RelayConfig, RelaySession
+        from styrened.services.relay import RelayService
 
         svc = RelayService(RelayConfig(enabled=True))
         s1 = RelaySession(requester_hash="aa", target_hash="bb")

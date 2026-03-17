@@ -4,7 +4,6 @@ Tests type-specific renderers for structured page data.
 """
 from __future__ import annotations
 
-
 from styrened.tui.widgets.page_renderers import (
     _format_duration,
     render_fleet_overview,

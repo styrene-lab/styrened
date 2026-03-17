@@ -1,8 +1,6 @@
 """Tests for content_type field on PageResponse and IPC passthrough."""
 from __future__ import annotations
 
-import pytest
-
 from styrened.services.page_browser import PageResponse, PageStatus
 
 
@@ -237,7 +235,7 @@ class TestMeshDeviceWebUrl:
     """MeshDevice.web_url field."""
 
     def test_web_url_defaults_to_none(self):
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
 
         device = MeshDevice(
             destination_hash="abc123",
@@ -250,7 +248,7 @@ class TestMeshDeviceWebUrl:
         assert device.web_url is None
 
     def test_web_url_can_be_set(self):
-        from styrened.models.mesh_device import MeshDevice, DeviceType
+        from styrened.models.mesh_device import DeviceType, MeshDevice
 
         device = MeshDevice(
             destination_hash="abc123",
@@ -290,6 +288,7 @@ class TestIdentityConfigWebUrl:
 
     def test_web_url_parsed_from_yaml(self, tmp_path):
         import yaml
+
         from styrened.services.config import load_core_config
 
         config_file = tmp_path / "core-config.yaml"
@@ -308,6 +307,7 @@ class TestGatherMetaWebUrl:
 
     def test_web_url_included_when_configured(self):
         from unittest.mock import MagicMock
+
         from styrened.rpc.server import RPCServer
 
         config = MagicMock()
@@ -325,6 +325,7 @@ class TestGatherMetaWebUrl:
 
     def test_web_url_omitted_when_empty(self):
         from unittest.mock import MagicMock
+
         from styrened.rpc.server import RPCServer
 
         config = MagicMock()

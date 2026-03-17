@@ -5,12 +5,9 @@ timeout handling, error conditions, authorization, rate limiting, and replay pro
 """
 from __future__ import annotations
 
-
 import asyncio
 import subprocess
-import tempfile
 import time
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,11 +19,9 @@ from styrened.models.styrene_wire import (
     generate_request_id,
 )
 from styrened.rpc.server import (
-    DANGEROUS_RPC_COMMANDS,
     DEFAULT_ALLOWED_COMMANDS,
     DEFAULT_RPC_RATE_LIMIT,
     MAX_RECENT_REQUEST_IDS,
-    PUBLIC_RPC_COMMANDS,
     RATE_LIMIT_WINDOW_SECONDS,
     REQUEST_ID_EXPIRY_SECONDS,
     RPCServer,

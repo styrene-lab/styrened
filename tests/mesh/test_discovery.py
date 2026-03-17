@@ -5,7 +5,6 @@ transport can discover each other through RNS announces.
 """
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.ipc.client import ControlClient

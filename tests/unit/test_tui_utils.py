@@ -1,7 +1,6 @@
 """Tests for TUI utility functions — device_info_to_mesh."""
 from __future__ import annotations
 
-
 from dataclasses import dataclass
 
 from styrened.ipc.messages import DeviceInfo

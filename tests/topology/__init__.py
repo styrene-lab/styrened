@@ -14,7 +14,6 @@ Usage:
 """
 from __future__ import annotations
 
-
 from .presets import (
     linear_chain,
     star_hub,

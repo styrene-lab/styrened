@@ -1,7 +1,6 @@
 """Tests for RPC client."""
 from __future__ import annotations
 
-
 import asyncio
 from typing import Any
 
@@ -68,7 +67,7 @@ class MockStyreneProtocol:
 
     async def simulate_response(
         self,
-        client: "RPCClient",
+        client: RPCClient,
         request_id: bytes,
         message_type: StyreneMessageType,
         payload_data: dict[str, Any],

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -15,7 +14,6 @@ from styrened.models.capabilities import (
 )
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.services.node_store import NodeStore
-
 
 # ---------------------------------------------------------------------------
 # CAPABILITY_YGGDRASIL token
@@ -83,14 +81,14 @@ class TestMeshDeviceYggAddress:
     """Tests for the ygg_address field on MeshDevice."""
 
     def _make_device(self, **kwargs) -> MeshDevice:
-        defaults = dict(
-            destination_hash="aabbccdd11223344",
-            identity_hash="11223344aabbccdd",
-            name="test-node",
-            device_type=DeviceType.STYRENE_NODE,
-            last_announce=1700000000,
-            announce_count=1,
-        )
+        defaults = {
+            "destination_hash": "aabbccdd11223344",
+            "identity_hash": "11223344aabbccdd",
+            "name": "test-node",
+            "device_type": DeviceType.STYRENE_NODE,
+            "last_announce": 1700000000,
+            "announce_count": 1,
+        }
         defaults.update(kwargs)
         return MeshDevice(**defaults)
 
@@ -125,14 +123,14 @@ _ID_HASH = "11223344aabbccdd11223344aabbccdd"
 
 
 def _device(destination_hash: str = _DEST_HASH, **kwargs) -> MeshDevice:
-    defaults = dict(
-        destination_hash=destination_hash,
-        identity_hash=_ID_HASH,
-        name="test-node",
-        device_type=DeviceType.STYRENE_NODE,
-        last_announce=1700000000,
-        announce_count=1,
-    )
+    defaults = {
+        "destination_hash": destination_hash,
+        "identity_hash": _ID_HASH,
+        "name": "test-node",
+        "device_type": DeviceType.STYRENE_NODE,
+        "last_announce": 1700000000,
+        "announce_count": 1,
+    }
     defaults.update(kwargs)
     return MeshDevice(**defaults)
 

@@ -6,7 +6,6 @@ authorization.  RBAC policy is always present (no legacy fallback).
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,7 +20,6 @@ from styrened.rpc.server import (
     MESSAGE_TYPE_CAPABILITY,
     RPCServer,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -7,7 +7,6 @@ These tests verify:
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -18,6 +17,7 @@ from styrened.tui.screens.conversation import ConversationScreen
 from styrened.tui.screens.forum_thread import ForumThreadScreen
 from styrened.tui.screens.inbox import InboxScreen, MailScreen
 from styrened.tui.screens.mail_group_thread import MailGroupThreadScreen
+from styrened.tui.services.app_lifecycle import LifecycleMode
 from styrened.ui_state import (
     ConversationScopeKind,
     ForumThreadMeta,
@@ -25,7 +25,6 @@ from styrened.ui_state import (
     MailIndexState,
     MailThreadRecord,
 )
-from styrened.tui.services.app_lifecycle import LifecycleMode
 
 
 @pytest.fixture(autouse=True)

@@ -13,7 +13,6 @@ This covers the critical gaps identified in the test coverage assessment:
 """
 from __future__ import annotations
 
-
 import asyncio
 import json
 
@@ -58,7 +57,7 @@ class MockLXMFTransport:
         self._endpoints = {}  # destination_hash -> endpoint
         self._message_log = []  # Track all messages for debugging
 
-    def register_endpoint(self, destination_hash: str, endpoint: "MockLXMFEndpoint"):
+    def register_endpoint(self, destination_hash: str, endpoint: MockLXMFEndpoint):
         """Register an endpoint (operator or device) with this transport.
 
         Args:

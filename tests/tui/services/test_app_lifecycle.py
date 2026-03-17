@@ -10,7 +10,6 @@ These tests verify:
 """
 from __future__ import annotations
 
-
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -23,7 +22,6 @@ from styrened.tui.services.app_lifecycle import (
     get_service_status,
     initialize_styrene,
 )
-
 
 # =============================================================================
 # Fixtures

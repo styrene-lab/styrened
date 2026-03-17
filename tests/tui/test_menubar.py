@@ -1,7 +1,6 @@
 """Tests for the macOS menu bar agent module."""
 from __future__ import annotations
 
-
 import time
 
 from styrened.tui.menubar.agent import MenuBarState, _relative_time

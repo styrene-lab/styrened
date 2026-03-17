@@ -14,10 +14,10 @@ import yaml
 from styrened.models.config import AutoReplyMode, CoreConfig, DeploymentMode, Profile
 from styrened.services.config import (
     _parse_bool,
-    serialize_config,
     get_profile_defaults,
     load_core_config,
     save_core_config,
+    serialize_config,
     validate_core_config,
 )
 

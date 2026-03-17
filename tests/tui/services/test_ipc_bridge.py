@@ -4,7 +4,6 @@ All ControlClient interactions are mocked. No real socket connections.
 """
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest

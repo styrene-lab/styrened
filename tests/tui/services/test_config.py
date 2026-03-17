@@ -1,12 +1,13 @@
 """Tests for configuration service."""
 from __future__ import annotations
 
-
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from styrened.models.config import GroupThreadFeatureTierConfig
+from styrened.services.group_threads import HardwareFootprintInputs
 from styrened.tui.models.config import (
     ConfigLoadError,
     ConfigValidationError,
@@ -15,8 +16,6 @@ from styrened.tui.models.config import (
     StyreneConfig,
     ThemeMode,
 )
-from styrened.models.config import GroupThreadFeatureTierConfig
-from styrened.services.group_threads import HardwareFootprintInputs
 from styrened.tui.services.config import (
     apply_group_thread_first_run_defaults,
     get_default_config,

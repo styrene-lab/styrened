@@ -8,20 +8,19 @@ Tests validate:
 """
 
 from __future__ import annotations
-import asyncio
+
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from styrened.services.doctor import (
+    _BOUNDARY_WARN_THRESHOLD,
     CheckCategory,
     Severity,
-    _BOUNDARY_WARN_THRESHOLD,
     check_boundary_log,
 )
-
 
 # ---------------------------------------------------------------------------
 # Record/snapshot factories

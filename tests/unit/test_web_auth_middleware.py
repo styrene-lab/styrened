@@ -12,15 +12,12 @@ from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from styrened.web.auth import SessionStore
-from styrened.web.auth_middleware import AuthMiddleware
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-from styrened.models.rbac import RBACPolicy, Role, RosterEntry
+from styrened.models.rbac import RBACPolicy
+from styrened.web.auth import SessionStore
+from styrened.web.auth_middleware import AuthMiddleware
 
 
 @dataclass

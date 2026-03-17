@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Button, Label, ProgressBar, Static
 
 from styrened.tui.screens.provision_modal import ProvisionModal
-
 
 # ---------------------------------------------------------------------------
 # Test harness app

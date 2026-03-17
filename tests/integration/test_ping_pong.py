@@ -8,7 +8,6 @@ This validates:
 """
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.models.styrene_wire import (

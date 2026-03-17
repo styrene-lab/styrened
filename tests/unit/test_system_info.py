@@ -5,7 +5,6 @@ generation for announce data and status responses.
 """
 from __future__ import annotations
 
-
 from unittest.mock import mock_open, patch
 
 from styrened.services.system_info import get_os_info, get_system_fingerprint

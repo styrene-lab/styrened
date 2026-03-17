@@ -5,7 +5,6 @@ serve_dynamic_page entry point.
 """
 from __future__ import annotations
 
-
 import os
 from io import StringIO
 from unittest.mock import patch

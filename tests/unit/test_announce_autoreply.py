@@ -5,7 +5,6 @@ is included/excluded based on config.
 """
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock, patch
 
 from styrened.models.config import AutoReplyMode, CoreConfig

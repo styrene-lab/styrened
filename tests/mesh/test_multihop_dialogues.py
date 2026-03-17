@@ -5,7 +5,6 @@ through transport node B. Uses the existing discovered_multihop fixture.
 """
 from __future__ import annotations
 
-
 from pathlib import Path
 
 import pytest

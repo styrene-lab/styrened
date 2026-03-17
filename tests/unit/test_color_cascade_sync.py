@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-
 """Tests for ColorCascade construction, preset dispatch, and theme sync logic.
 
 O1: ColorCascade derivation from phosphex color and from_textual_theme()
 O2: Theme→cascade dispatch logic (styrene brand, forge world, builtin, unknown)
 """
 
-import pytest
 from textual.theme import BUILTIN_THEMES, Theme
 
 from styrened.tui.themes.color_cascade import (
@@ -23,7 +21,6 @@ from styrened.tui.themes.styrene_brand import (
     STYRENE_THEME_KEY,
     create_styrene_cascade,
 )
-
 
 # =========================================================================
 # O1: ColorCascade derivation tests

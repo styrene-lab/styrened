@@ -1,7 +1,6 @@
 """Tests for NodeStore - SQLite persistence for discovered mesh nodes."""
 from __future__ import annotations
 
-
 import time
 from pathlib import Path
 

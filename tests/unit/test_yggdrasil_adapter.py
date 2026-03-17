@@ -2,26 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import signal
-import socket
 import stat
-import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from styrened.services.daemon_adapter import DaemonMode, DaemonStatus
+from styrened.services.daemon_adapter import DaemonMode
 from styrened.services.yggdrasil import (
     MANAGED_PORT,
     SYSTEM_SOCKET_PATHS,
     YggdrasilAdapter,
     YggdrasilConfig,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -161,10 +156,10 @@ async def test_stop_managed_sigkill_on_timeout():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
         return 0
 
-    with patch("asyncio.wait_for", side_effect=[asyncio.TimeoutError(), None]):
+    with patch("asyncio.wait_for", side_effect=[TimeoutError(), None]):
         mock_proc.send_signal = MagicMock()
         mock_proc.kill = MagicMock()
         adapter._process = mock_proc

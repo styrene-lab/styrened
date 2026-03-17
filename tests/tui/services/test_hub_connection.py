@@ -1,7 +1,6 @@
 """Tests for Styrene hub connection management."""
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock, Mock, patch
 
 from styrened.services.hub_connection import (

@@ -1,7 +1,6 @@
 """Unit tests for PQC cryptographic primitives."""
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.crypto.pqc_crypto import (

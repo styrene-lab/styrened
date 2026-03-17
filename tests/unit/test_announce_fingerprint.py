@@ -5,7 +5,6 @@ and MeshDevice.system_fingerprint field.
 """
 from __future__ import annotations
 
-
 from styrened.models.mesh_device import (
     DeviceType,
     MeshDevice,

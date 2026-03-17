@@ -5,7 +5,6 @@ the system_fingerprint field correctly.
 """
 from __future__ import annotations
 
-
 from styrened.ipc.messages import DeviceInfo
 from styrened.models.mesh_device import DeviceType, MeshDevice
 

@@ -16,7 +16,6 @@ from unittest.mock import MagicMock
 
 from sqlalchemy import create_engine, text
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

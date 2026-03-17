@@ -1,8 +1,6 @@
 """Tests for HTML-to-Rich rendering pipeline."""
 from __future__ import annotations
 
-import pytest
-
 from styrened.tui.widgets.html_renderer import (
     ContentKind,
     _escape_rich_markup,
@@ -406,10 +404,11 @@ class TestRenderHtmlLinksNavigable:
         # Verify the Text has spans with click actions
         markup = result._text  # Access raw markup text
         # The markup should contain navigate_link
-        full_markup = "".join(markup) if isinstance(markup, list) else str(markup)
+        "".join(markup) if isinstance(markup, list) else str(markup)
         # Actually let's check the Text object's internal representation
         # by checking it renders without errors
         from io import StringIO
+
         from rich.console import Console
         console = Console(file=StringIO(), force_terminal=True)
         console.print(result)

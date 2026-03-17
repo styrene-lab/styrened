@@ -17,16 +17,13 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from styrened.models.rbac import (
+    ROLE_CAPABILITIES,
     Capability,
     RBACPolicy,
-    ROLE_CAPABILITIES,
     Role,
     RosterEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. Capability model: new capabilities exist at correct tiers
@@ -419,7 +416,6 @@ class TestDefaultRBACPolicy:
 
     def test_speedtest_works_for_monitor(self):
         """MONITOR role grants speedtest access."""
-        from styrened.daemon import StyreneDaemon
         daemon = self._make_daemon()
         identity_hash = "abcd" * 8
         daemon.config.rbac = RBACPolicy(

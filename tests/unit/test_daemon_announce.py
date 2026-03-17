@@ -5,7 +5,6 @@ and includes the system fingerprint as the 7th field.
 """
 from __future__ import annotations
 
-
 from unittest.mock import patch
 
 import pytest

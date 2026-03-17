@@ -1,9 +1,11 @@
 """Tests for group-thread footprint policy helpers."""
 from __future__ import annotations
 
-
 from styrened.models.config import GroupThreadFeatureTierConfig
-from styrened.services.group_threads import HardwareFootprintInputs, choose_group_thread_feature_tier
+from styrened.services.group_threads import (
+    HardwareFootprintInputs,
+    choose_group_thread_feature_tier,
+)
 
 
 class TestChooseGroupThreadFeatureTier:

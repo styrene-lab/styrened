@@ -5,14 +5,10 @@ Category O4: Settings color editor unit tests.
 
 from __future__ import annotations
 
-import pytest
-
-
 import re
 from typing import Any
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # _COLOUR_KEYS structure tests

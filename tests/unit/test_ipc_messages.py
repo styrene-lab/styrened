@@ -1,7 +1,6 @@
 """Unit tests for IPC message dataclasses."""
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.ipc.messages import (

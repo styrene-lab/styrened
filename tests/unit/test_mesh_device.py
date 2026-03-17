@@ -5,7 +5,6 @@ aspect_hint parameter, and regression for existing formats.
 """
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock, patch
 
 from styrened.models.mesh_device import (

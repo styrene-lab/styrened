@@ -26,7 +26,6 @@ from styrened.tui.models.cop_situation import SituationPriority
 from styrened.tui.models.events import DaemonEvent
 from styrened.tui.widgets.adapter_status_bar import AdapterStatusBar
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

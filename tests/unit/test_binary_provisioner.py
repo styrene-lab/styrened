@@ -5,19 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import platform
-import struct
 import tarfile
-import tempfile
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from styrened.services.binary_errors import BinaryIntegrityError, UnsupportedPlatformError
 from styrened.services.binary_provisioner import BinaryProvisioner
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

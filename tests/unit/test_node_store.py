@@ -5,7 +5,6 @@ from potentially untrusted mesh peers, plus core persistence operations.
 """
 from __future__ import annotations
 
-
 import tempfile
 import threading
 import time

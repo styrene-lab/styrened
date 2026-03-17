@@ -10,12 +10,14 @@ Covers:
 """
 from __future__ import annotations
 
-
-import pytest
-
-from styrened.models.config import CoreConfig, GroupThreadFeatureTierConfig, GroupThreadsConfig, I2PConfig, YggdrasilConfig
+from styrened.models.config import (
+    CoreConfig,
+    GroupThreadFeatureTierConfig,
+    GroupThreadsConfig,
+    I2PConfig,
+    YggdrasilConfig,
+)
 from styrened.services.daemon_adapter import DaemonMode
-
 
 # ---------------------------------------------------------------------------
 # Default values
@@ -314,7 +316,7 @@ class TestI2PYAMLParsing:
 
 class TestRoundTrip:
     def test_yggdrasil_round_trip_via_parse(self):
-        from styrened.services.config import _parse_i2p, _parse_yggdrasil
+        from styrened.services.config import _parse_yggdrasil
 
         cfg = _make_core()
         _parse_yggdrasil(

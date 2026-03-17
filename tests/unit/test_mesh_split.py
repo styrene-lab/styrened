@@ -19,12 +19,11 @@ retired with that class.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from styrened.models.config import CoreConfig, DiscoveryConfig
-from styrened.models.rbac import RBACPolicy, Role, RosterEntry
 from styrened.services.config import load_core_config, save_core_config
 
 # ---------------------------------------------------------------------------
@@ -105,7 +104,6 @@ class TestDiscoveryConfigSerializationRoundtrip:
 
 class TestGatherMeta:
     def _make_server(self):
-        from unittest.mock import MagicMock
 
         from styrened.rpc.server import RPCServer
         protocol = MagicMock()
@@ -181,7 +179,6 @@ class TestGatherMeta:
 
 class TestGatherInfo:
     def _make_server(self):
-        from unittest.mock import MagicMock
 
         from styrened.rpc.server import RPCServer
         protocol = MagicMock()
@@ -268,7 +265,6 @@ class TestInfoRespondFlag:
         config = CoreConfig()
         config.discovery.info_respond = True
         config.discovery.operator_label = "op1"
-        from unittest.mock import MagicMock
 
         from styrened.rpc.server import RPCServer
         server = RPCServer(styrene_protocol=MagicMock())

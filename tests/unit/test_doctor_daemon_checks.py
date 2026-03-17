@@ -5,16 +5,13 @@ Covers all DaemonMode × running combinations for both adapters.
 
 from __future__ import annotations
 
-import math
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from styrened.models.daemon_mode import DaemonMode
 from styrened.services.daemon_adapter import DaemonStatus
-from styrened.services.doctor import CheckCategory, Finding, Severity, check_i2p, check_yggdrasil
-
+from styrened.services.doctor import CheckCategory, Severity, check_i2p, check_yggdrasil
 
 # ---------------------------------------------------------------------------
 # Helpers

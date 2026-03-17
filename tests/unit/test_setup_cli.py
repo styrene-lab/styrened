@@ -10,15 +10,13 @@ Tests cover:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from styrened.models.daemon_mode import DaemonMode
-
 
 # ---------------------------------------------------------------------------
 # Helpers

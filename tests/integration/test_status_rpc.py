@@ -7,7 +7,6 @@ Tests the status request RPC pattern:
 """
 from __future__ import annotations
 
-
 import pytest
 
 from styrened.models.styrene_wire import (

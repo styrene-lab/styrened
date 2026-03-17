@@ -6,11 +6,15 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from textual.containers import Vertical
-from textual.widgets import Input, Static, TabPane, TabbedContent
+from textual.widgets import Input, TabbedContent, TabPane
 
 from styrened.models.mesh_device import DeviceType, MeshDevice
 from styrened.tui.app import StyreneApp
-from styrened.tui.screens.exploration import ExplorationScreen, ReticumAnnounceTable, StyreneFleetTable
+from styrened.tui.screens.exploration import (
+    ExplorationScreen,
+    ReticumAnnounceTable,
+    StyreneFleetTable,
+)
 from styrened.ui_state import WorkspaceId
 
 

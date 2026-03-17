@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 import logging
-import tempfile
 import time
 from pathlib import Path
 
-import pytest
-
 from styrened.boundary import (
+    _DEQUE_MAXLEN,
     BoundaryLogHandler,
     BoundaryRecord,
     InterfaceBoundary,
-    _DEQUE_MAXLEN,
     make_boundary_handler,
 )
-
 
 # ---------------------------------------------------------------------------
 # InterfaceBoundary enum

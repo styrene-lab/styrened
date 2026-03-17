@@ -1,7 +1,6 @@
 """Tests for PageCacheService."""
 from __future__ import annotations
 
-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
