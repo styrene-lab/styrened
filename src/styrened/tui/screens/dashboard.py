@@ -107,6 +107,11 @@ class DashboardScreen(Screen[None]):
         self._hub_retry_timer = self.set_interval(30.0, self._retry_hub_connection)
         # Slow reconciliation timer — belt-and-suspenders behind event-driven updates
         self._reconcile_timer = self.set_interval(60.0, self._reconcile)
+        # Quick initial refresh burst — catches the announce wave during RNS startup.
+        # DevicesUpdated message routing from app→screen is unreliable in Textual 8.x,
+        # so we poll the cache directly at 3s and 8s after mount.
+        self.set_timer(3.0, self._reconcile)
+        self.set_timer(8.0, self._reconcile)
 
         if self._ipc_bridge is not None:
             self.run_worker(self._fetch_daemon_status(), group="dashboard-status")

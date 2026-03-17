@@ -134,6 +134,9 @@ class GlobalCopScreen(StyreneScreen[None]):
             self._fleet_timer = self.set_interval(
                 _FLEET_REFRESH_INTERVAL, self._auto_refresh_fleet
             )
+            # Quick catches for the announce wave during RNS startup
+            self.set_timer(3.0, self._auto_refresh_fleet)
+            self.set_timer(8.0, self._auto_refresh_fleet)
         else:
             self._fleet_timer.resume()
 
