@@ -1,15 +1,9 @@
 ---
 id: styrene-identity
 title: Styrene Identity System
-status: exploring
+status: resolved
 tags: [identity, cryptography, post-quantum, yubikey, rns, lxmf, yggdrasil, wireguard, i2p, key-derivation, architecture]
-open_questions:
-  - "Root algorithm: Ed25519-only (YubiKey-compatible today), hybrid Ed25519+ML-DSA-65, or ML-DSA-65-only? Which assurance level justifies the on-wire size cost of ML-DSA?"
-  - Does RNS use a key format compatible with HKDF derivation from a root secret? (secp256k1? EC prime256v1? Custom?) Can we derive a valid RNS identity seed deterministically, or must it be independently generated and cross-signed?
-  - "Identity manifest distribution: RNS app_data is bandwidth-constrained. Should the manifest fingerprint (32 bytes) travel in announces with full manifest fetchable via /meta or NomadNet, or is there a more efficient gossip mechanism?"
-  - "Key revocation and rotation: if a protocol-specific derived key is compromised (e.g., WireGuard private key exposed), how does the operator revoke just that binding without invalidating the root StyreneID or their existing conversations?"
-  - "Identity continuity/recovery: if the YubiKey is lost/destroyed, how does the operator prove to their peers that a new key is the same person? Social recovery (m-of-n trusted peers co-sign a migration)? A recovery seed phrase?"
-  - "Constrained device support: RP2040/ESP32 nodes cannot afford ML-DSA key storage (~4KB private key) or compute. Do embedded nodes get a \"lite\" StyreneID (Ed25519 only) that is managed by their operator's full node, or is there a different trust model for constrained peers?"
+open_questions: []
 ---
 
 # Styrene Identity System
@@ -256,6 +250,192 @@ identity.load_private_key(rns_prv_bytes)
 
 
 
+### Credential manager backends — Bitwarden, 1Password, system keychain
+
+The user's question is sharp: if YubiKey works by holding an Ed25519 private key in hardware, can a credential manager like Bitwarden that stores passkeys serve the same role?
+
+**Short answer: yes, at a different security tier. The threat model degrades gracefully and explicitly.**
+
+---
+
+**What Bitwarden actually stores when it stores a "passkey"**
+
+A passkey (FIDO2 discoverable credential) is an Ed25519 (or P-256) keypair bound to a relying party ID (rpId). The private key lives inside Bitwarden's encrypted vault (AES-256-CBC + HMAC-SHA256, KDF from master password). It is software-encrypted — accessible to anyone who can unlock the vault.
+
+Bitwarden also stores SSH keys natively (since 2023). The Bitwarden SSH agent exposes stored keys for signing operations without ever writing the raw key material to disk outside the vault. This is the directly applicable feature: store the Styrene root Ed25519 key as a Bitwarden SSH key, use it for signing via the Bitwarden agent.
+
+**What Bitwarden does NOT provide vs. YubiKey:**
+- The private key IS in software — someone with your master password can export it
+- No physical presence requirement for signing (Bitwarden unlocks vault on login, then signs without re-prompting)
+- The key can be synced to any device where Bitwarden is installed
+
+**What Bitwarden DOES provide that YubiKey doesn't:**
+- Cross-device portability without a physical token — your identity follows you to any device with Bitwarden installed
+- Self-hostable (Vaultwarden) — operator controls the vault server
+- Optional hardware 2FA including YubiKey — vault unlock can require YubiKey touch even if the key is software
+
+---
+
+**The security tier ladder — now four explicit levels**
+
+```
+Tier A — Hardware HSM (YubiKey PIV/FIDO2, OpenPGP card)
+  Private key: non-exportable, hardware-bound
+  Physical presence: required for each signing op (touch)
+  Cross-device: NO — key stays on the physical token
+  Threat: device compromise cannot extract key; token theft = game over without PIN
+
+Tier B — Device HSM (iOS Secure Enclave, Android Keystore StrongBox)
+  Private key: non-exportable, device-bound
+  Physical presence: biometric or PIN on that specific device
+  Cross-device: NO — lost device = lost identity (unless backup exists)
+  Threat: device compromise cannot extract key; device destruction = loss
+
+Tier C — Credential Manager (Bitwarden, 1Password, macOS Keychain, GNOME Keyring)
+  Private key: software-encrypted, accessible with master credential
+  Physical presence: none beyond vault unlock
+  Cross-device: YES (synced vault)
+  Threat: master password compromise = key compromise; vault server breach mitigated by client-side encryption
+
+Tier D — Encrypted file (~/.styrene/identity/styrene-id.key, argon2id + ChaCha20)
+  Private key: software-encrypted on disk
+  Physical presence: none
+  Cross-device: if you copy the file
+  Threat: passphrase compromise or key file exfiltration = game over
+```
+
+---
+
+**Why Tier C is correct for most users**
+
+The vast majority of Styrene operators are NOT in the YubiKey threat model. They want:
+- Identity that works on their phone, laptop, and desktop
+- No physical token to carry or lose
+- Reasonable encryption at rest
+- Ideally self-hostable
+
+Bitwarden (or Vaultwarden) at Tier C delivers all of this. It's the right default for everyday operators. YubiKey is the right escalation for high-threat users (journalists, activists, military, first responders).
+
+---
+
+**FIDO2 passkeys vs. raw key storage — which Bitwarden feature to use**
+
+Using Bitwarden's passkey (FIDO2) feature for Styrene signing would require constructing FIDO2 assertions for arbitrary data — the signature format wraps the actual data in `authenticatorData || SHA-256(clientDataJSON)` with rpId binding. This is adaptable but adds protocol friction.
+
+**Simpler and cleaner: use Bitwarden as a raw key store, not as a FIDO2 signer.**
+
+- Store the Styrene root secret (32 bytes) or Ed25519 key as a Bitwarden secure note or SSH key item
+- `styrened` retrieves it via Bitwarden SDK or `rbw` (unofficial Bitwarden CLI) during startup
+- Holds the key in memory for the session, clears on shutdown
+- This is exactly what the Bitwarden SSH agent does for SSH keys
+
+This way Styrene does its own Ed25519 signing natively — no FIDO2 protocol wrapper, no rpId binding, no clientDataJSON. Clean.
+
+---
+
+**The IdentitySigner trait (Rust) / interface (Python)**
+
+This entire conversation implies that the identity system needs an abstract signing interface with pluggable backends:
+
+```rust
+#[async_trait]
+trait IdentitySigner: Send + Sync {
+    /// Sign arbitrary data. May prompt for user interaction (PIN, biometric, touch).
+    async fn sign(&self, data: &[u8]) -> Result<Signature>;
+    /// Public key — used to derive identity_hash and verify signatures.
+    fn public_key(&self) -> &Ed25519PublicKey;
+    /// Security tier — for UI display and policy enforcement.
+    fn tier(&self) -> SignerTier;
+}
+
+enum SignerTier { HardwareHsm, DeviceHsm, CredentialManager, EncryptedFile }
+```
+
+Implementations:
+- `YubikeySigner` — signs via PIV slot, requires touch
+- `SecureEnclaveSigner` — iOS/macOS Secure Enclave, biometric prompt
+- `BitwardenSigner` — unlocks vault via SDK, reads key, signs in memory
+- `FileSigner` — decrypts key file with argon2id passphrase, signs in memory
+
+The daemon displays the tier in `styrened identity` output and optionally enforces minimum tier for sensitive operations (e.g., RBAC admin actions require Tier A or B).
+
+---
+
+**Interaction with the root-secret / HKDF derivation model**
+
+The existing research established that all protocol keys (RNS, Yggdrasil, WireGuard, etc.) are HKDF-derived from a single 32-byte root secret. The IdentitySigner holds that root secret (or derives it from the Ed25519 key). The derivation hierarchy remains unchanged regardless of which backend holds the root:
+
+```
+root_secret (held by IdentitySigner backend)
+  ├─ Ed25519 signing key (for identity + mesh signatures)
+  ├─ HKDF → RNS enc seed + RNS sign seed → RNS Identity
+  ├─ HKDF → Yggdrasil Ed25519 key
+  ├─ HKDF → WireGuard Curve25519 key
+  └─ HKDF → ML-DSA-65 key (encrypted, unlocked by backend)
+```
+
+The abstraction boundary is clean: the backend holds the root secret, the IdentitySigner exposes signing and the public key, everything above is pure deterministic derivation.
+
+### Revised four-tier model — platform-native as Tier B, FOSS manager as Tier C
+
+The previous tier model conflated two orthogonal concerns: **key extractability** (hardware vs. software) and **user-facing credential management UX**. The correct taxonomy is UX-first, with hardware backing noted as an implementation detail within each tier.
+
+```
+Tier A — Hardware token (YubiKey, OpenPGP card, PIV smartcard)
+  UX: physical device, explicit tap/touch per session unlock
+  Key extractability: non-exportable (hardware-bound)
+  Cross-device: YES (carry the token)
+  Who: high-threat operators, journalists, activists, military
+
+Tier B — Platform-native credential system
+  iOS/macOS: iCloud Keychain / Apple Passwords app
+  Android (stock): Android Credential Manager / Google Password Manager
+  UX: integrated with OS — FaceID/TouchID/fingerprint unlock, no extra app
+  Key extractability: implementation detail — iCloud Keychain uses Secure Enclave
+                      on-device + end-to-end encrypted iCloud sync; Android Keystore
+                      with StrongBox on capable devices (Pixel, Galaxy S)
+  Cross-device: YES (within ecosystem — iCloud across Apple; Google across Android)
+  Who: everyday "normie" users who already use the platform password manager
+
+Tier C — FOSS credential manager (preferred open-source global solution)
+  Examples: Bitwarden (self-hosted via Vaultwarden), 1Password, KeePassXC
+  UX: separate app, master password or biometric unlock
+  Key extractability: software-encrypted, exportable with master credential
+  Cross-device: YES (cross-platform, cross-ecosystem — the only option that
+                works identically on iOS, Android, Linux, macOS, Windows,
+                and de-Googled Android where Tier B is unavailable)
+  Who: privacy-conscious users, de-Googled Android users, cross-platform operators
+
+Tier D — Encrypted file (graceful low-tech fallback)
+  Storage: ~/.styrene/identity/styrene-id.key (argon2id + ChaCha20-Poly1305)
+  UX: passphrase at daemon startup
+  Key extractability: software-encrypted, passphrase-required
+  Cross-device: manual (copy the file)
+  Who: embedded/edge devices (Pi Zero, edge servers), airgapped deployments,
+       developers, nodes with no interactive user
+
+---
+
+Hardware backing as implementation detail (not a separate tier):
+- Tier B on iOS: iCloud Keychain stores item in Secure Enclave-protected area
+- Tier B on Android: Android Credential Manager uses Keystore with StrongBox on capable hardware
+- Tier C (Bitwarden): software AES-256 encryption; can optionally require YubiKey for vault unlock (Tier A + C combined)
+- These implementation details improve security within the tier but don't change the user-facing category
+
+---
+
+Why Tier C is preferred over Tier B for privacy-first users:
+- Tier B on iOS routes through iCloud — Apple observes encrypted metadata (sync timing, device list)
+- Tier B on Android requires Google Password Manager — unavailable on de-Googled devices
+- Tier C (Bitwarden/Vaultwarden): fully self-hostable, Google-free, cross-platform
+- For Styrene's explicit first-class de-Googled Android target: Tier C is the natural credential layer
+
+Hierarchy of recommendations in the onboarding wizard:
+1. Have a YubiKey? → Tier A (highest security)
+2. No YubiKey, OK with platform ecosystem? → Tier B (Apple Passwords / Android Credential Manager)
+3. Privacy-first, cross-platform, or de-Googled Android? → Tier C (Bitwarden/Vaultwarden)
+4. Embedded device, airgapped, or none of the above? → Tier D (encrypted file, prompted at setup)
+
 ## Decisions
 
 ### Decision: Third-party attestations are additive, opt-in, and non-coercive
@@ -263,14 +443,49 @@ identity.load_private_key(rns_prv_bytes)
 **Status:** decided
 **Rationale:** A CAC, corporate PKI, or any other X.509-backed identity can sign a binding attestation: "I, holder of this verified credential, assert that this StyreneID public key is mine." That attestation travels with the identity manifest as an optional attestations[] array. Peers who trust the issuing PKI chain can verify it. Peers who don't care ignore it entirely. This is additive — it says nothing about what the peer can do on the network, only provides a verifiable claim about who they are. No Styrene peer is forced to trust any attestation chain. This is explicitly different from CAC-as-hardware-token (using the CAC device for key derivation/protection) vs. CAC-as-attestation (the DoD cert chain vouches for the StyreneID holder). Both use cases are supported and composable: a DoD operator can use their CAC as the hardware token AND publish its attestation.
 
+### Decision: IdentitySigner is an abstract trait with four pluggable backend tiers
+
+**Status:** decided
+**Rationale:** Hardware (YubiKey) and software (Bitwarden) credential stores differ in extractability and portability but are both valid identity backends. Rather than privileging one, Styrene defines an IdentitySigner trait (Rust) / interface (Python) with tier-annotated implementations: HardwareHsm (YubiKey PIV/FIDO2), DeviceHsm (Secure Enclave / Android Keystore), CredentialManager (Bitwarden, 1Password, system keychain), EncryptedFile (default). Tier C (CredentialManager) is the right default for most operators — cross-device portability without a physical token, with Vaultwarden available for self-hosted deployments. Tier A (YubiKey) is the escalation path for high-threat users. All tiers feed the same HKDF derivation hierarchy — the backend is only involved in holding the root secret and performing the root Ed25519 signing operation.
+
+### Decision: Use Bitwarden as raw key store (SSH key / secure note), not as FIDO2 signer
+
+**Status:** decided
+**Rationale:** FIDO2 passkeys wrap signatures in authenticatorData + clientDataJSON with rpId binding — not suitable for signing arbitrary RNS packets without protocol friction. The cleaner path: store the Styrene root secret or Ed25519 private key as a Bitwarden SSH key item or secure note. styrened retrieves it via Bitwarden SDK or rbw CLI at startup, holds it in memory for the session, clears on shutdown. This is identical to how the Bitwarden SSH agent handles SSH keys. The passkey feature (FIDO2) remains relevant for web-facing authentication (Styrene web UI login), not for mesh identity signing.
+
+### Decision: Tier B is platform-native credential system, not raw Secure Enclave — hardware backing is an implementation detail
+
+**Status:** decided
+**Rationale:** The previous framing of Tier B as "Secure Enclave / Android Keystore" conflated hardware backing (an implementation detail) with the user-facing credential management tier. The correct Tier B is iCloud Keychain / Apple Passwords on Apple platforms and Android Credential Manager on stock Android. These happen to use Secure Enclave / Keystore with StrongBox under the hood on capable hardware, but the tier is defined by the UX: OS-integrated, biometric unlock, no additional software. This makes the tier ladder coherent from a user perspective: hardware token → platform native → FOSS manager → encrypted file.
+
+### Decision: Hybrid Ed25519+ML-DSA-65 root; Ed25519 travels on-wire, ML-DSA lives in manifest only
+
+**Status:** decided
+**Rationale:** ML-DSA-65's 1952-byte pubkey is incompatible with bandwidth-constrained RNS links (RNode LoRa: ~235 byte packets). Ed25519 is YubiKey-compatible today and sufficient for mesh routing. The hybrid gives harvest-now-decrypt-later protection without breaking existing infrastructure: Ed25519 pubkey (32 bytes) travels in RNS announces as the network identity; ML-DSA-65 pubkey lives only in the full identity manifest fetched on demand. Nodes without StyreneID awareness see a normal RNS peer. Identity manifest fingerprint in app_data is SHA-256(ed25519_pubkey || ml_dsa_pubkey)[:16] — 16 bytes, fits alongside existing fields. Full manifest distributed via /meta or NomadNet /id page, cached locally with TTL, propagated by hubs via LXMF store-and-forward. No gossip protocol needed at launch.
+
+### Decision: Per-binding revocation via superseding manifest; root rotation via signed migration assertion
+
+**Status:** decided
+**Rationale:** HKDF is one-way — a compromised derived key (WireGuard, Yggdrasil) does not expose the root secret. Per-binding rotation: publish a new manifest with a replacement binding for that protocol, signed by the root key, with a later issued_at timestamp. Peers accept the newer manifest; old binding is superseded. Root key rotation (root itself compromised) requires a signed migration assertion: {old_styrene_id_sig, new_styrene_id_pubkey, issued_at} signed by BOTH old and new root keys, distributed to trusted peers who then update their resolution tables. This shares a solution path with recovery (Q4).
+
+### Decision: Constrained devices (RP2040/ESP32) are operator-managed sub-identities, not root peers
+
+**Status:** decided
+**Rationale:** RP2040/ESP32 cannot store a 4KB ML-DSA key or compute lattice signatures. They remain pure RNS nodes. Operator's StyreneID manifest includes a managed_nodes section: [{rns_identity_hash, device_type, label}], signed by the operator's root. Trust in the embedded node is delegated trust in its operator. No ML-DSA storage or compute required on device. Same trust model as RBAC managed endpoints.
+
+### Decision: Recovery: BIP-39 seed phrase primary; social recovery optional opt-in
+
+**Status:** decided
+**Rationale:** Seed phrase (BIP-39, 24 words) deterministically recovers the root secret and therefore all derived keys — no social coordination required, no trusted peers need to be online. Generated at setup, stored offline by the operator. Social recovery (m-of-n trusted peers co-sign a migration assertion) is an optional upgrade for operators willing to accept the coordination dependency in exchange for resilience against seed phrase loss. The two mechanisms are composable: an operator can have both. Social recovery without a seed phrase is the highest-convenience/highest-trust option; seed phrase only is the default self-sovereign path. No recovery mechanism at all is explicitly disallowed — setup wizard requires at minimum the seed phrase be written down before proceeding.
+
+### Decision: CredentialManager tier uses `keyring` crate at launch; explicit Bitwarden SDK is opt-in
+
+**Status:** decided
+**Rationale:** The `keyring` crate (Rust, cross-platform) abstracts macOS Keychain, GNOME Keyring/libsecret (SecretService D-Bus), KWallet, and Windows Credential Store from one API — covering Tier B on desktop macOS and Tier C on Linux without bespoke integrations. Bitwarden on Linux stores items via GNOME Keyring, so it is accessible through SecretService without the Bitwarden app running. Explicit Bitwarden SDK / rbw CLI integration is an optional named-item path for operators who want to reference a specific vault item by name. No 1Password, KeePassXC, or other manager integrations at launch — the SecretService abstraction covers them where they support it.
+
 ## Open Questions
 
-- Root algorithm: Ed25519-only (YubiKey-compatible today), hybrid Ed25519+ML-DSA-65, or ML-DSA-65-only? Which assurance level justifies the on-wire size cost of ML-DSA?
-- Does RNS use a key format compatible with HKDF derivation from a root secret? (secp256k1? EC prime256v1? Custom?) Can we derive a valid RNS identity seed deterministically, or must it be independently generated and cross-signed?
-- Identity manifest distribution: RNS app_data is bandwidth-constrained. Should the manifest fingerprint (32 bytes) travel in announces with full manifest fetchable via /meta or NomadNet, or is there a more efficient gossip mechanism?
-- Key revocation and rotation: if a protocol-specific derived key is compromised (e.g., WireGuard private key exposed), how does the operator revoke just that binding without invalidating the root StyreneID or their existing conversations?
-- Identity continuity/recovery: if the YubiKey is lost/destroyed, how does the operator prove to their peers that a new key is the same person? Social recovery (m-of-n trusted peers co-sign a migration)? A recovery seed phrase?
-- Constrained device support: RP2040/ESP32 nodes cannot afford ML-DSA key storage (~4KB private key) or compute. Do embedded nodes get a "lite" StyreneID (Ed25519 only) that is managed by their operator's full node, or is there a different trust model for constrained peers?
+*No open questions.*
 
 ## Proposal
 
