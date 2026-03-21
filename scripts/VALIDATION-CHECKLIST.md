@@ -39,9 +39,9 @@ IPC calls: `get_status`, `get_devices`, `get_hub_status`, `get_unread_counts`, `
 |-------|--------------|----------|--------|
 | Status panel renders | QUERY_STATUS ✅ | Uptime, connected status | ☐ |
 | Node count shows | QUERY_DEVICES ✅ | Zero nodes (standalone) | ☐ |
-| Hub status shows | GET_HUB_STATUS ⚠️ | "disabled" or similar | ☐ |
-| Unread counts load | GET_UNREAD_COUNTS ⚠️ | Zero counts | ☐ |
-| Activity feed populates | GET_ACTIVITY_HISTORY ⚠️ | Empty or startup events | ☐ |
+| Hub status shows | GET_HUB_STATUS ✅ | "disabled" (standalone) | ☐ |
+| Unread counts load | GET_UNREAD_COUNTS ✅ | Zero counts | ☐ |
+| Activity feed populates | GET_ACTIVITY_HISTORY ✅ | Empty list | ☐ |
 | No crash on open | — | Screen renders cleanly | ☐ |
 
 ### 2. Exploration (Nodes)
@@ -51,7 +51,7 @@ IPC calls: `get_devices`, `get_nodes`, `subscribe_devices`, `resolve_name`
 | Check | Rust dispatch | Expected | Status |
 |-------|--------------|----------|--------|
 | Device table renders | QUERY_DEVICES ✅ | Empty table (standalone) | ☐ |
-| Nodes table renders | GET_NODES ⚠️ | Empty table | ☐ |
+| Nodes table renders | GET_NODES ✅ | Empty table | ☐ |
 | No crash on refresh | — | Tables refresh cleanly | ☐ |
 
 ### 3. Chat
@@ -82,7 +82,7 @@ IPC calls: `get_config`, `get_core_config`, `get_auto_reply`, `get_identity`, `s
 | Config loads | QUERY_CONFIG ✅ | Default config | ☐ |
 | Identity loads | QUERY_IDENTITY ✅ | Hash + empty name | ☐ |
 | Auto-reply loads | QUERY_AUTO_REPLY ✅ | Disabled state | ☐ |
-| Core config loads | GET_CORE_CONFIG ⚠️ | Full config dict | ☐ |
+| Core config loads | GET_CORE_CONFIG ✅ | Config dict | ☐ |
 | No crash on open | — | Screen renders | ☐ |
 
 ### 6. Node Detail Panel
@@ -92,7 +92,7 @@ IPC calls: `query_device_status`, `get_path_info`, `datalink_status`, `datalink_
 | Check | Rust dispatch | Expected | Status |
 |-------|--------------|----------|--------|
 | Panel opens for a node | CMD_DEVICE_STATUS ✅ | Timeout (no remote) | ☐ |
-| Path info loads | QUERY_PATH_INFO ❌ | NotImplemented → graceful | ☐ |
+| Path info loads | QUERY_PATH_INFO ⚠️ | NotImplemented → graceful | ☐ |
 
 ### 7. Pages (I2P Browser)
 
@@ -101,35 +101,33 @@ IPC calls: `fetch_page`, `page_disconnect`, `page_list_sites`, `page_save_site`
 | Check | Rust dispatch | Expected | Status |
 |-------|--------------|----------|--------|
 | Pages screen opens | — | Screen renders | ☐ |
-| (All page IPC unimplemented) | ⚠️ all | Graceful errors | ☐ |
+| (All page IPC unimplemented) | ⚠️ | Graceful errors | ☐ |
 
 ## Legend
 
-- ✅ = Dispatched in Rust IPC server (17 types)
+- ✅ = Dispatched in Rust IPC server (30 types)
 - ⚠️ = Type exists in Rust wire.rs but NOT dispatched (returns "unimplemented message type")
-- ❌ = DaemonFacade returns NotImplemented
+- ❌ = Not in wire.rs at all
 
-## IPC Dispatch Gap Analysis
+## IPC Dispatch Coverage
 
-### Dispatched (17) — should work:
+### Dispatched (30) — all TUI startup types covered:
 PING, QUERY_STATUS, QUERY_IDENTITY, QUERY_DEVICES, QUERY_AUTO_REPLY,
-CMD_ANNOUNCE, QUERY_CONVERSATIONS, QUERY_MESSAGES, CMD_SEND_CHAT,
-CMD_MARK_READ, CMD_DELETE_CONVERSATION, CMD_DELETE_MESSAGE,
+QUERY_CONFIG, CMD_ANNOUNCE, QUERY_CONVERSATIONS, QUERY_MESSAGES,
+CMD_SEND_CHAT, CMD_MARK_READ, CMD_DELETE_CONVERSATION, CMD_DELETE_MESSAGE,
 QUERY_CONTACTS, QUERY_RESOLVE_NAME, CMD_SET_IDENTITY, CMD_RETRY_MESSAGE,
-CMD_SET_AUTO_REPLY, QUERY_SEARCH_MESSAGES
+CMD_SET_AUTO_REPLY, QUERY_SEARCH_MESSAGES, CMD_SET_CONTACT,
+CMD_REMOVE_CONTACT, CMD_DEVICE_STATUS, SUB_DEVICES, SUB_MESSAGES,
+GET_HUB_STATUS, GET_UNREAD_COUNTS, GET_NODES, GET_CORE_CONFIG,
+GET_ACTIVITY_HISTORY, GET_ADAPTER_STATE, SUB_ACTIVITY
 
-### Used by TUI but NOT dispatched — need adding:
+### Remaining gaps (not used by TUI startup):
 | Type | Used by | Priority |
 |------|---------|----------|
-| GET_HUB_STATUS (0x4E) | Dashboard | HIGH — visible on home |
-| GET_UNREAD_COUNTS (0x4F) | Dashboard | HIGH — visible on home |
-| GET_NODES (0x1E) | Exploration | HIGH — nodes tab |
-| GET_CORE_CONFIG (0x1F) | Settings | MEDIUM |
-| GET_ACTIVITY_HISTORY (0x73) | Dashboard | MEDIUM |
-| GET_ADAPTER_STATE (0x72) | Dashboard | LOW |
-| SAVE_CORE_CONFIG (0x4D) | Settings | LOW |
-| QUERY_CONFIG (0x13) | Settings | MEDIUM |
-| SUB_DEVICES (0x30) | Exploration | HIGH — live updates |
-| SUB_ACTIVITY (0x32) | Dashboard | MEDIUM |
-| CMD_DEVICE_STATUS (0x23) | Node detail | MEDIUM |
-| QUERY_PAGE (0x1B) | Pages | LOW |
+| SAVE_CORE_CONFIG (0x4D) | Settings save | LOW |
+| QUERY_PAGE (0x1B) | Pages browser | LOW |
+| CMD_PAGE_* (0x44-0x49) | Pages management | LOW |
+| CMD_DATALINK_* (0x60-0x66) | DirectLink | MEDIUM |
+| CMD_TERMINAL_* (0x50-0x53) | Remote terminal | P3 |
+| CMD_BLOCK/UNBLOCK_PEER | Peer blocking | LOW |
+| CMD_BOUNDARY_SNAPSHOT | Diagnostics | LOW |
