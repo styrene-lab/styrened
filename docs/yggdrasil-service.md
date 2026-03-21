@@ -97,6 +97,10 @@ The CAPABILITY_YGGDRASIL bit (already in the capabilities bitmap framework) sign
 
 styrened-side Yggdrasil work is effectively complete through adapter, capability, /meta, announce bootstrap, handshake extension, doctor, and setup CLI. The remaining blocker for closing the broader YggdrasilService effort is the external NixOS module work in styrene-edge (`styrene-edge/sbc/common/yggdrasil.nix`).
 
+### Blocker update (2026-03-20)
+
+The styrene-identity dependency is resolved. The actual remaining work is the NixOS module in styrene-edge (styrene-edge/sbc/common/yggdrasil.nix). styrened-side Yggdrasil work is complete. Keeping blocked status but updating the reason to reflect the real external dependency.
+
 ## Decisions
 
 ### Decision: Hybrid deployment model: NixOS delegates to system, others use managed process

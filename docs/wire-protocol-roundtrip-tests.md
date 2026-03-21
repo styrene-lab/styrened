@@ -1,13 +1,13 @@
 ---
 id: wire-protocol-roundtrip-tests
 title: Cross-Language Wire Protocol Roundtrip Tests
-status: exploring
+status: decided
 parent: wire-protocol-idl
 dependencies: [wire-protocol-idl]
 tags: [testing, wire-protocol, cross-language, rust, python, contract]
 open_questions: []
 issue_type: feature
-priority: 3
+priority: 2
 ---
 
 # Cross-Language Wire Protocol Roundtrip Tests
@@ -15,6 +15,12 @@ priority: 3
 ## Overview
 
 Build a cross-language roundtrip test suite that encodes every Styrene message type in Python (styrene_wire.py), decodes in Rust (styrene-mesh/wire.rs), and vice versa. Catches schema drift between the two implementations without introducing a shared IDL or changing the serialization format.\n\nScope:\n- Generate canonical test vectors from Python for all ~50 message types\n- Rust test that deserialises each vector and re-serialises to byte-identical output\n- Python test that deserialises Rust-generated vectors\n- CI job that runs both sides and fails on any mismatch\n- Test vectors checked into repo as fixtures (JSON or binary files)\n\nThis is the pragmatic first step before a shared schema codegen (option 1 from the IDL assessment). If drift becomes frequent, graduate to a TOML/YAML schema with codegen.
+
+## Research
+
+### Implementation context (2026-03-20)
+
+The Rust IPC server (styrene-ipc-server) is now wire-compatible with the Python IPC protocol. 17 message types dispatched. The framing format (u32 BE length, u8 type, 16-byte request_id, msgpack payload) matches Python byte-for-byte. This makes cross-language roundtrip tests immediately feasible — a Python test can connect to the Rust server and verify responses, or vice versa. The wire-protocol-idl dependency is resolved (decision: stay with msgpack, no IDL codegen).
 
 ## Decisions
 

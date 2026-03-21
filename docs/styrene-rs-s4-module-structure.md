@@ -1,7 +1,7 @@
 ---
 id: styrene-rs-s4-module-structure
 title: "S4: Replace include!() macros with proper module hierarchy"
-status: decided
+status: implemented
 parent: styrene-rs-architecture
 open_questions: []
 ---

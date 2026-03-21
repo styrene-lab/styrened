@@ -5,6 +5,7 @@ status: decided
 parent: tui-smoke-tests
 tags: [ipc, daemon, testing, contract, integration]
 open_questions: []
+priority: 2
 ---
 
 # Daemon IPC Contract Tests — Real Handler Coverage
@@ -103,6 +104,10 @@ Priority 3 — Graceful failure without RNS:
 Priority 4 — Subscription events:
 - SUB_DEVICES → subscribe, receive initial snapshot, UNSUB
 - SUB_ACTIVITY → subscribe, trigger an action, receive event
+
+### Rust coverage (2026-03-20)
+
+The Rust daemon now has substantial IPC contract coverage: 18 IPC server integration tests (server_integration.rs: ping_pong, query_status, query_identity, query_devices, unknown_message, concurrent_clients, stop_removes_socket, subscribe_and_event_push), 9 DaemonFacade contract tests (daemon_facade_contract.rs), 1 inbound worker integration test (worker_inbound.rs). 17 message types dispatched through dispatch.rs. Total 303 tests across styrened-rs + styrene-ipc-server. The Python daemon IPC contract tests in this design node may be partially superseded if the Python TUI connects to the Rust daemon for validation.
 
 ## Open Questions
 
