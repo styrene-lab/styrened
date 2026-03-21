@@ -98,14 +98,14 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         from styrened import paths
         from styrened.rust_daemon import exec_rust_daemon
 
-        # Forward Python config paths so Rust daemon uses the same
-        # identity, database, config, and socket as the Python daemon.
-        result = exec_rust_daemon(
-            config=str(paths.core_config()) if paths.core_config().exists() else None,
-            identity=str(paths.identity_file()) if paths.identity_file().exists() else None,
-            db=str(paths.data_dir() / "messages.db"),
-            socket=str(paths.control_socket()),
-        )
+        # Set path env vars so Rust daemon resolves identical paths via its
+        # default_*() functions. This is the single source of truth — both
+        # Python (paths module) and Rust (config module) read these env vars.
+        os.environ.setdefault("STYRENE_CONFIG_DIR", str(paths.config_dir()))
+        os.environ.setdefault("STYRENE_DATA_DIR", str(paths.data_dir()))
+        os.environ.setdefault("STYRENED_SOCKET", str(paths.control_socket()))
+
+        result = exec_rust_daemon()
         if result == -1:
             # Rust binary not found — fall through to Python daemon
             import sys
