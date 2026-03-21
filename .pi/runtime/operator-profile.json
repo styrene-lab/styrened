@@ -1,14 +1,18 @@
 {
   "providers": {
     "anthropic": {
-      "until": "2026-03-15T19:01:22.719Z",
-      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZ5Nm2MbYkm34Ab245ujB\"}"
+      "until": "2026-03-21T01:32:14.617Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZFMcLbNs99GVkGrMJHBz\"}"
     }
   },
   "candidates": {
     "anthropic/claude-sonnet-4-6": {
-      "until": "2026-03-15T19:01:22.719Z",
-      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZ5Nm2MbYkm34Ab245ujB\"}"
+      "until": "2026-03-20T03:55:34.863Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Extra usage is required for long context requests.\"},\"request_id\":\"req_011CZDejLQt4wmBHN9EbXxSr\"}"
+    },
+    "anthropic/claude-opus-4-6": {
+      "until": "2026-03-21T01:32:14.617Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZFMcLbNs99GVkGrMJHBz\"}"
     }
   }
 }

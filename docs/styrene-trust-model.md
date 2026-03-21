@@ -1,14 +1,9 @@
 ---
 id: styrene-trust-model
 title: Styrene Trust Model — Web of Trust, Attestations, and Sybil Resistance
-status: exploring
+status: resolved
 parent: styrene-identity
-open_questions:
-  - How should trust accumulate over time across the network — identities, hubs, and content — without a central authority, and how do we resist bot-brigading Sybil attacks on the trust graph?
-  - "Content signature UX: how does a NomadNet page indicate it is signed, and what does the TUI show for unverified vs. verified vs. verified-by-trusted-identity pages? Does unsigned content become a first-class warning or just an absence of a badge?"
-  - "Hub reputation specifically: beyond \"operated by StyreneID X,\" what makes a hub trustworthy as infrastructure? Uptime history? Signed software manifest? Operator attestations from other hub operators? What is the hub trust display in the TUI?"
-  - "PGP ecosystem integration depth: WKD-only (domain-verified email), keyserver lookups (hkps://keys.openpgp.org), or also Keybase-style cross-proofs (Twitter/GitHub/domain)? Each adds verification surface but also external dependency and operational complexity."
-  - "ABS tier enforcement: for the hardened \"ABS\" topology, should minimum endorsement thresholds (e.g., 3 trusted-path endorsers required before any content is rendered) be enforced at the network level, or remain operator-configurable policy?"
+open_questions: []
 ---
 
 # Styrene Trust Model — Web of Trust, Attestations, and Sybil Resistance
@@ -250,13 +245,29 @@ Combining the academic landscape, implementation inventory, and Styrene-specific
 **Status:** decided
 **Rationale:** Guha α=(0.4, 0.4, 0.1, 0.1) and γ=0.5 are empirically grounded on Epinions (consumer reviews, large social network). No validation exists for operational mesh topology. Weights are made configurable via TrustEngineConfig { alpha: [f32; 4], gamma: f32, max_depth: u8, base_energy: f32 }. Two named profiles ship by default: (1) "guha" — α=(0.4, 0.4, 0.1, 0.1), empirically grounded baseline; (2) "mesh-operational" — α=(0.5, 0.2, 0.2, 0.1), higher direct+transpose, lower co-citation, more appropriate for operational trust relationships. Appleseed energy budget derived at compute time as log₂(|reachable_nodes|) × base_energy to scale with mesh size. SybilRank (Phase 2 Layer 2) labeled "candidate" not "scheduled" — homophily assumption unvalidated for small operational mesh graphs. Phase 1 Sybil pre-filter is the reciprocity heuristic only. SybilHP (MDPI 2023) is the better SybilRank variant if Phase 2 proceeds to random-walk detection.
 
+### Decision: Content signature UX: three states — verified-by-trusted (green badge), signed-unknown (grey warning), unsigned (silent absence unless ABS mode or regression)
+
+**Status:** decided
+**Rationale:** Three states reflect real information: (1) Verified-by-trusted: Appleseed score >= threshold from operator's WoT — show green ✓ <name> in URL bar. (2) Signed-unverified: valid signature, signer not in WoT — show grey ⚠ signed (unknown). (3) Unsigned: no badge, no warning. Most NomadNet content is unsigned; a first-class warning for every unsigned page would make the TUI unusably noisy. Unsigned surfaces as a warning only in two cases: operator has configured content_policy: hardened (ABS mode), or a previously-signed page is now unsigned (regression signal — indicates possible content substitution).
+
+### Decision: Hub trust display: three signals — software attestation, local uptime observation, operator WoT endorsement count
+
+**Status:** decided
+**Rationale:** Hub trust is shown in the hub detail panel as three compact badges: (1) Software attestation: hub announces signed (binary_hash, version) tuple verified against pinned styrene-lab developer key — shows ✓ styrene-lab signed vX.Y.Z or ✗ unsigned/unverified. (2) Uptime: derived from local announce cadence observation (not a self-reported claim) — shows e.g. 98% uptime (30d). (3) Endorsement chain: number of operators in the local WoT who endorse this hub's operator StyreneID — shows endorsed by N of your contacts. No raw numeric trust scores shown to operators — only these three human-readable signals.
+
+### Decision: PGP integration Phase 1: WKD + hkps://keys.openpgp.org only; Keybase-style cross-proofs deferred to Phase 2
+
+**Status:** decided
+**Rationale:** WKD is domain-controlled and self-hostable — consistent with Styrene's no-mandatory-central-infrastructure model. hkps://keys.openpgp.org is the modern, GDPR-compliant keyserver with verified UIDs only — low dependency risk. Keybase-style cross-proofs (Twitter, GitHub, domain) require live internet at verification time — a mesh-first application should not have hard internet dependencies for identity verification. Phase 1 fetches via the optional wkd_url and keyserver_url already in the attestation structure. Phase 2 can add cross_proofs[] if there is demand. No full keyserver network crawl — keys.openpgp.org only.
+
+### Decision: ABS tier enforcement is operator-configurable local policy (content_policy: hardened) — not network-level consensus enforcement
+
+**Status:** decided
+**Rationale:** Network-level enforcement of endorsement thresholds requires consensus on threshold values and creates fragmentation when nodes disagree on policy. It is also unenforceable — nodes can ignore or strip policy fields. ABS mode is a local flag (content_policy: hardened) that causes the local node's page renderer and inbox to refuse to display content that doesn't meet configured minimum endorsement thresholds. Other nodes on the network are not affected. This is the firewall model: enforcement at the boundary, by the boundary owner, not by the network. It is also the only model that works without network-wide coordination.
+
 ## Open Questions
 
-- How should trust accumulate over time across the network — identities, hubs, and content — without a central authority, and how do we resist bot-brigading Sybil attacks on the trust graph?
-- Content signature UX: how does a NomadNet page indicate it is signed, and what does the TUI show for unverified vs. verified vs. verified-by-trusted-identity pages? Does unsigned content become a first-class warning or just an absence of a badge?
-- Hub reputation specifically: beyond "operated by StyreneID X," what makes a hub trustworthy as infrastructure? Uptime history? Signed software manifest? Operator attestations from other hub operators? What is the hub trust display in the TUI?
-- PGP ecosystem integration depth: WKD-only (domain-verified email), keyserver lookups (hkps://keys.openpgp.org), or also Keybase-style cross-proofs (Twitter/GitHub/domain)? Each adds verification surface but also external dependency and operational complexity.
-- ABS tier enforcement: for the hardened "ABS" topology, should minimum endorsement thresholds (e.g., 3 trusted-path endorsers required before any content is rendered) be enforced at the network level, or remain operator-configurable policy?
+*No open questions.*
 
 ## Factual corrections
 

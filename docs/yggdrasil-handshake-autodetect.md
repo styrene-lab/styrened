@@ -3,9 +3,7 @@ id: yggdrasil-handshake-autodetect
 title: Yggdrasil auto-detection in VPN handshake
 status: decided
 parent: overlay-network-integration
-open_questions:
-  - Does styrened need a YggdrasilInterfaceHelper that auto-generates RNS TCP config from detected Yggdrasil peers, or is a doc + doctor check sufficient?
-  - Should a failed Ygg endpoint attempt fall back to clearnet automatically, or surface the failure to the operator?
+open_questions: []
 branches: ["feature/yggdrasil-handshake-autodetect"]
 openspec_change: yggdrasil-handshake-autodetect
 ---
@@ -243,7 +241,16 @@ The handshake autodetect work shipped as part of the Yggdrasil integration: `Pee
 **Status:** decided
 **Rationale:** Yggdrasil addresses are stable (keypair-derived), NAT-proof, and already encrypted. Clearnet IPs change, are CGNAT-blocked, and require port forwarding. When both sides have a Ygg address, always prefer it. No connectivity probing for v1 — trust the detection signal.
 
+### Decision: No YggdrasilInterfaceHelper service — RNS TCP config generation belongs in doctor --setup as opt-in output only
+
+**Status:** decided
+**Rationale:** The VPN/WG endpoint path is already handled by admin socket detection (shipped). A separate helper auto-writing RNS TCP interface config is too invasive as a default — it would modify the running Reticulum config without operator review. styrened doctor --check-yggdrasil detects the Ygg address and prints the config snippet the operator should add; doctor --setup offers to write it interactively. No background auto-writing. This is the same pattern as the existing doctor setup wizard for other interface types.
+
+### Decision: Failed Ygg endpoint: silent WG roaming fallback in v1; doctor diagnostic for persistent failures; no TUI alert unless >2 announce cycles unreachable
+
+**Status:** decided
+**Rationale:** WireGuard natively roams to clearnet if Ygg endpoint is unreachable — no custom fallback code needed. Connection attempt failures are logged at DEBUG only (not surfaced during normal operation). styrened doctor detects the specific pattern "ygg_endpoint present but WG handshake never completed via Ygg address" and surfaces it as a diagnostic. TUI alert is only shown if Ygg is configured and the peer has been unreachable for >2 consecutive announce cycles, indicating a persistent problem worth operator attention (not transient Ygg routing hiccup).
+
 ## Open Questions
 
-- Does styrened need a YggdrasilInterfaceHelper that auto-generates RNS TCP config from detected Yggdrasil peers, or is a doc + doctor check sufficient?
-- Should a failed Ygg endpoint attempt fall back to clearnet automatically, or surface the failure to the operator?
+*No open questions.*

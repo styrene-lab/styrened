@@ -1,11 +1,10 @@
 ---
 id: overlay-network-integration
 title: "Overlay Network Integration: Yggdrasil + I2P"
-status: exploring
+status: resolved
 related: [styrene-contacts-page]
 tags: [yggdrasil, i2p, transport, mesh, overlay]
-open_questions:
-  - Should the public hub publish a well-known Yggdrasil address for peers to connect via?
+open_questions: []
 ---
 
 # Overlay Network Integration: Yggdrasil + I2P
@@ -107,9 +106,14 @@ Reticulum is explicitly designed as a transport-agnostic resilient mesh that wor
 **Status:** decided
 **Rationale:** The concrete near-term value is eepsite browsing through the existing page browser and PageCacheService transport dispatch. A separate hub API hidden-service tunnel is niche and remains deferred; it should not shape the core I2P integration path.
 
+### Decision: Public hub publishes its Yggdrasil address in announces, /meta, and hub documentation
+
+**Status:** decided
+**Rationale:** The hub's Ygg address is deterministic from its keypair — stable, no DNS needed. Publishing it in (1) RNS announce app_data, (2) /meta DirectLink response, and (3) operator documentation gives any Yggdrasil-connected peer a NAT-free TCP endpoint to reach the hub as an RNS peer. This is the minimum viable Ygg integration for the public hub — very low complexity, high value as it turns the hub into a Ygg bootstrap point for the whole mesh. Consistent with the virtuous cycle described in yggdrasil-handshake-autodetect: RNS bootstraps Ygg, Ygg accelerates RNS.
+
 ## Open Questions
 
-- Should the public hub publish a well-known Yggdrasil address for peers to connect via?
+*No open questions.*
 
 ## Current three-tier architecture (from memory)
 

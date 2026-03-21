@@ -1,7 +1,7 @@
 ---
 id: styrene-mesh-content-distribution
 title: "Styrene Mesh Content Distribution — P2P file sharing over RNS/Yggdrasil"
-status: implementing
+status: implemented
 tags: [content, p2p, torrent, rns, resources, yggdrasil, fleet]
 open_questions: []
 branches: ["feature/styrene-mesh-content-distribution"]
@@ -349,6 +349,11 @@ For RP2040 (no std):
 - `crates/libs/styrene-mesh/src/wire.rs` (modified) — Add StyreneMessageType::ResourceAvailable = 0xE0 and payload types for RESOURCE_AVAILABLE announce
 - `crates/bindings/styrene-native/src/lib.rs` (modified) — Expose StyreneManifest, ContentId, ChunkProfile via PyO3 for Python hub
 - `crates/bindings/styrene-native/src/content.rs` (new) — PyO3 bindings module for styrene-content types
+- `crates/bindings/styrene-native/Cargo.toml` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/libs/styrene-content/tests/manifest_roundtrip.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/libs/styrene-content/tests/no_std_compile.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `Cargo.toml` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `openspec/changes/styrene-mesh-content-distribution/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 

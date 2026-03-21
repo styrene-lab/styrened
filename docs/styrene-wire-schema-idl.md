@@ -1,13 +1,10 @@
 ---
 id: styrene-wire-schema-idl
 title: Styrene Wire Schema IDL — Format and Codegen
-status: exploring
+status: resolved
 parent: rns-rpc-invocation-layer
 tags: [architecture, wire-protocol, idl, codegen, msgpack, rust, python]
-open_questions:
-  - Should the schema live in styrened, styrene-rs, or a new shared repo (e.g. styrene-wire)?
-  - Should the codegen script be a standalone Python tool, or a Cargo build.rs for the Rust side?
-  - "Does the schema need to express request/response pairing (StatusRequest → StatusResponse) and transport-level semantics (fire-and-forget vs correlated), or just field definitions?"
+open_questions: []
 issue_type: feature
 priority: 2
 ---
@@ -145,8 +142,23 @@ impl MessageBase for StatusResponse {
 
 **Codegen script**: `tools/wire_codegen.py` — reads `styrene-wire.toml`, emits both Python and Rust. Run as `just wire-gen`. CI verifies generated files match schema (no stale codegen).
 
+## Decisions
+
+### Decision: Schema lives in styrene-rs under wire/ — not styrened or a standalone repo
+
+**Status:** decided
+**Rationale:** styrene-rs already implements the wire protocol (styrene-mesh crate). Collocating schema with implementation means the staleness CI check lives where generated Rust code lives. styrened is a consumer of the generated Python output, not the schema owner. A standalone styrene-wire repo adds cross-repo dependency management overhead with no current benefit — extractable later if a third independent consumer appears.
+
+### Decision: Codegen is a standalone Python tool (tools/wire_codegen.py) invoked via just wire-gen — not build.rs
+
+**Status:** decided
+**Rationale:** build.rs would regenerate Python output on every cargo build, coupling the Rust build to a Python runtime and firing at the wrong trigger (Python lives in styrened, a separate repo). The codegen runs on developer demand and as a CI staleness check only. styrened pulls the committed generated file and has its own CI staleness guard. Both repos carry the schema version in the generated file header so drift is detectable.
+
+### Decision: Schema expresses request/response pairing and correlation mode — not retry/timeout policy
+
+**Status:** decided
+**Rationale:** response_to = "StatusRequest" and correlation = "correlated"|"broadcast"|"fire-and-forget" are first-class fields. They cost nothing to add to the TOML schema and carry information that consumers need for send/receive pattern generation and documentation. Retry policy, timeout values, and ordering guarantees stay in the implementation — the IDL is a schema, not a service mesh config. This gives codegen enough information to generate typed send/await helpers on the Rust side and dispatch tables on the Python side.
+
 ## Open Questions
 
-- Should the schema live in styrened, styrene-rs, or a new shared repo (e.g. styrene-wire)?
-- Should the codegen script be a standalone Python tool, or a Cargo build.rs for the Rust side?
-- Does the schema need to express request/response pairing (StatusRequest → StatusResponse) and transport-level semantics (fire-and-forget vs correlated), or just field definitions?
+*No open questions.*

@@ -1,11 +1,9 @@
 ---
 id: styrene-dioxus-ui
 title: Styrene Dioxus UI — Web Dashboard + Mobile App
-status: exploring
+status: resolved
 tags: [dioxus, rust, mobile, web, dashboard, cross-platform, ui]
-open_questions:
-  - Does the Dioxus app talk to the daemon over a local Unix socket (same as Python TUI IPC) or does it embed styrene-rs library crates directly (in-process)?
-  - Where does the Dioxus app crate live — inside styrene-rs workspace, a new styrene-app repo, or the existing styrene-web-bridge repo (renamed)?
+open_questions: []
 issue_type: epic
 priority: 2
 ---
@@ -48,7 +46,16 @@ Dioxus as the single UI framework for all non-TUI Styrene surfaces: web dashboar
 **Status:** decided
 **Rationale:** dioxus-tui was removed from the Dioxus project; the rendering model mismatch between DOM/CSS and terminal cells is fundamental. The SSH/operator interface on edge devices requires a real TUI. Ratatui is the correct tool; the Omegon codebase provides a directly reusable pattern. These are complementary surfaces, not competing choices.
 
+### Decision: Dioxus app connects to daemon via Unix socket (desktop/web); embeds styrene-rs only for mobile tiers 2/3
+
+**Status:** decided
+**Rationale:** On desktop and server (web dashboard), styrened-rs daemon is already running. Dioxus connects over the existing Unix socket IPC — same contract as the Ratatui TUI. Two embedded RNS stacks on one machine would cause port conflicts, double announce, and split node state. Embedded library path is reserved for mobile contexts (iOS Network Extension, Android foreground service) where no separate daemon process exists. This is the natural progression: Tier 1 mobile is hub-connected client only (no embedding), Tiers 2/3 embed styrene-rs in a process that IS the daemon on-device.
+
+### Decision: Dioxus app lives in a new styrene-app repo (styrene-web-bridge renamed/repurposed)
+
+**Status:** decided
+**Rationale:** styrene-web-bridge is in planning phase with no implementation to migrate — rename cost is zero. Keeping Dioxus app outside styrene-rs workspace avoids polluting edge-device build profiles with mobile/WASM tooling (dx CLI, wasm32 target, asset bundling). Separate repo gives independent CI profile and release cadence appropriate for a user-facing app vs. a daemon library. Name "styrene-app" accurately describes the crate's role across web, mobile, and desktop surfaces.
+
 ## Open Questions
 
-- Does the Dioxus app talk to the daemon over a local Unix socket (same as Python TUI IPC) or does it embed styrene-rs library crates directly (in-process)?
-- Where does the Dioxus app crate live — inside styrene-rs workspace, a new styrene-app repo, or the existing styrene-web-bridge repo (renamed)?
+*No open questions.*

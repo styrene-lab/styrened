@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "changeName": "styrene-mesh-content-distribution",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-20T04:36:34.994Z",
+  "summary": "All 72 tasks complete and marked. 35 tests in styrene-content, 12 in styrene-mesh, all green.",
+  "snapshot": {
+    "gitHead": "2ddfd11117f8e3af99684eaaa91a030406fd25e7",
+    "fingerprint": "bf456d4f4e246da2e73ed30464074ddddd8044fd815b3ab773cf255ed75c5581",
+    "dirty": true,
+    "scopedPaths": [
+      "crates/bindings/styrene-native/src/content.rs",
+      "crates/bindings/styrene-native/src/lib.rs",
+      "crates/libs/styrene-content/",
+      "crates/libs/styrene-mesh/src/wire.rs"
+    ],
+    "files": [
+      {
+        "path": "crates/bindings/styrene-native/src/content.rs",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      },
+      {
+        "path": "crates/bindings/styrene-native/src/lib.rs",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      },
+      {
+        "path": "crates/libs/styrene-content/",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      },
+      {
+        "path": "crates/libs/styrene-mesh/src/wire.rs",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      },
+      {
+        "path": "openspec/changes/styrene-mesh-content-distribution/design.md",
+        "exists": true,
+        "size": 24799,
+        "sha256": "a20ce94725d04d6b7c568a787a9518c94843b9c311b9da1bbc954c058e2fef94"
+      },
+      {
+        "path": "openspec/changes/styrene-mesh-content-distribution/proposal.md",
+        "exists": true,
+        "size": 736,
+        "sha256": "ae399bdfb598b75473b08f2f87151391bf0717f2b7b44d83765bfa9c3a1fbb3a"
+      },
+      {
+        "path": "openspec/changes/styrene-mesh-content-distribution/tasks.md",
+        "exists": true,
+        "size": 8749,
+        "sha256": "25056704a408cffd9eb66f354a8fcfa0dbd53e5cac9ac549fc680c9cbb4ce878"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/styrene-mesh-content-distribution/tasks.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
