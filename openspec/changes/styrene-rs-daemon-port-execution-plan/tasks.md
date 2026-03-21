@@ -23,9 +23,9 @@
 
 ## 3. Package C — MockTransport and transport contract tests
 
-- [ ] 3.1 Define deterministic MockTransport behavior aligned to the approved MeshTransport contract.
-- [ ] 3.2 Add contract tests for inbound fan-out, announce fan-out, send/request behavior, and shutdown/failure handling.
-- [ ] 3.3 Ensure test semantics are derived from Package B rather than independently invented.
+- [x] 3.1 Define deterministic MockTransport behavior aligned to the approved MeshTransport contract. → MockTransport with queued results, event injection, call recording. 11 unit tests.
+- [x] 3.2 Add contract tests for inbound fan-out, announce fan-out, send/request behavior, and shutdown/failure handling. → 20 contract tests covering both NullTransport and MockTransport. Fan-out verified for inbound and lifecycle channels.
+- [x] 3.3 Ensure test semantics are derived from Package B rather than independently invented. → All contract tests reference the MeshTransport trait directly, not impl-specific behavior. TransportError made Clone for mock queue support.
 
 ## 4. Package D — AppContext foundation and service registration skeleton
 
