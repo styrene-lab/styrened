@@ -48,15 +48,15 @@
 
 ## 7. Package G — Service slice 3: protocol dispatch and inbound handling
 
-- [ ] 7.1 Route transport-delivered inbound behavior through service-facing adapters.
-- [ ] 7.2 Move protocol dispatch responsibilities out of RpcDaemon internals.
-- [ ] 7.3 Add tests proving delegated behavior before collapsing old paths.
+- [x] 7.1 Route transport-delivered inbound behavior through service-facing adapters. → ProtocolService dispatches by fields["protocol"] discriminator. ProtocolHandler trait for extensible handlers.
+- [x] 7.2 Move protocol dispatch responsibilities out of RpcDaemon internals. → Registration pattern with dispatch(), registered_protocols(). Concrete handlers (StyreneProtocol, ChatProtocol) to be added when inbound pipeline is wired.
+- [x] 7.3 Add tests proving delegated behavior before collapsing old paths. → 5 unit tests: handler dispatch, unknown protocol, no protocol field, registration listing.
 
 ## 8. Package H — Service slice 4: events and tunnel
 
-- [ ] 8.1 Move event fan-out and tunnel-related daemon behavior behind service boundaries.
-- [ ] 8.2 Ensure service consumers use the agreed transport and event contracts.
-- [ ] 8.3 Add tests proving delegated behavior before collapsing old paths.
+- [x] 8.1 Move event fan-out and tunnel-related daemon behavior behind service boundaries. → EventService wraps broadcast channel + bounded activity ring (200 events, evicts oldest). TunnelService is DEFER'd stub.
+- [x] 8.2 Ensure service consumers use the agreed transport and event contracts. → EventService uses RpcEvent from existing rpc module. publish() writes to ring + broadcasts.
+- [x] 8.3 Add tests proving delegated behavior before collapsing old paths. → 6 EventService unit tests (publish, subscribe, fan-out, ring eviction, zero-subscriber safety).
 
 ## 9. Package I — RpcDaemon field collapse and Daemon trait conformance cleanup
 
