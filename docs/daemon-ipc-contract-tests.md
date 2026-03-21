@@ -1,7 +1,7 @@
 ---
 id: daemon-ipc-contract-tests
 title: Daemon IPC Contract Tests — Real Handler Coverage
-status: decided
+status: implemented
 parent: tui-smoke-tests
 tags: [ipc, daemon, testing, contract, integration]
 open_questions: []
