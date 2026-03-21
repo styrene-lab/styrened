@@ -16,10 +16,10 @@
 
 ## 2. Package B — MeshTransport contract and TokioTransport adaptation
 
-- [ ] 2.1 Define the MeshTransport trait from consumer needs rather than one-for-one TokioTransport extraction.
-- [ ] 2.2 Specify command operations, inbound/announce subscription APIs, and lifecycle semantics.
-- [ ] 2.3 Adapt TokioTransport to the agreed contract.
-- [ ] 2.4 Keep the contract free of unnecessary Tokio-specific leakage so future alternate backends remain plausible.
+- [x] 2.1 Define the MeshTransport trait from consumer needs rather than one-for-one TokioTransport extraction. → Option C (split levels): thin trait + service-level delivery pipeline. 13 methods covering send, discovery, announcing, subscriptions, state, and lifecycle.
+- [x] 2.2 Specify command operations, inbound/announce subscription APIs, and lifecycle semantics. → subscribe_inbound/announces/lifecycle via broadcast channels. TransportLifecycleEvent enum. TransportError with thiserror.
+- [x] 2.3 Adapt TokioTransport to the agreed contract. → TokioTransportAdapter wraps Arc<Transport>, implements MeshTransport. NullTransport for standalone mode.
+- [x] 2.4 Keep the contract free of unnecessary Tokio-specific leakage so future alternate backends remain plausible. → Trait uses broadcast::Receiver (tokio) but no other Tokio types in the interface. AddressHash/Identity/DestinationDesc from rns_core.
 
 ## 3. Package C — MockTransport and transport contract tests
 
@@ -29,10 +29,10 @@
 
 ## 4. Package D — AppContext foundation and service registration skeleton
 
-- [ ] 4.1 Define the AppContext composition-root structure.
-- [ ] 4.2 Define initial service registration and shared dependency ownership.
-- [ ] 4.3 Ensure AppContext remains a wiring/lifecycle object rather than a new behavior sink.
-- [ ] 4.4 Establish the delegation pattern that later service-slice packages will follow.
+- [x] 4.1 Define the AppContext composition-root structure. → app_context.rs with phased constructor, Arc<dyn MeshTransport> + 11 Arc<XxxService>.
+- [x] 4.2 Define initial service registration and shared dependency ownership. → 11 service stubs in services/, re-exports in services/mod.rs, accessor methods on AppContext.
+- [x] 4.3 Ensure AppContext remains a wiring/lifecycle object rather than a new behavior sink. → No business logic in AppContext. Stubs have no behavior. AppContext does NOT implement Daemon trait.
+- [x] 4.4 Establish the delegation pattern that later service-slice packages will follow. → Arc<XxxService> stored in AppContext, accessor returns &XxxService. transport_arc() for services needing shared ownership.
 
 ## 5. Package E — Service slice 1: identity, config, status, fleet
 
