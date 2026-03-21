@@ -58,12 +58,13 @@
 - [x] 8.2 Ensure service consumers use the agreed transport and event contracts. → EventService uses RpcEvent from existing rpc module. publish() writes to ring + broadcasts.
 - [x] 8.3 Add tests proving delegated behavior before collapsing old paths. → 6 EventService unit tests (publish, subscribe, fan-out, ring eviction, zero-subscriber safety).
 
-## 9. Package I — RpcDaemon field collapse and Daemon trait conformance cleanup
+## 9. Package I — DaemonFacade and Daemon trait conformance
 
-- [ ] 9.1 Remove or collapse obsolete RpcDaemon fields once prior service slices are green.
-- [ ] 9.2 Clean up remaining direct field access paths in favor of service delegation.
-- [ ] 9.3 Finalize RpcDaemon conformance with the styrene-ipc Daemon composite trait.
-- [ ] 9.4 Add final regression coverage around the delegated daemon facade.
+- [x] 9.1 Create DaemonFacade implementing all 6 Daemon sub-traits (39 methods). → daemon_facade.rs (583 LOC). Auth enforcement on every method via require(Capability).
+- [x] 9.2 Wire real delegation for ready methods (~15). → query_identity, announce, query_status, query_config, query_devices, query_auto_reply, set_auto_reply, query_messages with MessageInfo mapping.
+- [x] 9.3 Stub remaining methods with IpcError::NotImplemented (~24). → send_chat, delete/mark/retry, search, contacts, resolve_name, all fleet, all tunnel, set_identity, subscribe events.
+- [x] 9.4 Add regression coverage. → 11 unit tests: Arc<dyn Daemon> conformance, auth enforcement (blocked caller, peer-cannot-exec), real delegation roundtrips, not-implemented assertions, device query through discovery.
+- [ ] 9.5 (follow-on) Collapse RpcDaemon fields into services — deferred until bootstrap.rs is rewired to construct AppContext + DaemonFacade instead of RpcDaemon. This is the actual cutover point.
 
 ## 10. Package J — Dependent unlock preparation
 
