@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 # Binary names to search for, in priority order.
-BINARY_NAMES = ("reticulumd", "styrened-rs")
+BINARY_NAMES = ("styrened-rs", "reticulumd")
 
 # Additional search paths beyond $PATH.
 EXTRA_SEARCH_PATHS = (

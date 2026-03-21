@@ -138,6 +138,62 @@ class DoctorReport:
 # -----------------------------------------------------------------------------
 
 
+def check_rust_daemon() -> list[Finding]:
+    """Check if the Rust daemon binary is available.
+
+    Returns:
+        List of findings about Rust daemon availability.
+    """
+    from styrened.rust_daemon import find_rust_daemon
+
+    findings: list[Finding] = []
+    binary = find_rust_daemon()
+
+    if binary:
+        import subprocess
+
+        findings.append(
+            Finding(
+                category=CheckCategory.DAEMON,
+                severity=Severity.OK,
+                message=f"Rust daemon found: {binary}",
+            )
+        )
+        # Try to get version
+        try:
+            result = subprocess.run(
+                [binary, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                findings.append(
+                    Finding(
+                        category=CheckCategory.DAEMON,
+                        severity=Severity.OK,
+                        message=f"Rust daemon version: {result.stdout.strip()}",
+                    )
+                )
+        except (subprocess.TimeoutExpired, OSError):
+            pass  # Version check is best-effort
+    else:
+        findings.append(
+            Finding(
+                category=CheckCategory.DAEMON,
+                severity=Severity.WARN,
+                message="Rust daemon (reticulumd) not found — using Python daemon fallback",
+                fix_hint=(
+                    "Install via: cargo install styrened-rs\n"
+                    "  Or download from GitHub releases\n"
+                    "  Or set STYRENED_RS_BIN=/path/to/reticulumd"
+                ),
+            )
+        )
+
+    return findings
+
+
 def check_version(offline: bool = False) -> list[Finding]:
     """Check installed version and compare to latest PyPI release.
 
@@ -1271,6 +1327,7 @@ async def run_doctor(offline: bool = False) -> DoctorReport:
 
     # Run synchronous checks
     report.findings.extend(check_version(offline=offline))
+    report.findings.extend(check_rust_daemon())
     report.findings.extend(check_identity())
     report.findings.extend(check_config())
     report.findings.extend(check_reticulum())
