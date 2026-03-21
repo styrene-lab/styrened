@@ -994,3 +994,17 @@ test-matrix-analyze:
 test-matrix-list:
     @echo "Recent test matrix results:"
     @ls -lt test-results/matrix_*.json 2>/dev/null | head -10 || echo "  No results found"
+
+# ── Rust Daemon Validation ──────────────────────────────────────────────────
+
+# Run contract tests against running Rust daemon
+validate-rust:
+    ./scripts/validate-rust-daemon.sh
+
+# Run contract tests + launch TUI against Rust daemon
+validate-rust-tui:
+    ./scripts/validate-rust-daemon.sh --tui
+
+# Launch TUI against Rust daemon (skip tests)
+tui-rust:
+    ./scripts/validate-rust-daemon.sh --tui-only

@@ -168,3 +168,95 @@ class TestRustDaemonIPC:
         results = await asyncio.gather(*[ping() for _ in range(5)])
         for resp_type, _, _ in results:
             assert resp_type == IPCMessageType.PONG
+
+    # ── TUI startup sequence ─────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_query_config(self):
+        """QUERY_CONFIG — used by Settings screen."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.QUERY_CONFIG, {}
+        )
+        # Should return RESULT or ERROR (not crash)
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_get_hub_status(self):
+        """GET_HUB_STATUS — used by Dashboard on startup."""
+        resp_type, _, payload = await ipc_roundtrip(
+            IPCMessageType.GET_HUB_STATUS, {}
+        )
+        # May return ERROR if not dispatched yet — that's ok, TUI handles it
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_get_unread_counts(self):
+        """GET_UNREAD_COUNTS — used by Dashboard on startup."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.GET_UNREAD_COUNTS, {}
+        )
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_get_nodes(self):
+        """GET_NODES — used by Exploration nodes tab."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.GET_NODES, {}
+        )
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_get_core_config(self):
+        """GET_CORE_CONFIG — used by Settings screen."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.GET_CORE_CONFIG, {}
+        )
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_get_activity_history(self):
+        """GET_ACTIVITY_HISTORY — used by Dashboard activity feed."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.GET_ACTIVITY_HISTORY, {"limit": 50}
+        )
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_sub_devices(self):
+        """SUB_DEVICES — used by Exploration for live updates."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.SUB_DEVICES, {}
+        )
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_search_messages(self):
+        """QUERY_SEARCH_MESSAGES — used by Chat search."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.QUERY_SEARCH_MESSAGES, {
+                "query": "test",
+                "limit": 10,
+            }
+        )
+        assert resp_type == IPCMessageType.RESULT
+
+    @pytest.mark.asyncio
+    async def test_set_contact(self):
+        """CMD_SET_CONTACT — used by Contacts screen."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.CMD_SET_CONTACT, {
+                "peer_hash": "abcdef0123456789abcdef0123456789",
+                "alias": "TestNode",
+            }
+        )
+        assert resp_type in (IPCMessageType.RESULT, IPCMessageType.ERROR)
+
+    @pytest.mark.asyncio
+    async def test_mark_read(self):
+        """CMD_MARK_READ — used by Chat when opening conversation."""
+        resp_type, _, _ = await ipc_roundtrip(
+            IPCMessageType.CMD_MARK_READ, {
+                "peer_hash": "abcdef0123456789abcdef0123456789",
+            }
+        )
+        assert resp_type == IPCMessageType.RESULT
