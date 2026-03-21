@@ -27,7 +27,7 @@ elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
 else
     SOCKET_PATH="${HOME}/.local/run/styrened/control.sock"
 fi
-RETICULUMD="${RUST_REPO}/target/debug/styrened-rs"
+RETICULUMD="${RUST_REPO}/target/debug/styrened"
 DAEMON_PID=""
 LAUNCH_TUI=false
 SKIP_TESTS=false

@@ -182,11 +182,11 @@ def check_rust_daemon() -> list[Finding]:
             Finding(
                 category=CheckCategory.DAEMON,
                 severity=Severity.WARN,
-                message="Rust daemon (reticulumd) not found — using Python daemon fallback",
+                message="Rust daemon (styrened) not found — using Python daemon fallback",
                 fix_hint=(
-                    "Install via: cargo install styrened-rs\n"
+                    "Install via: cargo install styrened\n"
                     "  Or download from GitHub releases\n"
-                    "  Or set STYRENED_RS_BIN=/path/to/reticulumd"
+                    "  Or set STYRENED_RS_BIN=/path/to/styrened"
                 ),
             )
         )

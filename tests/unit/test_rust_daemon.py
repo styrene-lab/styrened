@@ -50,17 +50,19 @@ class TestFindRustDaemon:
         """Binary found on PATH via shutil.which."""
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch("shutil.which", side_effect=lambda name: f"/usr/bin/{name}" if name == "reticulumd" else None),
+            patch("shutil.which", side_effect=lambda name: f"/usr/bin/{name}" if name == "styrened" else None),
+            patch("styrened.rust_daemon._is_compiled_binary", return_value=True),
         ):
             result = find_rust_daemon()
-            assert result == "/usr/bin/reticulumd"
+            assert result == "/usr/bin/styrened"
 
     def test_found_in_cargo_bin(self, tmp_path):
         """Binary found in ~/.cargo/bin/ fallback."""
         cargo_bin = tmp_path / ".cargo" / "bin"
         cargo_bin.mkdir(parents=True)
-        binary = cargo_bin / "reticulumd"
-        binary.write_text("#!/bin/sh\n")
+        binary = cargo_bin / "styrened"
+        # Write ELF magic so _is_compiled_binary passes
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
         binary.chmod(0o755)
 
         with (
@@ -70,7 +72,7 @@ class TestFindRustDaemon:
         ):
             result = find_rust_daemon()
             assert result is not None
-            assert "reticulumd" in result
+            assert "styrened" in result
 
 
 class TestExecRustDaemon:

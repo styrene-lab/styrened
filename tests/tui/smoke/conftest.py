@@ -28,7 +28,7 @@ RUST_REPO = Path(os.environ.get(
     "STYRENE_RS_REPO",
     Path.home() / "workspace" / "styrene-lab" / "styrene-rs",
 ))
-RETICULUMD = RUST_REPO / "target" / "debug" / "styrened-rs"
+RETICULUMD = RUST_REPO / "target" / "debug" / "styrened"
 
 
 def _socket_path() -> Path:

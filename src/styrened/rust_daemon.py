@@ -13,8 +13,11 @@ import sys
 from pathlib import Path
 
 
-# Binary names to search for, in priority order.
-BINARY_NAMES = ("styrened-rs", "reticulumd")
+# Binary names to search for on PATH and in extra search dirs.
+# Note: when the Python package also installs a "styrened" script,
+# shutil.which("styrened") may find the Python script first. The
+# _is_rust_binary() check filters out non-ELF/Mach-O scripts.
+BINARY_NAMES = ("styrened", "styrened-rs")
 
 # Additional search paths beyond $PATH.
 EXTRA_SEARCH_PATHS = (
@@ -22,6 +25,25 @@ EXTRA_SEARCH_PATHS = (
     Path("/usr/local/bin"),
     Path("/opt/styrene/bin"),
 )
+
+
+def _is_compiled_binary(path: str) -> bool:
+    """Check if a file is a compiled binary (not a Python/shell script).
+
+    Reads the first 4 bytes to detect ELF (\x7fELF) or Mach-O
+    (\xfe\xed\xfa or \xcf\xfa\xed\xfe) magic bytes.
+    """
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+        if magic[:4] == b"\x7fELF":
+            return True  # ELF (Linux)
+        if magic[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
+                         b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"):
+            return True  # Mach-O (macOS)
+        return False
+    except (OSError, IOError):
+        return False
 
 
 def find_rust_daemon() -> str | None:
@@ -49,17 +71,17 @@ def find_rust_daemon() -> str | None:
         )
         return None
 
-    # Search PATH
+    # Search PATH — but filter out Python scripts (avoid finding ourselves)
     for name in BINARY_NAMES:
         found = shutil.which(name)
-        if found:
+        if found and _is_compiled_binary(found):
             return found
 
     # Search extra paths
     for search_dir in EXTRA_SEARCH_PATHS:
         for name in BINARY_NAMES:
             candidate = search_dir / name
-            if candidate.is_file() and os.access(candidate, os.X_OK):
+            if candidate.is_file() and os.access(candidate, os.X_OK) and _is_compiled_binary(str(candidate)):
                 return str(candidate.resolve())
 
     return None
