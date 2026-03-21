@@ -6,9 +6,12 @@ public_mode is enabled, allows reads, and responds to runtime toggling.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("fastapi", reason="fastapi not installed (web extra)")
+
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

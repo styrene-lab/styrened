@@ -6,6 +6,10 @@ RNS identity operations.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("fastapi", reason="fastapi not installed (web extra)")
+
 import hashlib
 import os
 from dataclasses import dataclass, field

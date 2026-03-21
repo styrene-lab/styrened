@@ -5,9 +5,11 @@ acceptance, and the /metrics FastAPI route.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
+
+pytest.importorskip("fastapi", reason="fastapi not installed (web extra)")
+
+from unittest.mock import MagicMock
 
 from styrened.web.metrics import (
     StyreneCollector,

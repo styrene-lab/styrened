@@ -5,6 +5,10 @@ Tests ChallengeStore, SessionStore, _verify_identity_hash, and extract_session.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("fastapi", reason="fastapi not installed (web extra)")
+
 import hashlib
 import os
 import time

@@ -7,6 +7,10 @@ The AuthMiddleware enforces WEB_WRITE for mutating endpoints.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("fastapi", reason="fastapi not installed (web extra)")
+
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 

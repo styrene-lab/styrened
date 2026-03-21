@@ -6,6 +6,10 @@ and disabled-auth passthrough using FastAPI TestClient.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("fastapi", reason="fastapi not installed (web extra)")
+
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
