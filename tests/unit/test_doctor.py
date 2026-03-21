@@ -496,7 +496,7 @@ class TestRunDoctor:
 
         report = await run_doctor(offline=True)
 
-        assert len(report.findings) == 6
+        assert len(report.findings) == 7  # includes Rust daemon check
         assert report.has_errors  # from identity check
         assert report.has_warnings  # from daemon check
         assert report.exit_code == 2
