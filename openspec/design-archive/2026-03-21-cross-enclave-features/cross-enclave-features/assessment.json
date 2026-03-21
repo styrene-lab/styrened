@@ -1,0 +1,13 @@
+{
+  "nodeId": "cross-enclave-features",
+  "pass": true,
+  "structuralPass": true,
+  "findings": [
+    {
+      "type": "structural",
+      "index": 1,
+      "pass": true,
+      "finding": "Design-only node with decided status. Bridged to OpenSpec to unblock downstream dependency graph. Implementation deferred to future sprint."
+    }
+  ]
+}

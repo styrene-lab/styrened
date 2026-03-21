@@ -3,6 +3,8 @@ id: tui-light-dark-mode
 title: "TUI Light/Dark Mode"
 status: decided
 open_questions: []
+branches: ["feature/tui-light-dark-mode"]
+openspec_change: tui-light-dark-mode
 ---
 
 # TUI Light/Dark Mode

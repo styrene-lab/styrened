@@ -4,6 +4,8 @@ title: "Test Path: Peer Discovery &amp; Node Detail"
 status: decided
 parent: operator-interface-testing
 open_questions: []
+branches: ["feature/test-path-peer-discovery"]
+openspec_change: test-path-peer-discovery
 ---
 
 # Test Path: Peer Discovery &amp; Node Detail

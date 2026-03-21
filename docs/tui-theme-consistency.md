@@ -5,6 +5,8 @@ status: decided
 parent: tui-specification
 tags: [tui, theming, ux, color-cascade, css, rich-markup]
 open_questions: []
+branches: ["feature/tui-theme-consistency"]
+openspec_change: tui-theme-consistency
 ---
 
 # TUI Theme Consistency — Cascade Sync, Residual Hardcodes, and Structural Gaps

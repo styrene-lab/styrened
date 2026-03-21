@@ -4,6 +4,8 @@ title: Cross-Enclave Features for Hub-Only Peers
 status: decided
 tags: [networking, directlink, hub, relay]
 open_questions: []
+branches: ["feature/cross-enclave-features"]
+openspec_change: cross-enclave-features
 ---
 
 # Cross-Enclave Features for Hub-Only Peers

@@ -4,6 +4,8 @@ title: "Test Path: Overlay Transports (I2P, Yggdrasil)"
 status: decided
 parent: operator-interface-testing
 open_questions: []
+branches: ["feature/test-path-overlay-transports"]
+openspec_change: test-path-overlay-transports
 ---
 
 # Test Path: Overlay Transports (I2P, Yggdrasil)

@@ -5,6 +5,8 @@ status: decided
 parent: lxmf-group-discussion-model
 tags: [tui, mail, group-threads, performance, storage]
 open_questions: []
+branches: ["feature/group-thread-footprint-policy"]
+openspec_change: group-thread-footprint-policy
 ---
 
 # Group Thread Footprint Policy

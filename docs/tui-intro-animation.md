@@ -5,6 +5,8 @@ status: decided
 parent: tui-specification
 tags: [tui, ux, animation, branding]
 open_questions: []
+branches: ["feature/tui-intro-animation"]
+openspec_change: tui-intro-animation
 ---
 
 # TUI Intro Animation / Splash Screen

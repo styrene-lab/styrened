@@ -4,6 +4,8 @@ title: Independent Cross-Enclave Features (Clipboard, Discovery, Jobs)
 status: decided
 parent: cross-enclave-features
 open_questions: []
+branches: ["feature/independent-cross-enclave"]
+openspec_change: independent-cross-enclave
 ---
 
 # Independent Cross-Enclave Features (Clipboard, Discovery, Jobs)

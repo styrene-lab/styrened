@@ -4,6 +4,8 @@ title: TUI Comms Workspace Model
 status: decided
 parent: tui-information-architecture
 open_questions: []
+branches: ["feature/tui-comms-workspace"]
+openspec_change: tui-comms-workspace
 ---
 
 # TUI Comms Workspace Model

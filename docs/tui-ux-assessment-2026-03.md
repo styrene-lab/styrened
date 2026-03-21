@@ -5,6 +5,8 @@ status: decided
 parent: tui-information-architecture
 tags: [tui, ux, assessment, operator-interface, information-hierarchy]
 open_questions: []
+branches: ["feature/tui-ux-assessment-2026-03"]
+openspec_change: tui-ux-assessment-2026-03
 ---
 
 # TUI UX Assessment — Operator Interface Gaps (March 2026)

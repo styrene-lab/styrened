@@ -4,6 +4,8 @@ title: TUI Navigation UX — Workspace Consolidation
 status: decided
 tags: [tui, ux, navigation]
 open_questions: []
+branches: ["feature/tui-navigation-ux"]
+openspec_change: tui-navigation-ux
 ---
 
 # TUI Navigation UX — Workspace Consolidation

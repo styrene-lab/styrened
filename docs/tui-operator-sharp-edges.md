@@ -5,6 +5,8 @@ status: decided
 parent: tui-ux-assessment-2026-03
 tags: [tui, ux, operator-flow, sharp-edges]
 open_questions: []
+branches: ["feature/tui-operator-sharp-edges"]
+openspec_change: tui-operator-sharp-edges
 ---
 
 # TUI Operator Flow Sharp Edges — Preemptive Fixes

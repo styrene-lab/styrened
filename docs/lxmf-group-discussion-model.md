@@ -4,6 +4,8 @@ title: LXMF Group Discussion Model
 status: decided
 parent: tui-comms-workspace
 open_questions: []
+branches: ["feature/lxmf-group-discussion-model"]
+openspec_change: lxmf-group-discussion-model
 ---
 
 # LXMF Group Discussion Model

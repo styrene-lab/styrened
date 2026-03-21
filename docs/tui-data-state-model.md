@@ -6,6 +6,8 @@ parent: tui-specification
 related: [screen-lifecycle]
 tags: [tui, state, ipc, view-model]
 open_questions: []
+branches: ["feature/tui-data-state-model"]
+openspec_change: tui-data-state-model
 ---
 
 # TUI Data State Model
@@ -71,59 +73,6 @@ The local compatibility path is now explicitly adapter-shaped. `NodeInfoPanel` d
 ### Adversarial audit: hash space confusion across TUI boundaries
 
 Audit date: 2026-03-10. Scope: mesh_device_detail.py, exploration.py, dashboard.py, contacts.py, chat_widget.py, conversation_service.py, ipc/client.py, models/mesh_device.py, ui_state/nodes.py.
-
-## Root cause
-`MeshDevice.identity` is a **legacy property that returns `destination_hash`**, not `identity_hash`. Two distinct hash spaces exist for every Styrene peer:
-- `identity_hash`: public-key hash, used for RNS.Identity.recall(), stable across re-announces
-- `destination_hash`: aspect hash (identity + app_name + aspects), used for RNS routing
-- `lxmf_destination_hash`: LXMF delivery hash (identity + "lxmf" + "delivery"), used for messaging
-
-These are THREE different values for a single Styrene node. The TUI conflates all three.
-
-## Bug 1 — Critical: ChatWidget receives Styrene destination_hash, not LXMF hash
-`MeshDeviceDetailScreen.compose()` yields `ChatWidget(peer_hash=self.device_identity)`.
-`self.device_identity` is populated from `device.identity` (= `destination_hash`) by callers.
-ChatWidget then calls `bridge.get_messages(peer_hash=destination_hash)`.
-ConversationService queries the DB with `source_hash == lxmf_hash OR destination_hash == lxmf_hash`.
-Result: **0 messages returned** for Styrene peers. Chat tab appears empty even when messages exist.
-Similarly, `bridge.send_chat(peer_hash=destination_hash)` — daemon resolves identity via multi-strategy fallback so sends may work, but `bridge.mark_read(destination_hash)` won't mark messages stored under lxmf_hash.
-
-## Bug 2 — Critical: Unread badge always shows 0 on Dashboard for Styrene peers
-`build_dashboard_tree_projection` does `unread_counts.get(destination_hash or "", 0)`.
-`get_unread_counts()` returns `{lxmf_destination_hash: count}` from ConversationService._unread_counts.
-For Styrene nodes, lxmf_destination_hash ≠ destination_hash → lookup always misses.
-Result: The unread mail badge (✉N) in the dashboard tree never shows for any Styrene peer.
-
-## Bug 3 — High: Contact saved with wrong hash → broken conv linkage in Contacts screen
-`bridge.set_contact(peer_hash=self.device_identity)` uses Styrene destination_hash.
-In contacts.py, `conv_map.get(peer_hash)` queries with Styrene dest, but conversations are keyed by LXMF hash.
-When user opens chat from Contacts for a Styrene peer, `ConversationScreen(peer_hash=styrene_dest)` → ChatWidget shows 0 history.
-
-## Bug 4 — High: `discover_devices()` is dead code in socket mode
-`MeshDeviceDetailScreen._find_live_device()` calls `discover_devices()` from `tui.services.reticulum`.
-This reads `_announce_handler.discovered_devices` — in-process daemon memory.
-In socket mode (TUI → external daemon via Unix socket), `_announce_handler` is None → returns [].
-The IPC fallback in `_async_load_device` rescues this, but the first strategy is always a no-op in the common (socket) deployment.
-
-## Bug 5 — High: `PeerWorkspaceContext.peer_identity_hash` stores destination_hash
-All callers pass `device_identity` (which is `destination_hash`) to `build_peer_workspace_context(identity_hash, ...)`.
-So `context.peer_identity_hash` is a destination_hash, not an identity hash.
-Any future code reading this field expecting an identity hash (for RNS.Identity.recall()) will be wrong.
-
-## Bug 6 — Medium: `NodeCatalogInputs` built without `local_identity_hash` in dashboard
-`inputs = NodeCatalogInputs(devices=tuple(styrene_devices))` — no `local_identity_hash`.
-`NodeRecord.relationship.in_my_mesh` is always False for all nodes.
-The tree grouping is separately correct (RBAC path in `build_dashboard_tree_projection`).
-But NodeRecord data is wrong for any consumer that checks `node.relationship.in_my_mesh`.
-
-## Bug 7 — Medium: `StopIteration` latent crash in dashboard device lookup
-`next(d for d in styrene_devices if d.identity_hash == node.identity_hash)` has no default.
-`_get_identity_key()` in ui_state/nodes.py falls back to destination_hash when identity_hash is empty.
-If such a fallback record enters the catalog, `d.identity_hash == ""` never matches `node.identity_hash == destination_hash`.
-Result: unhandled StopIteration from the list comprehension. Would show as a cryptic async crash.
-
-## Bug 8 — Low: `action_copy_hash` copies destination_hash, docstring says "identity hash"
-Users expecting to paste this into RNS tools (which expect identity_hash for recall()) get wrong data.
 
 ## Decisions
 
@@ -209,3 +158,65 @@ Users expecting to paste this into RNS tools (which expect identity_hash for rec
 - Shared state modules should expose deterministic pure transforms suitable for unit tests and reuse by future non-TUI frontends.
 - MailIndexState currently covers direct/group/forum scope typing and normalization, but scope-aware screen routing beyond direct-thread compatibility remains unfinished.
 - Inbox/Mail still relies on some legacy conversation metadata such as attachment counts until the canonical mail state surface is expanded further.
+
+## Root cause
+
+`MeshDevice.identity` is a **legacy property that returns `destination_hash`**, not `identity_hash`. Two distinct hash spaces exist for every Styrene peer:
+- `identity_hash`: public-key hash, used for RNS.Identity.recall(), stable across re-announces
+- `destination_hash`: aspect hash (identity + app_name + aspects), used for RNS routing
+- `lxmf_destination_hash`: LXMF delivery hash (identity + "lxmf" + "delivery"), used for messaging
+
+These are THREE different values for a single Styrene node. The TUI conflates all three.
+
+## Bug 1 — Critical: ChatWidget receives Styrene destination_hash, not LXMF hash
+
+`MeshDeviceDetailScreen.compose()` yields `ChatWidget(peer_hash=self.device_identity)`.
+`self.device_identity` is populated from `device.identity` (= `destination_hash`) by callers.
+ChatWidget then calls `bridge.get_messages(peer_hash=destination_hash)`.
+ConversationService queries the DB with `source_hash == lxmf_hash OR destination_hash == lxmf_hash`.
+Result: **0 messages returned** for Styrene peers. Chat tab appears empty even when messages exist.
+Similarly, `bridge.send_chat(peer_hash=destination_hash)` — daemon resolves identity via multi-strategy fallback so sends may work, but `bridge.mark_read(destination_hash)` won't mark messages stored under lxmf_hash.
+
+## Bug 2 — Critical: Unread badge always shows 0 on Dashboard for Styrene peers
+
+`build_dashboard_tree_projection` does `unread_counts.get(destination_hash or "", 0)`.
+`get_unread_counts()` returns `{lxmf_destination_hash: count}` from ConversationService._unread_counts.
+For Styrene nodes, lxmf_destination_hash ≠ destination_hash → lookup always misses.
+Result: The unread mail badge (✉N) in the dashboard tree never shows for any Styrene peer.
+
+## Bug 3 — High: Contact saved with wrong hash → broken conv linkage in Contacts screen
+
+`bridge.set_contact(peer_hash=self.device_identity)` uses Styrene destination_hash.
+In contacts.py, `conv_map.get(peer_hash)` queries with Styrene dest, but conversations are keyed by LXMF hash.
+When user opens chat from Contacts for a Styrene peer, `ConversationScreen(peer_hash=styrene_dest)` → ChatWidget shows 0 history.
+
+## Bug 4 — High: `discover_devices()` is dead code in socket mode
+
+`MeshDeviceDetailScreen._find_live_device()` calls `discover_devices()` from `tui.services.reticulum`.
+This reads `_announce_handler.discovered_devices` — in-process daemon memory.
+In socket mode (TUI → external daemon via Unix socket), `_announce_handler` is None → returns [].
+The IPC fallback in `_async_load_device` rescues this, but the first strategy is always a no-op in the common (socket) deployment.
+
+## Bug 5 — High: `PeerWorkspaceContext.peer_identity_hash` stores destination_hash
+
+All callers pass `device_identity` (which is `destination_hash`) to `build_peer_workspace_context(identity_hash, ...)`.
+So `context.peer_identity_hash` is a destination_hash, not an identity hash.
+Any future code reading this field expecting an identity hash (for RNS.Identity.recall()) will be wrong.
+
+## Bug 6 — Medium: `NodeCatalogInputs` built without `local_identity_hash` in dashboard
+
+`inputs = NodeCatalogInputs(devices=tuple(styrene_devices))` — no `local_identity_hash`.
+`NodeRecord.relationship.in_my_mesh` is always False for all nodes.
+The tree grouping is separately correct (RBAC path in `build_dashboard_tree_projection`).
+But NodeRecord data is wrong for any consumer that checks `node.relationship.in_my_mesh`.
+
+## Bug 7 — Medium: `StopIteration` latent crash in dashboard device lookup
+
+`next(d for d in styrene_devices if d.identity_hash == node.identity_hash)` has no default.
+`_get_identity_key()` in ui_state/nodes.py falls back to destination_hash when identity_hash is empty.
+If such a fallback record enters the catalog, `d.identity_hash == ""` never matches `node.identity_hash == destination_hash`.
+Result: unhandled StopIteration from the list comprehension. Would show as a cryptic async crash.
+
+## Bug 8 — Low: `action_copy_hash` copies destination_hash, docstring says "identity hash"
+
+Users expecting to paste this into RNS tools (which expect identity_hash for recall()) get wrong data.

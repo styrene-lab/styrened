@@ -6,6 +6,8 @@ parent: cop-activity-summary
 related: [meshtastic-canary-shape]
 tags: [transport, meshtastic, bridge, lora]
 open_questions: []
+branches: ["feature/meshtastic-bridge"]
+openspec_change: meshtastic-bridge
 ---
 
 # Meshtastic Bridge Service

@@ -4,6 +4,8 @@ title: TUI Panel Tier System
 status: decided
 tags: [tui, design-system, theme]
 open_questions: []
+branches: ["feature/tui-panel-tier-system"]
+openspec_change: tui-panel-tier-system
 ---
 
 # TUI Panel Tier System
