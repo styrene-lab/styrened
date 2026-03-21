@@ -1,7 +1,7 @@
 ---
 id: styrene-rs-propagation-client
 title: PropagationClient node role — thin LXMF client mode
-status: decided
+status: implemented
 parent: styrene-rs-architecture
 dependencies: [styrene-rs-s5-app-context]
 open_questions: []

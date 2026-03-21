@@ -1,7 +1,7 @@
 ---
 id: styrene-rs-identity-crate
 title: styrene-identity crate — IdentitySigner trait + HKDF key hierarchy
-status: decided
+status: implemented
 parent: styrene-rs-architecture
 dependencies: [styrene-identity]
 open_questions: []
