@@ -1,11 +1,9 @@
 ---
 id: python-daemon-sunset
 title: Python Daemon Sunset — TUI-only styrened + Rust daemon backend
-status: exploring
+status: decided
 tags: [strategic, architecture, migration, packaging]
-open_questions:
-  - "How is the Rust daemon binary distributed — cargo install, GitHub release binary, or bundled in the Python wheel via PyO3/maturin?"
-  - "Does `styrened daemon` spawn the Rust binary as a subprocess, or does the user run reticulumd separately?"
+open_questions: []
 issue_type: epic
 priority: 1
 ---
@@ -92,7 +90,11 @@ Once Phase 2 validates all TUI flows against Rust:
 **Status:** decided
 **Rationale:** The IPC boundary is the natural architectural cut. The TUI (Textual, 83 behaviors) stays Python — rewriting it in Rust gains nothing and loses the Textual ecosystem. The daemon (services, transport, storage, protocol dispatch) is already ported. The CLI (devices, status, send, exec) is thin IPC client code that works against either daemon. After transition, styrened is ~40% smaller by LOC and ships as pip install styrened[tui] with a dependency on the styrened-rs binary.
 
+### Decision: Rust binary distributed as GitHub release + cargo install; styrened spawns it as subprocess
+
+**Status:** decided
+**Rationale:** PyO3/maturin bundling is blocked by Python 3.14 compatibility. GitHub release binaries (cross-compiled via Nix/Argo) cover the primary targets (linux-amd64, linux-arm64, darwin-amd64, darwin-arm64). `cargo install styrened-rs` for developers. `styrened daemon` spawns the Rust binary as a subprocess (exec, not fork) — searches PATH for `reticulumd`, falls back to `~/.cargo/bin/reticulumd`, then fails with a doctor-style diagnostic. The TUI doesn't care which daemon runs — it connects to the socket. This avoids the complexity of embedding a Rust binary in a Python wheel.
+
 ## Open Questions
 
-- How is the Rust daemon binary distributed — cargo install, GitHub release binary, or bundled in the Python wheel via PyO3/maturin?
-- Does `styrened daemon` spawn the Rust binary as a subprocess, or does the user run reticulumd separately?
+*No open questions.*
