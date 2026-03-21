@@ -2922,7 +2922,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
     config = load_core_config(config_path)
 
     if args.enable == "yggdrasil":
-        from styrened.services.yggdrasil import YggdrasilAdapter
+        try:
+            from styrened.services.yggdrasil import YggdrasilAdapter
+        except ImportError:
+            print("Yggdrasil adapter not available — overlay transport modules removed.", file=sys.stderr)
+            return 1
 
         ygg_adapter = YggdrasilAdapter(config.yggdrasil)  # type: ignore[arg-type]
         asyncio.run(ygg_adapter.provision())
@@ -2938,7 +2942,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
             return 1
 
     elif args.enable == "i2p":
-        from styrened.services.i2p import I2PAdapter
+        try:
+            from styrened.services.i2p import I2PAdapter
+        except ImportError:
+            print("I2P adapter not available — overlay transport modules removed.", file=sys.stderr)
+            return 1
 
         i2p_adapter = I2PAdapter(config.i2p)
         asyncio.run(i2p_adapter.provision())

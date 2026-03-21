@@ -1,7 +1,7 @@
-"""Rust daemon launcher — finds and spawns reticulumd binary.
+"""Rust daemon launcher — finds and exec's the styrened binary.
 
-Phase 2 of the Python daemon sunset: `styrened daemon` prefers the Rust
-binary when available, falls back to the Python daemon otherwise.
+Locates the compiled Rust daemon binary on PATH or in standard install
+locations, then replaces the current process via os.execvp.
 """
 
 from __future__ import annotations
@@ -40,7 +40,9 @@ def _is_compiled_binary(path: str) -> bool:
             return True  # ELF (Linux)
         if magic[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
                          b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"):
-            return True  # Mach-O (macOS)
+            return True  # Mach-O (macOS, thin)
+        if magic[:4] in (b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"):
+            return True  # Mach-O (macOS, fat/universal)
         return False
     except (OSError, IOError):
         return False
@@ -50,7 +52,8 @@ def find_rust_daemon() -> str | None:
     """Locate the Rust daemon binary.
 
     Search order:
-    1. STYRENED_RS_BIN environment variable (explicit override)
+    1. STYRENED_BIN environment variable (explicit override)
+       (STYRENED_RS_BIN also accepted for backward compatibility)
     2. $PATH via shutil.which()
     3. ~/.cargo/bin/
     4. /usr/local/bin/, /opt/styrene/bin/
@@ -59,14 +62,14 @@ def find_rust_daemon() -> str | None:
         Absolute path to the binary, or None if not found.
     """
     # Explicit override
-    env_bin = os.environ.get("STYRENED_RS_BIN")
+    env_bin = os.environ.get("STYRENED_BIN") or os.environ.get("STYRENED_RS_BIN")
     if env_bin:
         p = Path(env_bin)
         if p.is_file() and os.access(p, os.X_OK):
             return str(p.resolve())
         # If explicitly set but not found, don't search further
         print(
-            f"[daemon] STYRENED_RS_BIN={env_bin} not found or not executable",
+            f"[daemon] STYRENED_BIN={env_bin} not found or not executable",
             file=sys.stderr,
         )
         return None
@@ -97,10 +100,7 @@ def build_rust_daemon_args(
     socket: str | None = None,
     announce_interval: int | None = None,
 ) -> list[str]:
-    """Build the command-line arguments for the Rust daemon.
-
-    Maps styrened's configuration to reticulumd CLI flags.
-    """
+    """Build the command-line arguments for the Rust daemon."""
     cmd = [binary]
 
     if db:

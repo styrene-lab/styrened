@@ -34,7 +34,7 @@ class TestFindRustDaemon:
         binary.write_text("#!/bin/sh\n")
         binary.chmod(0o755)
 
-        with patch.dict(os.environ, {"STYRENED_RS_BIN": str(binary)}):
+        with patch.dict(os.environ, {"STYRENED_BIN": str(binary)}):
             result = find_rust_daemon()
             assert result is not None
             assert Path(result).name == "reticulumd"
@@ -42,7 +42,7 @@ class TestFindRustDaemon:
     def test_env_override_not_found(self, tmp_path):
         """STYRENED_RS_BIN set but file doesn't exist → None."""
         with patch.dict(
-            os.environ, {"STYRENED_RS_BIN": str(tmp_path / "nonexistent")}
+            os.environ, {"STYRENED_BIN": str(tmp_path / "nonexistent")}
         ):
             assert find_rust_daemon() is None
 
@@ -124,6 +124,48 @@ class TestSpawnRustDaemon:
 
         with patch("styrened.rust_daemon.find_rust_daemon", return_value=None):
             assert spawn_rust_daemon() is None
+
+
+class TestIsCompiledBinary:
+    """Tests for _is_compiled_binary()."""
+
+    def test_elf_binary(self, tmp_path):
+        """ELF magic → True."""
+        from styrened.rust_daemon import _is_compiled_binary
+
+        binary = tmp_path / "elf"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        assert _is_compiled_binary(str(binary)) is True
+
+    def test_macho_thin(self, tmp_path):
+        """Mach-O thin magic → True."""
+        from styrened.rust_daemon import _is_compiled_binary
+
+        binary = tmp_path / "macho"
+        binary.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 100)
+        assert _is_compiled_binary(str(binary)) is True
+
+    def test_macho_fat(self, tmp_path):
+        """Mach-O fat/universal magic → True."""
+        from styrened.rust_daemon import _is_compiled_binary
+
+        binary = tmp_path / "fat"
+        binary.write_bytes(b"\xca\xfe\xba\xbe" + b"\x00" * 100)
+        assert _is_compiled_binary(str(binary)) is True
+
+    def test_python_script(self, tmp_path):
+        """Shell/Python script → False."""
+        from styrened.rust_daemon import _is_compiled_binary
+
+        script = tmp_path / "script"
+        script.write_text("#!/usr/bin/env python3\nprint('hi')\n")
+        assert _is_compiled_binary(str(script)) is False
+
+    def test_nonexistent_file(self):
+        """Missing file → False."""
+        from styrened.rust_daemon import _is_compiled_binary
+
+        assert _is_compiled_binary("/nonexistent/path") is False
 
 
 class TestBuildRustDaemonArgs:

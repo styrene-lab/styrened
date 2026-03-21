@@ -704,7 +704,7 @@ def _parse_yggdrasil(config: CoreConfig, data: dict) -> None:
     if "yggdrasil" not in data or not isinstance(data["yggdrasil"], dict):
         return
     from styrened.models.config import YggdrasilConfig
-    from styrened.services.daemon_adapter import DaemonMode
+    from styrened.models.daemon_mode import DaemonMode
 
     y = data["yggdrasil"]
     raw_mode = y.get("mode", DaemonMode.DISABLED.value)
@@ -731,7 +731,7 @@ def _parse_i2p(config: CoreConfig, data: dict) -> None:
     if "i2p" not in data or not isinstance(data["i2p"], dict):
         return
     from styrened.models.config import I2PConfig
-    from styrened.services.daemon_adapter import DaemonMode
+    from styrened.models.daemon_mode import DaemonMode
 
     i = data["i2p"]
     raw_mode = i.get("mode", DaemonMode.DISABLED.value)

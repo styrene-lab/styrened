@@ -28,7 +28,10 @@ from typing import Any
 from styrened import __version__, paths
 from styrened.models.daemon_mode import DaemonMode
 from styrened.services.config import load_core_config
-from styrened.services.i2p import I2PAdapter
+try:
+    from styrened.services.i2p import I2PAdapter
+except ImportError:
+    I2PAdapter = None  # type: ignore[assignment,misc]
 from styrened.services.reticulum import (
     _resolve_identity_path,
     detect_existing_lxmf_identity,
@@ -38,7 +41,10 @@ from styrened.services.reticulum import (
     get_reticulum_config_state,
     is_reticulum_configured,
 )
-from styrened.services.yggdrasil import YggdrasilAdapter
+try:
+    from styrened.services.yggdrasil import YggdrasilAdapter
+except ImportError:
+    YggdrasilAdapter = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +192,7 @@ def check_rust_daemon() -> list[Finding]:
                 fix_hint=(
                     "Install via: cargo install styrened\n"
                     "  Or download from GitHub releases\n"
-                    "  Or set STYRENED_RS_BIN=/path/to/styrened"
+                    "  Or set STYRENED_BIN=/path/to/styrened"
                 ),
             )
         )

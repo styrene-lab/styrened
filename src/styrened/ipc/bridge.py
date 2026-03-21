@@ -43,7 +43,7 @@ from styrened.ipc.messages import (
     SelfUpdateResultInfo,
 )
 from styrened.ipc.protocol import IPCMessageType
-from styrened.paths import control_socket as get_default_socket_path
+from styrened.paths import control_socket
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class IPCBridge:
         auto_reconnect: bool = True,
         traffic_class: str = "control",
     ) -> None:
-        self._socket_path = socket_path or get_default_socket_path()
+        self._socket_path = socket_path or control_socket()
         self._timeout = timeout
         self._auto_reconnect = auto_reconnect
         self._traffic_class = traffic_class

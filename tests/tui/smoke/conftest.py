@@ -1,11 +1,12 @@
 """Conftest for TUI smoke tests against a live Rust daemon.
 
-These tests start the Rust daemon (reticulumd) once per session, wait for
-the IPC socket, then run Textual Pilot tests against the real TUI connecting
+These tests start the styrened binary once per session, wait for the
+IPC socket, then run Textual Pilot tests against the real TUI connecting
 to the real daemon. No mocks — the full IPC path is exercised.
 
 Requires:
     cargo build -p styrened-rs   (in ~/workspace/styrene-lab/styrene-rs)
+    Binary produced at: target/debug/styrened
 
 Mark: @pytest.mark.tui_smoke
 Skip: pytest -m "not tui_smoke"
@@ -28,7 +29,7 @@ RUST_REPO = Path(os.environ.get(
     "STYRENE_RS_REPO",
     Path.home() / "workspace" / "styrene-lab" / "styrene-rs",
 ))
-RETICULUMD = RUST_REPO / "target" / "debug" / "styrened"
+DAEMON_BIN = RUST_REPO / "target" / "debug" / "styrened"
 
 
 def _socket_path() -> Path:
@@ -46,9 +47,9 @@ def rust_daemon():
 
     Yields the socket path. Kills the daemon on teardown.
     """
-    if not RETICULUMD.exists():
+    if not DAEMON_BIN.exists():
         pytest.skip(
-            f"Rust daemon not built at {RETICULUMD} — "
+            f"Rust daemon not built at {DAEMON_BIN} — "
             f"run: cd {RUST_REPO} && cargo build -p styrened-rs"
         )
 
@@ -67,7 +68,7 @@ def rust_daemon():
     tmp_db = os.path.join(tmp_dir, "test.db")
 
     proc = subprocess.Popen(
-        [str(RETICULUMD), "--db", tmp_db, "--socket", str(socket)],
+        [str(DAEMON_BIN), "--db", tmp_db, "--socket", str(socket)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         # Don't inherit our signal handlers
@@ -98,6 +99,9 @@ def rust_daemon():
         proc.wait()
     if socket.exists():
         socket.unlink()
+    # Clean up temp database directory
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @pytest.fixture

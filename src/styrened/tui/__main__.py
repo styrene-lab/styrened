@@ -288,31 +288,26 @@ Examples:
 
     # Dispatch to headless daemon or TUI
     if args.headless:
-        import asyncio
-        import logging
+        import os
 
-        from styrened.daemon import run_daemon
-        from styrened.tui.services.config import load_config, update_styrene_config_from_cli
+        from styrened import paths
+        from styrened.rust_daemon import exec_rust_daemon
 
-        # Setup logging for headless mode
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
+        # Headless mode now starts the Rust daemon directly.
+        os.environ.setdefault("STYRENE_CONFIG_DIR", str(paths.config_dir()))
+        os.environ.setdefault("STYRENE_DATA_DIR", str(paths.data_dir()))
+        os.environ.setdefault("STYRENED_SOCKET", str(paths.control_socket()))
 
-        # Load and apply CLI overrides to config
-        config = load_config()
-        config = update_styrene_config_from_cli(
-            config,
-            mode=DeploymentMode(args.mode),
-            server_port=args.port,
-            peers=peer_configs,
-            api_port=args.api_port,
-            headless=True,
-        )
-
-        # Run daemon
-        asyncio.run(run_daemon(config))
+        result = exec_rust_daemon()
+        if result == -1:
+            print(
+                "[headless] Rust daemon binary not found.\n"
+                "  Install via: cargo install styrened\n"
+                "  Or download from GitHub releases.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        sys.exit(result)
     else:
         # Setup logging for TUI mode
         import logging

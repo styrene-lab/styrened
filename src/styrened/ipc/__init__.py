@@ -1,35 +1,21 @@
-"""IPC control interface for styrened.
+"""IPC client interface for the styrened daemon.
 
-Provides Unix socket communication between CLI tools and the running daemon,
-eliminating the need for CLI commands to initialize their own RNS/LXMF stack.
+Provides Unix socket communication between Python tools (TUI, CLI) and
+the running Rust daemon (styrened binary).
 
 Components:
-    ControlServer: Unix socket server (runs in daemon)
-    ControlClient: Client library (used by CLI/TUI)
+    IPCBridge: High-level async client with auto-reconnect and typed methods
+    ControlClient: Low-level socket client
     IPCMessageType: Protocol message types
 
-Usage (daemon side):
-    from styrened.ipc import ControlServer
+Usage::
 
-    server = ControlServer(daemon)
-    await server.start()
-    # ... daemon runs ...
-    await server.stop()
+    from styrened.ipc import IPCBridge
 
-Usage (CLI side):
-    from styrened.ipc import ControlClient, get_daemon_client
-
-    # Context manager style
-    async with ControlClient() as client:
-        devices = await client.query_devices()
-
-    # Or check for running daemon
-    client = await get_daemon_client()
-    if client:
-        try:
-            devices = await client.query_devices()
-        finally:
-            await client.disconnect()
+    bridge = IPCBridge()
+    await bridge.connect()
+    status = await bridge.get_status()
+    await bridge.disconnect()
 """
 from __future__ import annotations
 
@@ -59,15 +45,9 @@ def get_default_socket_path() -> Path:
     return _control_socket()
 
 
-# ControlServer removed — daemon is now Rust (styrened binary).
-# Kept for backward-compatible imports that only reference the name.
-ControlServer = None
-
 __all__ = [
     # Bridge (high-level client)
     "IPCBridge",
-    # Server (deprecated — daemon is Rust)
-    "ControlServer",
     "get_default_socket_path",
     # Client (low-level)
     "ControlClient",

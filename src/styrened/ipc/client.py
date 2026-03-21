@@ -82,7 +82,7 @@ from styrened.ipc.protocol import (
     read_frame,
     write_frame,
 )
-from styrened.paths import control_socket as get_default_socket_path
+from styrened.paths import control_socket
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ class ControlClient:
             socket_path: Path to Unix socket (None = auto-detect).
             timeout: Default timeout for requests in seconds.
         """
-        self.socket_path = socket_path or get_default_socket_path()
+        self.socket_path = socket_path or control_socket()
         self.default_timeout = timeout
 
         self._reader: asyncio.StreamReader | None = None

@@ -35,14 +35,14 @@ import re
 _DYNAMIC_PATTERNS = [
     # Timestamps: 2026-03-21 15:33:57, 15:33, etc.
     (re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?"), "TIMESTAMP"),
-    (re.compile(r"\d{2}:\d{2}:\d{2}"), "HH:MM:SS"),
+    (re.compile(r"\b\d{2}:\d{2}:\d{2}\b"), "HH:MM:SS"),
     # Hex hashes (identity/destination hashes, 16+ hex chars)
-    (re.compile(r"[0-9a-f]{16,}"), "HEXHASH"),
-    # Uptime values: "0d 0h 2m", "5s ago"
-    (re.compile(r"\d+[dhms]\s*\d*[dhms]?"), "UPTIME"),
-    (re.compile(r"\d+s? ago"), "AGO"),
-    # Version numbers that might change
-    (re.compile(r"v?\d+\.\d+\.\d+"), "VERSION"),
+    (re.compile(r"\b[0-9a-f]{16,}\b"), "HEXHASH"),
+    # Uptime values: "0d 0h 2m", "12h 5m 3s"
+    (re.compile(r"\b\d+[dhm]\s+\d+[hms]\b"), "UPTIME"),
+    (re.compile(r"\b\d+s?\s+ago\b"), "AGO"),
+    # Version numbers that might change (e.g., v0.18.0, 0.17.2)
+    (re.compile(r"\bv?\d+\.\d+\.\d+\b"), "VERSION"),
 ]
 
 
