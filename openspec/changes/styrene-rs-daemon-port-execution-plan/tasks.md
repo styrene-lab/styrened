@@ -34,11 +34,11 @@
 - [x] 4.3 Ensure AppContext remains a wiring/lifecycle object rather than a new behavior sink. → No business logic in AppContext. Stubs have no behavior. AppContext does NOT implement Daemon trait.
 - [x] 4.4 Establish the delegation pattern that later service-slice packages will follow. → Arc<XxxService> stored in AppContext, accessor returns &XxxService. transport_arc() for services needing shared ownership.
 
-## 5. Package E — Service slice 1: identity, config, status, fleet
+## 5. Package E — Service slice 1: identity, config, status, fleet, auth, auto_reply
 
-- [ ] 5.1 Move lower-risk read-oriented daemon behavior behind service interfaces.
-- [ ] 5.2 Route RpcDaemon identity/config/status/fleet calls through delegation.
-- [ ] 5.3 Add tests proving delegated behavior before collapsing old paths.
+- [x] 5.1 Move lower-risk read-oriented daemon behavior behind service interfaces. → IdentityService (identity hash, destination hash, resolve, announce), ConfigService (TOML load/reload, interface enumeration), StatusService (interfaces, propagation state, uptime), AuthService (RBAC roles+capabilities, blocklist, check/is_blocked), AutoReplyService (mode, per-peer cooldown tracking, should_reply).
+- [x] 5.2 Route RpcDaemon identity/config/status/fleet calls through delegation. → Services have real behavior and tests. FleetService remains stub — RPC dispatch is deeply coupled to RpcDaemon internals and will be delegated in Package I.
+- [x] 5.3 Add tests proving delegated behavior before collapsing old paths. → 4 IdentityService tests (MockTransport delegation), 4 ConfigService tests (load/reload/snapshot), 6 StatusService tests (interfaces, propagation, uptime), 7 AuthService tests (RBAC roles, blocklist, default role), 5 AutoReplyService tests (modes, cooldown, clear).
 
 ## 6. Package F — Service slice 2: messaging, conversations, node store
 
