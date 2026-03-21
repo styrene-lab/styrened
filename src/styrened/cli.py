@@ -78,49 +78,39 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 def cmd_daemon(args: argparse.Namespace) -> int:
-    """Run the styrened daemon.
+    """Run the styrened daemon (Rust binary).
 
-    Prefers the Rust daemon (reticulumd) when available.
-    Falls back to the Python daemon if Rust binary is not found.
-    Set STYRENED_RS_BIN to override the binary path, or
-    STYRENED_PYTHON_DAEMON=1 to force the Python daemon.
+    Locates and exec's the Rust 'styrened' binary, replacing this process.
+    Set STYRENED_RS_BIN to override the binary path.
 
     Args:
         args: Parsed arguments.
 
     Returns:
-        Exit code.
+        Exit code (only if binary not found).
     """
     import os
+    import sys
 
-    # Allow forcing the Python daemon for development/debugging
-    if not os.environ.get("STYRENED_PYTHON_DAEMON"):
-        from styrened import paths
-        from styrened.rust_daemon import exec_rust_daemon
+    from styrened import paths
+    from styrened.rust_daemon import exec_rust_daemon
 
-        # Set path env vars so Rust daemon resolves identical paths via its
-        # default_*() functions. This is the single source of truth — both
-        # Python (paths module) and Rust (config module) read these env vars.
-        os.environ.setdefault("STYRENE_CONFIG_DIR", str(paths.config_dir()))
-        os.environ.setdefault("STYRENE_DATA_DIR", str(paths.data_dir()))
-        os.environ.setdefault("STYRENED_SOCKET", str(paths.control_socket()))
+    # Set path env vars so Rust daemon resolves identical paths.
+    os.environ.setdefault("STYRENE_CONFIG_DIR", str(paths.config_dir()))
+    os.environ.setdefault("STYRENE_DATA_DIR", str(paths.data_dir()))
+    os.environ.setdefault("STYRENED_SOCKET", str(paths.control_socket()))
 
-        result = exec_rust_daemon()
-        if result == -1:
-            # Rust binary not found — fall through to Python daemon
-            import sys
-
-            print(
-                "[daemon] Rust daemon not found, falling back to Python daemon",
-                file=sys.stderr,
-            )
-        else:
-            return result
-
-    from styrened.daemon import main as daemon_main
-
-    daemon_main()
-    return 0
+    result = exec_rust_daemon()
+    if result == -1:
+        print(
+            "[daemon] Rust daemon binary not found.\n"
+            "  Install via: cargo install styrened\n"
+            "  Or download from GitHub releases.\n"
+            "  Or set STYRENED_RS_BIN=/path/to/styrened",
+            file=sys.stderr,
+        )
+        return 1
+    return result
 
 
 # -----------------------------------------------------------------------------

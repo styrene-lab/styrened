@@ -1,4 +1,8 @@
-"""Styrene Core Services."""
+"""Styrene services — config helpers and TUI utilities.
+
+Daemon services have moved to Rust (styrened binary). This package retains
+config loading, doctor diagnostics, and utilities used by the TUI.
+"""
 from __future__ import annotations
 
 from styrened.services.config import (
@@ -10,12 +14,6 @@ from styrened.services.config import (
     load_core_config,
     save_core_config,
 )
-from styrened.services.conversation_service import (
-    ConversationInfo,
-    ConversationService,
-    MessageInfo,
-    MessageStatus,
-)
 
 __all__ = [
     "ensure_directories",
@@ -25,9 +23,4 @@ __all__ = [
     "get_log_dir",
     "load_core_config",
     "save_core_config",
-    # Conversation service
-    "ConversationService",
-    "ConversationInfo",
-    "MessageInfo",
-    "MessageStatus",
 ]

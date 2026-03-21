@@ -46,12 +46,27 @@ from styrened.ipc.protocol import (
     FrameReadTimeoutError,
     IPCMessageType,
 )
-from styrened.ipc.server import ControlServer, get_default_socket_path
+from styrened.paths import control_socket as _control_socket
+from pathlib import Path
+
+
+def get_default_socket_path() -> Path:
+    """Determine the default socket path.
+
+    Delegates to the central ``paths`` module. Respects ``STYRENED_SOCKET``
+    env var, then mode-dependent defaults.
+    """
+    return _control_socket()
+
+
+# ControlServer removed — daemon is now Rust (styrened binary).
+# Kept for backward-compatible imports that only reference the name.
+ControlServer = None
 
 __all__ = [
     # Bridge (high-level client)
     "IPCBridge",
-    # Server
+    # Server (deprecated — daemon is Rust)
     "ControlServer",
     "get_default_socket_path",
     # Client (low-level)

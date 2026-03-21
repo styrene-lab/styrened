@@ -43,7 +43,7 @@ from styrened.ipc.messages import (
     SelfUpdateResultInfo,
 )
 from styrened.ipc.protocol import IPCMessageType
-from styrened.ipc.server import get_default_socket_path
+from styrened.paths import control_socket as get_default_socket_path
 
 logger = logging.getLogger(__name__)
 

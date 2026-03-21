@@ -219,7 +219,7 @@ class DaemonSetupScreen(Screen[bool]):
         """
         import asyncio
 
-        from styrened.ipc.server import get_default_socket_path
+        from styrened.ipc import get_default_socket_path
 
         socket_path = get_default_socket_path()
         elapsed = 0.0

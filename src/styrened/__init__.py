@@ -1,33 +1,30 @@
-"""Styrened - Unified Styrene library and headless daemon.
+"""Styrene — TUI and CLI for the Styrene mesh network.
 
 This package provides:
-1. Core library for RNS/LXMF mesh networking (models, protocols, rpc, services)
-2. Headless daemon for edge deployments
+1. Terminal UI (TUI) for mesh network operation
+2. CLI tools (devices, status, send, exec, doctor)
+3. IPC bridge to the Rust daemon (styrened binary)
+4. Data models for mesh devices, config, and protocol types
 
-Library usage:
+The daemon has moved to Rust. Install it via:
+    cargo install styrened
+    # or download from GitHub releases
 
-```python
-from styrened import CoreConfig, RPCClient, RPCServer
-from styrened.models import MeshDevice, DeviceType
-from styrened.services import load_core_config
-```
+TUI usage:
+    styrene          # Launch the TUI
 
-Daemon usage:
-
-```python
-from styrened import StyreneDaemon, main
-# or run via: styrened command
-```
+CLI usage:
+    styrened daemon  # Start the Rust daemon
+    styrened devices # List discovered mesh devices
+    styrened status  # Check daemon health
+    styrened doctor  # Run diagnostics
 """
 from __future__ import annotations
 
-__version__ = "0.17.2"
+__version__ = "0.18.0"
 
 # Path resolution
 from styrened import paths  # noqa: F401
-
-# Daemon exports
-from styrened.daemon import StyreneDaemon, main
 
 # Core model exports
 from styrened.models import (
@@ -37,27 +34,22 @@ from styrened.models import (
     ConfigFieldError,
     ConfigLoadError,
     ConfigValidationError,
-    # Config
     CoreConfig,
     DeploymentMode,
     DeviceType,
     DiscoveryConfig,
     GatewayMode,
     LogLevel,
-    # Mesh devices
     MeshDevice,
     NodeStatus,
     ReticulumConfig,
     ReticulumIdentity,
     ReticulumInterface,
     ReticulumNotConfiguredError,
-    # Reticulum state
     ReticulumState,
     RNSErrorCategory,
-    # RNS errors
     RNSErrorState,
     RPCConfig,
-    # Wire protocol
     StyreneEnvelope,
     StyreneMessageType,
     StyreneWireError,
@@ -73,37 +65,7 @@ from styrened.models import (
     parse_announce_data,
 )
 
-# Protocol exports
-from styrened.protocols import (
-    ChatProtocol,
-    LXMFMessage,
-    Protocol,
-    ProtocolNotFoundError,
-    ProtocolRegistry,
-    StyreneProtocol,
-)
-
-# RPC exports (most commonly used from library)
-# Note: Request classes removed in wire protocol migration.
-# Use RPCClient.call_status(), call_exec(), etc. or create_*() from styrene_wire.
-from styrened.rpc import (
-    ExecResult,
-    RebootResult,
-    RPCClient,
-    # Errors
-    RPCError,
-    RPCInvalidResponseError,
-    RPCServer,
-    RPCTimeoutError,
-    RPCTransportError,
-    SelfUpdateResult,
-    # Response types (for type hints and deserialization)
-    StatusResponse,
-    UpdateConfigResult,
-    get_rpc_server,
-)
-
-# Service exports (path helpers are deprecated — use paths module directly)
+# Service exports (config helpers used by TUI)
 from styrened.services import (
     ensure_directories,
     get_config_dir,
@@ -115,26 +77,7 @@ from styrened.services import (
 )
 
 __all__ = [
-    # Version
     "__version__",
-    # Daemon
-    "StyreneDaemon",
-    "main",
-    # RPC Client/Server
-    "RPCClient",
-    "RPCServer",
-    "get_rpc_server",
-    # RPC Response Types
-    "StatusResponse",
-    "ExecResult",
-    "RebootResult",
-    "UpdateConfigResult",
-    "SelfUpdateResult",
-    # RPC Errors
-    "RPCError",
-    "RPCTimeoutError",
-    "RPCTransportError",
-    "RPCInvalidResponseError",
     # Config models
     "CoreConfig",
     "APIConfig",
@@ -185,11 +128,4 @@ __all__ = [
     "get_data_dir",
     "get_log_dir",
     "ensure_directories",
-    # Protocols
-    "Protocol",
-    "LXMFMessage",
-    "ChatProtocol",
-    "StyreneProtocol",
-    "ProtocolRegistry",
-    "ProtocolNotFoundError",
 ]

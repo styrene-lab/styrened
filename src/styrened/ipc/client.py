@@ -82,7 +82,7 @@ from styrened.ipc.protocol import (
     read_frame,
     write_frame,
 )
-from styrened.ipc.server import get_default_socket_path
+from styrened.paths import control_socket as get_default_socket_path
 
 logger = logging.getLogger(__name__)
 
