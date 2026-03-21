@@ -80,12 +80,35 @@ def setup_logging(verbose: bool = False) -> None:
 def cmd_daemon(args: argparse.Namespace) -> int:
     """Run the styrened daemon.
 
+    Prefers the Rust daemon (reticulumd) when available.
+    Falls back to the Python daemon if Rust binary is not found.
+    Set STYRENED_RS_BIN to override the binary path, or
+    STYRENED_PYTHON_DAEMON=1 to force the Python daemon.
+
     Args:
         args: Parsed arguments.
 
     Returns:
         Exit code.
     """
+    import os
+
+    # Allow forcing the Python daemon for development/debugging
+    if not os.environ.get("STYRENED_PYTHON_DAEMON"):
+        from styrened.rust_daemon import exec_rust_daemon
+
+        result = exec_rust_daemon()
+        if result == -1:
+            # Rust binary not found — fall through to Python daemon
+            import sys
+
+            print(
+                "[daemon] Rust daemon not found, falling back to Python daemon",
+                file=sys.stderr,
+            )
+        else:
+            return result
+
     from styrened.daemon import main as daemon_main
 
     daemon_main()
