@@ -1,7 +1,7 @@
 ---
 id: styrene-rs-s2-mesh-transport-trait
 title: "S2: MeshTransport trait — testable, swappable transport backend"
-status: decided
+status: implemented
 parent: styrene-rs-architecture
 open_questions: []
 ---

@@ -1,7 +1,7 @@
 ---
 id: styrene-rs-s5-app-context
 title: "S5: AppContext — decompose RpcDaemon god-struct into service registry"
-status: exploring
+status: implemented
 parent: styrene-rs-architecture
 dependencies: [styrene-rs-s1-arc-runtime, styrene-rs-s2-mesh-transport-trait, styrene-rs-s4-module-structure]
 open_questions: []
