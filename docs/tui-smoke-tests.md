@@ -1,7 +1,7 @@
 ---
 id: tui-smoke-tests
 title: TUI Automated Smoke Tests — First-Operator Coverage
-status: decided
+status: implemented
 parent: pre-release-qa-gate
 tags: [tui, testing, smoke, textual, pilot, qa]
 open_questions: []
@@ -82,3 +82,18 @@ Current test landscape:
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `tests/tui/smoke/conftest.py` (new) — Session fixture: starts styrened-rs, waits for socket, kills on teardown
+- `tests/tui/smoke/test_screens_live.py` (new) — 17 Textual Pilot tests: every major screen mounts against live Rust daemon
+- `tests/tui/smoke/test_bridge_live.py` (new) — 16 IPCBridge contract tests: typed method returns from live daemon
+- `tests/tui/smoke/test_snapshots.py` (new) — 7 SVG snapshot tests: visual regression detection with dynamic normalization
+
+### Constraints
+
+- Requires cargo build -p styrened-rs in sibling repo
+- Binary name is styrened-rs not reticulumd
+- Snapshots need --snapshot-update after intentional visual changes
