@@ -64,7 +64,7 @@
 - [x] 9.2 Wire real delegation for ready methods (~15). → query_identity, announce, query_status, query_config, query_devices, query_auto_reply, set_auto_reply, query_messages with MessageInfo mapping.
 - [x] 9.3 Stub remaining methods with IpcError::NotImplemented (~24). → send_chat, delete/mark/retry, search, contacts, resolve_name, all fleet, all tunnel, set_identity, subscribe events.
 - [x] 9.4 Add regression coverage. → 11 unit tests: Arc<dyn Daemon> conformance, auth enforcement (blocked caller, peer-cannot-exec), real delegation roundtrips, not-implemented assertions, device query through discovery.
-- [ ] 9.5 (follow-on) Collapse RpcDaemon fields into services — deferred until bootstrap.rs is rewired to construct AppContext + DaemonFacade instead of RpcDaemon. This is the actual cutover point.
+- [x] 9.5 Construct AppContext + DaemonFacade alongside RpcDaemon in bootstrap.rs. → Coexistence phase: both architectures initialize at startup. NullTransport for now (TokioTransportAdapter wiring when workers migrate). No behavioral change to existing SDK RPC.
 
 ## 10. Package J — Dependent unlock preparation
 
