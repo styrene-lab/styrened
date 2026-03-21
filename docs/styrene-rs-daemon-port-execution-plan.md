@@ -1,7 +1,7 @@
 ---
 id: styrene-rs-daemon-port-execution-plan
 title: styrene-rs Daemon Port Execution Plan
-status: implementing
+status: implemented
 parent: styrene-rs-architecture
 tags: [rust, daemon, execution-plan, migration, cleave]
 open_questions: []
@@ -38,6 +38,62 @@ Deep review of the Python TUI shows it is already a pure IPC client — all mesh
 ### Package A complete: ownership matrix and file-scope map produced from both inventories + Rust codebase analysis
 
 Analyzed the full styrene-rs crate structure (11 crates, 42K LOC) and the RpcDaemon god struct (50+ Mutex fields across 23 include! files, 7,467 LOC). Produced ownership-matrix.md defining: 11 target services (IdentityService, ConfigService, StatusService, FleetService, MessagingService, DiscoveryService, ProtocolService, EventService, TunnelService, TransportAdapter, AuthService), AppContext as composition root, DaemonFacade as the thin Daemon trait implementor replacing RpcDaemon. File-scope map covers ~20 new files, ~15 modified, ~8 test files. MeshTransport trait defined from consumer contracts (messaging needs send+subscribe_inbound, discovery needs subscribe_announces, fleet needs send+request). Startup order and reconnection invalidation maps validated and assigned to Rust service owners. All BRIDGE items documented with IPC contract requirements. All DEFER items mapped to existing or needed design-tree nodes.
+
+### Post-assessment known items from Packages B–E implementation
+
+**Documented after full clippy + architectural review of Packages B–E (commit c0169f1).**
+
+1. **Announce forwarding task cancellation** (adapter.rs) — The `TokioTransportAdapter` constructor spawns a detached `tokio::spawn` task that forwards announce events from the real transport's async channel to a sync broadcast sender. This task has no explicit cancellation — it exits when the transport's announce channel closes, but `shutdown()` doesn't cancel it. **Fix in Package I**: store the `JoinHandle` or `AbortHandle` and abort in `shutdown()`.
+
+2. **TokioTransportAdapter has no unit tests** — It wraps a real `rns_core::Transport` which requires full RNS infrastructure to instantiate. MockTransport and NullTransport have thorough test coverage (31 contract tests + 18 unit tests), but the production adapter is only exercised through the existing `bootstrap.rs` integration path. **Fix in Package J**: integration tests with a real Transport instance, or extract the packet-construction logic into a testable helper.
+
+3. **`is_connected()` always returns `true`** on TokioTransportAdapter — Currently, transport object existence is treated as connectivity. Real connectivity detection requires monitoring interface status. **Fix in later package**: track interface up/down events and reflect in `is_connected()`. The `subscribe_lifecycle` + `TransportLifecycleEvent` infrastructure is already in place for this.
+
+4. **`send_raw` is a transport primitive, not LXMF delivery** — Documented in the trait. The caller (MessagingService, Package F) must handle LXMF wire format details like stripping the destination prefix for opportunistic delivery. The existing `TransportBridge.deliver()` does this in `bridge_helpers::opportunistic_payload()`. That logic migrates to MessagingService.
+
+5. **InterfaceConfig made Clone** — The `config.rs` model's `InterfaceConfig` was changed from `#[derive(Debug, Deserialize)]` to `#[derive(Debug, Clone, Deserialize)]` to support `ConfigService::interfaces()` returning owned copies. This is a minor API surface change on an internal type — no external consumers affected.
+
+### Pre-Package F architectural audit: existing modules, integration points, and library gaps
+
+**Audit scope**: all existing styrened-rs modules relevant to Package F (messaging, discovery, node storage), plus styrene-lxmf and styrene-ipc crate surfaces.
+
+**Existing modules to compose (not reimplement):**
+- `storage/messages.rs` (575 LOC) — MessagesStore with SQLite CRUD for messages AND announces. Schema init, pagination, pruning, receipt status updates. Already the unified storage layer.
+- `announce_names.rs` (153 LOC) — Pure functions for parsing peer names from announce app_data. Three strategies: msgpack array, PN metadata map, UTF-8 fallback. Used by announce_worker.
+- `inbound_delivery.rs` (120 LOC) — Decode inbound LXMF wire payloads into MessageRecord. Uses styrene-lxmf decode_inbound_message. No RpcDaemon coupling.
+- `lxmf_bridge.rs` (34 LOC) — Build outbound LXMF wire messages from title/content/fields. Signs with PrivateIdentity. No RpcDaemon coupling.
+- `receipt_bridge.rs` (65 LOC) — Receipt correlation and handler. Pure helpers except `handle_receipt_event` which calls into RpcDaemon (this function migrates to MessagingService).
+- `identity_store.rs` (77 LOC) — Load/create identity key files. Already used by bootstrap. Atomic write with tmp+rename, Unix 0600 perms.
+
+**IPC trait contract (styrene-ipc):**
+- `DaemonMessaging` — 12 async methods: send_chat, mark_read, delete_conversation, delete_message, retry_message, query_conversations, query_messages, search_messages, query_attachment, set_contact, remove_contact, query_contacts, resolve_name.
+- `DaemonStatus` — includes query_devices (announce-based device list) which reads from the announce store.
+- `DaemonEvents` — subscribe_messages, subscribe_devices (broadcast channels).
+
+**Library gaps: none.** All needed crates already in deps: rusqlite (storage), tokio broadcast (pub/sub), rmpv/rmp-serde (msgpack), serde_json (JSON fields), hex (hash encoding), async-trait, thiserror.
+
+**Key insight: MessagesStore IS the NodeStore.** The announce table (insert_announce, list_announces) lives in the same SQLite DB as messages. No separate storage struct needed — DiscoveryService writes announces, other services read them, all through the same MessagesStore instance.
+
+**SDK subsystem excluded from Package F.** RpcDaemon's sdk_*.rs files (negotiate, runtime, helpers, topics, attachments, markers, identity, paper_command, voice, auth_http, capabilities, outbound = ~3,000+ LOC) manage the SDK contract lifecycle. This is deeply coupled to RpcDaemon fields and should NOT be mixed into domain services. It stays in RpcDaemon until Package I or becomes a dedicated SdkService.
+
+### Pre-Package I gap analysis: 39 Daemon trait methods vs service readiness
+
+**Assessment of which Daemon trait methods can delegate to real service behavior vs which must remain stubbed.**
+
+**Ready for real delegation (~15 methods):**
+- DaemonIdentity: query_identity (IdentityService.identity_hash + metadata), announce (IdentityService.announce)
+- DaemonStatus: query_status (StatusService.uptime+interfaces+propagation + transport.is_connected), query_config (ConfigService), query_auto_reply (AutoReplyService.config), set_auto_reply (AutoReplyService.set_config), query_devices (DiscoveryService.list_announces → DeviceInfo mapping)
+- DaemonMessaging: query_messages (MessagingService.list_messages), get partial via MessagingService
+- DaemonEvents: subscribe can wrap EventService.subscribe with DaemonEvent conversion
+
+**Must remain NotImplemented (~24 methods):**
+- DaemonIdentity: set_identity (needs identity metadata storage — display_name, icon, short_name)
+- DaemonStatus: query_path_info (needs transport path table access not yet exposed)
+- DaemonMessaging: send_chat (needs full delivery pipeline), mark_read/delete_conversation/delete_message (need store extensions), retry_message (needs delivery pipeline), query_conversations (needs grouped query), search_messages (needs FTS), query_attachment (needs attachment storage), set_contact/remove_contact/query_contacts (needs contact table), resolve_name (needs node store name lookup)
+- DaemonFleet: all 10 methods (FleetService is stub — RPC dispatch deeply coupled to RpcDaemon)
+- DaemonTunnel: all 5 methods (TunnelService is DEFER'd)
+
+**Key decision**: Package I creates the facade with auth enforcement and wires what's ready. Remaining methods return IpcError::NotImplemented. This matches StubDaemon's pattern — the facade replaces it as the IPC-facing type, starting mostly-stubbed but with real service delegation for ready methods. Store extensions (delete, search, contacts, conversations) are follow-on work that incrementally fills methods.
 
 ## Decisions
 
@@ -121,6 +177,16 @@ Analyzed the full styrene-rs crate structure (11 crates, 42K LOC) and the RpcDae
 **Status:** decided
 **Rationale:** MessagingService owns the receipt correlation map (packet_hash/resource_hash → message_id) because it initiated the send and needs to update delivery status. When receipt callbacks arrive from transport, MessagingService resolves the message_id and pushes delivery status events through EventService for IPC fanout. This splits the concern cleanly: MessagingService tracks causality (which send produced which receipt), EventService handles distribution (notify TUI, SSE, activity ring). The current TransportBridge receipt_map + receipt_tx pattern decomposes naturally into this two-service model.
 
+### Decision: NodeStore is a service-level abstraction over MessagesStore's announce table, not a separate storage struct
+
+**Status:** decided
+**Rationale:** MessagesStore already owns both messages and announces in a single SQLite database with unified schema init. Creating a separate NodeStore struct would mean either (A) two DB connections to the same file, or (C) breaking apart the schema init. Option B is correct: DiscoveryService owns announce writes via store.insert_announce(), other services read via store.list_announces(). The 'NodeStore' from the ownership matrix becomes a conceptual view — the DiscoveryService write interface to the announce side of MessagesStore. The original ownership-matrix.md §NodeStore decision ('shared storage module, DiscoveryService writes, others read') is preserved in spirit: DiscoveryService writes, MessagingService/IdentityService/FleetService read, but through the existing MessagesStore rather than a new struct.
+
+### Decision: Package F services compose existing modules, not reimplement them
+
+**Status:** decided
+**Rationale:** The existing modules (MessagesStore, announce_names, inbound_delivery, lxmf_bridge, receipt_bridge) are already pure functions or data-focused structs with no RpcDaemon coupling. Package F services wrap and compose these: MessagingService holds Arc<Mutex<MessagesStore>>, uses inbound_delivery for decode, lxmf_bridge for wire encode, receipt_bridge helpers for correlation. DiscoveryService uses announce_names for parsing. No logic reimplementation needed — services are thin orchestrators over well-factored existing code. The SDK subsystem (~11 files, 3,000+ LOC) is explicitly excluded from Package F — it stays in RpcDaemon until Package I or becomes its own service.
+
 ## Open Questions
 
 *No open questions.*
@@ -138,6 +204,32 @@ Analyzed the full styrene-rs crate structure (11 crates, 42K LOC) and the RpcDae
 - `openspec/changes/styrene-rs-daemon-port-execution-plan/inventory.md` (new) — Authoritative Python daemon behavior census with PORT/BRIDGE/DEFER classification, startup order map, and reconnection invalidation map
 - `openspec/changes/styrene-rs-daemon-port-execution-plan/tui-inventory.md` (new) — Authoritative TUI behavior census with PORT/BRIDGE/DEFER/DROP classification and IPC contract surface enumeration
 - `openspec/changes/styrene-rs-daemon-port-execution-plan/ownership-matrix.md` (new) — Authoritative Rust service-boundary ownership matrix, file-scope map, and MeshTransport trait specification
+- `crates/apps/styrened-rs/src/transport/mesh_transport.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/transport/adapter.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/transport/null_transport.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/transport/mock_transport.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/transport/mod.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/mod.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/identity.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/config.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/status.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/auth.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/auto_reply.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/messaging.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/discovery.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/protocol.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/events.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/tunnel.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/services/fleet.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/app_context.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/daemon_facade.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/lib.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/src/bin/reticulumd/bootstrap.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/Cargo.toml` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/tests/transport_null.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/tests/transport_contract.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/tests/app_context_construction.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `crates/apps/styrened-rs/tests/daemon_facade_contract.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
