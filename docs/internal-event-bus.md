@@ -1,7 +1,7 @@
 ---
 id: internal-event-bus
 title: Internal Event Bus
-status: seed
+status: implemented
 parent: interface-boundary-logging
 tags: [architecture, eventing, deferred]
 open_questions: []
