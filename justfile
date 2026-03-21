@@ -1012,3 +1012,46 @@ tui-rust:
 # TUI smoke tests against live Rust daemon (auto-starts daemon)
 test-tui-smoke:
     .venv/bin/python -m pytest tests/tui/smoke/ -v
+
+# Build Rust daemon from sibling repo (required for smoke tests)
+build-rust-daemon:
+    #!/usr/bin/env bash
+    RUST_REPO="${STYRENE_RS_REPO:-$HOME/workspace/styrene-lab/styrene-rs}"
+    echo "[build] Building styrened-rs from $RUST_REPO..."
+    cd "$RUST_REPO" && cargo build -p styrened-rs
+    echo "[build] Binary at $RUST_REPO/target/debug/styrened-rs"
+
+# Full cross-repo validation: build Rust daemon → unit tests → smoke tests
+test-full:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUST_REPO="${STYRENE_RS_REPO:-$HOME/workspace/styrene-lab/styrene-rs}"
+
+    echo "═══════════════════════════════════════════════════════════"
+    echo " Step 1/4: Build Rust daemon"
+    echo "═══════════════════════════════════════════════════════════"
+    cd "$RUST_REPO" && cargo build -p styrened-rs
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo " Step 2/4: Rust workspace tests (${RUST_REPO})"
+    echo "═══════════════════════════════════════════════════════════"
+    cd "$RUST_REPO" && cargo test --workspace --exclude styrene-native -q
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo " Step 3/4: Python unit tests"
+    echo "═══════════════════════════════════════════════════════════"
+    cd "{{justfile_directory()}}"
+    .venv/bin/python -m pytest tests/unit/ -q --tb=short
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo " Step 4/4: TUI smoke tests (live Rust daemon)"
+    echo "═══════════════════════════════════════════════════════════"
+    .venv/bin/python -m pytest tests/tui/smoke/ -v
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo " ✅ All cross-repo validation passed"
+    echo "═══════════════════════════════════════════════════════════"
