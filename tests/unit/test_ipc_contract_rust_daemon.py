@@ -28,13 +28,15 @@ from styrened.ipc.protocol import (
     generate_request_id,
 )
 
-# Socket path — matches Rust default_socket_path()
-SOCKET_PATH = Path(os.path.expanduser("~/.styrene/styrened.sock"))
+# Socket path — matches both Python paths.control_socket() and Rust default_socket_path()
+from styrened.paths import control_socket as _control_socket
+
+SOCKET_PATH = _control_socket()
 
 # Skip all tests if socket doesn't exist (no running Rust daemon)
 pytestmark = pytest.mark.skipif(
     not SOCKET_PATH.exists(),
-    reason="Rust daemon not running (no socket at ~/.styrene/styrened.sock)",
+    reason=f"Rust daemon not running (no socket at {SOCKET_PATH})",
 )
 
 

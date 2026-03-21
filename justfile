@@ -1008,3 +1008,7 @@ validate-rust-tui:
 # Launch TUI against Rust daemon (skip tests)
 tui-rust:
     ./scripts/validate-rust-daemon.sh --tui-only
+
+# TUI smoke tests against live Rust daemon (auto-starts daemon)
+test-tui-smoke:
+    .venv/bin/python -m pytest tests/tui/smoke/ -v

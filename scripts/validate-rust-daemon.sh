@@ -19,8 +19,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 RUST_REPO="${RUST_REPO:-$HOME/workspace/styrene-lab/styrene-rs}"
-SOCKET_PATH="${HOME}/.styrene/styrened.sock"
-RETICULUMD="${RUST_REPO}/target/debug/reticulumd"
+# Socket path — aligned with Python paths.control_socket() and Rust default_socket_path()
+if [ -n "${STYRENED_SOCKET:-}" ]; then
+    SOCKET_PATH="$STYRENED_SOCKET"
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    SOCKET_PATH="${XDG_RUNTIME_DIR}/styrened/control.sock"
+else
+    SOCKET_PATH="${HOME}/.local/run/styrened/control.sock"
+fi
+RETICULUMD="${RUST_REPO}/target/debug/styrened-rs"
 DAEMON_PID=""
 LAUNCH_TUI=false
 SKIP_TESTS=false
@@ -80,7 +87,7 @@ fi
 echo "[harness] Starting Rust daemon (standalone mode)..."
 mkdir -p "$(dirname "$SOCKET_PATH")"
 
-"$RETICULUMD" --standalone 2>&1 | sed 's/^/[reticulumd] /' &
+"$RETICULUMD" --socket "$SOCKET_PATH" 2>&1 | sed 's/^/[styrened-rs] /' &
 DAEMON_PID=$!
 echo "[harness] Daemon PID: $DAEMON_PID"
 

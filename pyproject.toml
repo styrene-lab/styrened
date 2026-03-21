@@ -162,6 +162,7 @@ markers = [
     "mesh: requires Docker mesh topology (two styrened containers)",
     "multihop: requires multi-hop Docker topology (three containers, two networks)",
     "rust_daemon: requires running Rust daemon (styrened-rs) with IPC socket",
+    "tui_smoke: TUI smoke tests against live Rust daemon (auto-started)",
 ]
 # pytest-xdist configuration
 # Use --dist loadscope to keep session-scoped fixtures shared within workers
