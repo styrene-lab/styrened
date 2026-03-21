@@ -1,7 +1,7 @@
 ---
 id: python-daemon-sunset
 title: Python Daemon Sunset — TUI-only styrened + Rust daemon backend
-status: implementing
+status: implemented
 tags: [strategic, architecture, migration, packaging]
 open_questions: []
 issue_type: epic
