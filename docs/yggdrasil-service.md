@@ -1,7 +1,7 @@
 ---
 id: yggdrasil-service
 title: YggdrasilService — styrened-managed Yggdrasil daemon
-status: blocked
+status: decided
 parent: overlay-network-integration
 dependencies: [styrene-identity]
 tags: [yggdrasil, service, daemon, packaging, nix]
@@ -174,6 +174,7 @@ The styrene-identity dependency is resolved. The actual remaining work is the Ni
 - peer_discovery=lazy: /meta fetch happens inside initiate_handshake() before building WG payload — adds one round-trip to handshake but only when handshake is explicitly requested
 - bootstrap_from_rns=false overrides peer_discovery entirely — no automatic fetching in either mode
 - Per-interface peer_discovery granularity explicitly rejected — operator knows deployment profile at config time, RNS doesn't cleanly expose which interface an announce arrived on
+- File scope is STALE — all referenced Python modules (yggdrasil.py, reticulum.py, mesh_vpn.py, daemon.py, rpc/server.py) were deleted in v0.18.0 daemon removal. Remaining Python-side work (doctor checks, config parsing) is guarded with try/except. Implementation must target the Rust daemon (styrened-rs). External NixOS module (styrene-edge/sbc/common/yggdrasil.nix) is the remaining work outside Rust.
 
 ## Config model
 

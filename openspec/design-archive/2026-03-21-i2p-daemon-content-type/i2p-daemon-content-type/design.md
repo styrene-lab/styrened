@@ -1,21 +1,6 @@
----
-id: i2p-daemon-content-type
-title: "Daemon: content-type passthrough and /meta https_url"
-status: decided
-parent: i2p-pages-strategy
-tags: [daemon, ipc, i2p]
-open_questions: []
-branches: ["feature/i2p-daemon-content-type"]
-openspec_change: i2p-daemon-content-type
----
+# Daemon: content-type passthrough and /meta https_url — Design
 
-# Daemon: content-type passthrough and /meta https_url
-
-## Overview
-
-Add content_type field to PageResponse, capture from HTTP headers in fetch_url(), default to text/x-micron for NomadNet. Pass through IPC in handle_query_page. Add https_url to /meta endpoint and CoreConfig. Add https_url field to MeshDevice.
-
-## Decisions
+## Architecture Decisions
 
 ### Decision: Implementation complete — content_type on PageResponse, web_url in /meta and config
 
@@ -27,13 +12,7 @@ Add content_type field to PageResponse, capture from HTTP headers in fetch_url()
 **Status:** decided
 **Rationale:** PageResponse.content_type from HTTP headers, IPC passthrough, web_url in config/meta/MeshDevice/NodeStore. _validate_meta_response fixed to allow overlay addresses. 21 tests in test_page_content_type.py all pass.
 
-## Open Questions
-
-*No open questions.*
-
-## Implementation Notes
-
-### File Scope
+## File Changes
 
 - `src/styrened/services/page_browser.py` (modified) — Add content_type: str | None = None to PageResponse. In fetch_url()._fetch(), capture resp.headers.get('Content-Type') and return it as 3rd tuple element. In fetch_page(), set content_type='text/x-micron'.
 - `src/styrened/ipc/handlers.py` (modified) — In handle_query_page(), add content_type to response data dict from PageResponse.
@@ -42,7 +21,7 @@ Add content_type field to PageResponse, capture from HTTP headers in fetch_url()
 - `src/styrened/models/mesh_device.py` (modified) — Add https_url: str | None = None field to MeshDevice.
 - `tests/unit/test_page_browser_service.py` (new) — Test content_type passthrough for HTML and micron responses.
 
-### Constraints
+## Constraints
 
 - content_type must be the raw HTTP Content-Type header value (e.g. 'text/html; charset=utf-8'), not parsed
 - NomadNet fetch_page must always set content_type='text/x-micron' since there are no HTTP headers

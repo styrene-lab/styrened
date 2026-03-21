@@ -1,25 +1,23 @@
----
-id: styrene-mobile-push-identity
-title: Styrene Mobile — Push Identity, APNs Distribution, and YubiKey Integration
-status: decided
-parent: styrene-mobile-background-arch
-dependencies: [styrene-identity]
-open_questions: []
-branches: ["feature/styrene-mobile-push-identity"]
-openspec_change: styrene-mobile-push-identity
-issue_type: feature
----
+# Styrene Mobile — Push Identity, APNs Distribution, and YubiKey Integration — Design
 
-# Styrene Mobile — Push Identity, APNs Distribution, and YubiKey Integration
+## Architecture Decisions
 
-## Overview
+### Decision: YubiKey on mobile is a session-unlock token, not a per-packet signer
 
-> Parent: [Styrene Mobile — Background Execution Architecture](styrene-mobile-background-arch.md)
-> Spawned from: "Hub push gateway: self-hosted operators must supply their own APNs .p8 key + team ID + bundle ID. This means the mobile app bundle ID is fixed (or operators build their own IPA). What's the distribution model — App Store with Styrene's APNs credentials, or TestFlight/AltStore/sideload for self-hosted deployments?"
+**Status:** decided
+**Rationale:** NFC tap per signing operation is disruptive for routine mesh operations (periodic announces, message signing). YubiKey use on mobile: tap to unlock a session key held in memory, session key signs all mesh traffic until app kill or configurable timeout. This matches how YubiKey+SSH agent works. The YubiKey signs exactly once per session (the unlock assertion); symmetric/derived keys handle per-packet operations. This makes Tier A viable on mobile without requiring the user to tap their YubiKey on every message send.
 
-*To be explored.*
+### Decision: Android Keystore Ed25519 (Tier B) is the recommended mobile default on StrongBox devices
 
-## Research
+**Status:** decided
+**Rationale:** Android Keystore natively supports Ed25519 (API 33+) with StrongBox hardware backing on recent Pixel and Samsung devices. This is the cleanest Tier B path — native algorithm, no P-256 workaround needed unlike iOS Secure Enclave. For de-Googled Android (GrapheneOS) on supported hardware (Pixels), StrongBox is available. This aligns with the first-class de-Googled Android target: GrapheneOS users on Pixel hardware get hardware-backed identity without Google services.
+
+### Decision: Push delivery path is determined by identity tier — no single universal push path
+
+**Status:** decided
+**Rationale:** Tier B users (Apple Passwords / Android Credential Manager) are already in platform ecosystems; App Store + Styrene Lab APNs relay is coherent with their threat model and acceptable metadata exposure. Tier C/A users (Bitwarden, YubiKey) chose out of platform ecosystems; they use UnifiedPush (self-hosted ntfy/Gotify) or WorkManager/timer polling — no APNs, no Styrene Lab relay. Sideloading and custom builds are not required for any deployment. Self-hosted hubs serving privacy-first users are completely Google-and-Apple-free. The App Store + APNs path is an opt-in for mainstream usability.
+
+## Research Context
 
 ### The APNs credential binding problem
 
@@ -180,24 +178,3 @@ Styrene Lab relay observes: device APNs token (pseudonymous, rotates occasionall
 For Tier B users who chose iCloud Keychain: they already trust Apple with their identity sync, their iCloud data, and their device. Styrene Lab observing "this device received a wakeup push at this time from this hub" is a lower exposure than what Apple already observes. Acceptable for this tier. The wakeup-only payload means message content is never exposed.
 
 For Tier C/A users: they don't use this path. Not applicable.
-
-## Decisions
-
-### Decision: YubiKey on mobile is a session-unlock token, not a per-packet signer
-
-**Status:** decided
-**Rationale:** NFC tap per signing operation is disruptive for routine mesh operations (periodic announces, message signing). YubiKey use on mobile: tap to unlock a session key held in memory, session key signs all mesh traffic until app kill or configurable timeout. This matches how YubiKey+SSH agent works. The YubiKey signs exactly once per session (the unlock assertion); symmetric/derived keys handle per-packet operations. This makes Tier A viable on mobile without requiring the user to tap their YubiKey on every message send.
-
-### Decision: Android Keystore Ed25519 (Tier B) is the recommended mobile default on StrongBox devices
-
-**Status:** decided
-**Rationale:** Android Keystore natively supports Ed25519 (API 33+) with StrongBox hardware backing on recent Pixel and Samsung devices. This is the cleanest Tier B path — native algorithm, no P-256 workaround needed unlike iOS Secure Enclave. For de-Googled Android (GrapheneOS) on supported hardware (Pixels), StrongBox is available. This aligns with the first-class de-Googled Android target: GrapheneOS users on Pixel hardware get hardware-backed identity without Google services.
-
-### Decision: Push delivery path is determined by identity tier — no single universal push path
-
-**Status:** decided
-**Rationale:** Tier B users (Apple Passwords / Android Credential Manager) are already in platform ecosystems; App Store + Styrene Lab APNs relay is coherent with their threat model and acceptable metadata exposure. Tier C/A users (Bitwarden, YubiKey) chose out of platform ecosystems; they use UnifiedPush (self-hosted ntfy/Gotify) or WorkManager/timer polling — no APNs, no Styrene Lab relay. Sideloading and custom builds are not required for any deployment. Self-hosted hubs serving privacy-first users are completely Google-and-Apple-free. The App Store + APNs path is an opt-in for mainstream usability.
-
-## Open Questions
-
-*No open questions.*
