@@ -40,11 +40,11 @@
 - [x] 5.2 Route RpcDaemon identity/config/status/fleet calls through delegation. → Services have real behavior and tests. FleetService remains stub — RPC dispatch is deeply coupled to RpcDaemon internals and will be delegated in Package I.
 - [x] 5.3 Add tests proving delegated behavior before collapsing old paths. → 4 IdentityService tests (MockTransport delegation), 4 ConfigService tests (load/reload/snapshot), 6 StatusService tests (interfaces, propagation, uptime), 7 AuthService tests (RBAC roles, blocklist, default role), 5 AutoReplyService tests (modes, cooldown, clear).
 
-## 6. Package F — Service slice 2: messaging, conversations, node store
+## 6. Package F — Service slice 2: messaging, discovery, shared store
 
-- [ ] 6.1 Move messaging and conversation responsibilities behind service interfaces.
-- [ ] 6.2 Move node-store interactions behind the service boundary defined by the ownership map.
-- [ ] 6.3 Add tests proving delegated behavior before collapsing old paths.
+- [x] 6.1 Move messaging and conversation responsibilities behind service interfaces. → MessagingService wraps MessagesStore with accept_inbound (LXMF decode), query methods, receipt tracking (track/resolve/handle_receipt). 8 unit tests.
+- [x] 6.2 Move node-store interactions behind the service boundary defined by the ownership map. → DiscoveryService wraps MessagesStore announce table + in-memory PeerRecord map. accept_announce parses app_data via announce_names. NodeStore decided as service-level abstraction, not separate struct. 6 unit tests.
+- [x] 6.3 Add tests proving delegated behavior before collapsing old paths. → AppContext integration test proves shared store: discovery writes announces, messaging writes messages, same SQLite connection. 14 new unit tests + 1 new integration test.
 
 ## 7. Package G — Service slice 3: protocol dispatch and inbound handling
 
