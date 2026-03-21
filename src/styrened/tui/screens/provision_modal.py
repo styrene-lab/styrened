@@ -99,7 +99,12 @@ class ProvisionModal(ModalScreen[Path | None]):
 
     async def _do_provision(self) -> None:
         """Run the provisioning pipeline."""
-        from styrened.services.binary_provisioner import BinaryProvisioner
+        try:
+            from styrened.services.binary_provisioner import BinaryProvisioner
+        except ImportError:
+            self.notify("Binary provisioner not available", severity="error")
+            self.dismiss(False)
+            return
 
         provisioner = BinaryProvisioner(install_dir=self.install_dir)
         status = self.query_one("#provision-status", Label)
