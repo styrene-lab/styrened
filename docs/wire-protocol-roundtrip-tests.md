@@ -1,7 +1,7 @@
 ---
 id: wire-protocol-roundtrip-tests
 title: Cross-Language Wire Protocol Roundtrip Tests
-status: decided
+status: implemented
 parent: wire-protocol-idl
 dependencies: [wire-protocol-idl]
 tags: [testing, wire-protocol, cross-language, rust, python, contract]
