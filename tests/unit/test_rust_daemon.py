@@ -73,6 +73,57 @@ class TestFindRustDaemon:
             assert "reticulumd" in result
 
 
+class TestExecRustDaemon:
+    """Tests for exec_rust_daemon()."""
+
+    def test_returns_negative_one_when_not_found(self):
+        """No binary → returns -1."""
+        from styrened.rust_daemon import exec_rust_daemon
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("styrened.rust_daemon.find_rust_daemon", return_value=None),
+        ):
+            assert exec_rust_daemon() == -1
+
+    def test_passes_kwargs_to_build_args(self, tmp_path):
+        """Keyword args forwarded to build_rust_daemon_args."""
+        from styrened.rust_daemon import exec_rust_daemon
+
+        binary = tmp_path / "reticulumd"
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+
+        captured = {}
+
+        def mock_execvp(cmd, args):
+            captured["cmd"] = cmd
+            captured["args"] = args
+            raise OSError("mock")
+
+        with (
+            patch("styrened.rust_daemon.find_rust_daemon", return_value=str(binary)),
+            patch("os.execvp", side_effect=mock_execvp),
+        ):
+            exec_rust_daemon(db="/tmp/test.db", socket="/tmp/test.sock")
+
+        assert "--db" in captured["args"]
+        assert "/tmp/test.db" in captured["args"]
+        assert "--socket" in captured["args"]
+        assert "/tmp/test.sock" in captured["args"]
+
+
+class TestSpawnRustDaemon:
+    """Tests for spawn_rust_daemon()."""
+
+    def test_returns_none_when_not_found(self):
+        """No binary → returns None."""
+        from styrened.rust_daemon import spawn_rust_daemon
+
+        with patch("styrened.rust_daemon.find_rust_daemon", return_value=None):
+            assert spawn_rust_daemon() is None
+
+
 class TestBuildRustDaemonArgs:
     """Tests for build_rust_daemon_args()."""
 

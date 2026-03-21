@@ -95,9 +95,17 @@ def cmd_daemon(args: argparse.Namespace) -> int:
 
     # Allow forcing the Python daemon for development/debugging
     if not os.environ.get("STYRENED_PYTHON_DAEMON"):
+        from styrened import paths
         from styrened.rust_daemon import exec_rust_daemon
 
-        result = exec_rust_daemon()
+        # Forward Python config paths so Rust daemon uses the same
+        # identity, database, config, and socket as the Python daemon.
+        result = exec_rust_daemon(
+            config=str(paths.core_config()) if paths.core_config().exists() else None,
+            identity=str(paths.identity_file()) if paths.identity_file().exists() else None,
+            db=str(paths.data_dir() / "messages.db"),
+            socket=str(paths.control_socket()),
+        )
         if result == -1:
             # Rust binary not found — fall through to Python daemon
             import sys
