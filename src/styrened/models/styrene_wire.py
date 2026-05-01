@@ -141,6 +141,13 @@ class StyreneMessageType(IntEnum):
     FLEET_STATUS_REQUEST = 0x82
     FLEET_STATUS_RESPONSE = 0x83
 
+    # Hub Services — I2P Proxy (0x84-0x88)
+    I2P_PROXY_REQUEST = 0x84  # Client requests HTTP fetch through hub's i2pd
+    I2P_PROXY_RESPONSE = 0x85  # Hub returns HTTP response headers
+    I2P_PROXY_DATA = 0x86  # Hub sends response body chunk
+    I2P_PROXY_ERROR = 0x87  # Hub reports proxy error
+    I2P_PROXY_CLOSE = 0x88  # Either side aborts in-flight request
+
     # Pub/Sub (0xA0-0xBF)
     SUBSCRIBE = 0xA0
     UNSUBSCRIBE = 0xA1
