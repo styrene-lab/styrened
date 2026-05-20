@@ -171,7 +171,7 @@ def test_config_defaults() -> None:
     assert primary_hub.port == 4242
     assert primary_hub.name == "Styrene Community Hub"
     assert primary_hub.enabled is True
-    assert config.reticulum.announce_interval == 300
+    assert config.reticulum.announce_interval == 3600
     # Hub is pre-configured
     assert config.reticulum.hub_enabled is True
     assert config.reticulum.hub_address == "6fc8bf22aa293588c9bf8d7488102e95"

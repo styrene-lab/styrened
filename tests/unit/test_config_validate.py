@@ -5,6 +5,8 @@ Validates port ranges, enum values, string constraints, and cross-field rules.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from styrened.models.config import (
