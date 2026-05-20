@@ -42,6 +42,7 @@ from styrened.models.styrene_wire import (
     decode_payload,
 )
 from styrened.protocols.base import LXMFMessage
+from styrened.services.rns_limits import request_path_once
 from styrened.terminal.messages import (
     CommandExited,
     Error,
@@ -151,7 +152,9 @@ class TerminalClientSession:
             if not dest_identity:
                 # Fall back to path request using link destination hash
                 logger.info(f"Requesting path to {self.link_destination[:16]}...")
-                RNS.Transport.request_path(bytes.fromhex(self.link_destination))
+                request_path_once(
+                    bytes.fromhex(self.link_destination), reason="terminal link resolution"
+                )
 
                 # Wait for path resolution - this populates the identity cache
                 for _ in range(int(timeout * 10)):

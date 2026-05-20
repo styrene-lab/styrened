@@ -36,6 +36,8 @@ import sys
 import time
 from typing import Any, NoReturn, cast
 
+from styrened.services.rns_limits import request_path_once
+
 logger = logging.getLogger(__name__)
 
 
@@ -664,7 +666,7 @@ async def _cmd_send_async(args: argparse.Namespace) -> int:
 
     dest_bytes = bytes.fromhex(destination)
     print(f"Requesting path to {destination[:16]}...")
-    RNS.Transport.request_path(dest_bytes)
+    request_path_once(dest_bytes, reason="cli path resolution")
 
     path_resolved = False
     identity_known = False
@@ -1857,7 +1859,7 @@ async def _cmd_shell_async(args: argparse.Namespace) -> int:
     else:
         # Request path discovery and wait
         print(f"Requesting path to {destination[:16]}... (waiting {discovery_wait}s)")
-        RNS.Transport.request_path(bytes.fromhex(destination))
+        request_path_once(bytes.fromhex(destination), reason="cli path resolution")
 
         start_time = time.time()
         while time.time() - start_time < discovery_wait:

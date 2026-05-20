@@ -732,10 +732,11 @@ class YggdrasilConfig:
             the system default of 9001 to avoid conflicts).
         admin_socket: Path to the admin Unix socket. Empty means auto-detect.
         multicast: Enable multicast peer discovery on the local network.
-        bootstrap_from_rns: Advertise and discover Yggdrasil peers via RNS
-            announces so mesh-connected nodes can peer automatically.
+        bootstrap_from_rns: Advertise and discover Yggdrasil peers via RNS.
+            Defaults to False in the legacy Python daemon to avoid public-network
+            amplification from announce-observed peers.
         peer_discovery: Whether to bootstrap peers eagerly (on every announce)
-            or lazily (only on explicit request).
+            or lazily (only on explicit request). Defaults to lazy.
         initial_peers: Static list of Yggdrasil peer URIs to connect to.
     """
 
@@ -744,8 +745,8 @@ class YggdrasilConfig:
     listen_port: int = 9002
     admin_socket: str = ""
     multicast: bool = True
-    bootstrap_from_rns: bool = True
-    peer_discovery: PeerDiscovery = PeerDiscovery.EAGER
+    bootstrap_from_rns: bool = False
+    peer_discovery: PeerDiscovery = PeerDiscovery.LAZY
     initial_peers: list = field(default_factory=list)
 
 

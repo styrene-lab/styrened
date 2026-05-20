@@ -27,6 +27,7 @@ from enum import Enum
 
 import RNS
 
+from styrened.services.rns_limits import request_path_once
 from styrened.services.rns_service import get_rns_service
 
 # Setup logger
@@ -263,7 +264,7 @@ class HubConnection:
                     "Requesting path..."
                 )
                 # Request path to hub (active discovery)
-                RNS.Transport.request_path(hub_hash)
+                request_path_once(hub_hash, reason="hub connection")
 
                 # Store address but mark as not connected yet
                 self._hub_address = hub_address

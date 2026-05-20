@@ -415,22 +415,22 @@ class TestPathRequestSafety:
     """Legacy daemon must not amplify bridge/discovery input into path floods."""
 
     def test_path_request_rate_limit_suppresses_repeated_destination(self) -> None:
-        from styrened.services import lxmf_service as module
+        from styrened.services import rns_limits as module
 
-        service = module.LXMFService()
+        module.reset_path_request_budget()
         destination = bytes.fromhex("ab" * 16)
 
         with patch.object(module.RNS.Transport, "request_path") as request_path:
             with patch.object(module.time, "time", side_effect=[1000.0, 1001.0]):
-                assert service._request_path_once(destination, reason="test") is True
-                assert service._request_path_once(destination, reason="test") is False
+                assert module.request_path_once(destination, reason="test") is True
+                assert module.request_path_once(destination, reason="test") is False
 
         request_path.assert_called_once_with(destination)
 
     def test_path_request_global_budget_suppresses_fanout(self) -> None:
-        from styrened.services import lxmf_service as module
+        from styrened.services import rns_limits as module
 
-        service = module.LXMFService()
+        module.reset_path_request_budget()
         destinations = [
             i.to_bytes(16, "big") for i in range(module.MAX_PATH_REQUESTS_PER_WINDOW + 1)
         ]
@@ -438,7 +438,7 @@ class TestPathRequestSafety:
 
         with patch.object(module.RNS.Transport, "request_path") as request_path:
             with patch.object(module.time, "time", side_effect=times):
-                results = [service._request_path_once(dest, reason="test") for dest in destinations]
+                results = [module.request_path_once(dest, reason="test") for dest in destinations]
 
         assert results.count(True) == module.MAX_PATH_REQUESTS_PER_WINDOW
         assert results[-1] is False

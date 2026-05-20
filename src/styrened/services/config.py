@@ -752,7 +752,7 @@ def _parse_yggdrasil(config: CoreConfig, data: dict) -> None:
         listen_port=int(y.get("listen_port", 9002)),
         admin_socket=str(y.get("admin_socket", "")),
         multicast=_parse_bool(y.get("multicast", True)),
-        bootstrap_from_rns=_parse_bool(y.get("bootstrap_from_rns", True)),
+        bootstrap_from_rns=_parse_bool(y.get("bootstrap_from_rns", False)),
         initial_peers=[str(p) for p in peers],
     )
 
