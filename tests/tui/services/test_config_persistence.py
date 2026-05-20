@@ -254,3 +254,15 @@ def test_auto_enable_server_in_hub_mode(tmp_path: Path, monkeypatch: pytest.Monk
     # Server should be auto-enabled
     assert updated_config.reticulum.mode == DeploymentMode.HUB
     assert updated_config.reticulum.interfaces.server.enabled is True
+
+
+def test_tui_default_hub_announce_interval_is_public_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TUI defaults should not recreate the legacy 60-second hub announce cadence."""
+    config_dir = tmp_path / ".styrene"
+    monkeypatch.setattr("styrened.paths.config_dir", lambda: config_dir)
+
+    config = get_default_config()
+
+    assert config.reticulum.hub_announce_interval == 3600

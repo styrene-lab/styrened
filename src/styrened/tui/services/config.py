@@ -184,7 +184,7 @@ def get_default_config() -> StyreneConfig:
     # Pre-configure Styrene Community Hub connection
     config.reticulum.hub_enabled = True
     config.reticulum.hub_address = "6fc8bf22aa293588c9bf8d7488102e95"
-    config.reticulum.hub_announce_interval = 60
+    config.reticulum.hub_announce_interval = 3600
 
     # Well-known public hubs — Styrene enabled, others available to toggle
     import copy

@@ -32,16 +32,9 @@ from styrened.tui.services.config import save_config, validate_config
 from styrened.ui_state import ConfigDraftInputs, ConfigDraftState, build_config_draft_state
 
 # Announce interval presets: (label, seconds)
+# Keep shipped UI choices safe for public Reticulum transports. Shorter cadences
+# belong in isolated tests or styrene-rs development harnesses, not operator config.
 ANNOUNCE_INTERVALS: list[tuple[str, int]] = [
-    ("15s", 15),
-    ("30s", 30),
-    ("45s", 45),
-    ("1m", 60),
-    ("2m", 120),
-    ("5m", 300),
-    ("10m", 600),
-    ("15m", 900),
-    ("30m", 1800),
     ("1h", 3600),
     ("2h", 7200),
     ("4h", 14400),

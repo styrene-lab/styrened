@@ -144,13 +144,30 @@ class TestValidateCoreConfig:
         errors = validate_core_config(config)
         assert not any(e.field == "lxmf.propagation_node.name" for e in errors)
 
-    def test_negative_announce_interval(self) -> None:
-        """Negative announce_interval is rejected."""
+    def test_short_announce_interval_is_rejected(self) -> None:
+        """Public announce intervals below one hour are rejected."""
         config = CoreConfig()
-        config.reticulum.announce_interval = -1
+        config.reticulum.announce_interval = 300
         errors = validate_core_config(config)
         field_names = [e.field for e in errors]
         assert "reticulum.announce_interval" in field_names
+
+    def test_short_hub_announce_interval_is_rejected(self) -> None:
+        """Legacy hub announces are also capped at one hour minimum."""
+        config = CoreConfig()
+        config.reticulum.hub_announce_interval = 60
+        errors = validate_core_config(config)
+        field_names = [e.field for e in errors]
+        assert "reticulum.hub_announce_interval" in field_names
+
+    def test_hourly_announce_intervals_pass(self) -> None:
+        """One-hour announce intervals are valid for public transports."""
+        config = CoreConfig()
+        config.reticulum.announce_interval = 3600
+        config.reticulum.hub_announce_interval = 3600
+        errors = validate_core_config(config)
+        assert not any(e.field == "reticulum.announce_interval" for e in errors)
+        assert not any(e.field == "reticulum.hub_announce_interval" for e in errors)
 
     def test_negative_auto_reply_cooldown(self) -> None:
         """Negative auto_reply_cooldown is rejected."""
@@ -205,7 +222,7 @@ class TestValidateCoreConfig:
         """Multiple errors in one config are all reported."""
         config = CoreConfig()
         config.api.port = 0
-        config.reticulum.announce_interval = -1
+        config.reticulum.announce_interval = 300
         config.identity.display_name = ""
         config.chat.auto_reply_cooldown = -5
 

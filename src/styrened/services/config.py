@@ -132,7 +132,7 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
         config.ipc.enabled = True
         config.terminal.enabled = False
         config.notifications.enabled = True
-        config.reticulum.announce_interval = 300
+        config.reticulum.announce_interval = 3600
         # Use the Styrene Community Hub as the default LXMF propagation node.
         # This enables store-and-forward delivery when recipients are offline.
         config.lxmf.propagation_destination = COMMUNITY_HUB_PROPAGATION_HASH
@@ -148,7 +148,7 @@ def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
         config.ipc.enabled = False
         config.terminal.enabled = True
         config.notifications.enabled = False
-        config.reticulum.announce_interval = 600
+        config.reticulum.announce_interval = 3600
 
     elif profile == Profile.HUB:
         config.reticulum.mode = DeploymentMode.HUB
@@ -858,20 +858,28 @@ def validate_core_config(
             ConfigFieldError("reticulum.mode", "Invalid deployment mode", str(config.reticulum.mode))
         )
 
-    if config.reticulum.announce_interval <= 0:
+    # Public Reticulum transports are shared infrastructure. Historical Styrene
+    # Python defaults (60-300s) produced excessive announces; keep the legacy
+    # daemon conservative and point new development at styrene-rs instead of
+    # re-expanding this surface. Local/test harnesses that need faster cadence
+    # should bypass production config validation or use isolated fixtures.
+    min_public_announce_interval = 3600
+    if config.reticulum.announce_interval < min_public_announce_interval:
         errors.append(
             ConfigFieldError(
                 "reticulum.announce_interval",
-                "Must be > 0",
+                "Must be >= 3600 seconds on public Reticulum transports; "
+                "use styrene-rs or isolated test fixtures for faster local simulation",
                 str(config.reticulum.announce_interval),
             )
         )
 
-    if config.reticulum.hub_announce_interval <= 0:
+    if config.reticulum.hub_announce_interval < min_public_announce_interval:
         errors.append(
             ConfigFieldError(
                 "reticulum.hub_announce_interval",
-                "Must be > 0",
+                "Must be >= 3600 seconds on public Reticulum transports; "
+                "legacy Python hub announces are intentionally rate-limited",
                 str(config.reticulum.hub_announce_interval),
             )
         )

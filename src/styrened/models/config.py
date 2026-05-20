@@ -224,10 +224,10 @@ class ReticulumConfig:
         enable_transport: Override transport setting (None = auto from mode).
         interfaces: Interface configuration.
         operator_identity_path: Path to operator identity file.
-        announce_interval: Seconds between announces (default 300).
+        announce_interval: Seconds between announces (default 3600; public-network safe).
         hub_enabled: Whether to connect to Hub (Phase 2).
         hub_address: Hub LXMF address for fleet coordination (Phase 2).
-        hub_announce_interval: Hub's announce interval in seconds (default 60).
+        hub_announce_interval: Hub's announce interval in seconds (default 3600).
     """
 
     config_path_override: Path | None = None
@@ -236,11 +236,11 @@ class ReticulumConfig:
     enable_transport: bool | None = None  # None = auto-determine from mode
     interfaces: InterfaceConfig = field(default_factory=InterfaceConfig)
     operator_identity_path: Path | None = None
-    announce_interval: int = 300
+    announce_interval: int = 3600
     # Phase 2 settings - hub connectivity
     hub_enabled: bool = False
     hub_address: str | None = None  # 32-char hex LXMF address
-    hub_announce_interval: int = 60  # Hub's announce interval in seconds
+    hub_announce_interval: int = 3600  # Hub announce interval; keep public transports quiet
 
     def resolve_transport_enabled(self) -> bool:
         """Determine if transport should be enabled based on mode.
