@@ -278,3 +278,27 @@ class TestPQCConfigValidation:
         errors = validate_core_config(config)
         pqc_errors = [e for e in errors if e.field == "pqc.rekey_interval_hours"]
         assert len(pqc_errors) == 1
+
+
+def test_meshtastic_bridge_config_triggers_poison_pill(tmp_path: Path) -> None:
+    """Legacy Python refuses Meshtastic bridge config instead of starting dangerously."""
+    from styrened.models.config import ConfigLoadError
+    from styrened.services.config import load_core_config
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("meshtastic:\n  enabled: true\n")
+
+    with pytest.raises(ConfigLoadError, match="poison pill"):
+        load_core_config(config_path)
+
+
+def test_mqtt_bridge_config_triggers_poison_pill(tmp_path: Path) -> None:
+    """Legacy Python refuses MQTT bridge config instead of piping nodes into RNS."""
+    from styrened.models.config import ConfigLoadError
+    from styrened.services.config import load_core_config
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("mqtt:\n  enabled: true\n")
+
+    with pytest.raises(ConfigLoadError, match="poison pill"):
+        load_core_config(config_path)

@@ -98,6 +98,35 @@ def ensure_directories() -> None:
     paths.ensure_directories()
 
 
+LEGACY_BRIDGE_POISON_KEYS = ("meshtastic", "mqtt")
+
+
+def _legacy_bridge_poison_pill(data: dict[str, Any], *, source: Path | None = None) -> None:
+    """Refuse legacy Python Meshtastic/MQTT bridge configuration.
+
+    The old Python daemon must never bridge MQTT-observed Meshtastic nodes into
+    Reticulum. That architecture can create synthetic destinations for users who
+    do not own the RNS identity keys and can flood public transports. Keep this
+    as a local startup/config-load poison pill; future radio bridge work belongs
+    in styrene-rs.
+    """
+    present = [key for key in LEGACY_BRIDGE_POISON_KEYS if key in data]
+    if not present:
+        return
+
+    location = f" in {source}" if source is not None else ""
+    keys = ", ".join(present)
+    raise ConfigLoadError(
+        "Python styrened legacy bridge poison pill triggered"
+        f"{location}: unsupported top-level config section(s): {keys}. "
+        "Meshtastic/MQTT bridging in the Python daemon is disabled because it "
+        "can spam public Reticulum transports and misrepresent non-Reticulum "
+        "nodes as synthetic RNS destinations. Remove these sections and use "
+        "styrene-rs for any future radio bridge work.",
+        source or Path("<config>"),
+    )
+
+
 def get_profile_defaults(profile: Profile = Profile.OPERATOR) -> CoreConfig:
     """Return a CoreConfig with profile-appropriate defaults.
 
@@ -276,6 +305,8 @@ def load_core_config(config_path: Path | None = None) -> CoreConfig:
 
     if not isinstance(data, dict):
         return get_default_core_config()
+
+    _legacy_bridge_poison_pill(data, source=config_path)
 
     # Two-pass: extract profile first, then build config from profile defaults
     profile = Profile.OPERATOR

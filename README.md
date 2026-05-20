@@ -1,5 +1,19 @@
 # styrened
 
+> **Legacy Python daemon notice:** `styrened` was Styrene's first foray into
+> Reticulum and LXMF. Some of it was exploratory, vibe-coded prototype work that
+> should have been retired the moment it became clear the approach was not a
+> sound foundation. It was not retired quickly enough. In particular, legacy
+> Meshtastic/MQTT bridge behavior was left in a dangerous state and caused
+> harmful spam on public Reticulum transports. That was unacceptable. It was
+> irresponsible to the Reticulum community and embarrassing for this project.
+>
+> The Python daemon is now maintenance-only. Public-network behavior is being
+> cut back, rate-limited, and deprecated. The Python Meshtastic/MQTT bridge is
+> disabled by a local startup/config poison pill; remove any `meshtastic` or
+> `mqtt` bridge sections from old configs. New transport and bridge work belongs
+> in [`styrene-rs`](https://github.com/styrene-lab/styrene-rs), not here.
+
 Daemon, library, and TUI for [Reticulum](https://reticulum.network) mesh networks.
 
 ## Overview
