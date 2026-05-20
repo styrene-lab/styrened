@@ -500,31 +500,21 @@ class RNSService:
                         self._handle_reconnection(iface_type, name)
                         del self._disconnect_times[name]
 
-                # Track TCP interface reconnection via object identity change.
-                # RNS TCPClientInterface recreates the socket on reconnect,
-                # so we also track the object id to detect silent reconnects
-                # that don't toggle the online flag (e.g., network switch).
-                # Debounced: skip if we handled a reconnection within the
-                # cooldown period to avoid reconnection storms when multiple
-                # TCP peers cycle rapidly.
+                # Track TCP interface object churn for diagnostics only.
+                # The legacy Python daemon used to treat every TCPClientInterface
+                # object replacement as a reconnection and invoked callbacks that
+                # re-registered destinations and re-announced LXMF. On unstable or
+                # bridge-backed links this can multiply announces into public
+                # Reticulum transports. Keep this surface quiet; styrene-rs owns
+                # any future active bridge/reconnect behavior.
                 if "TCPClientInterface" in iface_type:
                     obj_id = id(iface)
                     prev_id = self._last_interface_ids.get(name)
                     if prev_id is not None and prev_id != obj_id:
-                        now = time.monotonic()
-                        last_reconnect = self._last_reconnect_time
-                        if now - last_reconnect > self._RECONNECT_DEBOUNCE:
-                            logger.info(
-                                f"[RECONNECT] TCP interface object changed: {name} "
-                                f"(id {prev_id} -> {obj_id}) — triggering re-announce"
-                            )
-                            self._handle_reconnection(iface_type, name)
-                            self._last_reconnect_time = now
-                        else:
-                            logger.debug(
-                                f"[RECONNECT] TCP interface churn suppressed for {name} "
-                                f"(debounce {self._RECONNECT_DEBOUNCE}s)"
-                            )
+                        logger.debug(
+                            f"[RECONNECT] TCP interface object changed: {name} "
+                            f"(id {prev_id} -> {obj_id}) — suppressing legacy re-announce"
+                        )
                     self._last_interface_ids[name] = obj_id
 
                 # Update tracked state

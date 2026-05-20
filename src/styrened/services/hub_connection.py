@@ -69,7 +69,7 @@ class HubConnection:
         self._hub_address: str | None = None
         self._hub_configured: bool = False  # True when hub peers present in config
         self._waiting_since: float | None = None
-        self._announce_interval: int = 60  # Default 60 seconds
+        self._announce_interval: int = 3600  # Default to public-safe one-hour announce window
         self._last_path_check: float = 0.0
 
     @property
