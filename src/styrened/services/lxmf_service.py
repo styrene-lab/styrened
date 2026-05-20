@@ -81,6 +81,13 @@ class SendMessageResult(TypedDict):
 # Setup logger
 logger = logging.getLogger(__name__)
 
+# Legacy Python network-safety guards. The daemon must not amplify untrusted
+# bridge/discovery input into Reticulum path requests or announces. New active
+# bridge behavior belongs in styrene-rs.
+MIN_PATH_REQUEST_INTERVAL: float = 300.0
+MAX_PATH_REQUESTS_PER_WINDOW: int = 30
+PATH_REQUEST_WINDOW: float = 3600.0
+
 # Singleton instance
 _lxmf_service: LXMFService | None = None
 
@@ -103,6 +110,8 @@ class LXMFService:
         # raw_mode=True means callback receives raw LXMF.LXMessage
         # raw_mode=False means callback receives (source_hash, payload_dict)
         self._message_callbacks: list[tuple[Callable, bool]] = []
+
+        self._last_path_requests: dict[str, float] = {}
 
         # RBAC policy reference (injected by daemon after init, always present)
         from styrened.models.rbac import RBACPolicy as _RBACPolicy
@@ -333,21 +342,60 @@ class LXMFService:
             self._initialized = False
             return False
 
+    def _can_request_path(self, destination_hash: bytes) -> bool:
+        """Return True when a Reticulum path request is within legacy safety limits."""
+        now = time.time()
+        key = destination_hash.hex()
+
+        # Drop old entries first so the global budget recovers over time.
+        cutoff = now - PATH_REQUEST_WINDOW
+        self._last_path_requests = {
+            hash_hex: requested_at
+            for hash_hex, requested_at in self._last_path_requests.items()
+            if requested_at >= cutoff
+        }
+
+        last_request = self._last_path_requests.get(key)
+        if last_request is not None and now - last_request < MIN_PATH_REQUEST_INTERVAL:
+            logger.debug(
+                f"[PATH] Suppressing repeated path request for {key[:16]}... "
+                f"({now - last_request:.1f}s since last request)"
+            )
+            return False
+
+        if len(self._last_path_requests) >= MAX_PATH_REQUESTS_PER_WINDOW:
+            logger.warning(
+                "[PATH] Suppressing path request: legacy Python daemon reached "
+                f"{MAX_PATH_REQUESTS_PER_WINDOW}/hour path-request budget"
+            )
+            return False
+
+        self._last_path_requests[key] = now
+        return True
+
+    def _request_path_once(self, destination_hash: bytes, *, reason: str) -> bool:
+        """Issue a bounded path request without letting bridge input fan out unboundedly."""
+        if not self._can_request_path(destination_hash):
+            return False
+        logger.info(f"[PATH] Requesting path for {destination_hash.hex()[:16]}... ({reason})")
+        RNS.Transport.request_path(destination_hash)
+        return True
+
     def _ensure_path(self, destination_hash: bytes) -> bool:
-        """Check if path exists to destination, request if missing.
+        """Check if path exists to destination, requesting only within safety limits.
 
         Args:
             destination_hash: Raw bytes of the destination hash.
 
         Returns:
-            True if path exists, False if path was requested (not yet available).
+            True if path exists, False otherwise. A False result may mean a path
+            request was suppressed by legacy daemon safety limits.
         """
         if RNS.Transport.has_path(destination_hash):
             logger.debug(f"Path exists to {destination_hash.hex()[:16]}...")
             return True
 
-        logger.info(f"No path to {destination_hash.hex()[:16]}..., requesting path")
-        RNS.Transport.request_path(destination_hash)
+        self._request_path_once(destination_hash, reason="send path check")
         return False
 
     def send_message(
@@ -664,12 +712,16 @@ class LXMFService:
             f"Requesting path to trigger identity resolution..."
         )
         try:
-            RNS.Transport.request_path(dest_bytes)
+            if not self._request_path_once(dest_bytes, reason="identity resolution"):
+                return None
 
-            # Also try requesting with identity hash if we have it from NodeStore
+            # Also try requesting with identity hash if we have it from NodeStore.
+            # This is still budgeted; old Python must not fan out unbounded requests.
             if identity_hash:
                 try:
-                    RNS.Transport.request_path(bytes.fromhex(identity_hash))
+                    self._request_path_once(
+                        bytes.fromhex(identity_hash), reason="identity-hash resolution"
+                    )
                 except Exception:
                     pass
 
