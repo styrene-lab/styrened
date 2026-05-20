@@ -5,6 +5,16 @@ All notable changes to styrened will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **Legacy Python Reticulum safety release prep** — Python `styrened` is now maintenance-only for public-network behavior. Meshtastic/MQTT bridge config is refused at config-load/startup time to prevent legacy bridge operators from creating synthetic Reticulum destinations or harmful public announce traffic.
+- **Reticulum announce safety** — public announce defaults and validation now enforce a one-hour minimum cadence; operator-facing TUI presets no longer expose sub-hour public announce intervals.
+- **Reticulum amplification controls** — TCP interface object churn no longer triggers legacy re-announces, and LXMF path-request fanout is bounded per destination and per hour.
+
+### Deprecated
+- **Python transport and bridge development** — new transport adapters, radio bridges, Meshtastic/LoRa integration, hub behavior, and path discovery strategy belong in `styrene-rs`. The Python daemon is retained for safety, migration, and maintenance only.
+
 ## [0.15.5] - 2026-03-09
 
 ### Fixed

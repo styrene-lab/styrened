@@ -12,7 +12,9 @@
 > cut back, rate-limited, and deprecated. The Python Meshtastic/MQTT bridge is
 > disabled by a local startup/config poison pill; remove any `meshtastic` or
 > `mqtt` bridge sections from old configs. New transport and bridge work belongs
-> in [`styrene-rs`](https://github.com/styrene-lab/styrene-rs), not here.
+> in [`styrene-rs`](https://github.com/styrene-lab/styrene-rs), not here. See
+> [`docs/python-daemon-maintenance-policy.md`](docs/python-daemon-maintenance-policy.md)
+> for the maintenance and archival policy.
 
 Daemon, library, and TUI for [Reticulum](https://reticulum.network) mesh networks.
 
