@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-20
+
 ### Security
 - **Legacy Python Reticulum safety release prep** — Python `styrened` is now maintenance-only for public-network behavior. Meshtastic/MQTT bridge config is refused at config-load/startup time to prevent legacy bridge operators from creating synthetic Reticulum destinations or harmful public announce traffic.
 - **Reticulum announce safety** — public announce defaults and validation now enforce a one-hour minimum cadence; operator-facing TUI presets no longer expose sub-hour public announce intervals.
